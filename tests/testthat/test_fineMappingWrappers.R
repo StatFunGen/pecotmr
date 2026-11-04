@@ -1480,7 +1480,10 @@ test_that("overlapping CSs of one method: a row per variant, smallest wins", {
         "0.5" = list(1L, 1L)
     )
     inp <- .fakeFitAndCs(variant_ids, cs_at_cov, pip = 0.9)
-    out <- .runBuildTopLoci(inp, method = "susie")
+    expect_warning(
+        out <- .runBuildTopLoci(inp, method = "susie"),
+        "in multiple credible sets: L1, L2"
+    )
     # Canonical schema is one row per variant. When a variant is in
     # multiple CSs at a coverage, the smallest cs_idx is reported.
     expect_equal(nrow(out), 1L)
@@ -3312,6 +3315,24 @@ test_that("mergeSusieCs: input that is not a fine-mapping result errors", {
     )
 }
 
+test_that(".csGenotypesForFit finds a fit's ids however a panel names them", {
+    skip_if_not_installed("pgenlibr")
+    window <- .fitSamplesWindow()
+    for (data in list(.fitSamplesDataset(), .fitSamplesDataset(.rsIdPanel()))) {
+        ids <- pecotmr:::.qtlExtractBlock(data, window = window)$variantIds[
+            c(4L, 2L, 7L)
+        ]
+        expect_equal(colnames(pecotmr:::.csGenotypesForFit(data, ids)), ids)
+    }
+    expect_error(
+        pecotmr:::.csGenotypesForFit(
+            .fitSamplesDataset(),
+            "chr21:17513228:A:A"
+        ),
+        "absent from the QtlDataset"
+    )
+})
+
 test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
@@ -4024,6 +4045,13 @@ test_that("the fit region spans one chromosome or is refused", {
         pecotmr:::.csVariantRegion(c("chr1:100:A:G", "chr2:200:C:T")),
         "fit variants span multiple chromosomes"
     )
+})
+
+test_that("the fit region reads a variant id however a panel spells it", {
+    region <- function(ids) as.character(pecotmr:::.csVariantRegion(ids))
+    expect_equal(region(c("chr1:100:A:G", "chr1:200:C:T")), "chr1:100-200")
+    expect_equal(region(c("chr1_100_A_G", "chr1_200_C_T")), "chr1:100-200")
+    expect_equal(region(c("1:100:A:G", "1:200:C:T")), "chr1:100-200")
 })
 
 test_that("credible-set genotypes must cover every fit variant", {

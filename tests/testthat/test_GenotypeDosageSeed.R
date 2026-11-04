@@ -238,6 +238,50 @@ test_that("a SeqArray GDS seed reads FORMAT/DS per ALT allele", {
     expect_equal(.dose(panel), .vcfOverlapDs(), tolerance = 1e-6)
 })
 
+test_that("a SeqArray GDS reads some samples as the whole panel has them", {
+    skip_if_not_installed("SeqArray")
+    skip_if_not_installed("GDSArray")
+    # Both of the nodes a SeqArray file holds its dosages in, read in any
+    # order and repeated, as DelayedArray may ask.
+    fromGt <- suppressWarnings(readGenotypes(.writeTestSeqArray(
+        .writeTestVcf(.vcfGtOnly(.vcfOverlapRecords()), samples3)
+    )))
+    fromDs <- suppressWarnings(readGenotypes(.writeTestSeqArray(
+        .writeTestVcf(
+            .vcfOverlapRecords(),
+            samples3,
+            format = c("GT", "DS"),
+            ds = "A"
+        ),
+        ds = TRUE
+    )))
+    expect_equal(pecotmr:::.gdSeedField(.seedOf(fromGt)), "seqArrayGt")
+    expect_equal(pecotmr:::.gdSeedField(.seedOf(fromDs)), "seqArrayDs")
+    rows <- c(4L, 1L, 2L)
+    picked <- c(3L, 1L, 1L)
+    for (read in list(
+        list(panel = fromGt, want = .vcfOverlapGt()),
+        list(panel = fromDs, want = .vcfOverlapDs())
+    )) {
+        dosage <- SummarizedExperiment::assay(read$panel, "dosage")
+        expect_equal(
+            unname(as.matrix(dosage[rows, picked])),
+            read$want[rows, picked],
+            tolerance = 1e-6
+        )
+        expect_equal(
+            unname(pecotmr:::.ldRefDosage(
+                read$panel,
+                rows,
+                meanImpute = FALSE,
+                sampleIdx = c(1L, 3L)
+            )),
+            t(read$want[rows, c(1L, 3L)]),
+            tolerance = 1e-6
+        )
+    }
+})
+
 test_that("a SeqArray DS row with no value of its own is missing", {
     skip_if_not_installed("SeqArray")
     skip_if_not_installed("GDSArray")

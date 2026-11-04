@@ -10,6 +10,7 @@ ncvregWeights(
   penalty,
   nfolds = 5,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = NcvregOptions()
 )
 }
@@ -30,7 +31,10 @@ nothing; \code{"slim"} the selected fit, as a list of its coefficients
 \code{lambda} and cross-validated error there (\code{cve},
 \code{cvse}); \code{"full"} the whole \code{cv.ncvreg} object, with
 every \code{lambda}'s coefficients but without its copy of \code{X}.
-Either names the variants it was fitted on.}
+Each names the variants it was fitted on.}
+
+\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
+(default \code{FALSE}). An error at any other \code{fitRetention}.}
 
 \item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
 with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be

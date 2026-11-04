@@ -324,6 +324,7 @@ reference:
 
   - subtitle: "QtlFineMappingResult"
     contents:
+      - dataType
       - contexts
       - cvResult
       - fineMappingResult
@@ -380,6 +381,7 @@ reference:
 
   - subtitle: "QtlSumStats"
     contents:
+      - dataType
       - combineQtlSumStats
       - contexts
       - significantQtls
@@ -393,7 +395,7 @@ reference:
     contents:
       - contexts
       - cvResult
-      - weightsDataType
+      - dataType
       - methodFits
       - ldReference
       - methodNames
@@ -413,7 +415,7 @@ reference:
   - subtitle: "TwasWeightsRow"
     contents:
       - cvResult
-      - weightsDataType
+      - dataType
       - methodFits
       - weightStandardized
       - variantIds
@@ -430,6 +432,7 @@ reference:
     contents:
       - contexts
       - ctwasGroupPriors
+      - ctwasCombinedPips
       - ctwasPosteriors
       - methodNames
       - studyName
@@ -482,6 +485,7 @@ reference:
 
   - subtitle: "QtlDataset"
     contents:
+      - dataType
       - contexts
       - genotypeCovariates
       - genotypes
@@ -753,7 +757,6 @@ reference:
       - metaSldscRandom
       - sldscSubsetMeta
       - qtlEnrichment
-      - enlocClusterProbabilities
 
   - title: "Bundled example datasets"
     desc: >

@@ -49,6 +49,29 @@ public:
 		return static_cast<double>(value) / static_cast<double>(mask);
 	}
 
+	// Moves past `count` values without decoding them: a sample nobody asked
+	// for costs some arithmetic rather than a division per probability.
+	void skip(uint64_t count) {
+		uint64_t skipped = count * static_cast<uint64_t>(bits_);
+		if (skipped <= static_cast<uint64_t>(held_)) {
+			buffer_ >>= skipped;
+			held_ -= static_cast<int>(skipped);
+			return;
+		}
+		skipped -= static_cast<uint64_t>(held_);
+		buffer_ = 0;
+		held_ = 0;
+		pos_ += static_cast<size_t>(skipped / 8);
+		const int partial = static_cast<int>(skipped % 8);
+		if (pos_ > size_ || (partial > 0 && pos_ == size_)) {
+			cpp11::stop("BGEN probability data ends early.");
+		}
+		if (partial > 0) {
+			buffer_ = static_cast<uint64_t>(data_[pos_++]) >> partial;
+			held_ = 8 - partial;
+		}
+	}
+
 private:
 	const unsigned char* data_;
 	size_t size_;
@@ -105,18 +128,25 @@ double genotype_number(int ploidy, int K, double cap) {
 }  // namespace
 
 /**
- * @brief The expected counts of the requested alleles in every sample.
+ * @brief The expected counts of the requested alleles in the requested samples.
+ *
+ * A sample's probabilities sit at a position only the samples before it can
+ * tell, so those are walked; but only the samples asked for are decoded, and
+ * the walk stops at the last of them.
  *
  * @param data One variant's uncompressed layout-2 probability data.
  * @param nSamples The file's sample count, which the data must repeat.
  * @param alleles 1-based indices of the alleles whose expected counts to
  *   return, one output column each.
- * @return An nSamples x length(alleles) matrix; NA for a sample flagged
- *   missing or of ploidy 0.
+ * @param samples 1-based, strictly ascending positions of the samples to
+ *   return, one output row each; empty for every sample.
+ * @return A samples x length(alleles) matrix; NA for a sample flagged missing
+ *   or of ploidy 0.
  */
 [[cpp11::register]]
 cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples,
-                                                 cpp11::integers alleles) {
+                                                 cpp11::integers alleles,
+                                                 cpp11::integers samples) {
 	const size_t size = data.size();
 	const unsigned char* p = RAW(static_cast<SEXP>(data));
 	if (size < 10) cpp11::stop("BGEN probability data is truncated.");
@@ -137,16 +167,23 @@ cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples,
 		if (alleles[a] < 1 || alleles[a] > K)
 			cpp11::stop("Allele %d is not one of the variant's %d alleles.", alleles[a], K);
 	}
+	const int nAsked = samples.size();
+	const int nRows = (nAsked > 0) ? nAsked : nSamples;
+	for (int s = 0; s < nAsked; ++s) {
+		if (samples[s] < 1 || samples[s] > nSamples || (s > 0 && samples[s] <= samples[s - 1]))
+			cpp11::stop("Samples must be ascending positions among the file's %d samples.", nSamples);
+	}
 	// Each ploidy's genotypes, enumerated when a sample of it is first met.
 	// The data cannot hold more probabilities than it has bits, which bounds
 	// the enumeration of a record that is not what it claims to be.
 	std::vector<std::vector<std::vector<int>>> countsOf(64);
 	const double cap = 8.0 * static_cast<double>(size) / bits + 1.0;
 
-	cpp11::writable::doubles_matrix<> out(nSamples, nOut);
+	cpp11::writable::doubles_matrix<> out(nRows, nOut);
 	BitReader reader(p + 10 + N, size - 10 - N, bits);
 	std::vector<double> stored;
-	for (int i = 0; i < nSamples; ++i) {
+	int row = 0;
+	for (int i = 0; i < nSamples && row < nRows; ++i) {
 		int ploidy = ploidyBytes[i] & 63;
 		bool missing = (ploidyBytes[i] & 128) != 0;
 		if (!phased && ploidy > 0 && countsOf[ploidy].empty()) {
@@ -158,10 +195,15 @@ cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples,
 		if (ploidy > 0) {
 			nStored = phased ? ploidy * (K - 1) : static_cast<int>(countsOf[ploidy].size()) - 1;
 		}
+		if (nAsked > 0 && samples[row] != i + 1) {
+			reader.skip(static_cast<uint64_t>(nStored));
+			continue;
+		}
 		stored.assign(nStored, 0.0);
 		for (int s = 0; s < nStored; ++s) stored[s] = reader.next();
 		if (missing || ploidy == 0) {
-			for (int a = 0; a < nOut; ++a) out(i, a) = NA_REAL;
+			for (int a = 0; a < nOut; ++a) out(row, a) = NA_REAL;
+			++row;
 			continue;
 		}
 		for (int a = 0; a < nOut; ++a) {
@@ -189,8 +231,9 @@ cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples,
 				}
 				expected += g[nStored][allele] * last;
 			}
-			out(i, a) = expected;
+			out(row, a) = expected;
 		}
+		++row;
 	}
 	return out;
 }

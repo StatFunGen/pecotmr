@@ -27,7 +27,8 @@ or a matrix with one column per condition).}
 \item{weightStandardized}{Whether the weights are already on the standardized
 scale.}
 
-\item{weightsDataType}{Optional data-type label.}
+\item{weightsDataType}{Optional molecular type (\code{"expression"},
+\code{"splicing"}).}
 }
 \value{
 A \code{\linkS4class{TwasWeightsRow}}.

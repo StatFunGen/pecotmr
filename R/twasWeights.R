@@ -549,7 +549,7 @@ TwasWeights <- function(
         variants = union,
         tensor = .twasTensor(placed, length(ids)),
         standardized = map_lgl(rowEntries, weightStandardized),
-        dataType = map(rowEntries, weightsDataType)
+        dataType = map(rowEntries, dataType)
     )
 }
 
@@ -1256,7 +1256,7 @@ TwasWeights <- function(
         methodFits = methodFits(entry),
         cvResult = cvResult(entry),
         weightStandardized = weightStandardized(entry),
-        weightsDataType = weightsDataType(entry)
+        weightsDataType = dataType(entry)
     )
 }
 
@@ -1614,10 +1614,10 @@ setMethod(
     }
 )
 
-#' @rdname weightsDataType
+#' @rdname dataType
 #' @export
 setMethod(
-    "weightsDataType",
+    "dataType",
     "TwasWeights",
     function(
         x,
@@ -1626,11 +1626,42 @@ setMethod(
         trait = NULL,
         method = NULL
     ) {
-        weightsDataType(
-            .twrSelectRowParts(x, studyName, context, trait, method)
-        )
+        dataType(.twrSelectRowParts(x, studyName, context, trait, method))
     }
 )
+
+# The assembled weights, each row taking the molecular type of the data it was
+# fitted on (.rowDataTypes()). Applied to the assembled result, as a
+# fine-mapping result's is (.fmRecordProvenance()), since joint rows are built
+# on their own path.
+# @noRd
+.twasRecordDataTypes <- function(x, data) {
+    if (is.null(x)) {
+        return(x)
+    }
+    labels <- .rowDataTypes(x, data)
+    if (all(is.na(labels))) {
+        return(x)
+    }
+    `$<-`(
+        x,
+        "dataType",
+        S4Vectors::SimpleList(map2(
+            as.list(x$dataType),
+            labels,
+            .twasRowDataType
+        ))
+    )
+}
+
+# One row's per-method labels under one label, as they were if it has none.
+# @noRd
+.twasRowDataType <- function(row, label) {
+    if (is.na(label)) {
+        return(row)
+    }
+    set_names(rep(list(label), length(row)), names(row))
+}
 
 #' @rdname variantIds
 #' @export
@@ -2961,8 +2992,8 @@ setMethod("show", "TwasWeights", function(object) {
 #'   Every method keeps a fit, which names the variants it was fitted on.
 #'   \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
 #'   (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
-#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
-#'   and the DPR methods; for the others the two behave alike.
+#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet and \code{mrash};
+#'   for the others the two behave alike.
 #' @param seed Integer or \code{NULL}. When supplied, seeds both the
 #'   main-process RNG (fold partitioning, variant sub-sampling) and the
 #'   streams the folds draw from (see \code{BPPARAM}). The main-process seed
@@ -3248,7 +3279,12 @@ twasWeightsCv <- function(
     }
     userArgs <- weightMethods[[methodName]]
     fnName <- .resolveMethodFunction(methodName, userArgs)
-    fitArgs <- .twasApplyRetainFit(userArgs, ctx$fitRetention)
+    fitArgs <- .twasApplyRetainFit(
+        userArgs,
+        ctx$fitRetention,
+        ctx$retainX,
+        fnName
+    )
     fit <- .twasFitWeightsMatrix(fnName, fitArgs, ctx, methodName)
     embedded <- .embedWeights(
         fit$weights,
@@ -3285,13 +3321,40 @@ twasWeightsCv <- function(
 )
 
 # Pass the retention level down to the target weight function when the caller
-# is keeping fits at all; every weight method takes `fitRetention`.
+# is keeping fits at all; every weight method takes `fitRetention`. `retainX`
+# goes only where it can apply: a method's own level may be lower than the
+# run's, and most methods' fits hold no copy of X.
 # @noRd
-.twasApplyRetainFit <- function(args, fitRetention) {
+.twasApplyRetainFit <- function(args, fitRetention, retainX, fnName) {
     if (identical(fitRetention, "none")) {
         return(args)
     }
-    list_assign(args, fitRetention = args$fitRetention %||% fitRetention)
+    level <- args$fitRetention %||% fitRetention
+    keepingX <- retainX && identical(level, "full") && .twasKeepsX(fnName)
+    list_assign(
+        args,
+        fitRetention = level,
+        !!!compact(list(retainX = if (keepingX) TRUE))
+    )
+}
+
+# Whether a weight function's fit can hold a copy of X, as its own formal says.
+# @noRd
+.twasKeepsX <- function(fnName) {
+    is_in("retainX", names(formals(get0(fnName, mode = "function"))))
+}
+
+# `retainX = TRUE` with no method whose fit has a copy of X would keep nothing.
+# @noRd
+.twasAssertKeepsX <- function(weightMethods) {
+    fns <- map2_chr(names(weightMethods), weightMethods, .resolveMethodFunction)
+    if (!any(map_lgl(fns, .twasKeepsX))) {
+        abort(glue(
+            "learnTwasWeights: `retainX = TRUE` needs a method whose fit has ",
+            "a copy of X; the fits of {str_flatten(fns, ', ')} hold none."
+        ))
+    }
+    invisible(NULL)
 }
 
 # Dispatch weight fitting to the multivariate or per-column univariate path;
@@ -3486,12 +3549,19 @@ twasWeightsCv <- function(
 #'   produce the fits.
 #' @param fitRetention How much of each per-method fit is kept on the result:
 #'   \code{"none"} (default) keeps none, \code{"slim"} keeps the trimmed
-#'   payload downstream needs, \code{"full"} keeps the whole fitted object.
+#'   payload downstream needs, \code{"full"} keeps the whole fitted object but
+#'   for any copy of \code{X}.
 #'   Every method keeps a fit, which names the variants it was fitted on.
 #'   \code{"slim"} and \code{"full"} differ for mr.mash, glmnet
 #'   (\code{lasso}, \code{enet}, \code{ridge}), ncvreg (\code{scad},
-#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet, \code{mrash}
-#'   and the DPR methods; for the others the two behave alike.
+#'   \code{mcp}), \code{l0learn}, the Bayesian alphabet and \code{mrash};
+#'   for the others the two behave alike.
+#' @param retainX Logical. Keep a fit's copy of \code{X}, for the methods whose
+#'   fit has one (\code{lasso}, \code{enet}, \code{ridge}, \code{scad},
+#'   \code{mcp}, \code{mrash} and the DPR methods), at
+#'   \code{fitRetention = "full"} (default \code{FALSE}). An error at any
+#'   other \code{fitRetention}, and when no method in \code{weightMethods} has
+#'   such a copy.
 #' @param verbose Integer controlling verbosity level: 0 = suppress all
 #'   messages, 1 = suppress external package messages (default), 2 = show all
 #'   messages including those from external packages.
@@ -3503,8 +3573,8 @@ twasWeightsCv <- function(
 #'   weights.
 #' @param weightStandardized Logical. Whether the supplied \code{X} / \code{Y}
 #'   are already standardized. Default \code{FALSE}.
-#' @param weightsDataType Character or \code{NULL}. Data-type label recorded on
-#'   the weights (e.g. \code{"individual"}).
+#' @param weightsDataType Character or \code{NULL}. The molecular type recorded
+#'   on the weights (e.g. \code{"expression"}).
 #' @param ldReference An LD reference (a genotype panel, see
 #'   \code{\link{readGenotypes}}, a \code{GenotypeMixture} or an
 #'   \code{LdMatrix}) to record on the weights, or \code{NULL}.
@@ -3544,17 +3614,17 @@ learnTwasWeights <- function(
     BPPARAM = SerialParam(),
     fittedModels = NULL,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     weightStandardized = FALSE,
     weightsDataType = NULL,
     ldReference = NULL,
     verbose = 1,
     seed = NULL
 ) {
-    assertString(studyName)
-    assertString(context)
-    assertString(trait)
+    .twasAssertRowLabels(studyName, context, trait)
     .assertBpparam(BPPARAM)
     fitRetention <- arg_match(fitRetention)
+    .assertRetainX(retainX, fitRetention)
     assertFlag(weightStandardized)
     assertString(weightsDataType, null.ok = TRUE)
     assertCount(verbose)
@@ -3575,12 +3645,21 @@ learnTwasWeights <- function(
         BPPARAM = BPPARAM,
         fittedModels = fittedModels,
         fitRetention = fitRetention,
+        retainX = retainX,
         weightStandardized = weightStandardized,
         weightsDataType = weightsDataType,
         ldReference = ldReference,
         verbose = verbose,
         seed = seed
     )
+}
+
+# The labels learnTwasWeights() gives its rows.
+# @noRd
+.twasAssertRowLabels <- function(studyName, context, trait) {
+    assertString(studyName)
+    assertString(context)
+    assertString(trait)
 }
 
 # Validate X/Y shapes; coerce a vector Y to a one-column matrix. Returns Y.
@@ -3674,6 +3753,7 @@ learnTwasWeights <- function(
     BPPARAM,
     fittedModels,
     fitRetention,
+    retainX,
     weightStandardized,
     weightsDataType,
     ldReference,
@@ -3686,6 +3766,9 @@ learnTwasWeights <- function(
     Y <- .twasValidateXY(X, Y)
     resolvedMethods <- .twasAsMethodRecord(weightMethods)
     .twasRequireLearnFits(resolvedMethods, fittedModels)
+    if (retainX) {
+        .twasAssertKeepsX(resolvedMethods)
+    }
     validColumns <- .nonzeroVarColumns(X)
     Xfiltered <- as.matrix(X[, validColumns, drop = FALSE])
     prepared <- .prepareSusieWeightMethods(resolvedMethods, fittedModels)
@@ -3698,6 +3781,7 @@ learnTwasWeights <- function(
         context = context,
         trait = trait,
         fitRetention = fitRetention,
+        retainX = retainX,
         standardized = weightStandardized,
         dataType = weightsDataType,
         verbose = verbose,

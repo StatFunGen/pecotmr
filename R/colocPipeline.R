@@ -373,7 +373,7 @@ GwasFineMappingParam <- function(
 #'   present; \code{\link{qtlEnrichmentPipeline}} emits all four, the context
 #'   and trait set for a QTL outcome side). Output of
 #'   \code{\link{qtlEnrichmentPipeline}}. When non-\code{NULL} the pair is
-#'   scored by enloc rather than coloc: the priors come from that table's
+#'   scored with enloc's priors: they come from that table's
 #'   \code{colocP1} / \code{colocP2} / \code{colocP12} columns, and the
 #'   report gains \code{RCP} and \code{LCP}. Pairs without a matching
 #'   enrichment row fall back to the baseline priors with a warning. Default
@@ -417,7 +417,7 @@ GwasFineMappingParam <- function(
 #'   \code{hit1}, \code{hit2}, \code{PP.H0.abf} \ldots \code{PP.H4.abf}) and
 #'   the reconciliation diagnostics \code{qtlRetainedMass} /
 #'   \code{gwasRetainedMass}. When \code{enrichment} is supplied the pair is
-#'   scored by enloc instead, and four further columns appear:
+#'   scored with enloc's priors, and four further columns appear:
 #'   \code{enrichment} and \code{p12Used} report the per-pair factor and the
 #'   shared-signal prior enloc derived, while \code{RCP} and \code{LCP} are
 #'   enloc's regional and locus colocalisation probabilities. Those two are
@@ -1087,32 +1087,6 @@ colocPipeline <- function(
     )
 }
 
-# With an enrichment table this is an enloc run: the prior depends on
-# whether the GWAS hit is itself the causal eQTL, which coloc.bf_bf cannot
-# express, so the scoring is ours. Without one it is plain coloc.
-# @noRd
-.colocRunPairEither <- function(
-    aligned,
-    p12Info,
-    q,
-    gInfo,
-    useEnrichment,
-    ColocOptions
-) {
-    if (useEnrichment) {
-        return(.colocRunPairEnloc(aligned, p12Info))
-    }
-    .colocRunPair(
-        aligned,
-        p12Info$p12Used,
-        q,
-        gInfo,
-        p1 = p12Info$p1,
-        p2 = p12Info$p2,
-        ColocOptions = ColocOptions
-    )
-}
-
 # Score one (QTL, GWAS) pair via coloc.bf_bf -> a summary row, or NULL when the
 # variants don't align or coloc fails / returns no summary.
 # @noRd
@@ -1126,8 +1100,7 @@ colocPipeline <- function(
     alleleFlip,
     ColocOptions
 ) {
-    # Align variants between the QTL and GWAS LBF matrices by (chrom, pos,
-    # allele) tuple via matchVariants (see .colocAlignLbf).
+    # Align the LBF matrices by (chrom, pos, allele); see .colocAlignLbf.
     aligned <- .colocAlignLbf(qLbf, gInfo$lbf, alleleFlip = alleleFlip)
     if (is.null(aligned)) {
         return(NULL)
@@ -1139,12 +1112,13 @@ colocPipeline <- function(
         enrichment = enrichment,
         priors = priors
     )
-    pairRes <- .colocRunPairEither(
+    pairRes <- .colocRunPair(
         aligned,
-        p12Info,
+        p12Info$p12Used,
         q,
         gInfo,
-        useEnrichment = useEnrichment,
+        p1 = p12Info$p1,
+        p2 = p12Info$p2,
         ColocOptions = ColocOptions
     )
     if (is.null(pairRes) || is.null(pairRes$summary)) {
@@ -1170,6 +1144,9 @@ colocPipeline <- function(
 # The priors for one pair. Without an enrichment table these are the caller's
 # own; with one they are enloc's, taken from the table rather than derived
 # from a default -- which is the whole point of running in enrichment mode.
+# The table's colocP1 is fastenloc's p1, the prior of a GWAS-only variant, and
+# its colocP2 the QTL-only one, while coloc's p1 goes with its first trait,
+# which here is the QTL side.
 # @noRd
 .colocResolvePriors <- function(gInfo, q, useEnrichment, enrichment, priors) {
     if (!useEnrichment) {
@@ -1199,90 +1176,35 @@ colocPipeline <- function(
     en <- .colocEnrichmentPriors(enrichment, idx)
     list(
         enRow = en$enrichment,
-        p1 = en$p1,
-        p2 = en$p2,
+        p1 = en$p2,
+        p2 = en$p1,
         p12Used = en$p12
     )
 }
 
-# Score every (QTL effect, GWAS effect) pair with the enloc configuration
-# probabilities, in the shape coloc.bf_bf returns so the two modes' rows line
-# up. RCP and LCP are reported alongside the hypothesis probabilities they
-# are: RCP is PP.H4 and LCP is PP.H3 + PP.H4.
+# The enrichment columns of the summary `sm`, present only when the pipeline
+# used an enrichment table: RCP and LCP are enloc's names for PP.H4 and
+# PP.H3 + PP.H4. A NULL `p12Info` carries the zero-row schema an empty result
+# needs.
 # @noRd
-.colocRunPairEnloc <- function(aligned, p12Info) {
-    priors <- list(
-        p1 = p12Info$p1,
-        p2 = p12Info$p2,
-        p12 = p12Info$p12Used
-    )
-    qtlRows <- seq_len(nrow(aligned$qtl))
-    gwasRows <- seq_len(nrow(aligned$gwas))
-    grid <- expand.grid(idx1 = qtlRows, idx2 = gwasRows)
-    scored <- map2(
-        grid$idx1,
-        grid$idx2,
-        .colocEnlocOneEffectPair,
-        aligned = aligned,
-        priors = priors
-    )
-    summary <- data.frame(
-        idx1 = grid$idx1,
-        idx2 = grid$idx2,
-        nSnps = ncol(aligned$qtl),
-        PP.H0.abf = map_dbl(scored, "ppH0"),
-        PP.H1.abf = map_dbl(scored, "ppH1"),
-        PP.H2.abf = map_dbl(scored, "ppH2"),
-        PP.H3.abf = map_dbl(scored, "ppH3"),
-        PP.H4.abf = map_dbl(scored, "ppH4"),
-        RCP = map_dbl(scored, "rcp"),
-        LCP = map_dbl(scored, "lcp"),
-        stringsAsFactors = FALSE
-    )
-    list(summary = summary, results = .colocEnlocResults(scored, aligned))
-}
-
-# One (QTL effect, GWAS effect) pair, which is enloc's signal cluster. The
-# LBF matrices hold SuSiE's natural-log Bayes factors and enloc reads log10
-# ones, so they are converted here; read as log10 unconverted, every cluster's
-# PIPs came out sharper than SuSiE's own alpha.
-# @noRd
-.colocEnlocOneEffectPair <- function(i, j, aligned, priors) {
-    .enlocScoreEffectPair(
-        qtlLog10Bf = aligned$qtl[i, ] / log(10),
-        gwasLog10Bf = aligned$gwas[j, ] / log(10),
-        priors = priors
-    )
-}
-
-# The per-variant layer, matching what coloc.bf_bf's `results` carries: one
-# column per scored pair, holding that pair's SNP-level colocalisation
-# probabilities (enloc's SCP, which sums to RCP).
-# @noRd
-.colocEnlocResults <- function(scored, aligned) {
-    scp <- map(scored, "scp")
-    # A data.frame rather than a tibble: this stands in for what
-    # coloc.bf_bf's `results` carries, and .crPivotColocResults consumes both
-    # paths' output through the same code.
-    out <- as.data.frame(
-        exec(cbind, !!!scp),
-        stringsAsFactors = FALSE
-    )
-    colnames(out) <- sprintf("SNP.PP.H4.row%d", seq_along(scp))
-    mutate(out, snp = colnames(aligned$qtl))
-}
-
-# The enrichment columns, present only when the pipeline used an enrichment
-# table. A NULL `p12Info` carries the zero-row schema an empty result needs.
-# @noRd
-.colocEnrichmentCols <- function(useEnrichment, p12Info) {
+.colocEnrichmentCols <- function(useEnrichment, p12Info, sm = NULL) {
     if (!useEnrichment) {
         return(list())
     }
     if (is.null(p12Info)) {
-        return(list(enrichment = numeric(0), p12Used = numeric(0)))
+        return(list(
+            enrichment = numeric(0),
+            p12Used = numeric(0),
+            RCP = numeric(0),
+            LCP = numeric(0)
+        ))
     }
-    list(enrichment = p12Info$enRow, p12Used = p12Info$p12Used)
+    list(
+        enrichment = p12Info$enRow,
+        p12Used = p12Info$p12Used,
+        RCP = sm[["PP.H4.abf"]],
+        LCP = sm[["PP.H3.abf"]] + sm[["PP.H4.abf"]]
+    )
 }
 
 # Which QTL tuple and which GWAS tuple a summary row belongs to.
@@ -1313,7 +1235,7 @@ colocPipeline <- function(
         as.data.frame(pairRes$summary, stringsAsFactors = FALSE)
     )
     identityCols <- .colocRowIdentity(q, gInfo)
-    enrichmentCols <- .colocEnrichmentCols(useEnrichment, p12Info)
+    enrichmentCols <- .colocEnrichmentCols(useEnrichment, p12Info, sm)
     mutate(
         sm,
         !!!identityCols,
@@ -1863,7 +1785,8 @@ colocPipeline <- function(
 
 # A blank result data frame for the no-pair case so callers downstream
 # do not have to special-case a NULL return. When `enriched = TRUE` the
-# enrichment + p12Used columns are appended (the enloc-mode schema).
+# enrichment, p12Used, RCP and LCP columns are appended (the enloc-mode
+# schema).
 # @noRd
 .colocEmptyResult <- function(enriched = FALSE) {
     base <- tibble(
@@ -1920,8 +1843,10 @@ colocPipeline <- function(
 # The enloc priors for one pair, read from the enrichment table rather than
 # derived here. qtlEnrichmentPipeline already computes them the way fastenloc
 # does -- p1 = (1 - P_eqtl) * expit(a0), p2 = P_eqtl / (1 + exp(a0 + a1)),
-# p12 = P_eqtl * expit(a0 + a1) -- from the genome-wide QTL results, so using
-# them is what makes this an enloc run rather than an approximation of one.
+# p12 = P_eqtl * expit(a0 + a1) -- from the genome-wide QTL results. Given
+# Bayes factors for both traits, fastenloc's configuration sum is coloc's up to
+# a factor of 1 - p1 - p2 - p12 on H0 and on H3's inverse, so scoring these
+# priors with coloc.bf_bf is the enloc run.
 # @noRd
 .colocEnrichmentPriors <- function(enrichment, idx) {
     needed <- c("colocP1", "colocP2", "colocP12")

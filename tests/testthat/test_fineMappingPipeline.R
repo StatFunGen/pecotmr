@@ -31,14 +31,14 @@ context("fineMappingPipeline")
 }
 
 .fmp_mockExtractor <- function(seed = 3, n_samples = 40L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -297,6 +297,91 @@ context("fineMappingPipeline")
 # ===========================================================================
 # .fmNormalizeMethods
 # ===========================================================================
+
+test_that("fineMappingPipeline reads each window once and shares its X", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    run <- .countBlocks(fineMappingPipeline(
+        qd,
+        methods = "susie",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    ))
+    expect_s4_class(run$result, "QtlFineMappingResult")
+    expect_equal(nrow(run$result), 6L)
+    # One read across 2 contexts and 3 traits, of only the samples they observe.
+    expect_equal(run$reads, 1L)
+    expect_equal(run$samples[[1L]], 1:30)
+    # In each context: one X for g1 and g3, and one for g2's different samples.
+    expect_equal(run$builds, 4L)
+    # Per-trait cis windows: one read per distinct window.
+    cis <- .countBlocks(fineMappingPipeline(
+        qd,
+        methods = "susie",
+        cisWindow = 1e4,
+        seed = 1L
+    ))
+    expect_equal(cis$reads, 1L)
+    expect_equal(nrow(cis$result), 6L)
+})
+
+test_that("fineMappingPipeline reads nothing when every fit is cached", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    first <- suppressMessages(fineMappingPipeline(
+        qd,
+        methods = "susie",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    ))
+    resumed <- .countBlocks(fineMappingPipeline(
+        qd,
+        methods = "susie",
+        region = .fitSamplesWindow(),
+        fineMappingResult = first,
+        seed = 1L
+    ))
+    expect_equal(resumed$reads, 0L)
+    expect_equal(resumed$builds, 0L)
+    expect_equal(nrow(resumed$result), nrow(first))
+})
+
+test_that("fineMappingPipeline reads a window once across its paths", {
+    skip_if_not_installed("pgenlibr")
+    window <- .fitSamplesWindow()
+    # The univariate fits and the PCA fits, across both contexts.
+    pca <- .countBlocks(fineMappingPipeline(
+        .fitSamplesDataset(),
+        methods = "susie",
+        region = window,
+        usePCA = TRUE,
+        nPCs = 1L,
+        phenotypeFilterParam = PhenotypeFilterParam(naAction = "impute"),
+        seed = 1L
+    ))
+    expect_equal(pca$reads, 1L)
+    expect_true(any(grepl("PC", as.character(pca$result$trait))))
+    skip_if_not_installed("mvsusieR")
+    # The univariate fits and the joint ones, whichever way they are asked for.
+    # The fixture's contexts share phenotypes, which mvSuSiE warns about.
+    auto <- .countBlocks(suppressWarnings(fineMappingPipeline(
+        .fitSamplesDataset(),
+        methods = c("susie", "mvsusie"),
+        region = window,
+        seed = 1L
+    )))
+    expect_equal(auto$reads, 1L)
+    expect_setequal(as.character(auto$result$method), c("susie", "mvsusie"))
+    bySpec <- .countBlocks(suppressWarnings(fineMappingPipeline(
+        .fitSamplesDataset(),
+        methods = c("susie", "mvsusie"),
+        jointSpecification = "context",
+        region = window,
+        seed = 1L
+    )))
+    expect_equal(bySpec$reads, 1L)
+    expect_setequal(as.character(bySpec$result$method), c("susie", "mvsusie"))
+})
 
 test_that(".fmNormalizeMethods: rejects NULL / empty / non-character/list", {
     expect_error(
@@ -827,6 +912,270 @@ test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
     expect_lte(re[["ENSG_B"]], 3499L) # traitPos 2499 + cisWindow
 })
 
+test_that("a multi-study run reads a window once per component", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mvsusieR")
+    # An explicit joint spec is fit along with the component's univariate fits.
+    run <- .countBlocks(suppressWarnings(fineMappingPipeline(
+        .fitSamplesTwoStudies(),
+        methods = c("susie", "mvsusie"),
+        jointSpecification = "context",
+        region = .fitSamplesWindow(),
+        seed = 1L
+    )))
+    expect_equal(run$reads, 2L)
+    expect_setequal(as.character(run$result$study), c("s", "s2"))
+    expect_setequal(as.character(run$result$method), c("susie", "mvsusie"))
+    # A scope that holds nothing of a component leaves it its univariate fits.
+    scoped <- .countBlocks(suppressWarnings(fineMappingPipeline(
+        .fitSamplesTwoStudies(),
+        methods = c("susie", "mvsusie"),
+        jointSpecification = list(list(
+            axes = "context",
+            scope = list(study = "s")
+        )),
+        region = .fitSamplesWindow(),
+        seed = 1L
+    )))
+    expect_equal(scoped$reads, 2L)
+    second <- as.character(scoped$result$study) == "s2"
+    expect_setequal(as.character(scoped$result$method)[second], "susie")
+    expect_true("mvsusie" %in% as.character(scoped$result$method)[!second])
+})
+
+# The dimensions of every matrix a fit holds.
+.fmFitMatrixShapes <- function(x) {
+    if (is.list(x)) {
+        return(list_flatten(map(unname(x), .fmFitMatrixShapes)))
+    }
+    if (length(dim(x)) >= 2L) list(dim(x))
+}
+
+# A side of samples and a side of variants; mvSuSiE's fitted values have a side
+# of samples and one of conditions, and fSuSiE's one of positions.
+.fmShapeHoldsX <- function(shape, X) {
+    is_in(nrow(X), shape) && max(shape) >= ncol(X) / 2L
+}
+
+# Fits of `method` on `data` hold no copy of its genotypes, at any level.
+.fmExpectFitsHoldNoX <- function(data, method, window) {
+    X <- residualizedGenotypes(data, context = "brain")
+    expect_true(.fmShapeHoldsX(dim(X), X))
+    for (level in c("slim", "full")) {
+        res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+            data,
+            methods = method,
+            region = window,
+            phenotypeFilterParam = PhenotypeFilterParam(naAction = "impute"),
+            fitRetention = level,
+            seed = 1L
+        )))
+        shapes <- compact(.fmFitMatrixShapes(methods::slot(res, "fits")))
+        expect_gt(length(shapes), 0L)
+        expect_false(
+            any(map_lgl(shapes, .fmShapeHoldsX, X = X)),
+            label = str_c(method, level)
+        )
+    }
+}
+
+# A context of traits at positions along a window of `panel`, as fSuSiE models
+# them, on `panel`'s first 30 samples: each a sample's `effect`, plus noise.
+.fmFunctionalDataset <- function(panel, positions, effect = 0) {
+    samples <- colnames(panel)[1:30]
+    traits <- str_c("cpg", seq_along(positions))
+    noise <- matrix(
+        rnorm(length(traits) * length(samples)),
+        nrow = length(traits),
+        dimnames = list(traits, samples)
+    )
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(methylation = sweep(noise, 2L, effect, "+")),
+        rowRanges = `names<-`(
+            GenomicRanges::GRanges(
+                as.character(GenomicRanges::seqnames(
+                    SummarizedExperiment::rowRanges(panel)
+                ))[[1L]],
+                IRanges::IRanges(positions, width = 1L)
+            ),
+            traits
+        ),
+        colData = S4Vectors::DataFrame(row.names = samples)
+    )
+    QtlDataset(
+        studyName = "s",
+        genotypes = panel,
+        phenotypes = list(brain = se)
+    )
+}
+
+test_that("no fine-mapping fit keeps a copy of X, at any level", {
+    # Why this pipeline has no retainX: there is nothing for it to keep.
+    skip_if_not_installed("pgenlibr")
+    data <- .fitSamplesDataset()
+    window <- .fitSamplesWindow()
+    for (method in c("susie", "susieInf", "susieAsh")) {
+        .fmExpectFitsHoldNoX(data, method, window)
+    }
+})
+
+test_that("a joint fit keeps no copy of X, at any level", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("mvsusieR")
+    skip_if_not_installed("fsusieR")
+    window <- .fitSamplesWindow()
+    .fmExpectFitsHoldNoX(.fitSamplesDataset(), "mvsusie", window)
+    panel <- pecotmr:::.qtlGenotypeSe(.fitSamplesDataset())
+    set.seed(1)
+    .fmExpectFitsHoldNoX(
+        .fmFunctionalDataset(
+            panel,
+            GenomicRanges::start(window) + 100L * seq_len(16L)
+        ),
+        "fsusie",
+        window
+    )
+})
+
+test_that("a joint fit reports the frequencies of the samples it keeps", {
+    skip_if_not_installed("VariantAnnotation")
+    skip_if_not_installed("mvsusieR")
+    skip_if_not_installed("fsusieR")
+    samples <- str_c("s", 1:30)
+    nVariants <- 20L
+    set.seed(2)
+    calls <- matrix(
+        sample(c("0/0", "0/1", "1/1"), nVariants * 30L, replace = TRUE),
+        nrow = nVariants,
+        dimnames = list(NULL, samples)
+    )
+    # Half of s1's calls are missing, which `imissCutoff` will not stand; one of
+    # s2's is, which it will.
+    calls[seq(1L, nVariants, by = 2L), "s1"] <- "./."
+    calls[1L, "s2"] <- "./."
+    panel <- readGenotypes(.writeTestVcf(
+        data.frame(
+            CHROM = "chr1",
+            POS = 100L * seq_len(nVariants),
+            ID = ".",
+            REF = "A",
+            ALT = "G",
+            calls
+        ),
+        samples
+    ))
+    dosage <- as.matrix(SummarizedExperiment::assay(panel, "dosage"))
+    data <- .fmFunctionalDataset(
+        panel,
+        100L * seq_len(16L),
+        effect = 3 * dosage[6L, ]
+    )
+    frequencies <- function(method, cutoff, kept) {
+        res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+            data,
+            methods = method,
+            region = GenomicRanges::GRanges("chr1:1-3000"),
+            genotypeFilterParam = GenotypeFilterParam(imissCutoff = cutoff),
+            traitId = str_c("cpg", 1:16),
+            seed = 1L
+        )))
+        top <- as.data.frame(S4Vectors::mcols(topLoci(res)))
+        expect_gt(nrow(top), 0L)
+        held <- dosage[
+            match(top$pos, 100L * seq_len(nVariants)),
+            kept,
+            drop = FALSE
+        ]
+        expect_equal(
+            top$af,
+            unname(rowSums(held, na.rm = TRUE) / (2 * rowSums(!is.na(held))))
+        )
+        top$af[top$pos == 600L]
+    }
+    for (method in c("fsusie", "mvsusie")) {
+        withAll <- frequencies(method, 0, seq_len(30L))
+        withoutS1 <- frequencies(method, 0.2, -1L)
+        # s1 has a call at the variant holding the signal, and it counts.
+        expect_false(any(withAll == withoutS1), label = method)
+    }
+})
+
+test_that("genes on several chromosomes fine-map without a seqlevels warning", {
+    skip_if_not_installed("VariantAnnotation")
+    samples <- str_c("s", 1:30)
+    set.seed(2)
+    calls <- matrix(
+        sample(c("0/0", "0/1", "1/1"), 40L * 30L, replace = TRUE),
+        nrow = 40L,
+        dimnames = list(NULL, samples)
+    )
+    panel <- readGenotypes(.writeTestVcf(
+        data.frame(
+            CHROM = rep(c("chr1", "chr2"), each = 20L),
+            POS = rep(100L * seq_len(20L), 2L),
+            ID = ".",
+            REF = "A",
+            ALT = "G",
+            calls
+        ),
+        samples
+    ))
+    traits <- c("g1", "g2")
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(
+            expression = matrix(
+                rnorm(2L * 30L),
+                nrow = 2L,
+                dimnames = list(traits, samples)
+            )
+        ),
+        rowRanges = `names<-`(
+            GenomicRanges::GRanges(
+                c("chr1", "chr2"),
+                IRanges::IRanges(500L, width = 1L)
+            ),
+            traits
+        ),
+        colData = S4Vectors::DataFrame(row.names = samples)
+    )
+    expect_no_warning(
+        res <- suppressMessages(fineMappingPipeline(
+            QtlDataset(
+                studyName = "s",
+                genotypes = panel,
+                phenotypes = list(brain = se)
+            ),
+            methods = "susie",
+            cisWindow = 1000L,
+            seed = 1L
+        )),
+        message = "sequence levels"
+    )
+    expect_setequal(as.character(res$trait), traits)
+})
+
+test_that("a panel of rsIDs fine-maps as one labelled by position", {
+    skip_if_not_installed("pgenlibr")
+    window <- .fitSamplesWindow()
+    byId <- suppressMessages(fineMappingPipeline(
+        .fitSamplesDataset(),
+        methods = "susie",
+        region = window,
+        seed = 1L
+    ))
+    byRs <- suppressMessages(fineMappingPipeline(
+        .fitSamplesDataset(.rsIdPanel()),
+        methods = "susie",
+        region = window,
+        seed = 1L
+    ))
+    expect_gt(length(topLoci(byId)), 0L)
+    expect_equal(
+        as.data.frame(S4Vectors::mcols(topLoci(byRs))),
+        as.data.frame(S4Vectors::mcols(topLoci(byId)))
+    )
+})
+
 test_that(".fmAfForX gives effect-allele af aligned to colnames(X)", {
     qd <- .fmp_qdA
     local_mocked_bindings(
@@ -842,7 +1191,7 @@ test_that(".fmAfForX gives effect-allele af aligned to colnames(X)", {
         ncol = 3L,
         dimnames = list(
             paste0("s", 1:5),
-            c("chr1:300:A:G", "chr1:100:A:G", "chr1:200:A:G")
+            c("chr1:300:G:A", "chr1:100:G:A", "chr1:200:G:A")
         )
     )
     noFilter <- pecotmr:::.qtlResolveFilter()
@@ -998,19 +1347,15 @@ test_that("fineMappingPipeline(QtlDataset, usePCA): rows keyed topPC{i}", {
         contexts = "brain",
         traits = c("ENSG_A", "ENSG_B", "ENSG_C")
     )
-    # The PCA path builds a window's block from all the context's traits; the
-    # univariate fits, from one trait each.
-    realBlock <- pecotmr:::.fmResidGenoBlock
-    pcaBuilds <- 0L
+    realResid <- pecotmr:::.fmResidGeno
+    builds <- 0L
     local_mocked_bindings(
         .handleDosage = .fmp_mockExtractor(),
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
-        .fmResidGenoBlock = function(ctx, traits, ...) {
-            if (length(traits) > 1L) {
-                pcaBuilds <<- pcaBuilds + 1L
-            }
-            realBlock(ctx, traits, ...)
+        .fmResidGeno = function(...) {
+            builds <<- builds + 1L
+            realResid(...)
         },
         .package = "pecotmr"
     )
@@ -1031,9 +1376,9 @@ test_that("fineMappingPipeline(QtlDataset, usePCA): rows keyed topPC{i}", {
     expect_equal(sum(pcRows), 2L)
     expect_setequal(as.character(res$trait)[pcRows], c("topPC1", "topPC2"))
     expect_setequal(as.character(res$method)[pcRows], "susie")
-    # The PCs differ only in the response, so they share their window's
-    # block: one build for the window, not one per PC.
-    expect_equal(pcaBuilds, 1L)
+    # The traits and the PCs are on one context and its samples, and the PCs'
+    # window holds the traits': one build for all of them.
+    expect_equal(builds, 1L)
 })
 
 test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
@@ -4458,7 +4803,7 @@ test_that("usePCA with a region uses the region's genotype block", {
         .fmFitSusieIndiv = .fmp_mockFitIndiv(),
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .fmSerScreen = function(...) TRUE,
-        .fmDispatchJointSpecsQtlDataset = function(...) NULL,
+        .fmJointSpecsWork = function(...) pecotmr:::.qtlWorkValue(NULL),
         .package = "pecotmr"
     )
     region <- GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 3000L))
@@ -4487,7 +4832,7 @@ test_that("usePCA skips a PC block with too few shared samples", {
                 )
             )
         }, # < 2 samples shared with the PCs
-        .fmDispatchJointSpecsQtlDataset = function(...) .fmp_jr(),
+        .fmJointSpecsWork = function(...) pecotmr:::.qtlWorkValue(.fmp_jr()),
         .package = "pecotmr"
     )
     res <- suppressMessages(fineMappingPipeline(
@@ -4505,7 +4850,7 @@ test_that("usePCA skips a PC block the SER screens out", {
     local_mocked_bindings(
         .handleDosage = .fmp_mockExtractor(),
         .fmSerScreen = function(...) FALSE, # the PC block is screened out
-        .fmDispatchJointSpecsQtlDataset = function(...) .fmp_jr(),
+        .fmJointSpecsWork = function(...) pecotmr:::.qtlWorkValue(.fmp_jr()),
         .package = "pecotmr"
     )
     res <- suppressMessages(fineMappingPipeline(
@@ -5285,7 +5630,7 @@ test_that(".fmBlockWindow falls back to the trait's own cis window", {
         explicit
     )
     # Without one, the cis path's window is the trait's position +/- cisWindow
-    # -- the same interval .fmResidGenoBlock() slices X over. Widening the
+    # -- the same interval .fmGenoWindow() gives X over. Widening the
     # cis window must widen the recorded window.
     cfgNarrow <- list(data = qtlDatasetExample, cisWindow = 1000)
     cfgWide <- list(data = qtlDatasetExample, cisWindow = 500000)
@@ -5351,9 +5696,9 @@ test_that("a GWAS row carries its block name and window into its fit", {
 # Provenance columns (dataType / dataSource / standardized)
 #
 # These three are what writeBed() / writeGwasVcf() publish as data_type,
-# data_source and weight_standardized. Only the first is an outside fact; the
-# other two follow from the branch the pipeline took, so they are derived and
-# the summary-statistics methods refuse to be told.
+# data_source and weight_standardized. Only the first is an outside fact, read
+# from the data; the other two follow from the branch the pipeline took, so they
+# are derived and the summary-statistics methods refuse to be told.
 # ---------------------------------------------------------------------------
 
 # @noRd
@@ -5367,16 +5712,24 @@ test_that("a GWAS row carries its block name and window into its fit", {
     ]
 }
 
-test_that("fineMappingPipeline(QtlDataset) records what it is given", {
+test_that("fineMappingPipeline(QtlDataset) records what the dataset says", {
     data(qtlDatasetExample, envir = environment())
+    typed <- QtlDataset(
+        studyName = studyName(qtlDatasetExample),
+        genotypes = pecotmr:::.qtlGenotypeSe(qtlDatasetExample),
+        phenotypes = as.list(
+            MultiAssayExperiment::experiments(qtlDatasetExample)
+        )["brain"],
+        dataType = "expression"
+    )
     res <- suppressMessages(fineMappingPipeline(
-        qtlDatasetExample,
+        typed,
         methods = "susie",
-        cisWindow = 1e6,
-        dataType = "bulk_rnaseq"
+        cisWindow = 1e6
     ))
     cols <- .fmprov_cols(res)
-    expect_equal(unique(cols$dataType), "bulk_rnaseq")
+    expect_equal(unique(cols$dataType), "expression")
+    expect_equal(unique(dataType(res)), "expression")
     # Derived, not supplied: this entry point fits individual-level genotypes.
     expect_equal(unique(cols$dataSource), "individual")
     # Also derived: the genotypes were standardized on the way in, so there
@@ -5384,7 +5737,31 @@ test_that("fineMappingPipeline(QtlDataset) records what it is given", {
     expect_true(all(cols$standardized))
 })
 
-test_that("fineMappingPipeline(QtlDataset) omits dataType when not supplied", {
+test_that("fineMappingPipeline(MultiStudyQtlDataset) reads each study's", {
+    data(qtlDatasetExample, envir = environment())
+    typed <- QtlDataset(
+        studyName = "gtex",
+        genotypes = pecotmr:::.qtlGenotypeSe(qtlDatasetExample),
+        phenotypes = as.list(
+            MultiAssayExperiment::experiments(qtlDatasetExample)
+        )["brain"],
+        dataType = "expression"
+    )
+    ms <- MultiStudyQtlDataset(
+        qtlDatasets = list(gtex = typed, study1 = qtlDatasetExample)
+    )
+    res <- suppressMessages(fineMappingPipeline(
+        ms,
+        methods = "susie",
+        cisWindow = 1e6
+    ))
+    types <- dataType(res)
+    expect_setequal(as.character(res$study), c("gtex", "study1"))
+    expect_true(all(types[as.character(res$study) == "gtex"] == "expression"))
+    expect_true(all(is.na(types[as.character(res$study) == "study1"])))
+})
+
+test_that("fineMappingPipeline(QtlDataset) omits dataType when none recorded", {
     data(qtlDatasetExample, envir = environment())
     res <- suppressMessages(fineMappingPipeline(
         qtlDatasetExample,
@@ -5402,12 +5779,11 @@ test_that("fineMappingPipeline(QtlDataset) omits dataType when not supplied", {
 
 test_that("fineMappingPipeline(QtlSumStats) records sumstat / standardized", {
     res <- suppressWarnings(suppressMessages(fineMappingPipeline(
-        .rssf_ss,
-        methods = "susie",
-        dataType = "bulk_rnaseq"
+        `$<-`(.rssf_ss, "dataType", rep("splicing", length(.rssf_ss))),
+        methods = "susie"
     )))
     cols <- .fmprov_cols(res)
-    expect_equal(unique(cols$dataType), "bulk_rnaseq")
+    expect_equal(unique(cols$dataType), "splicing")
     expect_equal(unique(cols$dataSource), "sumstat")
     # The RSS likelihood is written in standardized units, so the posterior
     # effects are on that scale whatever the caller believes.

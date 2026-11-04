@@ -1253,7 +1253,7 @@ test_that("the TWAS-weight VCF's ##SAMPLE lines describe each model, not CV", {
     expect_true(str_detect(susie, "Trait=ENSG00000130538"))
     expect_true(str_detect(susie, "TotalVariants=168"))
     expect_true(str_detect(susie, "WeightStandardized=FALSE"))
-    expect_true(str_detect(susie, "DataType=bulk_rnaseq"))
+    expect_true(str_detect(susie, "DataType=expression"))
     # CV describes held-out folds; a published file has no data-secure way to
     # say anything fold-level, so the header stops at identity + counts.
     expect_false(any(str_detect(sampleLines, "rsq=|corr=|pval=|CvRegions=")))

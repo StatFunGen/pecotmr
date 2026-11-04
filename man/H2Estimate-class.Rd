@@ -27,6 +27,9 @@ Besides the identity, \code{mcols()} hold each estimate's values:
       estimate used.}
     \item{\code{scale}}{FastHer's fitted phenotypic variance relative to
       its standardized value.}
+    \item{\code{reference_overlap}}{The share of the study's samples LAVA
+      took to be in the LD reference (\code{referenceOverlap} in
+      \code{\link{estimateH2}}).}
     \item{\code{enrichment}}{The per-annotation enrichment table of a
       stratified estimate (\code{\link{stratifiedHeritabilityEnrichment}}).}
     \item{\code{jackknife}}{The per-block jackknife matrix of the

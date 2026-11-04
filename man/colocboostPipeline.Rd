@@ -173,10 +173,11 @@ settings apply to each extracted block, as in
 \code{QtlDataset} and \code{MultiStudyQtlDataset} input only.}
 
 \item{phenotypeFilterParam}{The run's phenotype QC, built with
-\code{\link{PhenotypeFilterParam}}. colocboost takes missing phenotype
-values as they are, so unset keeps them; \code{"drop"} or
-\code{"impute"} applies that instead, and \code{outlierAction =
-"drop"} removes outlier samples. \code{QtlDataset} and
+\code{\link{PhenotypeFilterParam}}. Unset fits each trait on the samples
+that have a value for it, with genotypes filtered and residualized on just
+those; \code{"drop"} or \code{"impute"} applies that instead, and
+\code{outlierAction = "drop"} removes outlier samples, judging only those
+with every trait. \code{QtlDataset} and
 \code{MultiStudyQtlDataset} input only.}
 
 \item{residualizationParam}{Covariate residualization settings for

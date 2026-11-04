@@ -346,6 +346,13 @@ setClass(
 #' @param genotypeCovariates Numeric matrix of genotype-derived covariates
 #'   (e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
 #'   genotype experiment.
+#' @param dataType Optional molecular type of each context (\code{"expression"},
+#'   \code{"splicing"}, \code{"methylation"}): free text, one value for every
+#'   context or a vector named by context. It cannot be derived, the phenotypes
+#'   being only numbers, so pipelines read it from here and record it on what
+#'   they fit, and \code{\link{ctwasPipeline}} models each type as its own. Kept
+#'   in the context's \code{metadata()} as \code{dataType}, and read by
+#'   \code{\link{dataType}}. \code{NULL} (default) leaves a context's as it is.
 #' @details A \code{QtlDataset} holds data only. Which variants and samples
 #'   an analysis keeps, and whether residuals are scaled, are the pipeline's
 #'   settings (\code{\link{GenotypeFilterParam}} and
@@ -371,14 +378,16 @@ setClass(
 #'   rowRanges = rng
 #' )
 #' QtlDataset(
-#'     studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
+#'     studyName = "s1", genotypes = panel, phenotypes = list(brain = se),
+#'     dataType = "expression"
 #' )
 #' @export
 QtlDataset <- function(
     studyName,
     genotypes,
     phenotypes,
-    genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+    genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
+    dataType = NULL
 ) {
     handle <- .qtlValidateInputs(phenotypes, genotypes)
     # Every experiment's rowRanges in UCSC style, and the genotypes' alleles
@@ -390,7 +399,7 @@ QtlDataset <- function(
                 list(.genotypeExperiment(genotypes, genotypeCovariates)),
                 .QTL_GENO_EXPERIMENT
             ),
-            as.list(phenotypes)
+            .qtlWithDataTypes(as.list(phenotypes), dataType)
         ),
         .canonExperiment
     )
@@ -612,6 +621,69 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
     )
 }
 
+# The phenotypes, each carrying its context's molecular type in its metadata.
+# @noRd
+.qtlWithDataTypes <- function(phenotypes, dataType) {
+    if (is.null(dataType)) {
+        return(phenotypes)
+    }
+    assertCharacter(dataType, any.missing = FALSE, min.len = 1L)
+    typed <- names(dataType) %||% names(phenotypes)
+    if (length(dataType) != length(typed) && length(dataType) != 1L) {
+        abort(c(
+            glue(
+                "`dataType` has {length(dataType)} values for ",
+                "{length(phenotypes)} context(s)."
+            ),
+            i = "Give one value, or a vector named by context."
+        ))
+    }
+    unknown <- setdiff(typed, names(phenotypes))
+    if (length(unknown) > 0L) {
+        abort(glue(
+            "`dataType` names no such context: ",
+            "{str_flatten(unknown, ', ')}."
+        ))
+    }
+    values <- set_names(
+        rep(unname(dataType), length.out = length(typed)),
+        typed
+    )
+    imap(phenotypes, .qtlContextWithType, values = values)
+}
+
+# @noRd
+.qtlContextWithType <- function(se, context, values) {
+    if (!is_in(context, names(values))) {
+        return(se)
+    }
+    S4Vectors::`metadata<-`(
+        se,
+        value = list_assign(
+            S4Vectors::metadata(se),
+            dataType = values[[context]]
+        )
+    )
+}
+
+#' @rdname dataType
+#' @export
+setMethod("dataType", "QtlDataset", function(x) {
+    ids <- contexts(x)
+    set_names(
+        map_chr(
+            as.list(MultiAssayExperiment::experiments(x))[ids],
+            .seDataType
+        ),
+        ids
+    )
+})
+
+# @noRd
+.seDataType <- function(se) {
+    S4Vectors::metadata(se)$dataType %||% NA_character_
+}
+
 #' @rdname studyName
 #' @export
 setMethod("studyName", "QtlDataset", function(x) x@studyName)
@@ -741,7 +813,8 @@ setMethod("genotypeHandle", "QtlDataset", function(x) {
     if (length(perTraitRanges) == 0L) {
         abort("None of the requested traitId values were found in any context.")
     }
-    allRanges <- exec(c, !!!perTraitRanges)
+    # Contexts need not hold the same chromosomes, which c() warns of.
+    allRanges <- suppressWarnings(exec(c, !!!perTraitRanges))
     chrs <- unique(as.character(GenomicRanges::seqnames(allRanges)))
     if (length(chrs) != 1L) {
         msg <- glue(
@@ -936,7 +1009,8 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 #
 # Returns a list:
 #   geno       : numeric matrix (kept samples x kept variants)
-#   variantIds : character vector of kept variant IDs (= colnames(geno))
+#   variantIds : character vector of kept variant IDs (= colnames(geno)), the
+#                canonical ids .qtlReadBlock() labels a read with
 #   sampleIds  : character vector of kept sample IDs (= rownames(geno))
 #   maf        : numeric vector of per-variant MAF for kept variants
 #   af         : numeric vector of per-variant effect-allele (A1) frequency
@@ -944,11 +1018,15 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 #                allele): the frequency of the dosage-counted allele, which
 #                is A1 by the same convention the marginal betas use. `maf`
 #                is `pmin(af, 1 - af)`.
+#
+# `read` is the window's dosages when a caller already holds them
+# (.qtlReadBlock()); nothing is read again. It must span `window` and `samples`.
 .qtlExtractBlock <- function(
     x,
     window = NULL,
     samples = NULL,
-    filter = .qtlResolveFilter()
+    filter = .qtlResolveFilter(),
+    read = NULL
 ) {
     # A pipeline threads its resolved filter to every extraction; a NULL one
     # means a call site was missed, which must not pass for "no filter".
@@ -962,19 +1040,19 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
     if (length(inRegion) == 0L) {
         return(.qtlEmptyBlockAllSamples(x))
     }
-    # Apply keepVariants + indel restrictions before materialization so we do
-    # not extract dosage we would immediately drop.
-    snpIdx <- .qtlNarrowSnpIdx(x, inRegion, filter)
+    held <- read %||% .qtlReadBlock(x, window, samples, filter)
+    snpIdx <- inRegion[is_in(inRegion, held$snpIdx)]
     if (length(snpIdx) == 0L) {
         return(.qtlEmptyBlock())
     }
-    se <- .qtlGenotypeSe(x)
-    # Labelled with the panel's own variant ids, as the rows a block reports.
-    dosage <- `colnames<-`(
-        .ldRefDosage(se, snpIdx, meanImpute = FALSE),
-        .ldRefVariantIds(se)[snpIdx]
-    )
-    keep <- .qtlResolveSamples(dosage, x, samples)
+    dosage <- .qtlHeldDosage(held, snpIdx)
+    keep <- .qtlResolveSamples(rownames(dosage), x, samples)
+    if (length(.qtlUnreadSamples(x, keep, samples)) > 0L) {
+        abort(
+            "A held genotype read does not cover the samples asked of it.",
+            .internal = TRUE
+        )
+    }
     if (length(keep) == 0L) {
         return(.qtlEmptyBlockNoSamples(dosage))
     }
@@ -991,6 +1069,534 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         maf = filtered$maf,
         af = filtered$af
     )
+}
+
+# The dosages of one window, read once, for .qtlExtractBlock() to filter on the
+# samples each fit uses: the variants that survive keepVariants and the indel
+# rule (narrowed before materialization so nothing is read only to be dropped)
+# and the samples asked for, or every sample of the dataset. No read at all when
+# no variant survives. Returns list(snpIdx, dosage), the dosage NULL in that
+# case and otherwise labelled with each variant's canonical id, rendered from
+# its range and alleles: a fit's ids are the ones every result class holds and
+# locates, whatever the file calls the variant (an rsID names no position).
+# @noRd
+.qtlReadBlock <- function(x, window, samples, filter) {
+    inRegion <- .qtlVariantIndices(x, window)
+    snpIdx <- if (length(inRegion) > 0L) {
+        .qtlNarrowSnpIdx(x, inRegion, filter)
+    } else {
+        integer(0)
+    }
+    if (length(snpIdx) == 0L) {
+        return(list(snpIdx = integer(0), dosage = NULL))
+    }
+    se <- .qtlGenotypeSe(x)
+    panelSamples <- as.character(colnames(se))
+    wanted <- .qtlResolveSamples(panelSamples, x, samples)
+    list(
+        snpIdx = snpIdx,
+        dosage = `colnames<-`(
+            .ldRefDosage(
+                se,
+                snpIdx,
+                meanImpute = FALSE,
+                sampleIdx = if (length(wanted) < length(panelSamples)) {
+                    which(is_in(panelSamples, wanted))
+                }
+            ),
+            .ldRefMatchIds(se, snpIdx)
+        )
+    )
+}
+
+# The file's own labels of the variants with canonical ids `ids`, which the
+# accessors report: they hand the data back as stored.
+# @noRd
+.qtlStoredLabels <- function(x, ids) {
+    se <- .qtlGenotypeSe(x)
+    .ldRefVariantIds(se)[match(ids, .ldRefMatchIds(se))]
+}
+
+# The whole dataset's block under its file's labels.
+# @noRd
+.qtlStoredBlock <- function(x) {
+    block <- .qtlExtractBlock(x)
+    labels <- .qtlStoredLabels(x, block$variantIds)
+    list_assign(
+        block,
+        geno = `colnames<-`(block$geno, labels),
+        variantIds = labels
+    )
+}
+
+# The columns of a held read at `snpIdx`, without a copy when that is all of it.
+# @noRd
+.qtlHeldDosage <- function(held, snpIdx) {
+    if (identical(snpIdx, held$snpIdx)) {
+        return(held$dosage)
+    }
+    held$dosage[, match(snpIdx, held$snpIdx), drop = FALSE]
+}
+
+# The samples a request wants from the panel that a held read left out. A read
+# narrower than its requests would silently lose samples from a fit.
+# @noRd
+.qtlUnreadSamples <- function(x, kept, samples) {
+    setdiff(
+        .qtlResolveSamples(
+            as.character(colnames(.qtlGenotypeSe(x))),
+            x,
+            samples
+        ),
+        kept
+    )
+}
+
+# The rows of a matrix at `samples`, without a copy when that is all of them in
+# order, so fits sharing an X go on sharing the one matrix.
+# @noRd
+.qtlRowsOf <- function(X, samples) {
+    if (identical(samples, rownames(X))) {
+        return(X)
+    }
+    X[samples, , drop = FALSE]
+}
+
+# The samples of the given contexts' phenotypes: all a fit on them can use.
+# @noRd
+.qtlContextSamples <- function(x, contexts) {
+    unique(list_c(map(contexts, .qtlOneContextSamples, x = x)))
+}
+
+# @noRd
+.qtlOneContextSamples <- function(ctx, x) {
+    colnames(.qtlContextSe(x, context = ctx))
+}
+
+# A window as a key to group fits by.
+# @noRd
+.qtlWindowKey <- function(window) {
+    if (is.null(window)) "" else str_flatten(as.character(window), "|")
+}
+
+# The fits that can share one residualized X: the same window, covariates and
+# samples. `contexts` labels the covariates (fits that may not share an X get a
+# label of their own). A list of groups, each list(at, window, context,
+# samples), `at` the group's positions among the fits, in order of first
+# appearance.
+# @noRd
+#' @importFrom vctrs vec_group_loc
+.qtlXGroups <- function(windows, contexts, samples) {
+    keys <- tibble(
+        window = map_chr(windows, .qtlWindowKey),
+        context = contexts,
+        samples = map_chr(samples, rlang::hash)
+    )
+    map(
+        vec_group_loc(keys)$loc,
+        .qtlXGroup,
+        windows = windows,
+        contexts = contexts,
+        samples = samples
+    )
+}
+
+# @noRd
+.qtlXGroup <- function(at, windows, contexts, samples) {
+    first <- at[[1L]]
+    list(
+        at = at,
+        window = windows[[first]],
+        context = contexts[[first]],
+        samples = samples[[first]]
+    )
+}
+
+# Results laid out group by group, put back in the order of the items the groups
+# were formed from. `at` holds each group's positions among those items.
+# @noRd
+.qtlInItemOrder <- function(perGroup, at) {
+    flat <- exec(c, list(), !!!perGroup)
+    flat[order(as.integer(list_c(at)))]
+}
+
+# The items one read serves, as groups of their positions: the items of a
+# window, and with them those of any window inside it, in order of first
+# appearance. An item with no window stays apart, as it may read nothing at all.
+# @noRd
+.qtlWindowGroups <- function(windows) {
+    exact <- vec_group_loc(map_chr(windows, .qtlWindowKey))$loc
+    widest <- .qtlWidestHolder(windows[map_int(exact, 1L)])
+    map(
+        unname(split(exact, factor(widest, levels = unique(widest)))),
+        .qtlSortedPositions
+    )
+}
+
+# @noRd
+.qtlSortedPositions <- function(groups) {
+    sort(list_c(groups))
+}
+
+# For each of these distinct windows, the position of the widest one that holds
+# all of it: itself, when no wider one does. A window with several ranges is
+# held when each of its ranges lies inside one of the holder's.
+# @noRd
+#' @importFrom dplyr count arrange desc distinct
+.qtlWidestHolder <- function(windows) {
+    isWindow <- !map_lgl(windows, is.null)
+    if (sum(isWindow) < 2L) {
+        return(seq_along(windows))
+    }
+    sizes <- map_int(windows, length)
+    owner <- rep(seq_along(windows), sizes)
+    # Each window knows only its own chromosomes, which c() warns of.
+    ranges <- suppressWarnings(exec(c, !!!unname(windows[isWindow])))
+    inside <- GenomicRanges::findOverlaps(ranges, ranges, type = "within")
+    spans <- map_dbl(windows, .qtlWindowSpan)
+    holders <- tibble(
+        window = owner[S4Vectors::queryHits(inside)],
+        range = S4Vectors::queryHits(inside),
+        holder = owner[S4Vectors::subjectHits(inside)]
+    ) |>
+        distinct() |>
+        count(.data$window, .data$holder) |>
+        filter(.data$n == sizes[.data$window]) |>
+        arrange(desc(spans[.data$holder]), .data$holder) |>
+        distinct(.data$window, .keep_all = TRUE)
+    replace(seq_along(windows), holders$window, holders$holder)
+}
+
+# How many bases a window covers; none for no window.
+# @noRd
+.qtlWindowSpan <- function(window) {
+    if (is.null(window)) 0 else sum(as.numeric(GenomicRanges::width(window)))
+}
+
+# The widest of these windows, which .qtlWindowGroups() found holds the others.
+# @noRd
+.qtlWidestWindow <- function(windows) {
+    windows[[which.max(map_dbl(windows, .qtlWindowSpan))]]
+}
+
+# ---- Planned fits -----------------------------------------------------------
+#
+# A pipeline's paths (univariate, top PCs, joint) each plan their fits before
+# any genotype is read, and only then do all of them run together:
+#
+# * one read of a window serves every path, and is let go as soon as the last
+#   block it is needed for is built, before that block's fits run;
+# * one residualized X (a block) serves every fit on the same contexts and
+#   samples, whichever path it is on, and is let go when its last fit is done.
+#
+# A plan is a `.qtlWork()` of fits, or a `.qtlWorkOf()` joining plans. Each has
+# a `finish` that makes its result: of its fits, or of its parts' results.
+# Nothing runs until `.qtlRunWork()`.
+
+# The genotypes a fit is on: the variants of `window`, residualized on the
+# covariates of `contexts`, filtered and scaled on `samples`.
+# @noRd
+.qtlFitSpec <- function(window, contexts, samples) {
+    list(window = window, contexts = contexts, samples = samples)
+}
+
+# Fits to run: `fit(item, !!!fitArgs, block = )` for each of `items`, `block`
+# being the residualized genotypes of the item's `.qtlFitSpec()` in `specs`, as
+# list(X, af, window). An item with no spec reads no genotypes and gets none.
+# @noRd
+.qtlWork <- function(
+    items,
+    specs,
+    fit,
+    fitArgs = list(),
+    finish = identity,
+    finishArgs = list()
+) {
+    list(
+        items = items,
+        specs = specs,
+        fit = fit,
+        fitArgs = fitArgs,
+        finish = finish,
+        finishArgs = finishArgs
+    )
+}
+
+# Plans run together, `finish` given the list of their results.
+# @noRd
+.qtlWorkOf <- function(parts, finish = identity, finishArgs = list()) {
+    list(parts = as.list(parts), finish = finish, finishArgs = finishArgs)
+}
+
+# A plan with nothing to fit, and `value` for its result.
+# @noRd
+.qtlWorkValue <- function(value) {
+    .qtlWorkOf(list(), .qtlWorkConstant, list(value = value))
+}
+
+# @noRd
+.qtlWorkConstant <- function(results, value) {
+    value
+}
+
+# A plan's fits, and then its result. `withAf` has each block carry its
+# variants' allele frequencies, which fine-mapping reports and TWAS never reads.
+# @noRd
+.qtlRunWork <- function(
+    work,
+    dataset,
+    filter,
+    residualizationParam = NULL,
+    withAf = FALSE
+) {
+    leaves <- .qtlWorkLeaves(work)
+    leafOf <- rep(seq_along(leaves), map_int(leaves, .qtlWorkItemCount))
+    specs <- list_flatten(map(leaves, "specs"))
+    tagged <- map2(leafOf, list_flatten(map(leaves, "items")), .qtlWorkTag)
+    run <- list(
+        dataset = dataset,
+        filter = filter,
+        residualizationParam = residualizationParam,
+        withAf = withAf,
+        leaves = leaves
+    )
+    at <- .qtlWindowGroups(map(specs, "window"))
+    fits <- .qtlInItemOrder(
+        map(at, .qtlFitWindow, tagged = tagged, specs = specs, run = run),
+        at
+    )
+    perLeaf <- split(fits, factor(leafOf, seq_along(leaves)))
+    .qtlWorkFinish(work, unname(perLeaf))
+}
+
+# The plans that hold fits, in order.
+# @noRd
+.qtlWorkLeaves <- function(work) {
+    if (is.null(work$parts)) {
+        return(list(work))
+    }
+    list_flatten(map(work$parts, .qtlWorkLeaves))
+}
+
+# @noRd
+.qtlWorkItemCount <- function(leaf) {
+    length(leaf$items)
+}
+
+# @noRd
+.qtlWorkTag <- function(leaf, item) {
+    list(leaf = leaf, item = item)
+}
+
+# One read's fits. The last block's fits run after this function's read has
+# gone out of scope (.qtlFitUnderRead()), so that fits never sit beside a raw
+# block no one needs any more.
+# @noRd
+.qtlFitWindow <- function(at, tagged, specs, run) {
+    groups <- .qtlBlockGroups(specs[at], run$filter)
+    under <- .qtlFitUnderRead(groups, tagged[at], specs[at], run)
+    lastFits <- .qtlFitGroup(
+        groups[[length(groups)]],
+        tagged[at],
+        specs[at],
+        run,
+        under$block
+    )
+    .qtlInItemOrder(c(under$fits, list(lastFits)), map(groups, "at"))
+}
+
+# What needs the window's raw dosages: every block's fits but the last's, and
+# the last block itself. `read` is a lazily evaluated argument, so a window
+# whose items read no genotypes is never read, and it is gone when this returns.
+# @noRd
+.qtlFitUnderRead <- function(
+    groups,
+    tagged,
+    specs,
+    run,
+    read = .qtlReadBlock(
+        run$dataset,
+        .qtlWidestWindow(map(compact(specs), "window")),
+        .qtlUnionSamples(map(compact(specs), "samples")),
+        run$filter
+    )
+) {
+    earlier <- groups[-length(groups)]
+    list(
+        fits = map(
+            earlier,
+            .qtlFitGroupUnderRead,
+            tagged = tagged,
+            specs = specs,
+            run = run,
+            read = read
+        ),
+        block = .qtlFitBlock(groups[[length(groups)]]$spec, run, read)
+    )
+}
+
+# @noRd
+.qtlFitGroupUnderRead <- function(group, tagged, specs, run, read) {
+    .qtlFitGroup(group, tagged, specs, run, .qtlFitBlock(group$spec, run, read))
+}
+
+# Every fit on one block. The block is let go when this returns.
+# @noRd
+.qtlFitGroup <- function(group, tagged, specs, run, block) {
+    map2(tagged[group$at], specs[group$at], .qtlWorkFitItem, run, block)
+}
+
+# One item's fit, on its own window's part of the block.
+# @noRd
+.qtlWorkFitItem <- function(tagged, spec, run, block) {
+    leaf <- run$leaves[[tagged$leaf]]
+    fitArgs <- leaf$fitArgs
+    exec(
+        leaf$fit,
+        tagged$item,
+        !!!fitArgs,
+        block = .qtlBlockFor(block, spec, run$dataset)
+    )
+}
+
+# The fits that share one block, as groups of their positions: the same contexts
+# and samples, each group with the spec its block is built to. A residualized
+# column depends on no other, so a block over the widest window serves narrower
+# windows too. The exception is a per-sample missingness filter, which looks
+# across a block's variants: with one on, a block serves only its own window.
+# @noRd
+.qtlBlockGroups <- function(specs, filter) {
+    windows <- map(specs, "window")
+    keys <- if (filter$imissCutoff %||% 0 > 0) {
+        windows
+    } else {
+        rep(list(NULL), length(windows))
+    }
+    map(
+        .qtlXGroups(
+            keys,
+            map_chr(specs, .qtlSpecContexts),
+            map(specs, "samples")
+        ),
+        .qtlBlockGroup,
+        specs = specs
+    )
+}
+
+# A spec's contexts as a key; the order matters to the covariate design.
+# @noRd
+.qtlSpecContexts <- function(spec) {
+    str_flatten(spec$contexts %||% character(0), "|")
+}
+
+# @noRd
+.qtlBlockGroup <- function(group, specs) {
+    first <- specs[[group$at[[1L]]]]
+    list(
+        at = group$at,
+        spec = if (!is.null(first)) {
+            .qtlFitSpec(
+                .qtlWidestWindow(map(specs[group$at], "window")),
+                first$contexts,
+                first$samples
+            )
+        }
+    )
+}
+
+# The residualized genotypes of a spec, with their allele frequencies when the
+# run reports them; both come from `read`, which nothing here keeps.
+# @noRd
+.qtlFitBlock <- function(spec, run, read) {
+    if (is.null(spec)) {
+        return(NULL)
+    }
+    X <- .fmResidGeno(
+        run$dataset,
+        residualizationParam = run$residualizationParam,
+        genotypeFilter = run$filter,
+        contexts = spec$contexts,
+        region = spec$window,
+        samples = spec$samples,
+        read = read
+    )
+    list(
+        X = X,
+        af = if (run$withAf) {
+            .fmAfForX(
+                run$dataset,
+                X,
+                genotypeFilter = run$filter,
+                region = spec$window,
+                read = read
+            )
+        },
+        window = spec$window
+    )
+}
+
+# A block as one fit sees it: the variants of the fit's own window.
+# @noRd
+.qtlBlockFor <- function(block, spec, dataset) {
+    if (
+        is.null(block) ||
+            .qtlWindowKey(spec$window) == .qtlWindowKey(block$window)
+    ) {
+        return(block)
+    }
+    kept <- is_in(
+        colnames(block$X),
+        .ldRefMatchIds(
+            .qtlGenotypeSe(dataset),
+            .qtlVariantIndices(dataset, spec$window)
+        )
+    )
+    list(
+        X = block$X[, kept, drop = FALSE],
+        af = block$af[kept],
+        window = spec$window
+    )
+}
+
+# A plan's result, from each of its leaves' fits in order.
+# @noRd
+.qtlWorkFinish <- function(work, fits) {
+    finishArgs <- work$finishArgs
+    if (is.null(work$parts)) {
+        return(exec(work$finish, fits[[1L]], !!!finishArgs))
+    }
+    counts <- map_int(work$parts, .qtlWorkLeafCount)
+    ends <- cumsum(counts)
+    results <- map(
+        seq_along(work$parts),
+        .qtlWorkFinishPart,
+        parts = work$parts,
+        ends = ends,
+        counts = counts,
+        fits = fits
+    )
+    exec(work$finish, results, !!!finishArgs)
+}
+
+# @noRd
+.qtlWorkFinishPart <- function(k, parts, ends, counts, fits) {
+    start <- ends[[k]] - counts[[k]]
+    .qtlWorkFinish(parts[[k]], fits[start + seq_len(counts[[k]])])
+}
+
+# @noRd
+.qtlWorkLeafCount <- function(work) {
+    length(.qtlWorkLeaves(work))
+}
+
+# Every sample any of these requests uses; NULL (all of them) if any has no
+# limit.
+# @noRd
+.qtlUnionSamples <- function(samples) {
+    if (any(map_lgl(samples, is.null))) {
+        return(NULL)
+    }
+    unique(list_c(samples))
 }
 
 # Empty block preserving the full panel sample set (no variants selected).
@@ -1040,35 +1646,33 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
     )
 }
 
-# Narrow the selected variant indices by keepVariants (matched by chrom/pos/
-# allele) and, unless kept, by dropping indels. Done before materialization.
+# Narrow the selected variant indices by keepVariants (.keepByIds(), as a
+# keep-list file is matched) and, unless kept, by dropping indels. Done before
+# materialization.
 # @noRd
 .qtlNarrowSnpIdx <- function(x, snpIdx, filter) {
     si <- .qtlGenotypeVariants(x)
     kept <- if (length(filter$keepVariants) == 0L) {
         snpIdx
     } else {
-        snpAll <- si$SNP[snpIdx]
-        km <- matchVariants(snpAll, as.character(filter$keepVariants))
-        snpIdx[replace(logical(length(snpAll)), km$idxA, TRUE)]
+        snpIdx[.keepByIds(
+            .snpInfoToVariantInfo(slice(si, snpIdx)),
+            as.character(filter$keepVariants)
+        )]
     }
     if (length(kept) == 0L || isTRUE(filter$keepIndel)) {
         return(kept)
     }
-    # which() (not the mask) so an NA mask drops the variant rather than
-    # injecting an NA index.
-    snpMask <- str_length(as.character(si$A1[kept])) == 1L &
-        str_length(as.character(si$A2[kept])) == 1L
-    kept[which(snpMask)]
+    kept[isSnpAlleles(si$A1[kept], si$A2[kept])]
 }
 
 # Resolve the sample set: panel samples intersected with the dataset's
 # primary colData -- which is what narrows a subset dataset -- and with the
 # per-call `samples` arg.
 # @noRd
-.qtlResolveSamples <- function(dosage, x, samples) {
+.qtlResolveSamples <- function(panelSamples, x, samples) {
     inDataset <- intersect(
-        rownames(dosage),
+        panelSamples,
         rownames(MultiAssayExperiment::colData(x))
     )
     keep <- if (is.null(samples)) {
@@ -1132,7 +1736,7 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
     # An all-NA column means NaN either way, matching mean(numeric(0)).
     means <- colMeans(dosage, na.rm = TRUE)
     # One fill over the whole matrix instead of a copy per column: dosage is
-    # variants x samples, so rebuilding it column by column is the expensive
+    # samples x variants, so rebuilding it column by column is the expensive
     # way to say this.
     replace(dosage, naMask, means[col(dosage)[naMask]])
 }
@@ -1141,20 +1745,20 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 #' @export
 setMethod("genotypes", "QtlDataset", function(x) {
     # The whole dataset, unfiltered: narrow it first with x[i, j, ].
-    .qtlExtractBlock(x)$geno
+    .qtlStoredBlock(x)$geno
 })
 
 #' @rdname maf
 #' @export
 setMethod("maf", "QtlDataset", function(x) {
-    block <- .qtlExtractBlock(x)
+    block <- .qtlStoredBlock(x)
     set_names(block$maf, block$variantIds)
 })
 
 #' @rdname af
 #' @export
 setMethod("af", "QtlDataset", function(x) {
-    block <- .qtlExtractBlock(x)
+    block <- .qtlStoredBlock(x)
     set_names(block$af, block$variantIds)
 })
 
@@ -1432,13 +2036,33 @@ CovMcdOptions <- function(...) {
 #
 # Returns all-TRUE (no-op) when there are too few samples to support
 # a covariance estimate (n < p + 2).
-#' @importFrom rlang try_fetch
+#
+# A sample with a missing value has no distance, so it is kept unjudged, and the
+# centre and covariance come from the samples with every trait.
 .qtlOutlierKeepMask <- function(Y, pvalThreshold, outlierArgs = list()) {
-    Y <- as.matrix(Y)
+    values <- as.matrix(Y)
+    if (ncol(values) == 0L) {
+        return(rep(TRUE, nrow(values)))
+    }
+    complete <- stats::complete.cases(values)
+    replace(
+        rep(TRUE, nrow(values)),
+        complete,
+        .qtlOutlierKeepComplete(
+            values[complete, , drop = FALSE],
+            pvalThreshold,
+            outlierArgs
+        )
+    )
+}
+
+# .qtlOutlierKeepMask() of samples with no missing value.
+#' @importFrom rlang try_fetch
+.qtlOutlierKeepComplete <- function(Y, pvalThreshold, outlierArgs) {
     n <- nrow(Y)
     p <- ncol(Y)
-    if (n == 0L || p == 0L) {
-        return(rep(TRUE, n))
+    if (n == 0L) {
+        return(logical(0))
     }
     if (n < p + 2L) {
         msg <- glue(
@@ -1546,10 +2170,7 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     # `qr.resid` does not support LAPACK pivoted QR, so use `lm.fit`. It
     # handles rank-deficient designs gracefully via base-R's pivoted QR
     # internally -- same effect the LAPACK path was meant to deliver.
-    res <- `dimnames<-`(
-        as.matrix(stats::lm.fit(x = X, y = Y)$residuals),
-        list(rownames(Y), colnames(Y))
-    )
+    res <- `dimnames<-`(as.matrix(.qtlResiduals(X, Y)), dimnames(Y))
     if (isTRUE(scaleResiduals)) {
         # `sds == 0` exact-zero test is unreliable for residuals coming out of
         # lm.fit on a constant Y: roundoff gives sd ~ 1e-16 instead of 0, and
@@ -1563,6 +2184,44 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         return(sweep(res, 2L, if_else(nearZero, 0, 1 / rawSds), FUN = "*"))
     }
     res
+}
+
+# The residuals of Y on X. A column with missing values is fit on the rows it
+# has and stays missing on the others, and columns missing the same rows are fit
+# together.
+# @noRd
+.qtlResiduals <- function(X, Y) {
+    if (!anyNA(Y)) {
+        return(stats::lm.fit(x = X, y = Y)$residuals)
+    }
+    groups <- .qtlMissingnessGroups(Y)
+    columns <- map(groups, .qtlResidualsOnObserved, X = X, Y = Y)
+    exec(cbind, !!!columns)[, order(list_c(groups)), drop = FALSE]
+}
+
+# The columns of a matrix missing the same rows, as groups of their positions.
+# @noRd
+.qtlMissingnessGroups <- function(Y) {
+    vec_group_loc(t(is.na(Y)))$loc
+}
+
+# The residuals of the columns at `at`, which are missing the same rows.
+# @noRd
+.qtlResidualsOnObserved <- function(at, X, Y) {
+    observed <- !is.na(Y[, at[[1L]]])
+    missingAll <- matrix(NA_real_, nrow(Y), length(at))
+    if (!any(observed)) {
+        return(missingAll)
+    }
+    `[<-`(
+        missingAll,
+        observed,
+        ,
+        value = stats::lm.fit(
+            x = X[observed, , drop = FALSE],
+            y = Y[observed, at, drop = FALSE]
+        )$residuals
+    )
 }
 
 # Resolve the phenotype-covariate selection for one context: NULL requested ->
@@ -1861,7 +2520,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     window = NULL,
     samples = NULL,
     filter = .qtlResolveFilter(),
-    residualizationParam = ResidualizationParam()
+    residualizationParam = ResidualizationParam(),
+    read = NULL
 ) {
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
         msg <- glue(
@@ -1882,7 +2542,7 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
         abort(msg)
     }
-    G <- .qtlExtractBlock(x, window, samples, filter)$geno
+    G <- .qtlExtractBlock(x, window, samples, filter, read)$geno
     if (ncol(G) == 0L) {
         return(G)
     }
@@ -1901,11 +2561,12 @@ setMethod(
     "residualizedGenotypes",
     "QtlDataset",
     function(x, context, residualizationParam = ResidualizationParam()) {
-        .qtlResidualizedGenotypes(
+        residualized <- .qtlResidualizedGenotypes(
             x,
             context,
             residualizationParam = residualizationParam
         )
+        `colnames<-`(residualized, .qtlStoredLabels(x, colnames(residualized)))
     }
 )
 
@@ -2378,7 +3039,7 @@ setClass(
 #'   or \code{\link{colocboostPipeline}} on a \code{\link{QtlDataset}}.
 #'   A \code{QtlDataset} records no filter of its own; \code{keepSamples}
 #'   narrows it once at the start of the run, and the other fields apply to
-#'   each extracted block, against that block's samples.
+#'   each extracted block, against the samples being fit.
 #' @section Unset fields:
 #'   Every field defaults to \code{NULL}, meaning \strong{not set}: an unset
 #'   field is absent from the result rather than carried as \code{NULL}, and
@@ -2394,9 +3055,12 @@ setClass(
 #'   it.
 #' @param keepSamples Sample ids to restrict to; \code{character(0)} keeps
 #'   all samples.
-#' @param keepVariants Variant ids to restrict to; \code{character(0)} keeps
-#'   all variants.
-#' @param keepIndel Logical. Retain insertions and deletions.
+#' @param keepVariants Variant ids or rsIDs to restrict to; \code{character(0)}
+#'   keeps all variants. Alleles match in either order and on either strand,
+#'   and an rsID is matched against the panel's own variant ids.
+#' @param keepIndel Logical. Retain variants other than SNPs. A SNP has exactly
+#'   one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*} and
+#'   \code{N} count as indels.
 #' @return A \code{GenotypeFilterParam} object, a \code{\link{MethodParam}}.
 #' @seealso \code{\link{PanelFilterParam}}, \code{\link{SumstatsFilterParam}}
 #' @examples
@@ -2478,11 +3142,13 @@ setClass(
 #'   its default when the run resolves the bundle. \code{naAction} resolves
 #'   to the pipeline's own policy: fine-mapping and TWAS fits cannot take a
 #'   missing phenotype, so they drop the affected samples (and refuse
-#'   \code{"keep"}), while colocboost receives the phenotypes as they are.
+#'   \code{"keep"}), while colocboost keeps them, fitting each trait on the
+#'   samples that have a value for it.
 #'   Outliers are kept unless \code{outlierAction = "drop"}.
 #' @param naAction How missing phenotype values are handled: \code{"drop"}
 #'   the samples with any missing value among the selected traits,
-#'   \code{"impute"} each trait's mean, or \code{"keep"} them as they are.
+#'   \code{"impute"} each trait's mean, or \code{"keep"} them, each trait
+#'   fit on the samples it has (colocboost only).
 #' @param outlierAction \code{"keep"} or \code{"drop"} samples flagged as
 #'   multivariate outliers by a robust (MCD) Mahalanobis distance, computed
 #'   on the residualized phenotypes.

@@ -131,7 +131,7 @@ test_that("lassosum2 fits lassosum's objective at s = delta / (1 + delta)", {
     skip_if_not_installed("bigsnpr")
     d <- .rrwPanelStatLd()
     R <- pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- d$stat$z / sqrt(500)
+    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
     inp <- list(ld = list(R = R), bhat = bhat, n = rep(500, length(bhat)))
     engine <- pecotmr:::.bigsnprEngine(inp)
     on.exit(pecotmr:::.bigsnprRelease(engine))

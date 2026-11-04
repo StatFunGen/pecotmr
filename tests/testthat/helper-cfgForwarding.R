@@ -80,7 +80,7 @@
 .captureJointEngine <- function(cap, env = parent.frame()) {
     cap$calls <- list()
     testthat::local_mocked_bindings(
-        .runJointSpecs = function(
+        .jointSpecsWork = function(
             parsedJointSpec,
             data,
             dataForm,
@@ -97,7 +97,7 @@
                 args = args,
                 jointMethods = jointMethods
             )
-            NULL
+            pecotmr:::.qtlWorkValue(NULL)
         },
         .package = "pecotmr",
         .env = env

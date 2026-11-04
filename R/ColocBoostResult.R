@@ -511,13 +511,19 @@ ColocBoostResult <- function(
 }
 
 # Top variable of one set. Both cos_top_variables and ucos_top_variables are
-# data frames whose ROWNAMES are the set ids, not per-id lists.
+# data frames whose ROWNAMES are the set ids, not per-id lists. Variables tied
+# for the top get a row each, named id.1, id.2, ...; the first is the one
+# colocboost's own summary reports.
 # @noRd
 .cbrTopVariable <- function(tv, id) {
-    if (is.null(tv) || is.null(rownames(tv)) || !is_in(id, rownames(tv))) {
+    if (is.null(tv) || is.null(rownames(tv))) {
         return(NA_character_)
     }
-    as.character(tv[id, "top_variables"])
+    ofSet <- rownames(tv) == id | startsWith(rownames(tv), str_c(id, "."))
+    if (!any(ofSet)) {
+        return(NA_character_)
+    }
+    as.character(tv[which(ofSet)[[1L]], "top_variables"])
 }
 
 # @noRd

@@ -17,7 +17,8 @@ QtlSumStats(
   traitPos = NULL,
   region = NULL,
   extraCols = list(),
-  metadata = list()
+  metadata = list(),
+  dataType = NULL
 )
 }
 \arguments{
@@ -78,6 +79,13 @@ as adding an entry rather than a metadata column.}
 \item{metadata}{A list of free-form metadata about the collection,
 as \code{metadata()} holds on any Bioconductor vector. Default
 \code{list()}.}
+
+\item{dataType}{Optional molecular type of each tuple (\code{"expression"},
+\code{"splicing"}, \code{"methylation"}): free text, length 1 or one per
+tuple. The statistics cannot say what was measured, so pipelines read it
+from here and record it on what they fit, and \code{\link{ctwasPipeline}}
+models each type as its own. Read by \code{\link{dataType}}. \code{NULL}
+(default) omits the column.}
 }
 \value{
 A \code{QtlSumStats} object.

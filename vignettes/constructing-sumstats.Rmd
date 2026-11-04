@@ -185,6 +185,7 @@ points at a sumstats file for that trait.
 | `trait` (alias `gene_id`) | yes | molecular trait id |
 | `sumStatsPath` (alias `path`) | yes | sumstats file for this trait |
 | `columnMapping`, `varY` | no | as for GWAS |
+| `dataType` (alias `data_type`) | no | molecular type, e.g. `expression` |
 | `genome` | single-valued | may instead be an argument |
 | `ldReferencePath` | no | this row's LD reference (or the argument) |
 

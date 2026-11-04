@@ -387,9 +387,17 @@ test_that("ctwasGroupPriors() tabulates each run's priors once, by group", {
             "context",
             "method",
             "group",
+            "group_study",
+            "group_context",
+            "group_type",
             "group_size",
             "group_prior",
-            "group_prior_var"
+            "group_prior_var",
+            "log_enrichment",
+            "log_enrichment_se",
+            "enrichment_p",
+            "group_pve",
+            "prop_heritability"
         )
     )
     # The liver run recorded no priors, so it adds no rows.
@@ -398,6 +406,9 @@ test_that("ctwasGroupPriors() tabulates each run's priors once, by group", {
     expect_equal(tab$group_size, c(5000, 30))
     expect_equal(tab$group_prior, c(1e-4, 0.01))
     expect_equal(tab$group_prior_var, c(10, 20))
+    # A hand-built run recorded neither the groups' identities nor a summary.
+    expect_true(all(is.na(tab$group_study)))
+    expect_true(all(is.na(tab$group_pve)))
     # No run with priors: no rows, the same columns.
     expect_equal(ctwasGroupPriors(cr[2L]), tab[0L, ])
     # A run over two regions is listed once; what it did not record is NA.

@@ -42,12 +42,22 @@ asBundledResource <- function(stem) {
     paste0("pecotmr://extdata/", rel)
 }
 
-# A GenotypeHandle for `stem`, carrying the portable reference rather than
-# the concrete path it had to be read from.
-.portableHandle <- function(stem) {
-    handle <- pecotmr:::.ldRefHandle(readGenotypes(plink2Prefix = stem))
-    handle@path <- asBundledResource(stem)
-    handle
+# The genotype panel at `stem`, carrying the portable reference rather than the
+# concrete path it had to be read from. A PLINK2 panel records its stem twice:
+# in the handle under its seed, which reads the file, and as its genotype
+# source, which says where it came from. Both move together.
+.portablePanel <- function(stem) {
+    panel <- readGenotypes(plink2Prefix = stem)
+    ref <- asBundledResource(stem)
+    seed <- pecotmr:::.panelSeed(panel)
+    handle <- pecotmr:::.ghSeedHandle(seed)
+    handle@path <- ref
+    SummarizedExperiment::assay(panel, "dosage", withDimnames = FALSE) <-
+        DelayedArray::DelayedArray(methods::initialize(seed, handle = handle))
+    md <- S4Vectors::metadata(panel)
+    md$genotypeSource$path <- ref
+    S4Vectors::metadata(panel) <- md
+    panel
 }
 
 # -----------------------------------------------------------------------------
@@ -85,23 +95,23 @@ gwasByRegion <- summaryStatsQc(
 data(ctwasWeightsExample)
 
 # -----------------------------------------------------------------------------
-# 1b. Point the weight example's LD sketch at the bundled panel.
+# 1b. Point the weight example's LD reference at the bundled panel.
 # -----------------------------------------------------------------------------
 # ctwasWeightsExample was originally built against a local xqtl-protocol
 # checkout, so it carried that machine's absolute genotype path and a
-# 1975-variant sketch read from the untrimmed source. All 168 of its weight
+# 1975-variant reference read from the untrimmed source. All 168 of its weight
 # variants lie inside the bundled 175-variant chr22 panel, and the two span
 # exactly the same range, so the bundled copy is the right panel rather than
 # a substitute for it.
 #
-# Construction needs a real path (it reads .pvar to populate snpInfo), so
-# the handle is built from the concrete stem and its path rewritten to the
+# Reading needs a real path (it reads .pvar to populate the variants), so the
+# panel is read from the concrete stem and its references rewritten to the
 # portable "pecotmr://extdata/<stem>" form afterwards -- the same two-step
 # every other bundled example uses. .resolveGenotypeResourcePath() turns it
 # back into a real path at read time, on whatever machine has the package.
 ctwasWeightsExample <- pecotmr:::.withRowLdRefs(
     ctwasWeightsExample,
-    .portableHandle(ldStem)
+    .portablePanel(ldStem)
 )
 
 stopifnot(
@@ -110,6 +120,13 @@ stopifnot(
     )) ==
         asBundledResource(ldStem)
 )
+
+# These are expression weights, and cTWAS's groups name the type a gene records.
+ctwasWeightsExample$dataType <- S4Vectors::SimpleList(purrr::map(
+    as.list(ctwasWeightsExample$dataType),
+    pecotmr:::.twasRowDataType,
+    label = "expression"
+))
 
 # -----------------------------------------------------------------------------
 # 2. Run the chain, capturing each payload.

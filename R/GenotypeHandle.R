@@ -888,8 +888,17 @@ setMethod("extract_array", "GhSeed", function(x, index) {
         return(matrix(numeric(0), length(i), length(j)))
     }
     # Read as stored, unlabelled: a panel's rowRanges, not its seed, describe
-    # its variants.
-    t(.handleDosage(.ghSeedHandle(x), i))[, j, drop = FALSE]
+    # its variants. Each distinct sample is read once, in file order, and the
+    # block then laid out as asked: DelayedArray may ask in any order, and
+    # repeat.
+    handle <- .ghSeedHandle(x)
+    samples <- as.integer(sort(unique(j)))
+    dosage <- if (length(samples) == dm[[2L]]) {
+        .handleDosage(handle, i)
+    } else {
+        .handleDosage(handle, i, samples)
+    }
+    t(dosage)[, match(j, samples), drop = FALSE]
 })
 
 #' Genotype dosages as a lazily-read DelayedArray

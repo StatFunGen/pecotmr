@@ -12,6 +12,7 @@ dprWeights(
   y,
   fittingMethod = "VB",
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = DprOptions()
 )
 
@@ -20,6 +21,7 @@ dprVbWeights(
   y,
   nK = 8,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = DprOptions()
 )
 
@@ -28,6 +30,7 @@ dprGibbsWeights(
   y,
   sStep = 5000,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = DprOptions()
 )
 
@@ -35,6 +38,7 @@ dprAdaptiveGibbsWeights(
   X,
   y,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = DprOptions()
 )
 }
@@ -48,9 +52,12 @@ dprAdaptiveGibbsWeights(
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
-nothing, \code{"slim"} the fitted model without its copy of the
-genotypes (\code{x}), \code{"full"} the whole fitted model. Either
-names the variants it was fitted on.}
+nothing, \code{"slim"} and \code{"full"} the fitted model without its
+copy of the genotypes (\code{x}). Each names the variants it was fitted
+on.}
+
+\item{retainX}{Logical. Keep that copy of the genotypes in a \code{"full"}
+fit (default \code{FALSE}). An error at any other \code{fitRetention}.}
 
 \item{methodArgs}{Options forwarded to \code{RcppDPR::fit_model}, built
 with \code{\link{DprOptions}}. A bare list is refused: it cannot be

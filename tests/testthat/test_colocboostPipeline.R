@@ -1,5 +1,160 @@
 context("colocboostPipeline")
 
+test_that("a colocboost bundle reads its window once, on the samples fit", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    filter <- pecotmr:::.qtlResolveFilter(GenotypeFilterParam(mafCutoff = 0.05))
+    rp <- ResidualizationParam()
+    window <- .fitSamplesWindow()
+    bundle <- function(samples = NULL) {
+        pecotmr:::.cbIndividualBundle(
+            qd,
+            region = window,
+            samples = samples,
+            residualizationParam = rp,
+            genotypeFilter = filter,
+            phenotypeFilter = pecotmr:::.jointPhenotypeFilter(list())
+        )
+    }
+    run <- .countBlocks(bundle())
+    # One read across both contexts, of only the samples they observe.
+    expect_equal(run$reads, 1L)
+    expect_equal(run$samples[[1L]], 1:30)
+    expect_equal(run$builds, 2L)
+    # g2 misses five samples, which dropping its missing values takes away.
+    fitSamples <- rownames(run$result$Y[[1L]])
+    expect_length(fitSamples, 25L)
+    expected <- pecotmr:::.fmResidGeno(
+        qd,
+        rp,
+        filter,
+        contexts = "brain",
+        region = window,
+        samples = fitSamples
+    )
+    .expectFitOn(
+        run$result$X[[1L]],
+        fitSamples,
+        `colnames<-`(expected, normalizeVariantId(colnames(expected)))
+    )
+    # The run's `samples` narrow what is read and what is filtered on.
+    some <- colnames(qd[["brain"]])[1:12]
+    narrowed <- .countBlocks(bundle(some))
+    expect_equal(narrowed$samples[[1L]], 1:12)
+    expect_setequal(
+        rownames(narrowed$result$X[[1L]]),
+        intersect(some, fitSamples)
+    )
+})
+
+test_that("colocboostPipeline raises a failed genotype read", {
+    skip_if_not_installed("pgenlibr")
+    # A panel whose .pgen goes missing after it was opened. Every context shares
+    # the window's one read, so the run must stop rather than skip them all and
+    # return no rows.
+    source <- file.path(test_path("test_data"), "test_variants")
+    stem <- file.path(tempfile("cb_read_"), "panel")
+    dir.create(dirname(stem))
+    on.exit(unlink(dirname(stem), recursive = TRUE), add = TRUE)
+    file.copy(
+        str_c(source, c(".pgen", ".pvar", ".psam")),
+        str_c(stem, c(".pgen", ".pvar", ".psam"))
+    )
+    qd <- .fitSamplesDataset(readGenotypes(plink2Prefix = stem))
+    file.remove(str_c(stem, ".pgen"))
+    messages <- character(0)
+    warnings <- character(0)
+    cnd <- withCallingHandlers(
+        tryCatch(
+            colocboostPipeline(qd, traitId = "g1", cisWindow = 1e5),
+            error = identity
+        ),
+        message = function(m) {
+            messages <<- c(messages, conditionMessage(m))
+            invokeRestart("muffleMessage")
+        },
+        warning = function(w) {
+            warnings <<- c(warnings, conditionMessage(w))
+            invokeRestart("muffleWarning")
+        }
+    )
+    expect_s3_class(cnd, "error")
+    expect_false(any(str_detect(messages, "skipping context|Nothing to run")))
+    expect_false(any(str_detect(warnings, "restarting interrupted promise")))
+})
+
+test_that("colocboost fits a trait with missing values on the samples it has", {
+    skip_if_not_installed("pgenlibr")
+    qd <- .fitSamplesDataset()
+    filter <- pecotmr:::.qtlResolveFilter(GenotypeFilterParam(mafCutoff = 0.05))
+    run <- .countBlocks(pecotmr:::.cbIndividualBundle(
+        qd,
+        region = .fitSamplesWindow(),
+        genotypeFilter = filter,
+        phenotypeFilter = pecotmr:::.cbResolvePhenotypeFilter(
+            PhenotypeFilterParam()
+        )
+    ))
+    bundle <- run$result
+    # Still one read; in each context one X for g1 and g3, and one for g2.
+    expect_equal(run$reads, 1L)
+    expect_equal(run$builds, 4L)
+    expect_equal(nrow(bundle$outcomeInfo), 6L)
+    expect_setequal(bundle$outcomeInfo$trait, c("g1", "g2", "g3"))
+    # No outcome carries a missing value, and each has an X of its samples.
+    expect_false(any(map_lgl(bundle$Y, anyNA)))
+    pairedX <- bundle$X[bundle$dict_YX[, "X"]]
+    expect_equal(
+        unname(map(bundle$Y, rownames)),
+        unname(map(pairedX, rownames))
+    )
+    isG2 <- bundle$outcomeInfo$trait == "g2"
+    expect_equal(unique(map_int(bundle$Y[isG2], nrow)), 25L)
+    expect_equal(unique(map_int(bundle$Y[!isG2], nrow)), 30L)
+    # Its genotypes are filtered and residualized on just those samples.
+    expected <- pecotmr:::.fmResidGeno(
+        qd,
+        ResidualizationParam(),
+        filter,
+        contexts = "brain",
+        region = .fitSamplesWindow(),
+        samples = rownames(bundle$Y[[which(isG2)[[1L]]]])
+    )
+    .expectFitOn(
+        pairedX[[which(isG2)[[1L]]]],
+        rownames(bundle$Y[[which(isG2)[[1L]]]]),
+        expected
+    )
+    # colocboost takes the bundle: its own handling of a missing value does not.
+    skip_if_not_installed("colocboost")
+    fit <- suppressMessages(suppressWarnings(colocboost::colocboost(
+        X = bundle$X,
+        Y = bundle$Y,
+        dict_YX = bundle$dict_YX,
+        M = 5L,
+        output_level = 1L
+    )))
+    expect_s3_class(fit, "colocboost")
+})
+
+test_that("a trait observed on too few samples is left out with a message", {
+    Y <- matrix(
+        c(1, 2, 3, NA, NA, 3, NA, NA, NA),
+        3L,
+        3L,
+        dimnames = list(str_c("s", 1:3), c("g1", "g2", "g3"))
+    )
+    expect_message(
+        groups <- pecotmr:::.cbObservedGroups(Y, "brain"),
+        "leaving out g2, g3 of context 'brain'"
+    )
+    expect_equal(groups, list(1L))
+    expect_no_message(pecotmr:::.cbObservedGroups(
+        Y[, 1L, drop = FALSE],
+        "brain"
+    ))
+})
+
 test_that("colocboostPipeline is exported as an S4 generic", {
     expect_true("colocboostPipeline" %in% getNamespaceExports("pecotmr"))
     expect_true(methods::isGeneric("colocboostPipeline"))
@@ -18,14 +173,14 @@ context("colocboostPipeline (S4 dispatch)")
 # ===========================================================================
 
 .cbp_mockExtractor <- function(seed = 11, n_samples = 30L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * nrow(snpInfo(handle)), 2, 0.3),
             nrow = n_samples,
             ncol = nrow(snpInfo(handle))
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -1277,7 +1432,7 @@ test_that(".cbBuildContextXY skips a context with no genotypes", {
         .cbResidualizedX = function(...) NULL,
         .package = "pecotmr"
     )
-    expect_null(pecotmr:::.cbBuildContextXY("c1", list()))
+    expect_length(pecotmr:::.cbBuildContextXY("c1", list()), 0L)
 })
 
 test_that(".cbBuildContextXY skips a context with no shared samples", {
@@ -1293,7 +1448,7 @@ test_that(".cbBuildContextXY skips a context with no shared samples", {
         res <- pecotmr:::.cbBuildContextXY("c1", list()),
         "no samples shared between residualized X and Y"
     )
-    expect_null(res)
+    expect_length(res, 0L)
 })
 
 test_that(".cbResidualizedX reports why genotypes were unavailable", {

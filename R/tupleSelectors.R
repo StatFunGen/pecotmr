@@ -454,6 +454,107 @@
     rep(gr, n)
 }
 
+#' @rdname dataType
+#' @export
+setMethod("dataType", "RangedTupleList", function(x) {
+    md <- mcols(x, use.names = FALSE)
+    if (is_in("dataType", colnames(md))) {
+        return(as.character(md$dataType))
+    }
+    rep(NA_character_, nrow(md))
+})
+
+# The molecular type each row of a pipeline's result takes from the data it was
+# fitted on: QtlDataset per context, QtlSumStats per row. A joint fit's members
+# are its ";"-joined joint columns; it takes their one type, and NA if they
+# differ. NA where the data records none.
+# @noRd
+.rowDataTypes <- function(x, data) {
+    table <- .dataTypeTable(data)
+    if (nrow(table) == 0L || nrow(x) == 0L) {
+        return(rep(NA_character_, nrow(x)))
+    }
+    members <- .rowMemberKeys(mcols(x, use.names = FALSE))
+    found <- table$dataType[match(list_c(members), table$key)]
+    perRow <- split(found, rep(seq_along(members), lengths(members)))
+    map_chr(unname(perRow), .oneDataType)
+}
+
+# What `data` records, keyed by (study, context) for a QtlDataset and by (study,
+# context, trait) for a QtlSumStats, as .rowMemberKeys() reads a row.
+# @noRd
+.dataTypeTable <- function(data) {
+    if (methods::is(data, "MultiStudyQtlDataset")) {
+        return(list_rbind(c(
+            map(unname(as.list(data)), .dataTypeTable),
+            list(.dataTypeTable(data@sumStats))
+        )))
+    }
+    if (methods::is(data, "QtlDataset")) {
+        types <- dataType(data)
+        return(
+            tibble(
+                key = str_c(studyName(data), "\r", names(types)),
+                dataType = unname(types)
+            ) |>
+                filter(!is.na(.data$dataType))
+        )
+    }
+    if (methods::is(data, "QtlSumStats")) {
+        return(
+            tibble(
+                key = str_c(data$study, "\r", data$context, "\r", data$trait),
+                dataType = dataType(data)
+            ) |>
+                filter(!is.na(.data$dataType))
+        )
+    }
+    tibble(key = character(0), dataType = character(0))
+}
+
+# Each row's keys into .dataTypeTable(), over its joint members.
+# @noRd
+.rowMemberKeys <- function(md) {
+    pmap(
+        list(
+            .axisMembers(md, "study", "jointStudies"),
+            .axisMembers(md, "context", "jointContexts"),
+            .axisMembers(md, "trait", "jointTraits")
+        ),
+        .memberKeys
+    )
+}
+
+# @noRd
+.memberKeys <- function(studies, contexts, traits) {
+    pairs <- as.character(outer(studies, contexts, str_c, sep = "\r"))
+    c(pairs, as.character(outer(pairs, traits, str_c, sep = "\r")))
+}
+
+# One axis's members per row: its value, or on a joint axis what its joint
+# column lists.
+# @noRd
+.axisMembers <- function(md, axis, jointAxis) {
+    values <- as.character(md[[axis]])
+    joint <- if (is_in(jointAxis, colnames(md))) {
+        as.character(md[[jointAxis]])
+    } else {
+        rep(NA_character_, length(values))
+    }
+    map2(values, joint, .oneAxisMembers)
+}
+
+# @noRd
+.oneAxisMembers <- function(value, joint) {
+    if (is.na(joint)) value else str_split_1(joint, fixed(";"))
+}
+
+# @noRd
+.oneDataType <- function(found) {
+    labels <- unique(found[!is.na(found)])
+    if (length(labels) == 1L) labels else NA_character_
+}
+
 # Internal: an optional per-row provenance column. One helper for all three
 # (`dataType`, `dataSource`, `standardized`) since they differ only in name and
 # coercion.

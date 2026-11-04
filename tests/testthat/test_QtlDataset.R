@@ -687,7 +687,7 @@ test_that(".qtlBuildResidualizationDesign intersects the blocks' samples", {
 # requested snpIdx, drawing dosages from a per-handle-deterministic seed so
 # the same indices always give the same numbers.
 .qh_mockExtractor <- function(seed = 42, n_samples = 12L, n_snp = 6L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         # Build a (n_samples x n_snp) dosage matrix for the whole panel; the
         # caller's snpIdx subsets columns.
@@ -696,7 +696,7 @@ test_that(".qtlBuildResidualizationDesign intersects the blocks' samples", {
             nrow = n_samples,
             ncol = n_snp
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -727,7 +727,8 @@ test_that(".qtlExtractBlock gives the dosages of kept variants and samples", {
     blk <- pecotmr:::.qtlExtractBlock(qd)
     expect_equal(nrow(blk$geno), 12L)
     expect_equal(ncol(blk$geno), 6L)
-    expect_equal(blk$variantIds, paste0("rs", 1:6))
+    # Named by range and alleles, whatever the file calls them (rs1 to rs6).
+    expect_equal(blk$variantIds, str_c("chr1:", 1:6 * 100L, ":G:A"))
     expect_equal(blk$sampleIds, paste0("s", 1:12))
     expect_equal(length(blk$maf), 6L)
 })
@@ -750,50 +751,467 @@ test_that(".qtlExtractBlock: keepVariants narrows the variants returned", {
         qd,
         filter = .qh_filter(keepVariants = c("rs2", "rs4"))
     )
-    expect_setequal(blk$variantIds, c("rs2", "rs4"))
+    expect_setequal(blk$variantIds, c("chr1:200:G:A", "chr1:400:G:A"))
 })
 
-test_that(".qtlExtractBlock: keepSamples narrows the samples returned", {
-    qd <- .qh_makeDataset()
-    qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
+test_that(".qtlExtractBlock: keepVariants match as a keep-list file does", {
+    # rs1 to rs6 sit at chr1:100 to chr1:600 with alleles G/A; rs3 is T/A.
+    qd <- .qh_makeDataset(a2 = replace(rep("G", 6L), 3L, "T"))
     local_mocked_bindings(
         .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd)
-    expect_setequal(blk$sampleIds, paste0("s", 1:6))
+    keptIds <- function(...) {
+        filter <- .qh_filter(keepVariants = c(...))
+        pecotmr:::.qtlExtractBlock(qd, filter = filter)$variantIds
+    }
+    # An rsID-labelled panel is found by position and alleles, in either order.
+    expect_equal(keptIds("chr1:100:G:A"), "chr1:100:G:A")
+    expect_equal(keptIds("chr1:100:A:G"), "chr1:100:G:A")
+    # A palindrome spelled the other way is the same variant.
+    expect_equal(keptIds("chr1:300:A:T"), "chr1:300:T:A")
+    # A variant listed in both allele orders is no conflict.
+    expect_equal(keptIds("chr1:100:G:A", "chr1:100:A:G"), "chr1:100:G:A")
+    # Ids and rsIDs together, each matched by what it carries.
+    expect_equal(
+        keptIds("rs2", "chr1:400:G:A"),
+        c("chr1:200:G:A", "chr1:400:G:A")
+    )
+    expect_length(keptIds("chr1:100:G:C"), 0L)
 })
 
-test_that(".qtlExtractBlock: a call's samples argument narrows them further", {
+test_that(".qtlExtractBlock filters a held read as it would its own", {
     qd <- .qh_makeDataset()
-    qd <- pecotmr:::.qtlRestrictSamples(qd, paste0("s", 1:6))
     local_mocked_bindings(
         .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(qd, samples = c("s1", "s3", "s5"))
-    expect_setequal(blk$sampleIds, c("s1", "s3", "s5"))
+    filter <- .qh_filter(mafCutoff = 0.01, keepVariants = str_c("rs", 1:5))
+    window <- GenomicRanges::GRanges("chr1:100-400")
+    held <- pecotmr:::.qtlReadBlock(qd, window, NULL, filter)
+    for (samples in list(NULL, str_c("s", 1:6))) {
+        expect_identical(
+            pecotmr:::.qtlExtractBlock(qd, window, samples, filter, held),
+            pecotmr:::.qtlExtractBlock(qd, window, samples, filter)
+        )
+    }
+    # A window inside the one read, and none of it at all.
+    for (inside in c("chr1:200-300", "chr1:1-10", "chr1:600-700")) {
+        narrower <- GenomicRanges::GRanges(inside)
+        expect_identical(
+            pecotmr:::.qtlExtractBlock(qd, narrower, NULL, filter, held),
+            pecotmr:::.qtlExtractBlock(qd, narrower, NULL, filter)
+        )
+    }
 })
 
-test_that(".qtlExtractBlock: keepVariants sharing none gives an empty block", {
+test_that(".qtlExtractBlock refuses a held read missing samples it wants", {
     qd <- .qh_makeDataset()
     local_mocked_bindings(
         .handleDosage = .qh_mockExtractor(),
         .package = "pecotmr"
     )
-    blk <- pecotmr:::.qtlExtractBlock(
-        qd,
-        filter = .qh_filter(keepVariants = "rsGHOST")
+    filter <- .qh_filter()
+    held <- pecotmr:::.qtlReadBlock(qd, NULL, str_c("s", 1:3), filter)
+    expect_error(
+        pecotmr:::.qtlExtractBlock(qd, NULL, str_c("s", 1:6), filter, held),
+        "does not cover"
     )
-    expect_equal(ncol(blk$geno), 0L)
-    expect_equal(nrow(blk$geno), 0L)
+    # A sample the panel does not hold is simply not there to be read.
+    expect_equal(
+        pecotmr:::.qtlExtractBlock(
+            qd,
+            NULL,
+            c("s1", "nobody"),
+            filter,
+            held
+        )$sampleIds,
+        "s1"
+    )
 })
 
-test_that(".qtlExtractBlock: keepIndel = FALSE drops indels", {
-    # rs2 an insertion, rs4 a deletion; the rest stay SNPs.
+test_that(".qtlReadBlock reads what is asked for, or nothing", {
+    qd <- .qh_makeDataset()
+    seen <- list()
+    mock <- .qh_mockExtractor()
+    local_mocked_bindings(
+        .handleDosage = function(handle, snpIdx, sampleIdx = NULL) {
+            seen <<- c(seen, list(list(snpIdx, sampleIdx)))
+            mock(handle, snpIdx, sampleIdx)
+        },
+        .package = "pecotmr"
+    )
+    filter <- .qh_filter(keepVariants = c("rs2", "rs4"))
+    held <- pecotmr:::.qtlReadBlock(qd, NULL, c("s5", "s2"), filter)
+    expect_equal(rownames(held$dosage), c("s2", "s5"))
+    expect_equal(colnames(held$dosage), c("chr1:200:G:A", "chr1:400:G:A"))
+    expect_equal(seen[[1L]], list(c(2L, 4L), c(2L, 5L)))
+    # Every sample: no restriction goes to the reader.
+    pecotmr:::.qtlReadBlock(qd, NULL, NULL, filter)
+    expect_null(seen[[2L]][[2L]])
+    # A dataset narrowed to some samples reads only those.
+    narrowed <- pecotmr:::.qtlRestrictSamples(qd, str_c("s", 1:6))
+    pecotmr:::.qtlReadBlock(narrowed, NULL, NULL, filter)
+    expect_equal(seen[[3L]][[2L]], 1:6)
+    # No variant survives, or the window holds none: nothing is read.
+    empty <- list(snpIdx = integer(0), dosage = NULL)
+    expect_identical(
+        pecotmr:::.qtlReadBlock(qd, NULL, NULL, .qh_filter(keepVariants = "x")),
+        empty
+    )
+    expect_identical(
+        pecotmr:::.qtlReadBlock(
+            qd,
+            GenomicRanges::GRanges("chr9:1-2"),
+            NULL,
+            filter
+        ),
+        empty
+    )
+    expect_length(seen, 3L)
+})
+
+test_that(".qtlWindowGroups puts a window with any window it holds", {
+    gr <- GenomicRanges::GRanges
+    windows <- list(
+        gr("chr1:10-20"), # inside the next
+        gr("chr1:1-100"),
+        gr("chr2:1-100"),
+        gr("chr1:10-20"), # the first again
+        gr("chr1:50-150"), # overlaps the second, but is not inside it
+        NULL # no window: may read nothing, so it holds nothing
+    )
+    expect_equal(
+        pecotmr:::.qtlWindowGroups(windows),
+        list(c(1L, 2L, 4L), 3L, 5L, 6L)
+    )
+    # The widest of a group is what is read, wherever it falls among its items.
+    expect_identical(
+        pecotmr:::.qtlWidestWindow(windows[c(1L, 2L, 4L)]),
+        windows[[2L]]
+    )
+    expect_null(pecotmr:::.qtlWidestWindow(windows[6L]))
+    # A window of several ranges is held only if each of them is.
+    wide <- gr("chr1:1-100")
+    within <- gr(c("chr1:1-10", "chr1:50-60"))
+    across <- gr(c("chr1:1-10", "chr2:1-10"))
+    expect_equal(
+        pecotmr:::.qtlWindowGroups(list(within, wide)),
+        list(c(1L, 2L))
+    )
+    expect_equal(
+        pecotmr:::.qtlWindowGroups(list(across, wide)),
+        list(1L, 2L)
+    )
+    # Two ranges of one window held by different ranges of another.
+    twoParts <- gr(c("chr1:1-100", "chr2:1-100"))
+    expect_equal(
+        pecotmr:::.qtlWindowGroups(list(across, twoParts)),
+        list(c(1L, 2L))
+    )
+    # Nothing to compare, and one window alone.
+    expect_equal(pecotmr:::.qtlWindowGroups(list()), list())
+    expect_equal(pecotmr:::.qtlWindowGroups(list(NULL, wide)), list(1L, 2L))
+})
+
+# Plans over mocked reads and blocks: what was read and built, in order.
+.qh_workMocks <- function(env = parent.frame()) {
+    log <- new.env(parent = emptyenv())
+    log$reads <- list()
+    log$builds <- list()
+    testthat::local_mocked_bindings(
+        .qtlReadBlock = function(x, window, samples, filter) {
+            log$reads <- c(log$reads, list(list(as.character(window), samples)))
+            "read"
+        },
+        .fmResidGeno = function(x, ..., contexts, region, samples, read) {
+            force(read)
+            log$builds <- c(
+                log$builds,
+                list(list(contexts, as.character(region), samples))
+            )
+            matrix(
+                1,
+                nrow = 2L,
+                ncol = 2L,
+                dimnames = list(c("s1", "s2"), c("v1", "v2"))
+            )
+        },
+        .package = "pecotmr",
+        .env = env
+    )
+    log
+}
+
+test_that("windows and traits on several chromosomes combine in silence", {
+    gr <- GenomicRanges::GRanges
+    expect_no_warning(
+        groups <- pecotmr:::.qtlWindowGroups(list(
+            gr("chr1:1-9"),
+            gr("chr2:1-9")
+        ))
+    )
+    expect_equal(groups, list(1L, 2L))
+    # Each context holds a chromosome the other does not.
+    onChromosomes <- function(traits, chroms) {
+        se <- .qh_makeSe(traits = traits)
+        SummarizedExperiment::rowRanges(se) <- `names<-`(
+            gr(chroms, IRanges::IRanges(1000L, width = 500L)),
+            traits
+        )
+        se
+    }
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = .qh_makeHandle(n_samples = 12L),
+        phenotypes = list(
+            brain = onChromosomes(c("a", "b"), c("chr1", "chr2")),
+            liver = onChromosomes(c("a", "c"), c("chr1", "chr3"))
+        ),
+        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+    )
+    expect_no_warning(span <- pecotmr:::.qtlTraitRegion(qd, "a", 100L))
+    expect_equal(as.character(span), "chr1:900-1599")
+})
+
+test_that(".qtlRunWork runs every plan's fits on one read and one block", {
+    log <- .qh_workMocks()
+    wide <- GenomicRanges::GRanges("chr1:1-100")
+    other <- GenomicRanges::GRanges("chr2:1-100")
+    spec <- pecotmr:::.qtlFitSpec
+    fit <- function(item, tag, block) str_c(tag, item, ncol(block$X))
+    labelled <- function(fits, label) list(label, fits)
+    univariate <- pecotmr:::.qtlWork(
+        list("a", "b", "c"),
+        list(
+            spec(wide, "brain", "s1"),
+            spec(other, "brain", "s3"),
+            spec(wide, "liver", "s1")
+        ),
+        fit,
+        list(tag = "u"),
+        labelled,
+        list(label = "univariate")
+    )
+    pcs <- pecotmr:::.qtlWork(
+        list("d"),
+        list(spec(wide, "brain", "s1")),
+        fit,
+        list(tag = "p")
+    )
+    out <- pecotmr:::.qtlRunWork(
+        pecotmr:::.qtlWorkOf(
+            list(
+                univariate,
+                pecotmr:::.qtlWorkValue("none"),
+                pecotmr:::.qtlWorkOf(list(pcs), rev)
+            )
+        ),
+        NULL,
+        NULL
+    )
+    # Each plan's fits came back to it, in its order, and through its `finish`.
+    expect_equal(out[[1L]], list("univariate", list("ua2", "ub2", "uc2")))
+    expect_equal(out[[2L]], "none")
+    expect_equal(out[[3L]], list(list("pd2")))
+    # One read per window; brain's block on chr1 served both plans; liver's has
+    # other covariates, so it is its own.
+    expect_length(log$reads, 2L)
+    expect_equal(
+        log$builds,
+        list(
+            list("brain", "chr1:1-100", "s1"),
+            list("liver", "chr1:1-100", "s1"),
+            list("brain", "chr2:1-100", "s3")
+        )
+    )
+    # Nothing planned, nothing read.
+    log$reads <- list()
+    expect_null(pecotmr:::.qtlRunWork(
+        pecotmr:::.qtlWorkValue(NULL),
+        NULL,
+        NULL
+    ))
+    expect_length(log$reads, 0L)
+})
+
+test_that(".qtlUnionSamples joins what fits ask for; no limit wins", {
+    expect_equal(
+        pecotmr:::.qtlUnionSamples(list(c("a", "b"), c("b", "c"))),
+        c("a", "b", "c")
+    )
+    expect_null(pecotmr:::.qtlUnionSamples(list("a", NULL)))
+})
+
+test_that(".qtlRunWork reads nothing for an item with no genotypes to fit on", {
+    log <- .qh_workMocks()
+    seen <- list()
+    fit <- function(item, block) {
+        seen[[item]] <<- is.null(block)
+        item
+    }
+    out <- pecotmr:::.qtlRunWork(
+        pecotmr:::.qtlWork(list("g", "h"), list(NULL, NULL), fit),
+        NULL,
+        NULL
+    )
+    expect_equal(out, list("g", "h"))
+    expect_true(seen$g)
+    expect_length(log$reads, 0L)
+    expect_length(log$builds, 0L)
+})
+
+test_that(".qtlRunWork builds a block once over the widest window it serves", {
+    log <- .qh_workMocks()
+    wide <- GenomicRanges::GRanges("chr1:1-100")
+    narrow <- GenomicRanges::GRanges("chr1:10-20")
+    views <- list()
+    local_mocked_bindings(
+        .qtlBlockFor = function(block, spec, dataset) {
+            views[[length(views) + 1L]] <<- as.character(spec$window)
+            block
+        },
+        .package = "pecotmr"
+    )
+    work <- pecotmr:::.qtlWork(
+        list("a", "b"),
+        list(
+            pecotmr:::.qtlFitSpec(narrow, "brain", "s1"),
+            pecotmr:::.qtlFitSpec(wide, "brain", "s1")
+        ),
+        function(item, block) item
+    )
+    pecotmr:::.qtlRunWork(work, NULL, list(imissCutoff = 0))
+    expect_length(log$reads, 1L)
+    expect_equal(log$builds, list(list("brain", "chr1:1-100", "s1")))
+    expect_equal(views, list("chr1:10-20", "chr1:1-100"))
+    # A missingness filter looks across a block's variants, so a wider block
+    # could keep other samples: each window then gets its own, from one read.
+    log$reads <- list()
+    log$builds <- list()
+    pecotmr:::.qtlRunWork(work, NULL, list(imissCutoff = 0.1))
+    expect_length(log$reads, 1L)
+    expect_equal(
+        log$builds,
+        list(
+            list("brain", "chr1:10-20", "s1"),
+            list("brain", "chr1:1-100", "s1")
+        )
+    )
+})
+
+test_that(".qtlFitBlock keeps allele frequencies if the run reports them", {
+    local_mocked_bindings(
+        .fmResidGeno = function(...) matrix(1, 2L, 2L),
+        .fmAfForX = function(...) c(0.1, 0.2),
+        .package = "pecotmr"
+    )
+    spec <- pecotmr:::.qtlFitSpec(NULL, "brain", "s1")
+    run <- list(dataset = NULL, filter = NULL, residualizationParam = NULL)
+    expect_equal(
+        pecotmr:::.qtlFitBlock(spec, c(run, withAf = TRUE), NULL)$af,
+        c(0.1, 0.2)
+    )
+    expect_null(pecotmr:::.qtlFitBlock(spec, c(run, withAf = FALSE), NULL)$af)
+    expect_null(pecotmr:::.qtlFitBlock(NULL, run, NULL))
+})
+
+test_that(".qtlBlockFor cuts a block to the fit's own window", {
+    skip_if_not_installed("pgenlibr")
+    data <- .fitSamplesDataset()
+    wide <- .fitSamplesWindow()
+    narrow <- GenomicRanges::GRanges("chr21:17513228-17520000")
+    filter <- pecotmr:::.qtlResolveFilter(GenotypeFilterParam(mafCutoff = 0.05))
+    run <- list(
+        dataset = data,
+        filter = filter,
+        residualizationParam = ResidualizationParam(),
+        withAf = TRUE
+    )
+    samples <- colnames(data[["brain"]])
+    spec <- pecotmr:::.qtlFitSpec
+    whole <- pecotmr:::.qtlFitBlock(spec(wide, "brain", samples), run, NULL)
+    own <- pecotmr:::.qtlFitBlock(spec(narrow, "brain", samples), run, NULL)
+    cut <- pecotmr:::.qtlBlockFor(whole, spec(narrow, "brain", samples), data)
+    # Exactly what a block built for the narrow window holds.
+    expect_lt(ncol(cut$X), ncol(whole$X))
+    expect_identical(cut$X, own$X)
+    expect_identical(cut$af, own$af)
+    # Its own window: the same block, not a copy; no block stays none.
+    expect_identical(
+        pecotmr:::.qtlBlockFor(whole, spec(wide, "brain", samples), data),
+        whole
+    )
+    expect_null(pecotmr:::.qtlBlockFor(
+        NULL,
+        spec(narrow, "brain", samples),
+        data
+    ))
+})
+
+test_that(".qtlRunWork lets go of the raw read and each block when done", {
+    # Finalizers on what a read and a block hold show what garbage collection
+    # can reach while a fit runs.
+    gone <- new.env(parent = emptyenv())
+    gone$read <- FALSE
+    gone$brain <- FALSE
+    watched <- function(flag, value) {
+        holder <- new.env(parent = emptyenv())
+        reg.finalizer(holder, function(e) gone[[flag]] <- TRUE)
+        attr(value, "watch") <- holder
+        value
+    }
+    local_mocked_bindings(
+        .qtlReadBlock = function(x, window, samples, filter) {
+            list(snpIdx = 1L, dosage = watched("read", matrix(1)))
+        },
+        .fmResidGeno = function(x, ..., contexts, read) {
+            force(read)
+            X <- matrix(1, 2L, 1L, dimnames = list(c("s1", "s2"), "v1"))
+            if (identical(contexts, "brain")) watched("brain", X) else X
+        },
+        .package = "pecotmr"
+    )
+    seen <- list()
+    fit <- function(item, block) {
+        invisible(gc(FALSE))
+        seen[[item]] <<- list(read = gone$read, brain = gone$brain)
+        item
+    }
+    window <- GenomicRanges::GRanges("chr1:1-100")
+    pecotmr:::.qtlRunWork(
+        pecotmr:::.qtlWork(
+            list("first", "second", "last"),
+            list(
+                pecotmr:::.qtlFitSpec(window, "brain", "s1"),
+                pecotmr:::.qtlFitSpec(window, "brain", "s1"),
+                pecotmr:::.qtlFitSpec(window, "liver", "s1")
+            ),
+            fit
+        ),
+        NULL,
+        NULL
+    )
+    # A later block still needs the read while the earlier block's fits run, and
+    # that block is in use.
+    expect_false(seen$first$read)
+    expect_false(seen$second$brain)
+    # By the last block's fits both the read and the earlier block have gone.
+    expect_true(seen$last$read)
+    expect_true(seen$last$brain)
+})
+
+test_that(".qtlRowsOf copies only when the rows change", {
+    X <- matrix(1:4, 2L, dimnames = list(c("a", "b"), c("x", "y")))
+    expect_identical(pecotmr:::.qtlRowsOf(X, c("a", "b")), X)
+    expect_identical(pecotmr:::.qtlRowsOf(X, "b"), X["b", , drop = FALSE])
+})
+
+test_that(".qtlExtractBlock: keepIndel = FALSE keeps SNPs only", {
+    # One character each, but not a SNP: rs2 *, rs3 an I/D code, rs5 N.
     qd <- .qh_makeDataset(
-        a1 = replace(rep("A", 6L), 2L, "AT"),
-        a2 = replace(rep("G", 6L), 4L, "GC")
+        a1 = c("A", "*", "I", "A", "N", "A"),
+        a2 = c("G", "G", "D", "G", "G", "G")
     )
     local_mocked_bindings(
         .handleDosage = .qh_mockExtractor(),
@@ -803,7 +1221,7 @@ test_that(".qtlExtractBlock: keepIndel = FALSE drops indels", {
         qd,
         filter = .qh_filter(keepIndel = FALSE)
     )
-    expect_equal(blk$variantIds, c("rs1", "rs3", "rs5", "rs6"))
+    expect_equal(parseVariantId(blk$variantIds)$pos, c(100L, 400L, 600L))
 })
 
 test_that(".qtlExtractBlock: keepIndel = TRUE (default) keeps indel variants", {
@@ -850,7 +1268,7 @@ test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
 # Deterministic dosage panel so the directional (un-folded) effect-allele
 # frequency is exactly known: rs1 = 0.70, rs2 = 0.20, rs3 = 0.50, rest 0.
 .qh_directionalExtractor <- function() {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         panel <- matrix(
             0,
             nrow = length(sampleIds(handle)),
@@ -865,7 +1283,7 @@ test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
         panel[, "rs1"] <- c(2, 2, 2, 2, 1, 1, 1, 1, 1, 1) # sum 14 -> p = 0.70
         panel[, "rs2"] <- c(1, 1, 1, 1, 0, 0, 0, 0, 0, 0) # sum  4 -> p = 0.20
         panel[, "rs3"] <- 1 # sum 10 -> p = 0.50
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -992,14 +1410,14 @@ context("QtlDataset residualization methods")
 }
 
 .qr_mockExtractor <- function(seed = 42, n_samples = 12L, n_snp = 6L) {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
         panel <- matrix(
             rbinom(n_samples * n_snp, 2, 0.3),
             nrow = n_samples,
             ncol = n_snp
         )
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -1122,6 +1540,19 @@ test_that("residualizedGenotypes: empty genotype block short-circuits to G", {
         window = region
     )
     expect_equal(ncol(G), 0L)
+})
+
+test_that("residualizedGenotypes keeps the panel's own labels", {
+    skip_if_not_installed("pgenlibr")
+    X <- residualizedGenotypes(
+        .fitSamplesDataset(.rsIdPanel()),
+        context = "brain"
+    )
+    expect_true(all(startsWith(colnames(X), "rs")))
+    expect_equal(
+        unname(X),
+        unname(residualizedGenotypes(.fitSamplesDataset(), context = "brain"))
+    )
 })
 
 test_that("residualizedGenotypes: produces residualized matrix shape", {
@@ -1585,6 +2016,47 @@ test_that(".qtlOutlierKeepMask: returns all-TRUE when n < p + 2", {
     expect_true(all(keep))
 })
 
+test_that(".qtlOutlierKeepMask judges only samples with every trait", {
+    set.seed(11L)
+    Y <- matrix(
+        rnorm(80),
+        ncol = 2L,
+        dimnames = list(paste0("s", 1:40), c("g1", "g2"))
+    )
+    Y[1L, ] <- 50
+    # Huge, but missing a trait: kept unjudged, and out of the estimate.
+    Y[2L, ] <- c(50, NA)
+    Y[3:5, "g2"] <- NA
+    complete <- stats::complete.cases(Y)
+    keep <- pecotmr:::.qtlOutlierKeepMask(Y, pvalThreshold = 1e-3)
+    expect_length(keep, 40L)
+    expect_false(keep[[1L]])
+    expect_true(all(keep[!complete]))
+    expect_equal(
+        keep[complete],
+        pecotmr:::.qtlOutlierKeepMask(Y[complete, ], pvalThreshold = 1e-3)
+    )
+    # With no sample complete, nothing is judged.
+    expect_equal(
+        pecotmr:::.qtlOutlierKeepMask(
+            rbind(c(1, NA), c(NA, 2)),
+            pvalThreshold = 1e-3
+        ),
+        c(TRUE, TRUE)
+    )
+})
+
+test_that(".qtlResiduals leaves a trait with no values missing throughout", {
+    X <- cbind(1, c(1, 2, 3, 4))
+    Y <- cbind(a = c(1, 3, 2, 5), b = NA_real_)
+    out <- pecotmr:::.qtlResiduals(X, Y)
+    expect_equal(
+        unname(out[, 1L]),
+        unname(stats::lm.fit(X, Y[, "a"])$residuals)
+    )
+    expect_true(all(is.na(out[, 2L])))
+})
+
 # ===========================================================================
 # QtlDataset construction and validity
 # ===========================================================================
@@ -1907,7 +2379,10 @@ test_that("multi-range region spans chromosomes on a sharded handle", {
     gBoth <- .mr_geno(qd, rBoth)
     g21 <- .mr_geno(qd, r21)
     expect_equal(unname(gBoth[, seq_len(n21)]), unname(g21))
-    expect_true(all(grepl("_c22$", colnames(gBoth)[(n21 + 1):(n21 + n22)])))
+    expect_true(all(startsWith(
+        colnames(gBoth)[(n21 + 1):(n21 + n22)],
+        "chr22:"
+    )))
 })
 
 test_that("multi-region: single-range extraction is unchanged (regression)", {
@@ -2036,7 +2511,7 @@ test_that(".qtlExtractBlock: keepSamples off the panel gives no samples", {
 # per-sample imiss filter), and s2/rs2 carries a single scattered NA that
 # survives the filter (exercising the mean-impute loop).
 .qh_naExtractor <- function() {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         ns <- length(sampleIds(handle))
         nv <- nrow(snpInfo(handle))
         set.seed(123L)
@@ -2050,7 +2525,7 @@ test_that(".qtlExtractBlock: keepSamples off the panel gives no samples", {
         )
         panel["s1", ] <- NA_real_ # fully missing sample -> dropped by imiss
         panel["s2", "rs2"] <- NA_real_ # scattered NA -> kept then mean-imputed
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -2073,7 +2548,7 @@ test_that(".qtlExtractBlock: imissCutoff drops samples, imputes the rest", {
 
 # Extractor with one constant (zero-variance) column to drive the xvar filter.
 .qh_lowVarExtractor <- function() {
-    function(handle, snpIdx) {
+    function(handle, snpIdx, sampleIdx = NULL) {
         ns <- length(sampleIds(handle))
         nv <- nrow(snpInfo(handle))
         set.seed(99L)
@@ -2086,7 +2561,7 @@ test_that(".qtlExtractBlock: imissCutoff drops samples, imputes the rest", {
             dimnames = list(sampleIds(handle), str_c("rs", seq_len(nv)))
         )
         panel[, "rs1"] <- 1L # constant column -> variance 0
-        panel[, snpIdx, drop = FALSE]
+        panel[sampleIdx %||% seq_len(nrow(panel)), snpIdx, drop = FALSE]
     }
 }
 
@@ -3021,4 +3496,77 @@ test_that("a constant genotype column comes back as zeros, not NaN", {
     expect_equal(unname(out[, "b"]), rep(0, 4))
     expect_equal(sd(out[, "a"]), 1)
     expect_false(anyNA(out))
+})
+
+# ===========================================================================
+# The molecular type each context records
+# ===========================================================================
+
+test_that("QtlDataset records each context's molecular type", {
+    build <- function(dataType) {
+        gh <- .qh_makeHandle(n_samples = 12L)
+        QtlDataset(
+            studyName = "study1",
+            genotypes = gh,
+            phenotypes = list(
+                brain = .qh_makeSe(n_samples = 12L),
+                liver = .qh_makeSe(n_samples = 12L)
+            ),
+            dataType = dataType
+        )
+    }
+    # None recorded.
+    expect_equal(
+        dataType(.qh_makeDataset()),
+        c(brain = NA_character_, liver = NA_character_)
+    )
+    expect_equal(dataType(build(NULL)), dataType(.qh_makeDataset()))
+    # One for all, by context, or for some.
+    expect_equal(
+        dataType(build("expression")),
+        c(brain = "expression", liver = "expression")
+    )
+    expect_equal(
+        dataType(build(c(liver = "splicing", brain = "expression"))),
+        c(brain = "expression", liver = "splicing")
+    )
+    expect_equal(
+        dataType(build(c(liver = "splicing"))),
+        c(brain = NA_character_, liver = "splicing")
+    )
+    # What it records survives the subsetting that narrows a dataset.
+    typed <- build(c(brain = "expression", liver = "splicing"))
+    expect_equal(dataType(typed[, seq_len(6L), ]), dataType(typed))
+    expect_equal(
+        dataType(suppressWarnings(typed[,, "liver"])),
+        c(liver = "splicing")
+    )
+    # A context's own record stands unless the constructor is given another.
+    se <- S4Vectors::`metadata<-`(
+        .qh_makeSe(n_samples = 12L),
+        value = list(dataType = "methylation", other = 1)
+    )
+    own <- QtlDataset(
+        studyName = "study1",
+        genotypes = .qh_makeHandle(n_samples = 12L),
+        phenotypes = list(brain = se)
+    )
+    expect_equal(dataType(own), c(brain = "methylation"))
+    over <- QtlDataset(
+        studyName = "study1",
+        genotypes = .qh_makeHandle(n_samples = 12L),
+        phenotypes = list(brain = se),
+        dataType = "expression"
+    )
+    expect_equal(dataType(over), c(brain = "expression"))
+    expect_equal(
+        S4Vectors::metadata(MultiAssayExperiment::experiments(over)[[
+            "brain"
+        ]])$other,
+        1
+    )
+    # Refused: not one per context, a context it does not have, not text.
+    expect_error(build(c("a", "b", "c")), "has 3 values for 2 context")
+    expect_error(build(c(lung = "a")), "names no such context: lung")
+    expect_error(build(1), "dataType")
 })

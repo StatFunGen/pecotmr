@@ -29,16 +29,15 @@ through \code{\link{summaryStatsQc}}.}
 
 \item{twasWeights}{The per-gene weight source. Either (a) a FLAT
 \code{\link{TwasWeights}} / \code{QtlFineMappingResult} (or a homogeneous
-list of them) carrying \code{region} provenance -- each gene is placed into
-its home LD block internally by \code{start(region)} (matching cTWAS's
-\code{p0} assignment rule); or (b) a pre-bucketed NAMED LIST keyed by
-\code{region_id} (keys a SUBSET of \code{gwasSumStats}'s), used as-is.
-Blocks without any TWAS weights still contribute their SNP-level signal to
-ctwas's joint group prior estimate (the legacy whole-chromosome pattern
-where only a few of many LD blocks carry gene weights). A gene whose cis
-span straddles a block boundary is homed by its single anchor; the
-cross-block signal is cTWAS's boundary-gene concern
-(\code{\link{mergeCtwasBoundaryRegions}}), not placement. A
+list of them), each gene read with the LD block holding most of its
+weight; or (b) a pre-bucketed NAMED LIST keyed by \code{region_id} (keys a
+SUBSET of \code{gwasSumStats}'s), used as-is. A gene's \code{traitPos}, if
+it has one, gives its coordinates in the results, which are otherwise the
+span of its weight variants.
+Blocks without any TWAS weights do not feed the group priors by default:
+cTWAS skips regions with fewer genes than its \code{min_gene}, 1. To let
+their SNP-level signal in, set \code{min_gene = 0} in
+\code{\link{CtwasEstParamOptions}}. A
 \code{TwasWeights} row of the run's method that carries a SuSiE fit and
 was narrowed since that fit warns (condition class
 \code{pecotmrFitCoverage}): the fit no longer lines up with the row's
@@ -99,7 +98,7 @@ matrix, built with \code{\link{VariantPruningParam}}:
 \item{boundaryMergeParam}{Whether a high-PIP gene straddling an LD-block
 boundary has its regions merged and re-fine-mapped, built with
 \code{\link{BoundaryMergeParam}}: \code{enabled} (default
-\code{FALSE}), \code{pipThreshold}, \code{filterCs} and
+\code{TRUE}), \code{pipThreshold}, \code{filterCs} and
 \code{maxSnp}.}
 
 \item{keepSnps}{Logical (length 1). When \code{TRUE}, retain the
@@ -119,7 +118,11 @@ A \code{\link{CtwasResult}} collection: one row per
   \code{(gwasStudy, study, context, method)} run and cTWAS region. A
   single-context run gives each method its own rows; a multi-context
   (joint) run emits per-context rows sharing the same \code{jointContexts}
-  set and the jointly-estimated group priors. Each row holds that region's
+  set and the jointly-estimated group priors, and a multi-study run tags
+  \code{jointStudies} the same way. The contexts of a joint run
+  need not hold the same genes: each context's prior comes from its own
+  genes, and a context too small for cTWAS's \code{min_group_size} is left
+  out of the fit with a warning. Each row holds that region's
   per-gene fine-mapping posteriors as ranges, with the region's per-effect
   susie alpha table (\code{susieAlpha}), its \code{regionInfo} and the
   run's \code{groupPriors} in \code{mcols()}. Its \code{seqinfo()} names
@@ -150,6 +153,29 @@ Pipeline that hands a per-block set of
   \code{ctwas::ctwas_sumstats}. A single-block input is rejected: cTWAS's EM
   cannot converge on a single region, so callers must supply at least two
   blocks.
+}
+
+\section{Boundary genes}{
+ A gene is modelled as cTWAS models it. Its z-score
+  reads all its weights, whichever blocks they fall in, its weight variance
+  treating the blocks as independent; it is fine-mapped in the block holding
+  the largest share of its absolute weights, with the part of its weights in
+  that block. Such a first pass can call a gene whose real signal is a
+  variant across the boundary, so by default a high-PIP gene crossing one has
+  its regions merged and fine-mapped again (\code{boundaryMergeParam}).
+}
+
+\section{Groups and molecular types}{
+ cTWAS estimates one prior per group, and
+  a group here is a study, context and molecular type, so two studies with
+  one context name stay apart. The type is the \code{dataType} the weights
+  record (\code{"QTL"} where they record none, all such contexts being one
+  type), and it matters to the fit under \code{varStructure = "shared_type"},
+  or where one study and context holds two types. Results name a group
+  \code{{study}_{context}_{type}}, with the three also as columns of their
+  own, and a gene \code{{trait}|{study}_{context}_{type}_{method}}, the form
+  cTWAS reads the trait from. Groups whose names would coincide are refused,
+  as is a name holding \code{"|"}, on which cTWAS's EM splits a group.
 }
 
 \section{cTWAS's log}{

@@ -155,10 +155,11 @@
 #'   \code{\link{fineMappingPipeline}}. The default filters nothing.
 #'   \code{QtlDataset} and \code{MultiStudyQtlDataset} input only.
 #' @param phenotypeFilterParam The run's phenotype QC, built with
-#'   \code{\link{PhenotypeFilterParam}}. colocboost takes missing phenotype
-#'   values as they are, so unset keeps them; \code{"drop"} or
-#'   \code{"impute"} applies that instead, and \code{outlierAction =
-#'   "drop"} removes outlier samples. \code{QtlDataset} and
+#'   \code{\link{PhenotypeFilterParam}}. Unset fits each trait on the samples
+#'   that have a value for it, with genotypes filtered and residualized on just
+#'   those; \code{"drop"} or \code{"impute"} applies that instead, and
+#'   \code{outlierAction = "drop"} removes outlier samples, judging only those
+#'   with every trait. \code{QtlDataset} and
 #'   \code{MultiStudyQtlDataset} input only.
 #' @param residualizationParam Covariate residualization settings for
 #'   individual-level input, built with \code{\link{ResidualizationParam}}.
@@ -456,11 +457,12 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
 
 
 # Materialise an individual-level QtlDataset into the colocboost
-# (X, Y, dict_YX, outcome_names) bundle. Each context becomes one X /
-# Y pair; the YA matrices are split into single-trait columns and
-# dict_YX maps each split column back to its X. Returns NULL when no
-# context survives selection. pipCutoffToSkip (scalar or context-named
-# vector) optionally drops weak-signal outcomes / contexts up front.
+# (X, Y, dict_YX, outcome_names) bundle. Each context becomes one X / Y pair
+# per set of samples its traits are observed on; the YA matrices are split into
+# single-trait columns and dict_YX maps each split column back to its X. Returns
+# NULL when no context survives selection. pipCutoffToSkip (scalar or
+# context-named vector) optionally drops weak-signal outcomes / contexts up
+# front.
 .cbIndividualBundle <- function(
     qd,
     contexts = NULL,
@@ -485,7 +487,7 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         pipCutoffToSkip = pipCutoffToSkip,
         residualizationParam = residualizationParam
     )
-    built <- compact(map(contexts, .cbBuildContextXY, p = p))
+    built <- .cbBuildContexts(contexts, p)
     if (length(built) == 0L) {
         return(NULL)
     }
@@ -597,10 +599,31 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         any(is_in(traitId, rownames(.qtlContextSe(qd, context = ctx))))
 }
 
-# Residualized (X, Y) for one context (sample-aligned + signal-screened), or
-# NULL when the context should be skipped.
+# Every context's (X, Y). Their genotypes all come from one read of the bundle's
+# window, made when the first context with phenotypes asks for it (`read` is a
+# lazily evaluated argument), over the samples any of the contexts can fit.
 # @noRd
-.cbBuildContextXY <- function(ctx, p) {
+.cbBuildContexts <- function(
+    contexts,
+    p,
+    read = .qtlReadBlock(
+        p$qd,
+        .qtlResolveVariantRegion(p$qd, p$traitId, p$region, p$cisWindow),
+        .cbFitSamplesOf(.qtlContextSamples(p$qd, contexts), p$samples),
+        p$genotypeFilter
+    )
+) {
+    list_flatten(map(contexts, .cbBuildContextXY, p = p, read = read))
+}
+
+# Residualized (X, Y) records for one context, sample-aligned and
+# signal-screened: one per set of samples its traits are observed on, so usually
+# one, and none when the context should be skipped. Each trait goes to
+# colocboost free of missing values, with an X of just its samples. colocboost's
+# own handling of a missing value pairs the outcomes of a shared X with the
+# wrong X (1.0.9).
+# @noRd
+.cbBuildContextXY <- function(ctx, p, read = NULL) {
     rawY <- .cbResidualizedY(
         p$qd,
         ctx,
@@ -610,22 +633,69 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         p$phenotypeFilter
     )
     if (is.null(rawY) || ncol(rawY) == 0L) {
-        return(NULL)
+        return(list())
     }
+    compact(map(
+        .cbObservedGroups(rawY, ctx),
+        .cbBuildObservedXY,
+        rawY = rawY,
+        ctx = ctx,
+        p = p,
+        read = read
+    ))
+}
+
+# The traits of a context that can share an X, as groups of Y's columns: those
+# observed on the same samples. A trait observed on fewer than two is left out,
+# with a message.
+# @noRd
+.cbObservedGroups <- function(Y, ctx) {
+    groups <- .qtlMissingnessGroups(Y)
+    enough <- map_lgl(groups, .cbGroupHasSamples, Y = Y)
+    if (!all(enough)) {
+        few <- colnames(Y)[list_c(groups[!enough])]
+        inform(glue(
+            "colocboostPipeline: leaving out {str_flatten(few, ', ')} of ",
+            "context '{ctx}' (observed on fewer than two samples)."
+        ))
+    }
+    groups[enough]
+}
+
+# @noRd
+.cbGroupHasSamples <- function(at, Y) {
+    sum(!is.na(Y[, at[[1L]]])) >= 2L
+}
+
+# The (X, Y) of the traits at `at`, on the samples they are observed on; NULL
+# when there are no genotypes to fit them to.
+# @noRd
+.cbBuildObservedXY <- function(at, rawY, ctx, p, read) {
+    Y <- rawY[!is.na(rawY[, at[[1L]]]), at, drop = FALSE]
     rawX <- .cbResidualizedX(
         p$qd,
         ctx,
         p$traitId,
         p$region,
         p$cisWindow,
-        p$samples,
+        .cbFitSamplesOf(rownames(Y), p$samples),
         p$residualizationParam,
-        p$genotypeFilter
+        p$genotypeFilter,
+        read
     )
     if (is.null(rawX) || ncol(rawX) == 0L) {
         return(NULL)
     }
-    .cbAlignContextXY(ctx, rawX, rawY, p$pipCutoffToSkip)
+    .cbAlignContextXY(ctx, rawX, Y, p$pipCutoffToSkip)
+}
+
+# The samples a fit is on: its phenotypes', narrowed by the run's `samples`.
+# @noRd
+.cbFitSamplesOf <- function(observed, samples) {
+    if (is.null(samples)) {
+        return(observed)
+    }
+    intersect(observed, samples)
 }
 
 # One context's X and Y on the samples they share, Y signal-screened; NULL,
@@ -655,8 +725,9 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     list(ctx = ctx, X = X, Y = Y)
 }
 
-# colocboost's phenotype QC: colocboost takes missing phenotypes as they are,
-# so an unset naAction keeps them, and every choice is available.
+# colocboost's phenotype QC: an unset naAction keeps missing phenotypes, each
+# trait fit on the samples it has (.cbBuildContextXY()), and every choice is
+# available.
 # @noRd
 .cbResolvePhenotypeFilter <- function(phenotypeFilterParam) {
     .qtlResolvePhenotypeFilter(
@@ -697,7 +768,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     )
 }
 
-# Residualized genotypes for one context (message + NULL on failure).
+# Residualized genotypes for one context (message + NULL on failure). The
+# window's read is forced first, outside the handler: every context shares it,
+# so its failure is no one context's to skip, and skipping them all would end
+# the run with no rows and no error.
 # @noRd
 .cbResidualizedX <- function(
     qd,
@@ -707,8 +781,10 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     cisWindow,
     samples,
     residualizationParam = ResidualizationParam(),
-    genotypeFilter
+    genotypeFilter,
+    read = NULL
 ) {
+    force(read)
     try_fetch(
         .qtlResidualizedGenotypes(
             qd,
@@ -716,7 +792,8 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
             window = .qtlResolveVariantRegion(qd, traitId, region, cisWindow),
             samples = samples,
             filter = genotypeFilter,
-            residualizationParam = residualizationParam
+            residualizationParam = residualizationParam,
+            read = read
         ),
         error = function(cnd) {
             msg <- glue(

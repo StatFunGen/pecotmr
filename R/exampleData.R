@@ -446,7 +446,8 @@ NULL
 #' @format A \code{TwasWeights} collection with one row, the gene, holding
 #'   11 methods: \code{mrash}, \code{susie}, \code{susieInf}, \code{enet},
 #'   \code{lasso}, \code{mcp}, \code{scad}, \code{l0learn}, \code{bayesR},
-#'   \code{bayesC} and \code{ensemble}.
+#'   \code{bayesC} and \code{ensemble}. Its \code{\link{dataType}} is
+#'   \code{"expression"}.
 #'
 #' @keywords data
 #'
@@ -496,7 +497,8 @@ NULL
 #' placement). Derived from the de-identified \code{protocol_example} toy data
 #' (chr22); all identifiers are synthetic.
 #'
-#' @format A \code{TwasWeights} collection with one row, method \code{susie}.
+#' @format A \code{TwasWeights} collection with one row, method \code{susie},
+#'   its \code{\link{dataType}} \code{"expression"}.
 #'
 #' @keywords data
 #'

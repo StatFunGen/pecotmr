@@ -1292,21 +1292,21 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 }
 
 
-# Match the entry's variants to `keepVariants` by (chrom, pos, allele) so a
-# chr-prefix / separator difference does not read as no-overlap. PIP / LBF are
-# coding-invariant (no sign). The index is sorted to keep the entry's variant
-# order so fit-matrix subsetting is unchanged.
+# Match the entry's variants to `keepVariants` as every keep list is matched
+# (.keepByIds()), so a chr-prefix / separator / allele-order difference does not
+# read as no-overlap. PIP / LBF are coding-invariant (no sign). The index keeps
+# the entry's variant order so fit-matrix subsetting is unchanged.
 # @noRd
 .adjustPipsKeepIdx <- function(variantIds, keepVariants) {
-    m <- matchVariants(variantIds, as.character(keepVariants))
-    if (!length(m$idxA)) {
+    kept <- which(.keepIdsNamed(variantIds, as.character(keepVariants)))
+    if (length(kept) == 0L) {
         msg <- glue(
             "adjustPips: intersection of entry variants with `keepVariants` ",
             "is empty."
         )
         abort(msg)
     }
-    sort(m$idxA)
+    kept
 }
 
 # Where each of `common` sits among the variables `fitted` the fit was made

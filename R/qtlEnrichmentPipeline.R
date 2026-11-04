@@ -36,8 +36,9 @@ setClass(
 #'   Default \code{1.0}.
 #' @param impN Rounds of multiple imputation to draw QTL from. Default
 #'   \code{25}.
-#' @param doubleShrinkage Logical. Apply the double-shrinkage correction to
-#'   the enrichment estimate. Default \code{FALSE}.
+#' @param doubleShrinkage Logical. Shrink each imputation round's estimate and
+#'   then the combined one, as fastenloc does; \code{FALSE} shrinks only the
+#'   combined one. Default \code{TRUE}.
 #' @param besselCorrection Logical. Apply Bessel's correction when estimating
 #'   the sampling variance. Default \code{TRUE}.
 #' @return A \code{QtlEnrichmentParam} object, a \code{\link{MethodParam}}.
@@ -49,7 +50,7 @@ QtlEnrichmentParam <- function(
     piQtl = NULL,
     lambda = 1.0,
     impN = 25,
-    doubleShrinkage = FALSE,
+    doubleShrinkage = TRUE,
     besselCorrection = TRUE
 ) {
     new(
@@ -1114,8 +1115,9 @@ qtlEnrichmentPipeline <- function(
 #'   (e.g. \code{qtlEnrichmentPipeline} aligns each QTL tuple once against
 #'   the union GWAS panel rather than re-aligning per GWAS study); the names
 #'   are then matched to \code{gwasPip} exactly as given.
-#' @param doubleShrinkage Logical. Apply the double-shrinkage correction to the
-#'   enrichment estimate. Default \code{FALSE}.
+#' @param doubleShrinkage Logical. Shrink each imputation round's estimate and
+#'   then the combined one, as fastenloc does; \code{FALSE} shrinks only the
+#'   combined one. Default \code{TRUE}.
 #' @param besselCorrection Logical. Apply Bessel's correction when estimating
 #'   the sampling variance. Default \code{TRUE}.
 #' @param verbose Logical. Print progress messages. Default \code{TRUE}.
@@ -1182,7 +1184,7 @@ qtlEnrichment <- function(
     piQtl = NULL,
     lambda = 1.0,
     impN = 25,
-    doubleShrinkage = FALSE,
+    doubleShrinkage = TRUE,
     besselCorrection = TRUE,
     BPPARAM = SerialParam(),
     verbose = TRUE,
@@ -1228,7 +1230,7 @@ qtlEnrichment <- function(
     piQtl = NULL,
     lambda = 1.0,
     impN = 25,
-    doubleShrinkage = FALSE,
+    doubleShrinkage = TRUE,
     besselCorrection = TRUE,
     BPPARAM = SerialParam(),
     verbose = TRUE,

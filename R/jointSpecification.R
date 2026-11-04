@@ -983,7 +983,7 @@ parseTraitIds <- function(traitId, data) {
 }
 
 
-# --- .buildIndividualCrossContextXy helpers ---------------------------------
+# --- .crossContextPlan helpers ----------------------------------------------
 
 # Does context `cx` carry trait `tid`?
 # @noRd
@@ -1025,62 +1025,68 @@ parseTraitIds <- function(traitId, data) {
     exec(cbind, !!!yCols)
 }
 
-# Intersect samples, build the response matrix, and drop incomplete rows.
+# Skip a trait with too few of something to fit: NULL, and a message saying so.
+# `report` holds the caller's verbose, label and tid.
+# @noRd
+.crossContextSkip <- function(tooFew, report) {
+    if (report$verbose >= 1) {
+        inform(glue(
+            "{report$label}: trait '{report$tid}' has too few {tooFew}; ",
+            "skipping."
+        ))
+    }
+    NULL
+}
+
+# The samples a cross-context fit is on: every context's Y holds them and none
+# is missing a value. NULL, with a message, when fewer than two remain.
+# @noRd
+.crossContextFitSamples <- function(Yres, perTraitContexts, report) {
+    shared <- reduce(map(Yres, rownames), intersect)
+    if (length(shared) < 2L) {
+        return(.crossContextSkip("shared samples across contexts", report))
+    }
+    Y <- .crossContextY(Yres, perTraitContexts, shared)
+    keep <- stats::complete.cases(Y)
+    if (sum(keep) < 2L) {
+        return(.crossContextSkip("complete-Y subjects", report))
+    }
+    shared[keep]
+}
+
+# X and the response matrix on the fit's samples that X holds.
+# @noRd
 .crossContextAssemble <- function(
     X,
     Yres,
     perTraitContexts,
-    verbose,
-    label,
-    tid
+    fitSamples,
+    report
 ) {
-    commonSamples <- reduce(
-        c(list(rownames(X)), map(Yres, rownames)),
-        intersect
-    )
-    if (length(commonSamples) < 2L) {
-        if (verbose >= 1) {
-            inform(glue(
-                "{label}: trait '{tid}' has too few shared samples across ",
-                "contexts; skipping."
-            ))
-        }
-        return(NULL)
-    }
-    shared <- X[commonSamples, , drop = FALSE]
-    Y <- .crossContextY(Yres, perTraitContexts, commonSamples)
-    keep <- stats::complete.cases(Y)
-    if (sum(keep) < 2L) {
-        if (verbose >= 1) {
-            inform(glue(
-                "{label}: trait '{tid}' has too few complete-Y subjects; ",
-                "skipping."
-            ))
-        }
-        return(NULL)
+    common <- intersect(rownames(X), fitSamples)
+    if (length(common) < 2L) {
+        return(.crossContextSkip("shared samples across contexts", report))
     }
     list(
-        X = shared[keep, , drop = FALSE],
-        Y = Y[keep, , drop = FALSE],
+        X = X[common, , drop = FALSE],
+        Y = .crossContextY(Yres, perTraitContexts, common),
         perTraitContexts = perTraitContexts
     )
 }
 
 # Build a multi-context Y matrix for a single (study, trait) from an
-# individual-level QtlDataset. Returns list(X, Y, perTraitContexts) or
-# NULL when fewer than 2 contexts carry `tid` or the sample / complete-Y
-# subset is too small to fit.
+# individual-level QtlDataset, before any genotype is read. Returns the trait's
+# contexts, their residualized phenotypes and the samples the fit is on, or NULL
+# when fewer than 2 contexts carry `tid` or the sample / complete-Y subset is
+# too small to fit.
 # @noRd
-.buildIndividualCrossContextXy <- function(
+.crossContextPlan <- function(
     data,
     tid,
     scopedContexts,
-    cisWindow,
     verbose,
     label,
-    region = NULL,
     residualizationParam,
-    genotypeFilter,
     phenotypeFilter = NULL
 ) {
     perTraitContexts <- .crossContextPerTrait(
@@ -1093,15 +1099,6 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(perTraitContexts)) {
         return(NULL)
     }
-    X <- .buildResidGeno(
-        data,
-        perTraitContexts,
-        tid,
-        cisWindow,
-        region,
-        residualizationParam,
-        genotypeFilter
-    )
     Yres <- .fmResidPheno(
         data,
         contexts = perTraitContexts,
@@ -1109,7 +1106,17 @@ parseTraitIds <- function(traitId, data) {
         phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
-    .crossContextAssemble(X, Yres, perTraitContexts, verbose, label, tid)
+    report <- list(verbose = verbose, label = label, tid = tid)
+    fitSamples <- .crossContextFitSamples(Yres, perTraitContexts, report)
+    if (is.null(fitSamples)) {
+        return(NULL)
+    }
+    list(
+        perTraitContexts = perTraitContexts,
+        Yres = Yres,
+        fitSamples = fitSamples,
+        report = report
+    )
 }
 
 
@@ -1147,19 +1154,16 @@ parseTraitIds <- function(traitId, data) {
 # Build a multi-trait Y matrix for a single (study, context) from an
 # individual-level QtlDataset. Returns list(X, Y, traitsHere, se) or NULL
 # when fewer than 2 traits live in the context or the sample / complete-Y
-# subset is too small.
+# subset is too small. Before any genotype is read.
 # @noRd
-.buildIndividualCrossTraitXy <- function(
+.crossTraitPlan <- function(
     data,
     cx,
     scopedTraits,
-    cisWindow,
+    studyName,
     verbose,
     label,
-    studyName,
-    region = NULL,
     residualizationParam,
-    genotypeFilter,
     phenotypeFilter = NULL
 ) {
     se <- .qtlContextSe(data, context = cx)
@@ -1169,15 +1173,6 @@ parseTraitIds <- function(traitId, data) {
     if (.crossTraitTooFew(traitsHere, cx, studyName, verbose, label)) {
         return(NULL)
     }
-    allX <- .buildResidGeno(
-        data,
-        cx,
-        traitsHere,
-        cisWindow,
-        region,
-        residualizationParam,
-        genotypeFilter
-    )
     allY <- .fmResidPheno(
         data,
         contexts = cx,
@@ -1185,7 +1180,17 @@ parseTraitIds <- function(traitId, data) {
         phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
-    .crossTraitAssemble(allX, allY, traitsHere, se)
+    # The samples observed for every trait, which are the ones the fit is on.
+    fitSamples <- rownames(allY)[stats::complete.cases(allY)]
+    if (length(fitSamples) < 2L) {
+        return(NULL)
+    }
+    list(
+        se = se,
+        traitsHere = traitsHere,
+        allY = allY,
+        fitSamples = fitSamples
+    )
 }
 
 # The cross-trait X / Y on the samples they share, keeping only the samples
@@ -1211,39 +1216,7 @@ parseTraitIds <- function(traitId, data) {
 }
 
 
-# Residualized genotype for the cross-* / composed builders (cis-window or an
-# explicit region). Shared by the individual multi-axis Xy builders.
-# @noRd
-.buildResidGeno <- function(
-    data,
-    contexts,
-    traitId,
-    cisWindow,
-    region,
-    residualizationParam,
-    genotypeFilter
-) {
-    if (is.null(region)) {
-        .fmResidGeno(
-            data,
-            contexts = contexts,
-            traitId = traitId,
-            cisWindow = cisWindow,
-            residualizationParam = residualizationParam,
-            genotypeFilter = genotypeFilter
-        )
-    } else {
-        .fmResidGeno(
-            data,
-            contexts = contexts,
-            region = region,
-            residualizationParam = residualizationParam,
-            genotypeFilter = genotypeFilter
-        )
-    }
-}
-
-# --- .buildComposedIndividualXy helpers -------------------------------------
+# --- .composedPlan helpers ---------------------------------------------------
 
 # Enumerate the in-scope (context, trait) tuples for a study; NULL if < 2.
 # @noRd
@@ -1311,62 +1284,32 @@ parseTraitIds <- function(traitId, data) {
     exec(cbind, !!!yCols)
 }
 
-# The residualized genotypes and the per-context residualized phenotypes
-# for one composed block, both over the same context/trait span.
+# The samples a composed fit is on: every context's Y holds them and no tuple's
+# column misses them. Empty when the tuples cannot be fit together.
 # @noRd
-.composedResidualized <- function(
-    data,
-    allContexts,
-    allTraits,
-    cisWindow,
-    region,
-    residualizationParam,
-    genotypeFilter,
-    phenotypeFilter = NULL
-) {
-    # Genotypes first, as the inline version did: reading them is what
-    # fails on a missing panel file, and that error must stay the one the
-    # caller sees rather than a downstream lm.fit() complaint.
-    allX <- .buildResidGeno(
-        data,
-        allContexts,
-        allTraits,
-        cisWindow,
-        region,
-        residualizationParam,
-        genotypeFilter
-    )
-    resid <- .fmResidPheno(
-        data,
-        contexts = allContexts,
-        traitId = allTraits,
-        phenotypeFilter = phenotypeFilter,
-        residualizationParam = residualizationParam
-    )
-    list(
-        X = allX,
-        # A single context returns the bare matrix rather than a named list.
-        YresList = if (length(allContexts) == 1L) {
-            set_names(list(resid), allContexts)
-        } else {
-            resid
-        }
-    )
+.composedFitSamples <- function(YresList, tuples) {
+    shared <- reduce(map(YresList, rownames), intersect)
+    Y <- if (length(shared) >= 2L) {
+        .composedYCols(YresList, tuples, shared)
+    }
+    if (is.null(Y)) {
+        return(character(0))
+    }
+    shared[stats::complete.cases(Y)]
 }
 
-# Build a composed-axes (context, trait) X/Y for individual-level
-# QtlDataset. Returns list(X, Y, tuples) or NULL.
+# A composed-axes (context, trait) fit on an individual-level QtlDataset, before
+# any genotype is read: its tuples, the per-context residualized phenotypes and
+# the samples it is on, or NULL when too few samples could be fit to read any
+# genotypes for them.
 # @noRd
-.buildComposedIndividualXy <- function(
+.composedPlan <- function(
     data,
     scope,
     studyName,
-    cisWindow,
     verbose,
     label,
-    region = NULL,
     residualizationParam,
-    genotypeFilter,
     phenotypeFilter = NULL
 ) {
     tuples <- .composedTuples(data, scope, studyName, verbose, label)
@@ -1375,17 +1318,30 @@ parseTraitIds <- function(traitId, data) {
     }
     allContexts <- unique(map_chr(tuples, "context"))
     allTraits <- unique(map_chr(tuples, "trait"))
-    sides <- .composedResidualized(
+    resid <- .fmResidPheno(
         data,
-        allContexts,
-        allTraits,
-        cisWindow,
-        region,
-        residualizationParam,
-        genotypeFilter,
-        phenotypeFilter
+        contexts = allContexts,
+        traitId = allTraits,
+        phenotypeFilter = phenotypeFilter,
+        residualizationParam = residualizationParam
     )
-    .composedAlignXy(sides, tuples)
+    # A single context returns the bare matrix rather than a named list.
+    YresList <- if (length(allContexts) == 1L) {
+        set_names(list(resid), allContexts)
+    } else {
+        resid
+    }
+    fitSamples <- .composedFitSamples(YresList, tuples)
+    if (length(fitSamples) < 2L) {
+        return(NULL)
+    }
+    list(
+        tuples = tuples,
+        allContexts = allContexts,
+        allTraits = allTraits,
+        YresList = YresList,
+        fitSamples = fitSamples
+    )
 }
 
 # X and the tuples' Y columns on the samples both sides share, without the
@@ -1519,31 +1475,33 @@ parseTraitIds <- function(traitId, data) {
 # One passthrough column of a joint result row as a character vector (the joint-
 # key columns), or NULL when absent.
 # @noRd
-.jointStrCol <- function(nm, df) {
-    if (is_in(nm, names(df))) as.character(df[[nm]]) else NULL
+.jointStrCol <- function(nm, rows) {
+    if (is_in(nm, colnames(mcols(rows)))) as.character(mcols(rows)[[nm]])
 }
 
 # One passthrough column carried through UNCOERCED (GRanges provenance columns
 # region / traitPos), or NULL when absent.
 # @noRd
-.jointRawCol <- function(nm, df) if (is_in(nm, names(df))) df[[nm]] else NULL
+.jointRawCol <- function(nm, rows) {
+    if (is_in(nm, colnames(mcols(rows)))) mcols(rows)[[nm]]
+}
 
 # The optional passthrough columns of a per-tuple result row, as a named list
 # (NULL for any absent column): the three joint-key columns (jointStudies /
 # jointContexts / jointTraits) plus the GRanges provenance columns (region /
 # traitPos). Spliced into the QtlFineMappingResult / TwasWeights constructors so
 # by-key / cross-study rebuilds preserve them.
-.jointCols <- function(df) {
+.jointCols <- function(rows) {
     # traitPos is a GRanges provenance column: carry it through uncoerced so
     # by-key / cross-study rebuilds keep the trait position instead of silently
     # dropping it. There is no `region` counterpart -- the fine-mapping window
     # retired (section 4.4) because the element's own span is the region and a
     # stored window had no correct update rule when variants are narrowed.
     list(
-        jointStudies = .jointStrCol("jointStudies", df),
-        jointContexts = .jointStrCol("jointContexts", df),
-        jointTraits = .jointStrCol("jointTraits", df),
-        traitPos = .jointRawCol("traitPos", df)
+        jointStudies = .jointStrCol("jointStudies", rows),
+        jointContexts = .jointStrCol("jointContexts", rows),
+        jointTraits = .jointStrCol("jointTraits", rows),
+        traitPos = .jointRawCol("traitPos", rows)
     )
 }
 
@@ -1591,34 +1549,12 @@ parseTraitIds <- function(traitId, data) {
     rbindFn(fromStudies, ssRes)
 }
 
-# Reconstruct the per-tuple result object from the accumulated rows, each on
-# the LD reference it had. A TwasWeights is already that: row-binding
-# regroups its entries by gene, and every row keeps its window, trait
-# position and LD reference.
-.msDriverPerTuple <- function(out, resultCtor) {
-    if (methods::is(out, "TwasWeights")) {
-        return(out)
-    }
-    ctorArgs <- c(
-        list(
-            studyName = as.character(out$study),
-            context = as.character(out$context),
-            trait = as.character(out$trait),
-            method = as.character(out$method),
-            entry = .collectionEntries(out)
-        ),
-        .jointCols(out),
-        list(ldReference = .rowLdRefs(out))
-    )
-    exec(resultCtor, !!!ctorArgs)
-}
-
 # Shared tail of the MultiStudyQtlDataset fineMapping / twasWeights pipeline
 # methods: recurse into each embedded QtlDataset then the embedded QtlSumStats,
-# row-bind the per-study results, build the per-tuple result object, and combine
-# it with any joint-specification result. `perStudyFn` / `sumStatsFn` are the
-# (method-specific) single-study recursions; `rbindFn` / `resultCtor` /
-# `pipelineName` supply the per-pipeline pieces. Each method keeps its own
+# row-bind the per-study results, and combine them with any
+# joint-specification result. `perStudyFn` / `sumStatsFn` are the
+# (method-specific) single-study recursions; `rbindFn` / `pipelineName` supply
+# the per-pipeline pieces. Each method keeps its own
 # (divergent) method-gating / joint-dispatch preamble and passes the computed
 # `jointResult` in.
 # @noRd
@@ -1629,11 +1565,10 @@ parseTraitIds <- function(traitId, data) {
     sumStatsFn,
     cfg,
     rbindFn,
-    resultCtor,
     pipelineName,
     noun = "a result"
 ) {
-    out <- .msDriverAccumulate(
+    perTupleResult <- .msDriverAccumulate(
         as.list(data),
         sumStats(data),
         perStudyFn,
@@ -1641,11 +1576,6 @@ parseTraitIds <- function(traitId, data) {
         cfg,
         rbindFn
     )
-    perTupleResult <- if (!is.null(out)) {
-        .msDriverPerTuple(out, resultCtor)
-    } else {
-        NULL
-    }
     if (is.null(jointResult)) {
         if (is.null(perTupleResult)) {
             msg <- glue(
@@ -1703,28 +1633,48 @@ parseTraitIds <- function(traitId, data) {
     methodArgs,
     cfg
 ) {
-    .jointRejectStudyOnIndividual(parsedJointSpec)
-    perRegion <- compact(map(
-        cfg$xRegions,
-        .fmDispatchJointSpecRegion,
-        parsedJointSpec = parsedJointSpec,
-        tokens = tokens,
-        methodArgs = methodArgs,
-        cfg = cfg
-    ))
-    .fmCombineRegionResults(perRegion)
+    .qtlRunWork(
+        .fmJointSpecsWork(parsedJointSpec, tokens, methodArgs, cfg),
+        cfg$data,
+        cfg$genotypeFilter,
+        cfg$residualizationParam,
+        withAf = TRUE
+    )
 }
 
-# One region block of .fmDispatchJointSpecsQtlDataset().
+# .fmDispatchJointSpecsQtlDataset()'s fits, planned, for a run with others to
+# fit alongside.
 # @noRd
-.fmDispatchJointSpecRegion <- function(
+.fmJointSpecsWork <- function(parsedJointSpec, tokens, methodArgs, cfg) {
+    .jointRejectStudyOnIndividual(parsedJointSpec)
+    .qtlWorkOf(
+        map(
+            cfg$xRegions,
+            .fmJointSpecRegionWork,
+            parsedJointSpec = parsedJointSpec,
+            tokens = tokens,
+            methodArgs = methodArgs,
+            cfg = cfg
+        ),
+        .fmJointRegionsResult
+    )
+}
+
+# @noRd
+.fmJointRegionsResult <- function(perRegion) {
+    .fmCombineRegionResults(compact(perRegion))
+}
+
+# One region block of .fmJointSpecsWork().
+# @noRd
+.fmJointSpecRegionWork <- function(
     region,
     parsedJointSpec,
     tokens,
     methodArgs,
     cfg
 ) {
-    .runJointSpecs(
+    .jointSpecsWork(
         parsedJointSpec,
         cfg$data,
         dataForm = "individual",
@@ -1814,17 +1764,20 @@ parseTraitIds <- function(traitId, data) {
 # applied, as the per-study recursion applies them) -- and on the summary
 # statistics too. `cfg` is the individual-level joint record plus
 # `genotypeFilterParam` and `panelFilterParam`, with the collection as data.
+# `components = FALSE` leaves the components' fits to their own runs
+# (.fmPerStudy()), which have other fits to share their reads with.
 # @noRd
 .fmDispatchJointSpecsMultiStudy <- function(
     parsedJointSpec,
     tokens,
     methodArgs,
-    cfg
+    cfg,
+    components = TRUE
 ) {
     qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .fmMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
-    out <- if (length(specs$nonStudy) == 0L) {
+    out <- if (length(specs$nonStudy) == 0L || !components) {
         NULL
     } else {
         .msFoldStudyResults(
@@ -1927,6 +1880,39 @@ parseTraitIds <- function(traitId, data) {
 
 
 # --- .fmDispatchJointSpecsMultiStudy helpers --------------------------------
+
+# The joint specs a component's own run fits, each scope narrowed to what the
+# component holds, as a scope only names what some component does. A spec that
+# leaves it nothing does not apply to it.
+# @noRd
+.msStudySpecs <- function(specs, qd) {
+    compact(map(specs, .msStudySpec, qd = qd))
+}
+
+# @noRd
+.msStudySpec <- function(spec, qd) {
+    if (is.null(spec$scope)) {
+        return(spec)
+    }
+    scope <- imap(spec$scope, .msScopeValuesIn, qd = qd)
+    if (any(lengths(scope) == 0L)) {
+        return(NULL)
+    }
+    list_assign(spec, scope = scope)
+}
+
+# @noRd
+.msScopeValuesIn <- function(values, key, qd) {
+    intersect(
+        values,
+        switch(
+            key,
+            study = .spListStudies(qd),
+            context = .spListContexts(qd),
+            trait = .spListTraits(qd)
+        )
+    )
+}
 
 # Partition joint specs into those with a `study` axis and the rest.
 .fmSplitStudyAxisSpecs <- function(parsedJointSpec) {
@@ -2073,8 +2059,34 @@ parseTraitIds <- function(traitId, data) {
     contexts,
     traitIds
 ) {
+    .qtlRunWork(
+        .twasJointSpecsWork(
+            parsedJointSpec,
+            tokens,
+            marker,
+            ctx,
+            contexts,
+            traitIds
+        ),
+        ctx$data,
+        ctx$genotypeFilter,
+        ctx$residualizationParam
+    )
+}
+
+# .twasDispatchJointSpecsQtlDataset()'s fits, planned, for a run with others to
+# fit alongside.
+# @noRd
+.twasJointSpecsWork <- function(
+    parsedJointSpec,
+    tokens,
+    marker,
+    ctx,
+    contexts,
+    traitIds
+) {
     .jointRejectStudyOnIndividual(parsedJointSpec)
-    .twasRunJointSpecGrid(
+    .twasJointSpecGridWork(
         parsedJointSpec,
         intersect(tokens, "mrmash"),
         contexts,
@@ -2098,7 +2110,6 @@ parseTraitIds <- function(traitId, data) {
     pipeline <- new(
         "TwasJointPipeline",
         config = list(
-            dataType = cfg$weightsDataType,
             crossValidationParam = .cvResolve(CrossValidationParam()),
             fitRetention = cfg$fitRetention,
             standardized = TRUE,
@@ -2135,12 +2146,13 @@ parseTraitIds <- function(traitId, data) {
     parsedJointSpec,
     tokens,
     methods,
-    cfg
+    cfg,
+    components = TRUE
 ) {
     qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
     .twasMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
-    out <- if (length(specs$nonStudy) == 0L) {
+    out <- if (length(specs$nonStudy) == 0L || !components) {
         NULL
     } else {
         .msFoldStudyResults(

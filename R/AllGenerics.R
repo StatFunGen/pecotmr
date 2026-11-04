@@ -32,25 +32,49 @@ NULL
 #'   one estimate per selected (study, context, trait) row, each from the
 #'   row's own statistics and LD reference.
 #' @details Each per-trait method is written from its authors' published
-#'   estimator and reports what they report:
+#'   estimator and reports what they report. All three read a row's \code{z}
+#'   as the t statistic of a marginal regression, the correlation being
+#'   \eqn{r = z / \sqrt{z^2 + n - 2}}: \eqn{z / \sqrt{n}}, which HDL-L's and
+#'   FastHer's own code read instead, overstates \eqn{r^2} by a factor of
+#'   \eqn{1 / (1 - r^2)}, about 1.4 for a strong QTL at \eqn{r^2 = 0.3}.
 #'   \describe{
 #'     \item{\code{"lava"}}{(default) LAVA's univariate estimator (Werme et
-#'       al. 2022): the adjusted \eqn{R^2} of the trait on the standardized
-#'       LD components that hold 99\% of the LD variance (at least 2, at
-#'       most 0.75 times the sample size), with the F test of no
-#'       heritability. The estimate is scaled by \eqn{(N_{ref} - K - 1) /
-#'       (N_{ref} - 1)} for a reference of \eqn{N_{ref}} samples and
-#'       \eqn{K} components, a correction LAVA describes but leaves off.
+#'       al. 2022), on the \eqn{K} standardized LD components that hold 99\%
+#'       of the LD variance (at least 2, at most 0.75 times the sample size).
+#'       Whether LD is the study's own is not a yes or no: how far a reference
+#'       of \eqn{N} samples, holding a share \eqn{\rho} of the \eqn{n} study
+#'       samples (\code{referenceOverlap}), lies from the study's LD in units
+#'       of its sampling noise is \eqn{\phi = 1 + (1 - 2\rho) n / N}: 0 for
+#'       the study's own samples, about 1 for a panel of thousands. The
+#'       estimate is \eqn{(\delta'\delta - m) / (1 + m (\phi - 1))} with
+#'       \eqn{m = K / (n - 1)}, which at \eqn{\phi = 0} is exactly LAVA's
+#'       adjusted \eqn{R^2} of the trait on the components. LAVA's own noise
+#'       term holds only there: with a panel of 3000 on real genotypes it gave
+#'       0.55-0.63 at a true 0.5 with \eqn{K / n} of 0.1-0.2, 0.69 at 0.3, and
+#'       \code{NA} for 70\% of traits at 0.6; this estimate stayed at
+#'       0.47-0.52 across references of every kind. Assuming \eqn{\rho = 0}
+#'       costs about \eqn{2 \rho K / N} of the estimate, under 10\% for a
+#'       whole cis window with a panel of thousands holding all the study's
+#'       samples, but LD from the study's own samples at that default comes out
+#'       at half or less, hence a warning when \eqn{N \le 2 n}. Divergence
+#'       between populations of one ancestry raises \eqn{\phi}, unmodelled:
+#'       about 0.54 at a true 0.5 at Fst 0.001, and 0.62 at 0.003. The p-value
+#'       tests no heritability, with \eqn{\phi} in its variance. It is the
+#'       exact F test at \eqn{\phi = 0}, but ran at about 0.09 at a nominal
+#'       0.05 with a panel, as real genotypes' components have heavier tails
+#'       than it assumes; HDL-L's held at 0.03-0.05, so prefer it for testing.
 #'       LAVA itself withholds the estimate where \eqn{K} exceeds a tenth of
 #'       the sample size, which a cis window's components usually do at QTL
-#'       sample sizes; it is reported here at any \eqn{K}. On real genotypes
-#'       its error past that point was about twice that below it, still
-#'       below HDL-L's. The estimate can be negative.}
+#'       sample sizes; it is reported here at any \eqn{K}. The estimate can be
+#'       negative or exceed 1.}
 #'     \item{\code{"hdlL"}}{HDL-L (Li et al. 2025): the likelihood of the
 #'       statistics rotated onto the LD eigenvectors that cover 99\% of the
 #'       trace, in the heritability and an intercept, with a term for the
 #'       reference's sampling noise. Its p-value is the likelihood ratio
-#'       against no heritability; \code{intercept} is the fitted intercept.
+#'       against no heritability, referred to the equal mixture of a
+#'       chi-square on one degree of freedom and a point mass at 0 since that
+#'       null is on the boundary of the heritability's range, half of what
+#'       HDL-L reports; \code{intercept} is the fitted intercept.
 #'       \code{NA} where no fit converges and beats that null.}
 #'     \item{\code{"fastHer"}}{FastHer (Svishcheva 2025): the maximum
 #'       likelihood of an infinitesimal model for the study samples,
@@ -58,11 +82,13 @@ NULL
 #'       expected information; \code{scale} is the fitted phenotypic
 #'       variance relative to its standardized value, about 1 when the model
 #'       fits. HEELS (Li, Mazumder and Lin 2023) maximizes the same
-#'       likelihood by iteration. The likelihood assumes in-sample LD and is
+#'       likelihood by iteration. The standard error holds under that model:
+#'       with few causal variants it is too small, 0.77 of the estimates'
+#'       spread at a heritability of 0.2 with one causal variant, and 0.59 at
+#'       0.5, on real genotypes. The likelihood assumes in-sample LD and is
 #'       undefined when the reference's rank, or the statistics' squared
-#'       norm in the LD's metric, reaches the sample size, as it can with an
-#'       external reference larger than the study; such traits are
-#'       \code{NA}, with a warning.}
+#'       norm in the LD's metric, reaches the sample size, as it can with LD
+#'       from outside the study; such traits are \code{NA}, with a warning.}
 #'   }
 #'   Every per-trait method assumes the LD reference matches the population
 #'   of the statistics, as the QC step (\code{\link{summaryStatsQc}})
@@ -142,7 +168,7 @@ NULL
 #'
 #' # Per-trait cis heritability, each row against its own LD reference.
 #' data(qtlSumStatsExample)
-#' estimateH2(qtlSumStatsExample)
+#' estimateH2(qtlSumStatsExample, referenceOverlap = 1)
 #' @export
 setGeneric(
     "estimateH2",
@@ -321,7 +347,12 @@ setGeneric(
 #'     \item{partitioned}{tau-based enrichment of the baseline annotations,
 #'       with columns \code{annotation}, \code{tau}, \code{tauSe},
 #'       \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
-#'       \code{propH2}, \code{propSnps}.}
+#'       \code{propH2}, \code{propSnps}. \code{enrichmentP} is ldsc's t test
+#'       of the per-variant heritability inside the annotation against
+#'       outside it. The last five are \code{NA} for an annotation with
+#'       values outside [0, 1], where they are not shares of the variants and
+#'       the heritability and depend on where the annotation's zero is; read
+#'       \code{tau} there.}
 #'     \item{score test}{the score test over the tested (candidate)
 #'       annotations, with columns \code{annotation}, \code{scoreZ},
 #'       \code{scoreP}.}
@@ -848,7 +879,9 @@ setGeneric("ldMatrix", function(x) standardGeneric("ldMatrix"))
 #' @description Extract a genotype matrix from an object that carries genotype
 #'   data. For a \code{QtlDataset}, the whole dataset's dosages (samples x
 #'   variants), with no QC applied: to read part of it, narrow the dataset
-#'   first, e.g. \code{genotypes(x[window, samples, ])}.
+#'   first, e.g. \code{genotypes(x[window, samples, ])}. Its columns carry the
+#'   labels the genotype file gives its variants; a pipeline's results name
+#'   them by the canonical id \code{\link{variantIds}} describes.
 #' @param x The object to extract from.
 #' @param ... Passed on to methods.
 #' @return A numeric matrix, a list of matrices, or \code{NULL}.
@@ -967,7 +1000,9 @@ setGeneric(
 #'
 #' @param x A \code{FineMappingRow} or \code{FineMappingResultBase}.
 #' @param keepVariants Character vector of variant IDs to keep. Intersected with
-#'   the entry's own \code{variantIds}; an empty intersection raises an error.
+#'   the entry's own \code{variantIds}, by position and alleles in either order
+#'   and on either strand, or by label for an rsID; an empty intersection raises
+#'   an error.
 #' @param ... Future expansion.
 #' @return The same flavour of object with PIPs renormalized on the kept subset.
 #' @noRd
@@ -1279,10 +1314,18 @@ setGeneric("susieAlpha", function(x, ...) standardGeneric("susieAlpha"))
 #'   (typically ctwas's \code{param} list), or \code{NULL}. On a
 #'   \code{CtwasResult}, a tibble with one row per run and group, led by the
 #'   run identity (\code{gwasStudy}, \code{study}, \code{context},
-#'   \code{method}, and the joint columns when present), then \code{group},
-#'   \code{group_size}, \code{group_prior} and \code{group_prior_var}. A
-#'   value the run did not record is \code{NA}, a run with no priors has no
-#'   rows, and each context of a joint run lists the priors they share.
+#'   \code{method}, and the joint columns when present). Then \code{group},
+#'   named \code{{study}_{context}_{type}}, with \code{group_study},
+#'   \code{group_context} and \code{group_type} since those underscores cannot
+#'   be split back, \code{group_size}, \code{group_prior} and
+#'   \code{group_prior_var}. Then cTWAS's summary of them
+#'   (\code{ctwas::summarize_param()}): \code{log_enrichment},
+#'   \code{log_enrichment_se} and \code{enrichment_p}, each gene group against
+#'   the SNP group by a one-sided Fisher test, and \code{group_pve} and
+#'   \code{prop_heritability}, the heritability the group explains and its share
+#'   of what all groups explain, at the GWAS's median sample size. A value the
+#'   run did not record is \code{NA}, a run with no priors has no rows, and each
+#'   context of a joint run lists the priors they share.
 #' @examples
 #' priors <- list(group_prior = c(SNP = 1e-4, brain = 0.01),
 #'   group_prior_var = c(SNP = 10, brain = 20))
@@ -1378,27 +1421,41 @@ setGeneric("cvFits", function(x, ...) standardGeneric("cvFits"))
 #' @export
 setGeneric("methodNames", function(x) standardGeneric("methodNames"))
 
-#' @title Get Data Type
-#' @description Extract the data-type tag.
-#' @param x A \code{TwasWeightsRow} or \code{TwasWeights}.
+#' @title Get the Molecular Type
+#' @description What a dataset's phenotypes or summary statistics measure
+#'   (\code{"expression"}, \code{"splicing"}, \code{"methylation"}), as
+#'   \code{\link{QtlDataset}} and \code{\link{QtlSumStats}} record it, and as
+#'   the pipelines carry it onto what they fit. Free text: the label means what
+#'   it is given to mean, and \code{\link{ctwasPipeline}}'s \code{varStructure =
+#'   "shared_type"} pools the contexts that share one.
+#' @param x A \code{\link{QtlDataset}}, a collection such as a
+#'   \code{\link{QtlSumStats}} or fine-mapping result, a \code{TwasWeights} or a
+#'   \code{TwasWeightsRow}.
 #' @param ... Class-specific selection arguments.
-#' @param studyName Character (length 1) or \code{NULL}. Restrict the selection
-#'   to this study; \code{NULL} matches all studies.
-#' @param context Character (length 1) or \code{NULL}. Restrict the selection to
-#'   this context; \code{NULL} matches all contexts.
-#' @param trait Character (length 1) or \code{NULL}. Restrict the selection to
-#'   this trait; \code{NULL} matches all traits.
-#' @param method Character (length 1) or \code{NULL}. Restrict the selection to
-#'   this fine-mapping / weight method; \code{NULL} matches all methods.
-#' @return A character vector or NULL.
+#' @param studyName For a \code{TwasWeights}: character (length 1) or
+#'   \code{NULL}. Restrict the selection to this study; \code{NULL} matches all
+#'   studies.
+#' @param context For a \code{TwasWeights}: character (length 1) or \code{NULL}.
+#'   Restrict the selection to this context; \code{NULL} matches all contexts.
+#' @param trait For a \code{TwasWeights}: character (length 1) or \code{NULL}.
+#'   Restrict the selection to this trait; \code{NULL} matches all traits.
+#' @param method For a \code{TwasWeights}: character (length 1) or \code{NULL}.
+#'   Restrict the selection to this weight method; \code{NULL} matches all
+#'   methods.
+#' @return On a \code{QtlDataset}, a character vector named by context; on a
+#'   collection, one value per row. \code{NA} where nothing is recorded. On a
+#'   \code{TwasWeights} or \code{TwasWeightsRow}, the selected entry's label or
+#'   \code{NULL}.
 #' @examples
 #' twe <- TwasWeightsRow(variantIds = sprintf("chr1:%d:A:G", 100L * (1:4)),
 #'   weights = rep(0.1, 4), cvResult = list(rsq = 0.5),
-#'   weightStandardized = FALSE)
-#' weightsDataType(twe)
+#'   weightStandardized = FALSE, weightsDataType = "expression")
+#' dataType(twe)
+#' data(qtlDatasetExample)
+#' dataType(qtlDatasetExample)
 #' @export
-setGeneric("weightsDataType", function(x, ...) {
-    standardGeneric("weightsDataType")
+setGeneric("dataType", function(x, ...) {
+    standardGeneric("dataType")
 })
 
 # =============================================================================

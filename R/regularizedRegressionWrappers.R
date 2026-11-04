@@ -280,8 +280,8 @@ prsCs <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -568,8 +568,8 @@ sdpr <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -1757,8 +1757,10 @@ fitGlmnetCv <- function(
 #'   (\code{coef}, over the variants fitted), \code{intercept},
 #'   \code{lambda} and cross-validated error there (\code{cvm},
 #'   \code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-#'   every \code{lambda}'s coefficients. Either names the variants it was
-#'   fitted on.
+#'   every \code{lambda}'s coefficients but without the copy of \code{X} its
+#'   stored calls would hold. Each names the variants it was fitted on.
+#' @param retainX Logical. Keep that copy of \code{X} in a \code{"full"} fit
+#'   (default \code{FALSE}). An error at any other \code{fitRetention}.
 #' @param methodArgs Additional arguments forwarded to
 #'   \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 #'   list is refused, since it cannot be checked against the engine's formals.
@@ -1777,9 +1779,11 @@ glmnetWeights <- function(
     y,
     alpha,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = GlmnetOptions()
 ) {
     fitRetention <- arg_match(fitRetention)
+    .assertRetainX(retainX, fitRetention)
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "glmnetWeights")
     # `alpha` is the wrapper's own dial and is refused by GlmnetOptions()
@@ -1800,12 +1804,44 @@ glmnetWeights <- function(
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    fit <- if (identical(fitRetention, "full")) {
-        enet
-    } else {
-        .glmnetSlimFit(enet, coefs)
-    }
+    fit <- switch(
+        fitRetention,
+        slim = .glmnetSlimFit(enet, coefs),
+        full = if (retainX) enet else .glmnetWithoutData(enet)
+    )
     `attr<-`(weights, "fit", .withFitVariantIds(fit, colnames(X)[keep]))
+}
+
+# cv.glmnet's whole object without the data it was given: called with values
+# rather than names, its stored calls hold them inline.
+# @noRd
+.glmnetWithoutData <- function(cvFit) {
+    inner <- cvFit$glmnet.fit
+    `[[<-`(
+        `[[<-`(cvFit, "call", value = .callWithoutData(cvFit$call)),
+        "glmnet.fit",
+        value = `[[<-`(inner, "call", value = .callWithoutData(inner$call))
+    )
+}
+
+# A stored call naming its data rather than holding it.
+# @noRd
+.callWithoutData <- function(call) {
+    held <- intersect(c("x", "y"), names(call))
+    as.call(replace(as.list(call), held, map(held, as.name)))
+}
+
+# `retainX` keeps a fit's copy of X, which only a "full" fit can hold.
+# @noRd
+.assertRetainX <- function(retainX, fitRetention) {
+    assertFlag(retainX)
+    if (retainX && !identical(fitRetention, "full")) {
+        abort(glue(
+            "`retainX = TRUE` requires `fitRetention = \"full\"`, not ",
+            "\"{fitRetention}\"."
+        ))
+    }
+    invisible(NULL)
 }
 
 # The fit cv.glmnet selected: its coefficients over the variants fitted, the
@@ -1846,6 +1882,7 @@ enetWeights <- function(
     y,
     alpha = 0.5,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = GlmnetOptions()
 ) {
     .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
@@ -1855,6 +1892,7 @@ enetWeights <- function(
         y,
         alpha,
         fitRetention = arg_match(fitRetention),
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }
@@ -1876,6 +1914,7 @@ ridgeWeights <- function(
     X,
     y,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = GlmnetOptions()
 ) {
     .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
@@ -1884,6 +1923,7 @@ ridgeWeights <- function(
         y,
         0,
         fitRetention = arg_match(fitRetention),
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }
@@ -1905,6 +1945,7 @@ lassoWeights <- function(
     X,
     y,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = GlmnetOptions()
 ) {
     .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
@@ -1913,6 +1954,7 @@ lassoWeights <- function(
         y,
         1,
         fitRetention = arg_match(fitRetention),
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }
@@ -1938,8 +1980,10 @@ lassoWeights <- function(
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing, \code{"slim"} the fitted model without its copy of the data
 #'   (\code{data}) or the order it updated the variants in each iteration
-#'   (\code{update.order}), \code{"full"} the whole fitted model. Either
-#'   names the variants it was fitted on.
+#'   (\code{update.order}), \code{"full"} the whole fitted model but for its
+#'   copy of \code{X}. Each names the variants it was fitted on.
+#' @param retainX Logical. Keep that copy of \code{X} in a \code{"full"} fit
+#'   (default \code{FALSE}). An error at any other \code{fitRetention}.
 #' @param methodArgs Options forwarded to \code{susieR::mr.ash}, built
 #'   with \code{\link{MrashOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -1953,10 +1997,12 @@ mrashWeights <- function(
     X,
     y,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = MrashOptions()
 ) {
     .assertMethodOptions(methodArgs, "MrashOptions", "methodArgs")
     fitRetention <- arg_match(fitRetention)
+    .assertRetainX(retainX, fitRetention)
     keep <- .dropZeroVariance(X, "mrashWeights")
     XKeep <- X[, keep, drop = FALSE]
     # as.list(): list_assign() rejects a MethodOptions outright as `.x`, the
@@ -1973,11 +2019,19 @@ mrashWeights <- function(
     if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }
-    kept <- if (identical(fitRetention, "full")) {
-        fit.mr.ash
-    } else {
-        .withoutFields(fit.mr.ash, c("data", "update.order"))
-    }
+    kept <- switch(
+        fitRetention,
+        slim = .withoutFields(fit.mr.ash, c("data", "update.order")),
+        full = if (retainX) {
+            fit.mr.ash
+        } else {
+            `[[<-`(
+                fit.mr.ash,
+                "data",
+                value = .withoutFields(fit.mr.ash$data, "X")
+            )
+        }
+    )
     `attr<-`(eff.wgt, "fit", .withFitVariantIds(kept, colnames(XKeep)))
 }
 # --- Bayesian alphabet ------------------------------------------------------
@@ -2712,8 +2766,8 @@ bayesRWeights <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engines receive the standardized effects
-#'   z / sqrt(n), with n the median of \code{n}.
+#'   standardized. The engines receive the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -3289,7 +3343,7 @@ bayesAlphabetRss <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3333,7 +3387,7 @@ bayesARssWeights <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3378,7 +3432,7 @@ bayesBRssWeights <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3423,7 +3477,7 @@ bayesCRssWeights <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3465,7 +3519,7 @@ bayesLRssWeights <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3507,7 +3561,7 @@ bayesNRssWeights <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' stat <- list(
-#'   z = as.vector(cor(X, eqtlRegionExample$yRes)) * sqrt(nrow(X)),
+#'   cor = as.vector(cor(X, eqtlRegionExample$yRes)),
 #'   n = rep(nrow(X), ncol(X)),
 #'   variantNames = colnames(X)
 #' )
@@ -3544,7 +3598,7 @@ bayesRRssWeights <- function(
 # LDpred2-auto and LDpred2-grid run on bigsnpr, on the LD matrix written to a
 # temporary file, or on pecotmr's port of its samplers (ldpred2FactorCpp()),
 # on a genotype reference's factor of the LD. Both take the statistics in
-# standardized units, z / sqrt(n_j) for each variant's own sample size, and
+# standardized units, the correlations for each variant's own sample size, and
 # return weights in the same units.
 
 #' LDpred2-auto Weights from Summary Statistics
@@ -3575,8 +3629,8 @@ bayesRRssWeights <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The sampler reads z / sqrt(n) for each variant's own
-#'   sample size.
+#'   standardized. The sampler reads the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), for each variant's own sample size.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -3814,7 +3868,7 @@ ldpred2GridWeights <- function(
 }
 
 # The statistics bigsnpr's engines and pecotmr's LDpred2 read: the LD source
-# (.rssLdSource()), the standardized effects z / sqrt(n_j) and each
+# (.rssLdSource()), the correlations (.rssMarginalCor()) and each
 # variant's sample size.
 # @noRd
 .rssPerVariantInput <- function(stat, ldReference, label) {
@@ -3849,8 +3903,9 @@ ldpred2GridWeights <- function(
 }
 
 # The window's heritability by LAVA (.cisH2Lava(), estimateH2()'s default
-# for QTL summary statistics), which reads the reference's sample size,
-# floored at bigsnpr's 0.001: the start too where LAVA gives no estimate.
+# for QTL summary statistics), which reads the reference's sample size, taken to
+# share no samples with the study, and floored at bigsnpr's 0.001: the start too
+# where LAVA gives no estimate.
 # @noRd
 .ldpred2LavaH2 <- function(inp, label) {
     if (is.na(inp$ld$nSamples)) {
@@ -3862,7 +3917,7 @@ ldpred2GridWeights <- function(
             i = "Build the LdMatrix with `nSamples`, or give the heritability."
         ))
     }
-    h2 <- .cisH2Lava(inp$bhat * sqrt(inp$n), inp$n, inp$ld)$h2
+    h2 <- .lavaFit(inp$bhat, mean(inp$n), inp$ld)$h2
     if (is.na(h2)) 1e-3 else max(h2, 1e-3)
 }
 
@@ -4349,17 +4404,26 @@ lassosumRss <- function(
     map(fn_fmls(fn)[fmlNames], eval_bare, env = fn_env(fn))
 }
 
-# The standardized marginal effects, z / sqrt(n): the scale lassosum, PRS-CS
-# and SDPR all fit. Read from `cor` as given, else from `z`, else from
-# `b / seb`, which is a z-score whatever scale `b` is on, else from `b` alone,
-# taken as already standardized.
+# The correlation behind a t statistic z on n samples, the marginal effect of a
+# standardized variant on a standardized trait. z / sqrt(n) is only close to it
+# while z^2 is small against n, which a GWAS can assume and a strong QTL cannot.
+# @noRd
+.zToCor <- function(z, n) {
+    z / sqrt(z^2 + n - 2)
+}
+
+# The standardized marginal effects, the scale lassosum, PRS-CS and SDPR all
+# fit: the correlations (.zToCor()) rather than their usual stand-in z /
+# sqrt(n), which past r^2 = 0.5 exceeds 1 and fails a strong QTL's fit. Read
+# from `cor` as given, else from `z`, else from `b / seb`, which is a z-score
+# whatever scale `b` is on, else from `b` alone, taken as already standardized.
 .rssMarginalCor <- function(stat, n, p) {
     corInput <- if (!is.null(stat$cor)) {
         as.numeric(stat$cor)
     } else if (!is.null(stat$z)) {
-        as.numeric(stat$z) / sqrt(n)
+        .zToCor(as.numeric(stat$z), n)
     } else if (!is.null(stat$b) && !is.null(stat$seb)) {
-        as.numeric(stat$b) / as.numeric(stat$seb) / sqrt(n)
+        .zToCor(as.numeric(stat$b) / as.numeric(stat$seb), n)
     } else if (!is.null(stat$b)) {
         as.numeric(stat$b)
     } else {
@@ -4458,9 +4522,11 @@ lassosumRss <- function(
 .rssShrunkLdMoments <- function(candidateBeta, corInput, ld, w) {
     list(
         bxy = as.numeric(crossprod(corInput, candidateBeta)),
-        bxxb = (1 - w) *
-            .ldQuadForms(ld, candidateBeta) +
-            w * colSums(candidateBeta^2)
+        bxxb = as.numeric(
+            (1 - w) *
+                .ldQuadForms(ld, candidateBeta) +
+                w * colSums(candidateBeta^2)
+        )
     )
 }
 
@@ -4484,7 +4550,7 @@ lassosumRss <- function(
 # @noRd
 .rssHeldOutTrainShare <- function() 0.75
 
-# Selection on held-out summary statistics, as PUMAS does it (Zhao et al.
+# Selection on held-out summary statistics, with PUMAS's splits (Zhao et al.
 # 2021). For the marginal correlations c of n samples, a training part of
 # nTrain of them has c_t ~ N(c, (n - nTrain) / (n nTrain) Sigma), and its
 # held-out remainder c_h = (n c - nTrain c_t) / (n - nTrain). Sigma is the
@@ -4493,7 +4559,9 @@ lassosumRss <- function(
 # directions of the true LD, the least-penalized fits put weight exactly
 # there, and draws and scores from R alone never see it. Each split refits
 # the whole (s, lambda) grid on c_t and scores it on c_h; the full-data
-# candidate with the best mean score is returned (.rssHeldOutPick()).
+# candidate with the best mean score is returned (.rssHeldOutPick()). One
+# whose full-data fit is empty has nothing to return, so it counts as having
+# no correlation.
 # @noRd
 #' @importFrom stats rnorm
 .rssSelectHeldOut <- function(candidateBeta, corInput, ld, n, refit) {
@@ -4515,19 +4583,23 @@ lassosumRss <- function(
     corScores <- map(scores, "cor")
     explainedScores <- map(scores, "explained")
     idx <- .rssHeldOutPick(
-        rowMeans(exec(cbind, !!!corScores)),
+        replace(
+            rowMeans(exec(cbind, !!!corScores)),
+            colSums(candidateBeta != 0, na.rm = TRUE) == 0,
+            -Inf
+        ),
         rowMeans(exec(cbind, !!!explainedScores))
     )
     list(beta = candidateBeta[, idx], index = idx, mode = "heldOut")
 }
 
 # Split `k`: the candidates refit on its training part and scored on its
-# held-out part, by their correlation with it and by the variance of it they
-# explain, 2 c_h' b - b' Sigma b, which unlike the correlation depends on b's
-# scale. `refit` names the refitting function (`fn`) and its other
-# arguments (`args`); it is given the training part's correlations and the
-# share of the samples that part keeps, and returns the candidates in the
-# full data's order.
+# held-out part, by the variance of it they explain, 2 c_h' b - b' Sigma b,
+# and by their correlation with it, which is -Inf for a fit empty there.
+# `refit` names the refitting function (`fn`) and its other arguments
+# (`args`); it is given the training part's correlations and the share of the
+# samples that part keeps, and returns the candidates in the full data's
+# order.
 # @noRd
 .rssHeldOutScore <- function(k, noise, corInput, ld, refit, w) {
     share <- .rssHeldOutTrainShare()
@@ -4542,14 +4614,18 @@ lassosumRss <- function(
     )
 }
 
-# The candidate with the best mean held-out correlation. Candidates that
-# differ only in scale -- the ridge's at s = 1, where each fit is
-# c / (1 + lambda) -- tie on it, and the one explaining the most held-out
-# variance wins; the first in the grid where that ties too.
+# The candidate explaining the most held-out variance on average. PUMAS picks
+# on the correlation instead, but that ignores scale: at s near 1 the fit nearly
+# ignores the LD, every tag of a signal keeps its marginal weight, and it can
+# win with a predicted variance thousands of times the trait's. A correlation
+# of -Inf marks a fit empty in some split or on the full data. Such a candidate
+# is out while any other is left, or its score of 0 would beat every fit that
+# overshoots, so a fit is returned wherever one exists. A tie in the variance
+# goes to the better correlation, then to the first in the grid.
 # @noRd
 .rssHeldOutPick <- function(cor, explained) {
-    ties <- .rssScoreTies(cor)
-    ties[.lassosumFirstMax(explained[ties])]
+    ties <- .rssScoreTies(replace(explained, !is.finite(cor), -Inf))
+    ties[.lassosumFirstMax(cor[ties])]
 }
 
 # The shrinkage grid refit on a held-out split's training part.
@@ -4945,8 +5021,8 @@ lassosumRss <- function(
 #' training part, 75\% of the samples, and its held-out remainder, drawing
 #' each split from the statistics and the LD as PUMAS does (Zhao et al.
 #' 2021). The path is refit on each training part, every candidate is scored
-#' on the held-out part by
-#' \deqn{\frac{c_h^T \beta}{\sqrt{\beta^T \hat\Sigma \beta}}, \quad
+#' on the held-out part by the variance of it that it explains,
+#' \deqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta, \quad
 #'   \hat\Sigma = (1 - w) R + w I,}
 #' and the full-data fit at the (\code{s}, lambda) with the best mean score
 #' is returned. \eqn{w} is the Schafer-Strimmer intensity for a correlation
@@ -4954,13 +5030,16 @@ lassosumRss <- function(
 #' number of variants misses directions of the true LD, and the
 #' least-penalized fits put weight exactly there, so scoring against
 #' \eqn{R} itself would keep choosing them. The splits use R's random number
-#' generator, so \code{set.seed()} makes the weights reproducible. The score
-#' does not change with \eqn{\beta}'s scale, so candidates that differ only
-#' in scale tie on it, as the ridge's do at \eqn{s = 1}, where each fit is
-#' \eqn{c / (1 + \lambda)}. Of tied candidates, the one explaining the most
-#' held-out variance, \eqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta} averaged
-#' over the splits, is returned, and the first in the grid where that ties
-#' too.
+#' generator, so \code{set.seed()} makes the weights reproducible.
+#'
+#' PUMAS scores by the correlation with the held-out part,
+#' \eqn{c_h^T \beta / \sqrt{\beta^T \hat\Sigma \beta}}, which here only breaks
+#' ties. It does not change with \eqn{\beta}'s scale, so it lets a fit win at
+#' \eqn{s} near 1, where the LD is nearly ignored and every tag of a signal
+#' keeps its marginal weight, with a predicted variance thousands of times the
+#' trait's. A candidate whose fit is empty in a split or on the full data is
+#' returned only if every candidate's is, and the first in the grid wins a tie
+#' on both scores.
 #'
 #' \code{selection = "ldQuadratic"} is lassosum's pseudovalidation (Mak et
 #' al. 2017): the in-sample score
@@ -4973,8 +5052,8 @@ lassosumRss <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -5475,8 +5554,8 @@ penalizedRss <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -5548,8 +5627,8 @@ scadRssWeights <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -5758,8 +5837,8 @@ ridgeRssWeights <- function(
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
 #'   \code{b} with \code{seb}, or \code{b} alone, taken as already
-#'   standardized. The engine receives the standardized effects z / sqrt(n),
-#'   with n the median of \code{n}.
+#'   standardized. The engine receives the correlation each z stands for,
+#'   z / sqrt(z^2 + n - 2), with n the median of \code{n}.
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
@@ -5883,7 +5962,9 @@ l0learnRssWeights <- function(
 #'   \code{lambda} and cross-validated error there (\code{cve},
 #'   \code{cvse}); \code{"full"} the whole \code{cv.ncvreg} object, with
 #'   every \code{lambda}'s coefficients but without its copy of \code{X}.
-#'   Either names the variants it was fitted on.
+#'   Each names the variants it was fitted on.
+#' @param retainX Logical. Keep that copy of \code{X} in a \code{"full"} fit
+#'   (default \code{FALSE}). An error at any other \code{fitRetention}.
 #' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
 #'   with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be
@@ -5900,11 +5981,13 @@ ncvregWeights <- function(
     penalty,
     nfolds = 5,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = NcvregOptions()
 ) {
     .assertMethodOptions(methodArgs, "NcvregOptions", "methodArgs")
     assertCount(nfolds, positive = TRUE)
     fitRetention <- arg_match(fitRetention)
+    .assertRetainX(retainX, fitRetention)
     if (!requireNamespace("ncvreg", quietly = TRUE)) {
         abort("Package 'ncvreg' is required for this function.")
     }
@@ -5926,11 +6009,15 @@ ncvregWeights <- function(
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    kept <- if (identical(fitRetention, "full")) {
-        `[[<-`(fit, "fit", .withoutFields(fit$fit, "X"))
-    } else {
-        .ncvregSlimFit(fit, coefs)
-    }
+    kept <- switch(
+        fitRetention,
+        slim = .ncvregSlimFit(fit, coefs),
+        full = if (retainX) {
+            fit
+        } else {
+            `[[<-`(fit, "fit", value = .withoutFields(fit$fit, "X"))
+        }
+    )
     `attr<-`(weights, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
 }
 
@@ -5981,6 +6068,7 @@ scadWeights <- function(
     y,
     nfolds = 5,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = NcvregOptions()
 ) {
     .assertMethodOptions(methodArgs, "NcvregOptions", "methodArgs")
@@ -5990,6 +6078,7 @@ scadWeights <- function(
         penalty = "SCAD",
         nfolds = nfolds,
         fitRetention = arg_match(fitRetention),
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }
@@ -6021,6 +6110,7 @@ mcpWeights <- function(
     y,
     nfolds = 5,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = NcvregOptions()
 ) {
     .assertMethodOptions(methodArgs, "NcvregOptions", "methodArgs")
@@ -6030,6 +6120,7 @@ mcpWeights <- function(
         penalty = "MCP",
         nfolds = nfolds,
         fitRetention = arg_match(fitRetention),
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }
@@ -6227,9 +6318,11 @@ bglrWeights <- function(
 #'   silently ignored.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
-#'   nothing, \code{"slim"} the fitted model without its copy of the
-#'   genotypes (\code{x}), \code{"full"} the whole fitted model. Either
-#'   names the variants it was fitted on.
+#'   nothing, \code{"slim"} and \code{"full"} the fitted model without its
+#'   copy of the genotypes (\code{x}). Each names the variants it was fitted
+#'   on.
+#' @param retainX Logical. Keep that copy of the genotypes in a \code{"full"}
+#'   fit (default \code{FALSE}). An error at any other \code{fitRetention}.
 #' @param nK Integer. Number of variational mixture components for the VB fit
 #'   (\code{dprVbWeights}). Default \code{8}.
 #' @param sStep Integer. Number of Gibbs sampling steps for the Gibbs fit
@@ -6246,9 +6339,11 @@ dprWeights <- function(
     y,
     fittingMethod = "VB",
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = DprOptions()
 ) {
     fitRetention <- arg_match(fitRetention)
+    .assertRetainX(retainX, fitRetention)
     .assertMethodOptions(methodArgs, "DprOptions", "methodArgs")
     if (!requireNamespace("RcppDPR", quietly = TRUE)) {
         abort("Package 'RcppDPR' is required for this function.")
@@ -6272,11 +6367,7 @@ dprWeights <- function(
     if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }
-    kept <- if (identical(fitRetention, "full")) {
-        fit
-    } else {
-        .withoutFields(fit, "x")
-    }
+    kept <- if (retainX) fit else .withoutFields(fit, "x")
     `attr<-`(eff.wgt, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
 }
 
@@ -6292,6 +6383,7 @@ dprVbWeights <- function(
     y,
     nK = 8,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = DprOptions()
 ) {
     fitRetention <- arg_match(fitRetention)
@@ -6301,6 +6393,7 @@ dprVbWeights <- function(
         y,
         fittingMethod = "VB",
         fitRetention = fitRetention,
+        retainX = retainX,
         methodArgs = .methodOptionsWith(methodArgs, "DprOptions", n_k = nK)
     )
 }
@@ -6321,6 +6414,7 @@ dprGibbsWeights <- function(
     y,
     sStep = 5000,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = DprOptions()
 ) {
     .assertMethodOptions(methodArgs, "DprOptions", "methodArgs")
@@ -6331,6 +6425,7 @@ dprGibbsWeights <- function(
         y,
         fittingMethod = "Gibbs",
         fitRetention = fitRetention,
+        retainX = retainX,
         methodArgs = .methodOptionsWith(
             methodArgs,
             "DprOptions",
@@ -6354,6 +6449,7 @@ dprAdaptiveGibbsWeights <- function(
     X,
     y,
     fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
     methodArgs = DprOptions()
 ) {
     .assertMethodOptions(methodArgs, "DprOptions", "methodArgs")
@@ -6363,6 +6459,7 @@ dprAdaptiveGibbsWeights <- function(
         y,
         fittingMethod = "Adaptive_Gibbs",
         fitRetention = fitRetention,
+        retainX = retainX,
         methodArgs = methodArgs
     )
 }

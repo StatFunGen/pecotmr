@@ -8,6 +8,7 @@ ridgeWeights(
   X,
   y,
   fitRetention = c("none", "slim", "full"),
+  retainX = FALSE,
   methodArgs = GlmnetOptions()
 )
 }
@@ -22,8 +23,11 @@ nothing; \code{"slim"} the selected fit, as a list of its coefficients
 (\code{coef}, over the variants fitted), \code{intercept},
 \code{lambda} and cross-validated error there (\code{cvm},
 \code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-every \code{lambda}'s coefficients. Either names the variants it was
-fitted on.}
+every \code{lambda}'s coefficients but without the copy of \code{X} its
+stored calls would hold. Each names the variants it was fitted on.}
+
+\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
+(default \code{FALSE}). An error at any other \code{fitRetention}.}
 
 \item{methodArgs}{Additional arguments forwarded to
 \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare

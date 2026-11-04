@@ -140,17 +140,33 @@ should carry into a real analysis:
 `twasWeights` accepts two shapes:
 
 - a **flat** `TwasWeights` or `QtlFineMappingResult` (or a homogeneous list
-    of them) carrying `region` provenance. Each gene is assigned to its home
-    LD block by `start(region)`, matching cTWAS's own placement rule.
-- a **pre-bucketed named list** keyed by `region_id`, used as-is.
+    of them), each gene read with the LD block holding most of its weight. A
+    gene's `traitPos`, if it has one, only gives its coordinates in the
+    results.
+- a **pre-bucketed named list** keyed by `region_id`, used as-is, each gene in
+    one block.
 
-Blocks with no gene weights still contribute their SNP-level signal to the
-group prior — the whole-chromosome pattern where only a few blocks carry
-genes.
+Blocks with no gene weights do not feed the group priors by default: cTWAS
+skips regions with fewer genes than its `min_gene`, 1. To let their SNP-level
+signal in, set `min_gene = 0` in `CtwasEstParamOptions()`.
 
-A gene whose cis window straddles a block boundary is assigned by its single
-anchor. The signal it loses across the boundary is a separate concern,
-handled by `mergeCtwasBoundaryRegions()` below.
+A gene's weights are used whole, whichever blocks they fall in; see
+[Boundary genes](#boundary-genes).
+
+A run estimates one prior per group, and a group is a study, context and
+molecular type, each estimated from its own genes. So the contexts need not
+hold the same genes, and two studies with one context name stay apart. The type
+is the `dataType` the data records, through `QtlDataset(dataType = )` or
+`QtlSumStats(dataType = )`, which the pipelines carry onto the weights; where
+none is recorded, a gene's type is `"QTL"`. Groups share one prior variance by
+default (`varStructure = "shared_nonSNP"`), since a group with few causal genes
+has little to estimate its own from, and `"shared_type"` pools them within each
+molecular type instead.
+
+cTWAS leaves a group with fewer genes than `min_group_size` (100 by default) out
+of the fit, and `estCtwasGroupPriors()` warns when it does. To keep it, lower
+`min_group_size` in both `CtwasRegionDataOptions()` and
+`CtwasEstParamOptions()`: the second stops on a group under its own limit.
 
 ## Trimming each gene's variants
 
@@ -220,11 +236,23 @@ set.
 `susieAlpha()` returns the per-single-effect alpha matrix behind those
 PIPs. The group priors are the run's one genome-wide estimate: the EM step
 fits them across every region, and each region is then fine-mapped under
-them. `ctwasGroupPriors()` lists them once per run, one row per group with
-its size, prior inclusion probability and prior effect variance:
+them. `ctwasGroupPriors()` lists them once per run, one row per group. A group
+is named `{study}_{context}_{type}`, with the three as columns of their own,
+since those underscores cannot be split back. Beside its size, prior inclusion
+probability and prior effect variance are cTWAS's summary of them: each gene
+group's enrichment over the SNP group, and the heritability each group explains:
 
 ```{r ctwas-param}
 ctwasGroupPriors(res)
+```
+
+A gene modelled through several molecular traits or contexts has one PIP for
+each. `ctwasCombinedPips()` gives the probability that it is causal through any
+of them. Pass a `mapping` from molecular ids to gene names when the ids of a
+gene's traits differ, as an expression and a splicing trait's do:
+
+```{r ctwas-combined}
+ctwasCombinedPips(res)
 ```
 
 The rest of the EM output, iteration traces and convergence flag included,
@@ -302,9 +330,21 @@ apart lets you substitute priors of your own into `screenCtwasRegions()`.
 
 ## Boundary genes
 
-A gene whose cis window crosses an LD block boundary is fine-mapped in only
-one of the two blocks. `mergeCtwasBoundaryRegions()` re-runs such genes over
-the merged pair:
+A gene whose weights cross an LD block boundary is modelled as cTWAS models it.
+Its z-score reads all its weights, and it is fine-mapped in the block holding
+the largest share of its absolute weights, with the part of its weights in that
+block. That first pass can call a gene whose real signal is a variant across the
+boundary, since the block it is fine-mapped in has no LD to explain the signal
+by. So `ctwasPipeline()` merges the regions of a high-PIP boundary gene and
+fine-maps them again, as cTWAS's own post-processing does. In simulations
+through `ctwasPipeline()` on real LD, a non-causal gene reading a causal variant
+across the boundary reached a PIP above 0.5 in up to 93% of regions after the
+first pass and in up to 16% after merging, while a causal boundary gene reached
+it in at least 96% either way.
+
+`BoundaryMergeParam()` holds the settings; `BoundaryMergeParam(enabled = FALSE)`
+stops at the first pass. `mergeCtwasBoundaryRegions()` is the same step for the
+granular path:
 
 ```{r ctwas-merge, eval=FALSE}
 merged <- mergeCtwasBoundaryRegions(
@@ -314,12 +354,6 @@ merged <- mergeCtwasBoundaryRegions(
     maxSNP = Inf
 )
 ```
-
-`ctwasPipeline(boundaryMergeParam = BoundaryMergeParam(enabled = TRUE))` does
-the same thing inline, with
-`mergePipThresh` / `mergeFilterCs` / `mergeMaxSNP` forwarding to those
-arguments. It is off by default because it only matters when a
-high-PIP gene actually straddles a boundary.
 
 ## Common parameters
 
@@ -335,11 +369,11 @@ ctwasPipeline(
         thin = 0.1,
         niterPrefit = 3,
         niter = 30,
-        varStructure = "shared_type",
+        varStructure = "shared_nonSNP",
         fallbackToPrefit = FALSE
     ),
     variantPruningParam = VariantPruningParam(),
-    boundaryMergeParam = BoundaryMergeParam(enabled = FALSE)
+    boundaryMergeParam = BoundaryMergeParam()
 )
 ```
 

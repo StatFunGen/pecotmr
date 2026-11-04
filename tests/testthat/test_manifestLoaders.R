@@ -585,6 +585,32 @@ test_that("loadQtlSumStatsFromManifest builds a per-tuple collection", {
     expect_equal(as.character(obj$context), "Whole_Blood")
 })
 
+test_that("a QtlSumStats manifest records each tuple's molecular type", {
+    tmp <- withr::local_tempdir()
+    ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "geneA.tsv"))
+    manifest <- data.frame(
+        study = "eqtl",
+        context = "Whole_Blood",
+        trait = c("geneA", "geneB", "geneC"),
+        sumStatsPath = ssPath,
+        data_type = c("expression", "splicing", ""),
+        stringsAsFactors = FALSE
+    )
+    obj <- suppressWarnings(loadQtlSumStatsFromManifest(
+        manifest,
+        genome = "hg38",
+        ldReference = .toyLdRef()
+    ))
+    expect_equal(dataType(obj), c("expression", "splicing", NA_character_))
+    manifest$data_type <- NULL
+    untyped <- suppressWarnings(loadQtlSumStatsFromManifest(
+        manifest,
+        genome = "hg38",
+        ldReference = .toyLdRef()
+    ))
+    expect_true(all(is.na(dataType(untyped))))
+})
+
 test_that("loadQtlSumStatsFromManifest derives the Wald z from beta/se", {
     tmp <- withr::local_tempdir()
     df <- .toyGwasDf(5)
@@ -854,6 +880,46 @@ test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
     expect_equal(contexts(qd), "ctxA")
 })
 
+test_that("a QtlDataset manifest records each context's molecular type", {
+    tmp <- withr::local_tempdir()
+    manifest <- data.frame(
+        context = c("ctxA", "ctxB", "ctxC"),
+        phenotypePath = c(
+            .writePhenoBed(file.path(tmp, "a.bed")),
+            .writePhenoBed(file.path(tmp, "b.bed")),
+            .writePhenoBed(file.path(tmp, "c.bed"))
+        ),
+        study = "studyX",
+        genotypePath = .toyRefPrefix(),
+        data_type = c("expression", "splicing", ""),
+        stringsAsFactors = FALSE
+    )
+    qd <- loadQtlDatasetFromManifest(manifest)
+    expect_equal(
+        dataType(qd),
+        c(ctxA = "expression", ctxB = "splicing", ctxC = NA_character_)
+    )
+    # A context's rows may leave it blank, and with none given nothing is set.
+    twoRows <- manifest[c(1L, 1L), ]
+    twoRows$data_type <- c("expression", NA)
+    expect_equal(
+        dataType(loadQtlDatasetFromManifest(twoRows)),
+        c(ctxA = "expression")
+    )
+    blank <- manifest[1L, ]
+    blank$data_type <- ""
+    expect_equal(
+        dataType(loadQtlDatasetFromManifest(blank)),
+        c(ctxA = NA_character_)
+    )
+    twoRows$data_type <- c("expression", "splicing")
+    expect_error(
+        loadQtlDatasetFromManifest(twoRows),
+        "ctxA (study 'studyX') declare several dataType values",
+        fixed = TRUE
+    )
+})
+
 test_that("loadQtlDatasetFromManifest accepts study/genotypes as arguments", {
     tmp <- withr::local_tempdir()
     bed <- .writePhenoBed(file.path(tmp, "ctxA.bed"))
@@ -889,6 +955,24 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     expect_s4_class(msd, "MultiStudyQtlDataset")
     expect_true(methods::validObject(msd))
     expect_equal(sort(names(msd)), c("study1", "study2"))
+})
+
+test_that("a multi-study manifest types each study's contexts", {
+    tmp <- withr::local_tempdir()
+    manifest <- data.frame(
+        study = c("study1", "study2"),
+        context = "ctxA",
+        phenotypePath = c(
+            .writePhenoBed(file.path(tmp, "a.bed")),
+            .writePhenoBed(file.path(tmp, "b.bed"))
+        ),
+        genotypePath = .toyRefPrefix(),
+        dataType = c("expression", "protein"),
+        stringsAsFactors = FALSE
+    )
+    msd <- loadMultiStudyQtlDatasetFromManifest(manifest)
+    expect_equal(dataType(msd[["study1"]]), c(ctxA = "expression"))
+    expect_equal(dataType(msd[["study2"]]), c(ctxA = "protein"))
 })
 
 test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {

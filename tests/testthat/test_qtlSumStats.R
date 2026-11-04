@@ -815,3 +815,35 @@ test_that("sumStats(annotateSignificance=) adds a derived logical mcol", {
     }
     expect_equal(S4Vectors::mcols(gr)$significant, exp1)
 })
+
+test_that("QtlSumStats records each tuple's molecular type", {
+    build <- function(dataType = NULL) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100 * 1:3, width = 1)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = paste0("rs", 1:3),
+            A1 = "A",
+            A2 = "G",
+            Z = c(1, 2, 3),
+            N = 100L
+        )
+        QtlSumStats(
+            studyName = c("s1", "s1"),
+            context = c("brain", "liver"),
+            trait = c("g1", "g1"),
+            entry = list(gr, gr),
+            genome = "hg38",
+            dataType = dataType
+        )
+    }
+    expect_equal(dataType(build()), c(NA_character_, NA_character_))
+    expect_false("dataType" %in% colnames(S4Vectors::mcols(build())))
+    expect_equal(dataType(build("expression")), c("expression", "expression"))
+    both <- build(c("expression", "splicing"))
+    expect_equal(dataType(both), c("expression", "splicing"))
+    expect_equal(dataType(both[2L]), "splicing")
+    expect_equal(as.character(both$dataType), c("expression", "splicing"))
+    expect_error(build(c("a", "b", "c")), "`dataType` must be length 1")
+})

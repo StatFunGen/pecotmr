@@ -6,10 +6,10 @@
 #include <R_ext/Visibility.h>
 
 // bgen.cpp
-cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples, cpp11::integers alleles);
-extern "C" SEXP _pecotmr_bgenDosageCpp(SEXP data, SEXP nSamples, SEXP alleles) {
+cpp11::writable::doubles_matrix<> bgenDosageCpp(cpp11::raws data, int nSamples, cpp11::integers alleles, cpp11::integers samples);
+extern "C" SEXP _pecotmr_bgenDosageCpp(SEXP data, SEXP nSamples, SEXP alleles, SEXP samples) {
   BEGIN_CPP11
-    return cpp11::as_sexp(bgenDosageCpp(cpp11::as_cpp<cpp11::decay_t<cpp11::raws>>(data), cpp11::as_cpp<cpp11::decay_t<int>>(nSamples), cpp11::as_cpp<cpp11::decay_t<cpp11::integers>>(alleles)));
+    return cpp11::as_sexp(bgenDosageCpp(cpp11::as_cpp<cpp11::decay_t<cpp11::raws>>(data), cpp11::as_cpp<cpp11::decay_t<int>>(nSamples), cpp11::as_cpp<cpp11::decay_t<cpp11::integers>>(alleles), cpp11::as_cpp<cpp11::decay_t<cpp11::integers>>(samples)));
   END_CPP11
 }
 // bgen.cpp
@@ -114,7 +114,7 @@ extern "C" SEXP _pecotmr_vcfGtDosageCpp(SEXP gt, SEXP alleles) {
 extern "C" {
 static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_bayesAlphabetFactorCpp",       (DL_FUNC) &_pecotmr_bayesAlphabetFactorCpp,       17},
-    {"_pecotmr_bgenDosageCpp",                (DL_FUNC) &_pecotmr_bgenDosageCpp,                 3},
+    {"_pecotmr_bgenDosageCpp",                (DL_FUNC) &_pecotmr_bgenDosageCpp,                 4},
     {"_pecotmr_bgenSampleIdsCpp",             (DL_FUNC) &_pecotmr_bgenSampleIdsCpp,              2},
     {"_pecotmr_dentistIterativeImpute",       (DL_FUNC) &_pecotmr_dentistIterativeImpute,       12},
     {"_pecotmr_dentistIterativeImputeFactor", (DL_FUNC) &_pecotmr_dentistIterativeImputeFactor, 12},

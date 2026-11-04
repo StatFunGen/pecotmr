@@ -249,6 +249,13 @@ setMethod(
 #'       trait at \code{coverage} (and \code{minPurity}), else 0.}
 #'     \item{\code{"highPip"}}{1 when its largest PIP is at least
 #'       \code{pipThreshold}, else 0.}
+#'     \item{\code{"maxCppCs"}, \code{"sumPipCs"}}{\code{"maxCpp"} and
+#'       \code{"sumPip"} from the effects that produced a credible set
+#'       alone: each variant's \code{within_cs_pip}, its posterior in the
+#'       effect of its credible set at the fit's primary coverage and
+#'       purity, 0 outside any (continuous). Every effect a fit keeps spreads
+#'       a whole unit of posterior over its variants, however weak its
+#'       evidence, and these leave that low-confidence mass out.}
 #'   }
 #'
 #'   Variants are matched to the reference allele-aware (id format, ref/alt
@@ -265,7 +272,9 @@ setMethod(
 #'   \code{\link{GwasFineMappingResult}}.
 #' @param ldRef The \code{\linkS4class{LdStatistic}} the annotations will be
 #'   used with.
-#' @param types Which annotation types to build; see above. Default all four.
+#' @param types Which annotation types to build; see above. Default
+#'   \code{"maxCpp"}, \code{"sumPip"}, \code{"credibleSet"} and
+#'   \code{"highPip"}.
 #' @param coverage Credible-set coverage for \code{"credibleSet"}. Default
 #'   \code{0.95}.
 #' @param minPurity Minimum credible-set purity for \code{"credibleSet"};
@@ -319,7 +328,7 @@ fineMappingAnnotations <- function(
 ) {
     assertMultiClass(x, c("QtlFineMappingResult", "GwasFineMappingResult"))
     assertClass(ldRef, "LdStatistic")
-    chosenTypes <- arg_match(types, multiple = TRUE)
+    chosenTypes <- arg_match(types, .fmaTypes, multiple = TRUE)
     assertNumber(coverage, lower = 0, upper = 1)
     assertNumber(minPurity, lower = 0, upper = 1, null.ok = TRUE)
     assertNumber(pipThreshold, lower = 0, upper = 1)
@@ -344,7 +353,7 @@ fineMappingAnnotations <- function(
         name = colnames(mat),
         tier = rep(chosenTier, ncol(mat)),
         type = if_else(
-            is_in(colTypes, c("maxCpp", "sumPip")),
+            is_in(colTypes, c("maxCpp", "sumPip", "maxCppCs", "sumPipCs")),
             "continuous",
             "binary"
         )
@@ -356,6 +365,18 @@ fineMappingAnnotations <- function(
         genome = NULL
     )
 }
+
+# Every annotation type fineMappingAnnotations() builds; its default leaves the
+# credible-set PIP columns to be asked for.
+# @noRd
+.fmaTypes <- c(
+    "maxCpp",
+    "sumPip",
+    "credibleSet",
+    "highPip",
+    "maxCppCs",
+    "sumPipCs"
+)
 
 # One unit's columns over the reference's variants: its traits' PIPs and
 # credible-set members, its variants aligned to the reference in one pass by
@@ -379,13 +400,17 @@ fineMappingAnnotations <- function(
     hit <- !is.na(at) & !is.na(values)
     M <- .variantTableSize(refTable)
     maxPip <- .fmaScatter(M, at[hit], values[hit], "max")
+    withinCs <- as.numeric(md$within_cs_pip %||% rep(NA_real_, length(gr)))
+    inCs <- !is.na(at) & !is.na(withinCs)
     out <- list(
         maxCpp = maxPip,
         sumPip = .fmaScatter(M, at[hit], values[hit], "sum"),
         credibleSet = if (is_in("credibleSet", types)) {
             .fmaCredibleSetColumn(md, at, M, coverage, minPurity)
         },
-        highPip = as.numeric(maxPip >= pipThreshold)
+        highPip = as.numeric(maxPip >= pipThreshold),
+        maxCppCs = .fmaScatter(M, at[inCs], withinCs[inCs], "max"),
+        sumPipCs = .fmaScatter(M, at[inCs], withinCs[inCs], "sum")
     )[types]
     named <- set_names(out, str_c(.fmaUnitName(tuples, k), "|", types))
     exec(cbind, !!!named)
@@ -396,6 +421,9 @@ fineMappingAnnotations <- function(
 #' @importFrom dplyr summarise
 #' @noRd
 .fmaScatter <- function(M, at, values, f) {
+    if (length(at) == 0L) {
+        return(numeric(M))
+    }
     combine <- switch(f, max = max, sum = sum)
     byIndex <- tibble(at = at, value = values) |>
         summarise(value = combine(.data$value), .by = "at")

@@ -274,6 +274,16 @@ per-variant heritability on half the variants puts 75% of it in `annotA` —
 and the estimate is directionally right but attenuated, again a consequence
 of the reference's size rather than of the annotation.
 
+`enrichmentP` is ldsc's t test of the per-variant heritability inside the
+annotation against outside it, for every estimator. Those shares are only
+shares for values in [0, 1], the domain enrichment is defined on (Dey et al.
+2020), so for an annotation with values outside it the enrichment columns are
+`NA` and `tau` is the summary to read; `standardizeTauStar()` puts it on a
+scale comparable across annotations. Inside [0, 1], the enrichment of a
+continuous annotation still depends on its zero meaning "not in the
+annotation": `(x + 3) / 100` and `(x - min(x)) / max(x - min(x))` fit the same
+model but report different enrichments.
+
 Annotations come from files via `readAnnotations()`, which reads BED, BigWig
 and LDSC `.annot` formats at a given set of variant positions:
 
@@ -292,7 +302,10 @@ test each, via `scoreStats()`. Every estimator calibrates that test by the
 spread of its LD blocks' scores, as it does its standard errors, so it stays
 valid when the regression weights are only approximately right. Molecular QTL
 annotations built by `fineMappingAnnotations()` from fine-mapping results are
-candidates by default.
+candidates by default. Every effect a fit keeps spreads a whole unit of
+posterior over its variants, however weak its evidence, so its `maxCpp` and
+`sumPip` columns carry some low-confidence mass; `types = c("maxCppCs",
+"sumPipCs")` builds them from the effects that produced a credible set alone.
 
 All four estimators fit the same baseline design. An all-ones base
 annotation is added ahead of the baseline annotations unless they already
@@ -416,7 +429,7 @@ reports what its authors report, and `NA` where they report nothing:
 
 ```{r cis-h2}
 data(qtlSumStatsExample)
-cis <- estimateH2(qtlSumStatsExample)
+cis <- estimateH2(qtlSumStatsExample, referenceOverlap = 1)
 cis
 cis[[1]]
 heritabilityIntercept(estimateH2(qtlSumStatsExample, method = "hdlL"))
@@ -424,15 +437,26 @@ heritabilityIntercept(estimateH2(qtlSumStatsExample, method = "hdlL"))
 
 Each row's element is the window its estimate covers: the row's `region`,
 or with `cisWindow` the trait's position widened by that much on each side.
-LAVA, the default, projects the statistics onto the LD components that hold
-99% of the LD variance and corrects for the reference's size. LAVA itself
-withholds its estimate where the components outnumber a tenth of the sample
-size, which a cis window's usually do at QTL sample sizes; `estimateH2()`
-reports it at any size. LAVA and HDL-L read the reference's sample size, so
-an `LdMatrix` reference must record `nSamples`. FastHer's likelihood
-assumes in-sample LD (HEELS maximizes the same one): where the reference's
-rank or the statistics reach the study's sample size, as with an external
-reference larger than the study, its estimate is `NA`, with a warning.
+Every method reads `z` as a t statistic and converts it exactly to the
+correlation, since \(z / \sqrt{n}\) overstates a strong QTL's. LAVA, the
+default, projects the statistics onto the LD components that hold 99% of the
+LD variance. Whether LD is the study's own is not a yes or no, and LAVA's
+noise term depends on how far the reference's LD lies from the study's:
+`referenceOverlap` is the share of the study's samples in the reference. It
+defaults to 0, and with a reference of thousands it hardly matters, so you
+rarely need it. Set it when the LD comes from the study's own samples or a
+small cohort holding them, as here, where it is 1; at 0 such an estimate comes
+out far too low, and a warning says so. Each LAVA estimate records the value it
+took in its `reference_overlap` column.
+LAVA itself withholds its estimate where the components outnumber a tenth of
+the sample size, which a cis window's usually do at QTL sample sizes;
+`estimateH2()` reports it at any size. LAVA and HDL-L read the reference's
+sample size, so an `LdMatrix` reference must record `nSamples`. FastHer's
+likelihood assumes in-sample LD (HEELS maximizes the same one): where the
+reference's rank or the statistics reach the study's sample size, as they can
+with LD from outside the study, its estimate is `NA`, with a warning. Its
+standard error assumes an infinitesimal architecture and is too small with few
+causal variants.
 
 ## Next steps
 

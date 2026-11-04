@@ -4893,7 +4893,7 @@ effectiveN <- function(nCase, nControl) {
 .qcStepKeepSkip <- function(df, opts) {
     nIn <- nrow(df)
     kept <- if (length(opts$keepVariants) > 0L) {
-        filter(df, is_in(.data$SNP, opts$keepVariants))
+        slice(df, which(.qcKeepListed(df, opts$keepVariants)))
     } else {
         df
     }
@@ -4915,6 +4915,22 @@ effectiveN <- function(nCase, nControl) {
                 nKept - nrow(skipped)
             }
         )
+    )
+}
+
+# Which of an entry's variants a keep list names, as every keep list is matched
+# (.keepByIds()): by position and alleles, or by the SNP label for an rsID.
+# @noRd
+.qcKeepListed <- function(df, keepVariants) {
+    .keepByIds(
+        tibble(
+            chrom = df$chrom,
+            id = df$SNP,
+            pos = df$pos,
+            A2 = df$A2,
+            A1 = df$A1
+        ),
+        keepVariants
     )
 }
 
@@ -5797,8 +5813,9 @@ effectiveN <- function(nCase, nControl) {
 #'   \code{AF} / \code{MAF} / \code{FRQ} column when one is present
 #'   \emph{and} against the panel. It has always been a single knob, so it
 #'   lives here rather than being split into two that could disagree.
-#' @param keepVariants Optional character vector of variant IDs (SNP column) to
-#'   retain prior to harmonization.
+#' @param keepVariants Optional character vector of variant IDs or rsIDs to
+#'   retain prior to harmonization. Alleles match in either order and on either
+#'   strand, and an rsID is matched against the \code{SNP} column.
 #' @param skipRegion Optional \code{GRanges} of regions to drop.
 #' @param signalScreenParam Whether to skip an entry before fitting it,
 #'   built with
@@ -6155,8 +6172,9 @@ setClass(
 #'   checked bundle. These act on the sumstats themselves, not on any genotype
 #'   matrix, which is why they are separate from
 #'   \code{\link{GenotypeFilterParam}}.
-#' @param removeIndels Logical. Drop insertions and deletions. Default
-#'   \code{FALSE}.
+#' @param removeIndels Logical. Drop variants other than SNPs. A SNP has exactly
+#'   one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*} and
+#'   \code{N} count as indels. Default \code{FALSE}.
 #' @param removeStrandAmbiguous Logical. Drop strand-ambiguous variants (A/T
 #'   and C/G). Default \code{TRUE}.
 #' @param infoCutoff Imputation-INFO floor. Default \code{0}.

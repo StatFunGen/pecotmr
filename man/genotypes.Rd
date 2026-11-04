@@ -21,7 +21,9 @@ A numeric matrix, a list of matrices, or \code{NULL}.
 Extract a genotype matrix from an object that carries genotype
   data. For a \code{QtlDataset}, the whole dataset's dosages (samples x
   variants), with no QC applied: to read part of it, narrow the dataset
-  first, e.g. \code{genotypes(x[window, samples, ])}.
+  first, e.g. \code{genotypes(x[window, samples, ])}. Its columns carry the
+  labels the genotype file gives its variants; a pipeline's results name
+  them by the canonical id \code{\link{variantIds}} describes.
 }
 \examples{
 data(qtlDatasetExample)

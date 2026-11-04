@@ -8,7 +8,8 @@
 A \code{TwasWeights} collection with one row, the gene, holding
   11 methods: \code{mrash}, \code{susie}, \code{susieInf}, \code{enet},
   \code{lasso}, \code{mcp}, \code{scad}, \code{l0learn}, \code{bayesR},
-  \code{bayesC} and \code{ensemble}.
+  \code{bayesC} and \code{ensemble}. Its \code{\link{dataType}} is
+  \code{"expression"}.
 }
 \description{
 A \code{\link{TwasWeights}} collection holding per-variant TWAS

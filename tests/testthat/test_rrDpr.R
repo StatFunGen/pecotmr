@@ -46,6 +46,18 @@ test_that("dprWeights' slim fit drops the copy of the genotypes", {
         dprWeights(X, y, fittingMethod = "VB", fitRetention = "full"),
         "fit"
     )
-    expect_true(is.matrix(full$x))
+    expect_null(full$x)
     expect_equal(pecotmr:::.twasFitVariantIds(full), colnames(X))
+    withX <- attr(
+        dprWeights(
+            X,
+            y,
+            fittingMethod = "VB",
+            fitRetention = "full",
+            retainX = TRUE
+        ),
+        "fit"
+    )
+    expect_true(is.matrix(withX$x))
+    expect_equal(pecotmr:::.twasFitVariantIds(withX), colnames(X))
 })

@@ -25,7 +25,8 @@ estimateH2(sumstats, ldRef, method = "lder", annotations = NULL, ...)
   contexts = NULL,
   traitId = NULL,
   cisWindow = NULL,
-  BPPARAM = SerialParam()
+  BPPARAM = SerialParam(),
+  referenceOverlap = 0
 )
 }
 \arguments{
@@ -84,6 +85,15 @@ its \code{region}. Every selected row then needs a \code{traitPos}.}
 \item{BPPARAM}{For a \code{QtlSumStats}: a \code{BiocParallelParam} over
 the selected rows, each row's estimate on one worker. Default
 \code{SerialParam()}.}
+
+\item{referenceOverlap}{For a \code{QtlSumStats}: the share of the study's
+samples that are in the LD reference, from 0 to 1, one value or one per
+selected row. Default 0. Usually unknown, and with a reference of thousands
+it hardly matters (see Details): set it when the LD came from the study's
+own samples or a small cohort holding them, 1 if it holds them all. Only
+\code{"lava"} reads it, and its estimates record it in
+\code{reference_overlap}: HDL-L's intercept absorbs what it measures, and
+FastHer assumes the study's own LD.}
 }
 \value{
 An \code{\linkS4class{H2Estimate}}. From a \code{GwasSumStats},
@@ -103,25 +113,49 @@ Estimate SNP heritability, genome-wide from GWAS summary
 }
 \details{
 Each per-trait method is written from its authors' published
-  estimator and reports what they report:
+  estimator and reports what they report. All three read a row's \code{z}
+  as the t statistic of a marginal regression, the correlation being
+  \eqn{r = z / \sqrt{z^2 + n - 2}}: \eqn{z / \sqrt{n}}, which HDL-L's and
+  FastHer's own code read instead, overstates \eqn{r^2} by a factor of
+  \eqn{1 / (1 - r^2)}, about 1.4 for a strong QTL at \eqn{r^2 = 0.3}.
   \describe{
     \item{\code{"lava"}}{(default) LAVA's univariate estimator (Werme et
-      al. 2022): the adjusted \eqn{R^2} of the trait on the standardized
-      LD components that hold 99\% of the LD variance (at least 2, at
-      most 0.75 times the sample size), with the F test of no
-      heritability. The estimate is scaled by \eqn{(N_{ref} - K - 1) /
-      (N_{ref} - 1)} for a reference of \eqn{N_{ref}} samples and
-      \eqn{K} components, a correction LAVA describes but leaves off.
+      al. 2022), on the \eqn{K} standardized LD components that hold 99\%
+      of the LD variance (at least 2, at most 0.75 times the sample size).
+      Whether LD is the study's own is not a yes or no: how far a reference
+      of \eqn{N} samples, holding a share \eqn{\rho} of the \eqn{n} study
+      samples (\code{referenceOverlap}), lies from the study's LD in units
+      of its sampling noise is \eqn{\phi = 1 + (1 - 2\rho) n / N}: 0 for
+      the study's own samples, about 1 for a panel of thousands. The
+      estimate is \eqn{(\delta'\delta - m) / (1 + m (\phi - 1))} with
+      \eqn{m = K / (n - 1)}, which at \eqn{\phi = 0} is exactly LAVA's
+      adjusted \eqn{R^2} of the trait on the components. LAVA's own noise
+      term holds only there: with a panel of 3000 on real genotypes it gave
+      0.55-0.63 at a true 0.5 with \eqn{K / n} of 0.1-0.2, 0.69 at 0.3, and
+      \code{NA} for 70\% of traits at 0.6; this estimate stayed at
+      0.47-0.52 across references of every kind. Assuming \eqn{\rho = 0}
+      costs about \eqn{2 \rho K / N} of the estimate, under 10\% for a
+      whole cis window with a panel of thousands holding all the study's
+      samples, but LD from the study's own samples at that default comes out
+      at half or less, hence a warning when \eqn{N \le 2 n}. Divergence
+      between populations of one ancestry raises \eqn{\phi}, unmodelled:
+      about 0.54 at a true 0.5 at Fst 0.001, and 0.62 at 0.003. The p-value
+      tests no heritability, with \eqn{\phi} in its variance. It is the
+      exact F test at \eqn{\phi = 0}, but ran at about 0.09 at a nominal
+      0.05 with a panel, as real genotypes' components have heavier tails
+      than it assumes; HDL-L's held at 0.03-0.05, so prefer it for testing.
       LAVA itself withholds the estimate where \eqn{K} exceeds a tenth of
       the sample size, which a cis window's components usually do at QTL
-      sample sizes; it is reported here at any \eqn{K}. On real genotypes
-      its error past that point was about twice that below it, still
-      below HDL-L's. The estimate can be negative.}
+      sample sizes; it is reported here at any \eqn{K}. The estimate can be
+      negative or exceed 1.}
     \item{\code{"hdlL"}}{HDL-L (Li et al. 2025): the likelihood of the
       statistics rotated onto the LD eigenvectors that cover 99\% of the
       trace, in the heritability and an intercept, with a term for the
       reference's sampling noise. Its p-value is the likelihood ratio
-      against no heritability; \code{intercept} is the fitted intercept.
+      against no heritability, referred to the equal mixture of a
+      chi-square on one degree of freedom and a point mass at 0 since that
+      null is on the boundary of the heritability's range, half of what
+      HDL-L reports; \code{intercept} is the fitted intercept.
       \code{NA} where no fit converges and beats that null.}
     \item{\code{"fastHer"}}{FastHer (Svishcheva 2025): the maximum
       likelihood of an infinitesimal model for the study samples,
@@ -129,11 +163,13 @@ Each per-trait method is written from its authors' published
       expected information; \code{scale} is the fitted phenotypic
       variance relative to its standardized value, about 1 when the model
       fits. HEELS (Li, Mazumder and Lin 2023) maximizes the same
-      likelihood by iteration. The likelihood assumes in-sample LD and is
+      likelihood by iteration. The standard error holds under that model:
+      with few causal variants it is too small, 0.77 of the estimates'
+      spread at a heritability of 0.2 with one causal variant, and 0.59 at
+      0.5, on real genotypes. The likelihood assumes in-sample LD and is
       undefined when the reference's rank, or the statistics' squared
-      norm in the LD's metric, reaches the sample size, as it can with an
-      external reference larger than the study; such traits are
-      \code{NA}, with a warning.}
+      norm in the LD's metric, reaches the sample size, as it can with LD
+      from outside the study; such traits are \code{NA}, with a warning.}
   }
   Every per-trait method assumes the LD reference matches the population
   of the statistics, as the QC step (\code{\link{summaryStatsQc}})
@@ -163,7 +199,7 @@ estimateH2(ss, ldScoreExample, method = "sldsc")
 
 # Per-trait cis heritability, each row against its own LD reference.
 data(qtlSumStatsExample)
-estimateH2(qtlSumStatsExample)
+estimateH2(qtlSumStatsExample, referenceOverlap = 1)
 }
 \references{
 Werme J, van der Sluis S, Posthuma D, de Leeuw CA (2022). An

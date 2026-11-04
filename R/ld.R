@@ -967,9 +967,13 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # discarded: harmonization re-keys a surviving variant to the reference-allele
 # id, so the panel side has to speak the same form or every later id lookup
 # misses the variant it just harmonized.
+#
+# `idx` renders only those variants: a block read needs its own ids, not a whole
+# panel's.
 # @noRd
-.ldRefMatchIds <- function(x) {
-    gr <- .ldRefRanges(x)
+.ldRefMatchIds <- function(x, idx = NULL) {
+    whole <- .ldRefRanges(x)
+    gr <- if (is.null(idx)) whole else whole[idx]
     mc <- S4Vectors::mcols(gr)
     # Rendered from the reference's own ranges and alleles, in the canonical
     # form harmonization gives every id (UCSC chromosome, colons, upper-case
@@ -978,7 +982,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     # names no position to match on. A reference without alleles has only
     # its labels.
     if (is.null(mc$A1) || is.null(mc$A2)) {
-        return(.ldRefLabels(x))
+        labels <- .ldRefLabels(x)
+        return(if (is.null(idx)) labels else labels[idx])
     }
     .grVariantIds(gr)
 }
@@ -1232,9 +1237,10 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # ordering, the sharded routing and the empty-request guard in
 # `extractBlockGenotypes()` -- stays the single reader. `extract_array()`
 # delegates to that same function with `meanImpute = FALSE`, so imputation is
-# layered on here rather than pushed down.
+# layered on here rather than pushed down. `sampleIdx`, positions among the
+# panel's samples, reads only those samples; NULL reads every one.
 # @noRd
-.ldRefDosage <- function(x, snpIdx, meanImpute = TRUE) {
+.ldRefDosage <- function(x, snpIdx, meanImpute = TRUE, sampleIdx = NULL) {
     # The other primitive that does not pass through `.ldRefRanges()`.
     .ldFromRefValidate(x, "LD reference")
     if (.ldIsMatrixRef(x) || .ldIsMixtureRef(x)) {
@@ -1246,8 +1252,13 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     if (!methods::is(x, "RangedSummarizedExperiment")) {
         return(.dosageMatrix(x, snpIdx, meanImpute = meanImpute))
     }
+    panelDosage <- SummarizedExperiment::assay(x, "dosage")
     dosage <- t(as.matrix(
-        SummarizedExperiment::assay(x, "dosage")[snpIdx, , drop = FALSE]
+        if (is.null(sampleIdx)) {
+            panelDosage[snpIdx, , drop = FALSE]
+        } else {
+            panelDosage[snpIdx, sampleIdx, drop = FALSE]
+        }
     ))
     if (meanImpute) .qtlMeanImpute(dosage) else dosage
 }
@@ -2589,7 +2600,9 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 #'
 #' @param variantIds variant names in the format chr:pos:ref:alt.
 #' @param ldReferenceMetaFile Path to LD metadata file or PLINK prefix.
-#' @param keepIndel Whether to keep indel variants. Default TRUE.
+#' @param keepIndel Whether to keep variants other than SNPs. A SNP has exactly
+#'   one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*}
+#'   and \code{N} count as indels. Default TRUE.
 #' @return A list with:
 #'   \item{data}{Character vector of filtered variant IDs.}
 #'   \item{idx}{Integer vector of indices into the original variantIds.}

@@ -191,11 +191,13 @@ export(credibleSetParam)
 export(credibleSetSummary)
 export(credibleSets)
 export(csCoverage)
+export(ctwasCombinedPips)
 export(ctwasGroupPriors)
 export(ctwasPipeline)
 export(ctwasPosteriors)
 export(cvFits)
 export(cvResult)
+export(dataType)
 export(dentist)
 export(dentistSingleWindow)
 export(dprAdaptiveGibbsWeights)
@@ -207,7 +209,6 @@ export(eigenList)
 export(enetRssWeights)
 export(enetWeights)
 export(enforceDesignFullRank)
-export(enlocClusterProbabilities)
 export(ensembleWeights)
 export(estCtwasGroupPriors)
 export(estimateH2)
@@ -400,7 +401,6 @@ export(varY)
 export(variantIds)
 export(waldTestPval)
 export(weightStandardized)
-export(weightsDataType)
 export(writeBed)
 export(writeGwasVcf)
 export(z)
@@ -501,6 +501,7 @@ exportMethods(ctwasGroupPriors)
 exportMethods(ctwasPosteriors)
 exportMethods(cvFits)
 exportMethods(cvResult)
+exportMethods(dataType)
 exportMethods(eigenList)
 exportMethods(endoapply)
 exportMethods(estimateH2)
@@ -581,7 +582,6 @@ exportMethods(varY)
 exportMethods(variantIds)
 exportMethods(weightStandardized)
 exportMethods(weights)
-exportMethods(weightsDataType)
 exportMethods(writeBed)
 exportMethods(writeGwasVcf)
 exportMethods(z)
@@ -735,17 +735,20 @@ importFrom(dplyr,
   filter,
   full_join,
   group_by,
+  group_split,
   if_else,
   inner_join,
   left_join,
   matches,
   mutate,
   n_distinct,
+  na_if,
   pull,
   rename,
   row_number,
   select,
   slice,
+  slice_max,
   summarise
 )
 importFrom(glue,glue)
@@ -839,9 +842,9 @@ importFrom(stats,
   na.omit,
   optim,
   optimize,
+  pbeta,
   pcauchy,
   pchisq,
-  pf,
   pnorm,
   predict,
   pt,
@@ -908,6 +911,7 @@ importFrom(vctrs,
   vec_chop,
   vec_duplicate_detect,
   vec_group_id,
+  vec_group_loc,
   vec_match,
   vec_unique_loc
 )

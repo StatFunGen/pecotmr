@@ -54,13 +54,13 @@ The \code{finemapResult} list with \code{finemap_res},
   inputs as the "updated" values, so the result is effectively unchanged.
 }
 \description{
-Optional step 4 of the cTWAS pipeline (default-off region
-  merging). A gene whose cis window straddles an LD-block boundary (a
-  \code{boundary_genes} member) is split across two regions in the first-pass
-  fine-mapping. This step selects the high-PIP boundary genes, merges each
-  one's adjacent regions into a single region, re-runs fine-mapping on the
-  merged regions, and splices the updated results back into the
-  \code{\link{finemapCtwasRegions}} output. Thin wrapper over
+Step 4 of the cTWAS pipeline, on by default in
+  \code{\link{ctwasPipeline}}. A gene whose weights cross an LD-block
+  boundary (a \code{boundary_genes} member) is fine-mapped in one block in
+  the first pass, with only that block's LD. This step selects the high-PIP
+  boundary genes, merges each one's adjacent regions into a single region,
+  re-runs fine-mapping on the merged regions, and splices the updated results
+  back into the \code{\link{finemapCtwasRegions}} output. Thin wrapper over
   \code{ctwas::postprocess_region_merging()} (or
   \code{ctwas::postprocess_region_merging_noLD()} when the inputs carry no LD
   loaders).

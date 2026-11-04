@@ -11,7 +11,9 @@ filterVariantsByLdReference(variantIds, ldReferenceMetaFile, keepIndel = TRUE)
 
 \item{ldReferenceMetaFile}{Path to LD metadata file or PLINK prefix.}
 
-\item{keepIndel}{Whether to keep indel variants. Default TRUE.}
+\item{keepIndel}{Whether to keep variants other than SNPs. A SNP has exactly
+one of A, C, G, T for each allele, so \code{I}/\code{D} codes, \code{*}
+and \code{N} count as indels. Default TRUE.}
 }
 \value{
 A list with:

@@ -299,19 +299,11 @@ NULL
 # taken from the fit's OWN variants rather than a trait cis-window: a joint
 # group spans several traits, so no single trait's window describes X.
 # @noRd
-.jointAfForGroup <- function(data, g, genotypeFilter) {
-    if (!is(g, "IndividualJointGroup")) {
+.jointAfForGroup <- function(g, block) {
+    if (!is(g, "IndividualJointGroup") || is.null(block$af)) {
         return(NULL)
     }
-    X <- .jgX(g)
-    if (is.null(X) || ncol(X) == 0L) {
-        return(NULL)
-    }
-    rg <- try_fetch(.csVariantRegion(colnames(X)), error = function(cnd) NULL)
-    if (is.null(rg)) {
-        return(NULL)
-    }
-    .fmAfForX(data, X, genotypeFilter = genotypeFilter, region = rg)
+    block$af[match(colnames(.jgX(g)), colnames(block$X))]
 }
 
 
@@ -998,7 +990,6 @@ setMethod(
         trait = as.character(cond$trait[1L]),
         fitRetention = "slim",
         weightStandardized = stdz,
-        weightsDataType = cfg$dataType,
         verbose = 0,
         seed = cfg$seed
     )
@@ -1014,6 +1005,14 @@ setMethod(
 .jointRetentionLevel <- function(cfg, token = NULL) {
     level <- cfg$fitRetention %||% "slim"
     .twasRowRetention(token, if (identical(level, "none")) "slim" else level)
+}
+
+# Whether a joint fit keeps its copy of X: asked for, by a method whose fit has
+# one. The run was refused at any level but "full", and a fine-mapping token,
+# whose rows keep no fit, is not such a method.
+# @noRd
+.jointRetainX <- function(cfg, token) {
+    isTRUE(cfg$retainX) && is_in(token, .twasTokensKeepingX())
 }
 
 # The mr.mash RSS fit of one summary-statistics joint group, with the caller's
@@ -1066,8 +1065,8 @@ setMethod(
         trait = as.character(cond$trait[1L]),
         fittedModels = fittedModels,
         fitRetention = retention,
+        retainX = .jointRetainX(cfg, token),
         weightStandardized = stdz,
-        weightsDataType = cfg$dataType,
         verbose = verbose,
         seed = cfg$seed
     )
@@ -1221,8 +1220,7 @@ setMethod(
             variantIds = character(0),
             weights = NULL,
             cvResult = cvR,
-            weightStandardized = stdz,
-            weightsDataType = cfg$dataType
+            weightStandardized = stdz
         ))
     }
     TwasWeightsRow(
@@ -1230,8 +1228,7 @@ setMethod(
         weights = full$W[, r],
         methodFits = full$fitParts,
         cvResult = cvR,
-        weightStandardized = stdz,
-        weightsDataType = cfg$dataType
+        weightStandardized = stdz
     )
 }
 
@@ -1313,21 +1310,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         return(list())
     }
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
-    map(
+    compact(map(
         scopedTraits,
-        .deferGroups,
-        builder = .enumCrossContextGroupFor,
+        .deferCrossContext,
         data = data,
         studyName = studyName,
         scopedContexts = scopedContexts,
         args = args,
         verbose = verbose
-    )
+    ))
 }
 
-# One trait's cross-context group, or NULL when it has no usable (X, Y).
+# One trait's deferred cross-context unit, or NULL when it cannot be fit. Its
+# phenotypes are built here: the samples a fit is on decide what it can share an
+# X with, and whether it needs one at all.
 # @noRd
-.enumCrossContextGroupFor <- function(
+.deferCrossContext <- function(
     tid,
     data,
     studyName,
@@ -1335,17 +1333,38 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     args,
     verbose
 ) {
-    xy <- .buildIndividualCrossContextXy(
+    planned <- .crossContextPlan(
         data,
         tid,
         scopedContexts,
-        args$cisWindow,
         verbose,
-        label = "jointCrossContext",
-        region = args$region,
-        residualizationParam = args$residualizationParam,
-        genotypeFilter = args$genotypeFilter,
-        phenotypeFilter = args$phenotypeFilter
+        "jointCrossContext",
+        args$residualizationParam,
+        args$phenotypeFilter
+    )
+    if (is.null(planned)) {
+        return(NULL)
+    }
+    .deferGroups(
+        tid,
+        .enumCrossContextGroupFor,
+        xTraits = tid,
+        xContexts = planned$perTraitContexts,
+        samples = planned$fitSamples,
+        studyName = studyName,
+        planned = planned
+    )
+}
+
+# One trait's cross-context group on `X`, or NULL when it has no usable (X, Y).
+# @noRd
+.enumCrossContextGroupFor <- function(tid, studyName, planned, X) {
+    xy <- .crossContextAssemble(
+        X,
+        planned$Yres,
+        planned$perTraitContexts,
+        planned$fitSamples,
+        planned$report
     )
     if (is.null(xy)) {
         return(NULL)
@@ -1494,21 +1513,21 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     scopedContexts <- scope$contexts[[studyName]]
     scopedTraits <- scope$traits[[studyName]]
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
-    map(
+    compact(map(
         scopedContexts,
-        .deferGroups,
-        builder = .enumCrossTraitGroupFor,
+        .deferCrossTrait,
         data = data,
         studyName = studyName,
         scopedTraits = scopedTraits,
         args = args,
         verbose = verbose
-    )
+    ))
 }
 
-# One context's cross-trait group, or NULL when it has no usable (X, Y).
+# One context's deferred cross-trait unit, or NULL when it cannot be fit. Its
+# window spans the scoped traits the context carries.
 # @noRd
-.enumCrossTraitGroupFor <- function(
+.deferCrossTrait <- function(
     cx,
     data,
     studyName,
@@ -1516,19 +1535,34 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     args,
     verbose
 ) {
-    xy <- .buildIndividualCrossTraitXy(
+    planned <- .crossTraitPlan(
         data,
         cx,
         scopedTraits,
-        args$cisWindow,
+        studyName,
         verbose,
-        label = "jointCrossTrait",
-        studyName = studyName,
-        region = args$region,
-        residualizationParam = args$residualizationParam,
-        genotypeFilter = args$genotypeFilter,
-        phenotypeFilter = args$phenotypeFilter
+        "jointCrossTrait",
+        args$residualizationParam,
+        args$phenotypeFilter
     )
+    if (is.null(planned)) {
+        return(NULL)
+    }
+    .deferGroups(
+        cx,
+        .enumCrossTraitGroupFor,
+        xTraits = planned$traitsHere,
+        xContexts = cx,
+        samples = planned$fitSamples,
+        studyName = studyName,
+        planned = planned
+    )
+}
+
+# One context's cross-trait group on `X`, or NULL when it has no usable (X, Y).
+# @noRd
+.enumCrossTraitGroupFor <- function(cx, studyName, planned, X) {
+    xy <- .crossTraitAssemble(X, planned$allY, planned$traitsHere, planned$se)
     if (is.null(xy)) {
         return(NULL)
     }
@@ -1735,20 +1769,37 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         return(list())
     }
     verbose <- if (is.null(args$verbose)) 1 else args$verbose
-    xy <- .buildComposedIndividualXy(
+    planned <- .composedPlan(
         data,
         scope,
         studyName,
-        args$cisWindow,
         verbose,
-        label = "composed",
-        region = args$region,
-        residualizationParam = args$residualizationParam,
-        genotypeFilter = args$genotypeFilter,
-        phenotypeFilter = args$phenotypeFilter
+        "composed",
+        args$residualizationParam,
+        args$phenotypeFilter
+    )
+    if (is.null(planned)) {
+        return(list())
+    }
+    list(.deferGroups(
+        studyName,
+        .enumComposedIndividualGroup,
+        xTraits = planned$allTraits,
+        xContexts = planned$allContexts,
+        samples = planned$fitSamples,
+        planned = planned
+    ))
+}
+
+# The composed group on `X`, or NULL when it has no usable (X, Y).
+# @noRd
+.enumComposedIndividualGroup <- function(studyName, planned, X) {
+    xy <- .composedAlignXy(
+        list(X = X, YresList = planned$YresList),
+        planned$tuples
     )
     if (is.null(xy)) {
-        return(list())
+        return(NULL)
     }
     # Conditions follow the fitted Y columns ("context:trait"), so dropped
     # tuples don't desync conditions from Y. Split on the first ":" (contexts
@@ -1759,7 +1810,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         context = str_remove(labs, ":.*$"),
         trait = str_remove(labs, "^[^:]*:")
     )
-    list(new("IndividualJointGroup", conditions = conds, X = xy$X, Y = xy$Y))
+    new("IndividualJointGroup", conditions = conds, X = xy$X, Y = xy$Y)
 }
 
 # The run's resolved phenotype QC, or the univariate fits' own default -- drop
@@ -1797,7 +1848,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ))
 }
 
-# One context's univariate groups, one per trait it carries.
+# The traits of context `cx` that a study's scope selects.
+# @noRd
+.enumContextTraits <- function(cx, data, scope, studyName) {
+    se <- .qtlContextSe(data, context = cx)
+    keep(
+        intersect(scope$traits[[studyName]], rownames(se)),
+        .traitSelectedAt,
+        traitId = scope$traitSelection,
+        s = studyName,
+        cx = cx
+    )
+}
+
+# One context's univariate units, one per trait it carries. Their phenotypes are
+# built here, before any genotype is read: the samples a fit is on are what
+# decide which traits can share a residualized X.
 # @noRd
 .enumUnivariateForContext <- function(
     cx,
@@ -1807,18 +1873,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     studyName,
     phenotypeFilter
 ) {
-    se <- .qtlContextSe(data, context = cx)
-    traits <- keep(
-        intersect(scope$traits[[studyName]], rownames(se)),
-        .traitSelectedAt,
-        traitId = scope$traitSelection,
-        s = studyName,
-        cx = cx
-    )
+    traits <- .enumContextTraits(cx, data, scope, studyName)
     map(
         traits,
-        .deferGroups,
-        builder = .enumUnivariateGroupFor,
+        .deferUnivariate,
         data = data,
         args = args,
         studyName = studyName,
@@ -1827,10 +1885,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# One (context, trait) univariate group, or NULL when fewer than two samples
-# are shared between its genotypes and its phenotype.
+# One trait's deferred univariate unit.
 # @noRd
-.enumUnivariateGroupFor <- function(
+.deferUnivariate <- function(
     tid,
     data,
     args,
@@ -1845,24 +1902,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         phenotypeFilter = phenotypeFilter,
         residualizationParam = args$residualizationParam
     )
-    X <- if (is.null(args$region)) {
-        .fmResidGeno(
-            data,
-            contexts = cx,
-            traitId = tid,
-            cisWindow = args$cisWindow,
-            residualizationParam = args$residualizationParam,
-            genotypeFilter = args$genotypeFilter
-        )
-    } else {
-        .fmResidGeno(
-            data,
-            contexts = cx,
-            region = args$region,
-            residualizationParam = args$residualizationParam,
-            genotypeFilter = args$genotypeFilter
-        )
-    }
+    .deferGroups(
+        tid,
+        .enumUnivariateGroupFor,
+        xTraits = tid,
+        xContexts = cx,
+        samples = rownames(Y),
+        studyName = studyName,
+        cx = cx,
+        Y = Y
+    )
+}
+
+# One (context, trait) univariate group on `X`, or NULL when fewer than two
+# samples are shared between its genotypes and its phenotype.
+# @noRd
+.enumUnivariateGroupFor <- function(tid, studyName, cx, Y, X) {
     common <- intersect(rownames(X), rownames(Y))
     if (length(common) < 2L) {
         return(NULL)
@@ -1870,7 +1925,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     new(
         "IndividualJointGroup",
         conditions = tibble(study = studyName, context = cx, trait = tid),
-        X = X[common, , drop = FALSE],
+        X = .qtlRowsOf(X, common),
         Y = Y[common, , drop = FALSE]
     )
 }
@@ -2158,6 +2213,18 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # -- one method -> per-condition entries; the SR-TWAS ensemble is a layer ON TOP
 # of that.
 .runJointCell <- function(cell, pipeline, data, scope, tokens, args = list()) {
+    .qtlRunWork(
+        .jointCellWork(cell, pipeline, data, scope, tokens, args),
+        data,
+        args$genotypeFilter,
+        args$residualizationParam,
+        is(pipeline, "FmJointPipeline")
+    )
+}
+
+# One joint cell's fits, planned: its units enumerated, none of them built yet.
+# @noRd
+.jointCellWork <- function(cell, pipeline, data, scope, tokens, args = list()) {
     # PC groups are labelled by component, not by trait: their enumerator
     # applies the selection itself, to the traits the components come from.
     selection <- if (identical(.jcPattern(cell), "topPc")) {
@@ -2167,18 +2234,29 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     doEnsemble <- is(pipeline, "TwasJointPipeline") &&
         isTRUE(.jpConfig(pipeline)$ensembleParam$enabled)
-    perUnit <- map(
-        .jcEnumerate(cell)(data, scope, args),
+    units <- .jcEnumerate(cell)(data, scope, args)
+    .qtlWork(
+        units,
+        map(units, .unitSpec, data = data, args = args),
         .jointCellUnit,
-        selection = selection,
-        minGroup = .jcMinGroup(cell),
-        pipeline = pipeline,
-        data = data,
-        tokens = tokens,
-        args = args,
-        doEnsemble = doEnsemble
+        list(
+            selection = selection,
+            minGroup = .jcMinGroup(cell),
+            pipeline = pipeline,
+            data = data,
+            tokens = tokens,
+            args = args,
+            doEnsemble = doEnsemble
+        ),
+        .jointCellResult,
+        list(pipeline = pipeline)
     )
-    fitted <- discard(perUnit, is.null)
+}
+
+# A joint cell's result, from its units' fits.
+# @noRd
+.jointCellResult <- function(fits, pipeline) {
+    fitted <- discard(fits, is.null)
     if (length(fitted) == 0L) {
         return(NULL)
     }
@@ -2187,8 +2265,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # One enumerated unit built, filtered and fitted: the records of its groups,
 # or NULL when none survives the selection and the minimum size. The unit is
-# built here, inside the loop, so its residualized X is let go before the next
-# unit's is built.
+# built here, inside the loop, so a residualized X of its own is let go before
+# the next unit's is built.
 # @noRd
 .jointCellUnit <- function(
     unit,
@@ -2198,9 +2276,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     data,
     tokens,
     args,
-    doEnsemble
+    doEnsemble,
+    block = NULL
 ) {
-    groups <- .unitGroups(unit) |>
+    groups <- .unitGroups(unit, block) |>
         map(.jointGroupSelect, traitId = selection) |>
         compact() |>
         keep(.jointGroupMeetsMin, minGroup = minGroup)
@@ -2214,29 +2293,53 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         data = data,
         tokens = tokens,
         args = args,
-        doEnsemble = doEnsemble
+        doEnsemble = doEnsemble,
+        block = block
     ))
 }
 
-# A unit of joint groups not built yet: the function that builds it, and its
-# arguments, `x` first. The individual-level enumerators return these, so a
-# unit's residualized X and Y exist only while its groups are fitted rather
-# than every unit's being held at once. A unit is one group, or a context's
-# principal components, which share one X.
+# A unit of joint groups not built yet: the function that builds it from a
+# residualized X, its arguments, `x` first, and the genotypes it will be built
+# on (the traits that name their window, the contexts of their covariates and
+# the samples it may fit). The individual-level enumerators return these: their
+# phenotypes are in hand, so what can share an X is known before any genotype is
+# read, and a unit's X exists only while its groups are fitted. A unit is one
+# group, or a context's principal components, which share one X.
 # @noRd
-.deferGroups <- function(x, builder, ...) {
-    list(builder = builder, args = list(x, ...))
+.deferGroups <- function(x, builder, xTraits, xContexts, samples, ...) {
+    list(
+        builder = builder,
+        args = list(x, ...),
+        xTraits = xTraits,
+        xContexts = xContexts,
+        samples = samples
+    )
 }
 
-# The groups of an enumerated unit: built when it was deferred, as given when
-# it was enumerated built (the summary-statistics groups, which hold no X).
+# The genotypes a unit's fits are on; none for a group already built, which
+# holds its own.
 # @noRd
-.unitGroups <- function(unit) {
+.unitSpec <- function(unit, data, args) {
+    if (is(unit, "JointGroup")) {
+        return(NULL)
+    }
+    .qtlFitSpec(
+        .fmGenoWindow(data, unit$xTraits, args$region, args$cisWindow),
+        unit$xContexts,
+        unit$samples
+    )
+}
+
+# The groups of an enumerated unit: built on `block` when it was deferred, as
+# given when it was enumerated built (the summary-statistics groups, which hold
+# no X).
+# @noRd
+.unitGroups <- function(unit, block = NULL) {
     built <- if (is(unit, "JointGroup")) {
         unit
     } else {
         unitArgs <- unit$args
-        exec(unit$builder, !!!unitArgs)
+        exec(unit$builder, !!!unitArgs, X = block$X)
     }
     if (is(built, "JointGroup")) {
         return(list(built))
@@ -2278,36 +2381,18 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # Fit every token for one joint group -> records, plus the optional SR-TWAS
 # ensemble layer (built ON TOP of the shared per-method fits, when >= 2 methods
 # produced entries).
-#
-# `grp` carries provenance: the ";"-joined members of each varying axis
-# (identical on every per-context row of this group), and the window this
-# group was analysed over -- the caller's region when one was named, else the
-# group's own cis window (the union span of its traits +/- cisWindow). The
-# window is recorded because the fit only ever sees whichever variants
-# survived QC; it is read back by genomicRegion().
-#
-# `fitArgs$af` / `fitArgs$region` are provenance the fitters cannot recover for
-# themselves: `data` lives here but not inside fitJointGroup(), and the
-# requested window is only ever known to the caller. Both are read back as
-# args$af / args$region where the entries are post-processed.
 # @noRd
-.jointCellGroup <- function(g, pipeline, data, tokens, args, doEnsemble) {
-    cond <- .jgConditions(g)
-    grp <- list(
-        cond = cond,
-        js = .jointAxisMembers(cond, "study"),
-        jc = .jointAxisMembers(cond, "context"),
-        jt = .jointAxisMembers(cond, "trait"),
-        region = .jointGroupWindow(data, cond, args),
-        ldReference = .jgLdRefOf(g)
-    )
-    fitArgs <- .twasGroupArgs(g, pipeline, args)
-    # Allele frequencies go into fine-mapping's topLoci; TWAS never reads
-    # them, and computing them reads the group's genotypes a second time.
-    fitArgs$af <- if (is(pipeline, "FmJointPipeline")) {
-        .jointAfForGroup(data, g, args$genotypeFilter)
-    }
-    fitArgs$region <- args$region
+.jointCellGroup <- function(
+    g,
+    pipeline,
+    data,
+    tokens,
+    args,
+    doEnsemble,
+    block = NULL
+) {
+    grp <- .jointGroupProvenance(g, data, args)
+    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block)
     perTokenEntries <- compact(set_names(
         map(
             tokens,
@@ -2315,7 +2400,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             g = g,
             pipeline = pipeline,
             fitArgs = fitArgs,
-            cond = cond,
+            cond = grp$cond,
             args = args
         ),
         tokens
@@ -2338,6 +2423,39 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             grp,
             data
         )
+    )
+}
+
+# A group's provenance: the ";"-joined members of each varying axis (identical
+# on every per-context row of this group), and the window this group was
+# analysed over -- the caller's region when one was named, else the group's own
+# cis window (the union span of its traits +/- cisWindow). The window is
+# recorded because the fit only ever sees whichever variants survived QC; it is
+# read back by genomicRegion().
+# @noRd
+.jointGroupProvenance <- function(g, data, args) {
+    cond <- .jgConditions(g)
+    list(
+        cond = cond,
+        js = .jointAxisMembers(cond, "study"),
+        jc = .jointAxisMembers(cond, "context"),
+        jt = .jointAxisMembers(cond, "trait"),
+        region = .jointGroupWindow(data, cond, args),
+        ldReference = .jgLdRefOf(g)
+    )
+}
+
+# The arguments a joint group's fitters take, with what they cannot recover for
+# themselves: allele frequencies live on the block, not inside fitJointGroup(),
+# and the requested window is only ever known to the caller. Both are read back
+# as args$af / args$region where the entries are post-processed.
+# @noRd
+.jointGroupFitArgs <- function(g, pipeline, args, block) {
+    af <- .jointAfForGroup(g, block)
+    list_assign(
+        .twasGroupArgs(g, pipeline, args),
+        af = af,
+        region = args$region
     )
 }
 
@@ -2544,8 +2662,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             methodCoef = ens$methodCoef,
             methodPerformance = ens$methodPerformance
         ),
-        weightStandardized = stdz,
-        weightsDataType = cfg$dataType
+        weightStandardized = stdz
     )
 }
 
@@ -2554,7 +2671,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # Structurally identical to .enumUnivariateIndividual -- same residualization
 # helpers, same IndividualJointGroup -- so everything downstream (CV,
 # ensemble, retention) applies unchanged. It is the TWAS peer of
-# fineMappingPipeline's .fmPcaContextRows, sharing .fmTopPcScores().
+# fineMappingPipeline's .fmPcaContextPlan, sharing .fmTopPcScores().
 # @noRd
 .enumTopPcIndividual <- function(data, scope, args = list()) {
     studyName <- studyName(data)
@@ -2563,38 +2680,25 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     phenotypeFilter <- .jointPhenotypeFilter(args)
     # One unit per context: its components share the context's one X.
-    map(
+    compact(map(
         scope$contexts[[studyName]],
-        .deferGroups,
-        builder = .enumTopPcForContext,
+        .deferTopPc,
         data = data,
         scope = scope,
         args = args,
         studyName = studyName,
         phenotypeFilter = phenotypeFilter
-    )
+    ))
 }
 
+# One context's deferred top-PC unit: its window spans the traits it selects.
+# NULL when PCA has nothing to work on: it is undefined for a single trait,
+# matching the fine-mapping rule.
 # @noRd
-.enumTopPcForContext <- function(
-    cx,
-    data,
-    scope,
-    args,
-    studyName,
-    phenotypeFilter
-) {
-    se <- .qtlContextSe(data, context = cx)
-    traits <- keep(
-        intersect(scope$traits[[studyName]], rownames(se)),
-        .traitSelectedAt,
-        traitId = scope$traitSelection,
-        s = studyName,
-        cx = cx
-    )
-    # PCA is undefined for a single trait, matching the fine-mapping rule.
+.deferTopPc <- function(cx, data, scope, args, studyName, phenotypeFilter) {
+    traits <- .enumContextTraits(cx, data, scope, studyName)
     if (length(traits) < 2L) {
-        return(list())
+        return(NULL)
     }
     Y <- .fmResidPheno(
         data,
@@ -2605,9 +2709,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
     scores <- .fmTopPcScores(Y, args$nPCs %||% 10L)
     if (is.null(scores)) {
-        return(list())
+        return(NULL)
     }
-    X <- .enumTopPcX(data, cx, traits, args)
+    .deferGroups(
+        cx,
+        .enumTopPcForContext,
+        xTraits = traits,
+        xContexts = cx,
+        samples = rownames(scores),
+        studyName = studyName,
+        scores = scores
+    )
+}
+
+# One context's top-PC groups on `X`.
+# @noRd
+.enumTopPcForContext <- function(cx, studyName, scores, X) {
     common <- intersect(rownames(X), rownames(scores))
     if (length(common) < 2L) {
         return(list())
@@ -2620,27 +2737,6 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         studyName = studyName,
         cx = cx
     ))
-}
-
-# @noRd
-.enumTopPcX <- function(data, cx, traits, args) {
-    if (is.null(args$region)) {
-        return(.fmResidGeno(
-            data,
-            contexts = cx,
-            traitId = traits,
-            cisWindow = args$cisWindow,
-            residualizationParam = args$residualizationParam,
-            genotypeFilter = args$genotypeFilter
-        ))
-    }
-    .fmResidGeno(
-        data,
-        contexts = cx,
-        region = args$region,
-        residualizationParam = args$residualizationParam,
-        genotypeFilter = args$genotypeFilter
-    )
 }
 
 # @noRd
@@ -2753,58 +2849,74 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     traitIds,
     args = list()
 ) {
-    if (length(jointMethods) == 0L || length(parsedJointSpec) == 0L) {
-        return(NULL)
-    }
-    isFm <- is(pipeline, "FmJointPipeline")
-    results <- compact(map(
-        parsedJointSpec,
-        .runOneJointSpecFor,
-        data = data,
-        dataForm = dataForm,
-        pipeline = pipeline,
-        jointMethods = jointMethods,
-        contexts = contexts,
-        traitIds = traitIds,
-        args = args
-    ))
-    if (length(results) == 0L) {
-        return(NULL)
-    }
-    # Every row keeps the LD reference its group was fitted against.
-    reduce(results, if (isFm) .rbindFineMappingResult else .rbindTwasWeights)
+    .qtlRunWork(
+        .jointSpecsWork(
+            parsedJointSpec,
+            data,
+            dataForm,
+            pipeline,
+            jointMethods,
+            contexts,
+            traitIds,
+            args
+        ),
+        data,
+        args$genotypeFilter,
+        args$residualizationParam,
+        is(pipeline, "FmJointPipeline")
+    )
 }
 
-# `map()` hands the spec first, which is also where .runOneJointSpec wants it.
+# .runJointSpecs()' fits, planned, for a caller with others to run alongside.
 # @noRd
-.runOneJointSpecFor <- function(
-    spec,
+.jointSpecsWork <- function(
+    parsedJointSpec,
     data,
     dataForm,
     pipeline,
     jointMethods,
     contexts,
     traitIds,
-    args
+    args = list()
 ) {
-    .runOneJointSpec(
-        spec,
-        data,
-        dataForm,
-        pipeline,
-        jointMethods,
-        contexts,
-        traitIds,
-        args
+    if (length(jointMethods) == 0L || length(parsedJointSpec) == 0L) {
+        return(.qtlWorkValue(NULL))
+    }
+    .qtlWorkOf(
+        map(
+            parsedJointSpec,
+            .jointSpecWork,
+            data = data,
+            dataForm = dataForm,
+            pipeline = pipeline,
+            jointMethods = jointMethods,
+            contexts = contexts,
+            traitIds = traitIds,
+            args = args
+        ),
+        .jointSpecsResult,
+        list(pipeline = pipeline)
     )
 }
 
-# Run all joint methods for ONE spec: resolve its scope (optionally
-# region-restricting the traits), pick the joint cell, and dispatch to
-# .runJointCell (one call with ALL methods so the twas ensemble layer can
-# combine a group's per-method fits).
+# The specs' results rbound. Every row keeps the LD reference its group was
+# fitted against.
 # @noRd
-.runOneJointSpec <- function(
+.jointSpecsResult <- function(perSpec, pipeline) {
+    results <- compact(perSpec)
+    if (length(results) == 0L) {
+        return(NULL)
+    }
+    isFm <- is(pipeline, "FmJointPipeline")
+    reduce(results, if (isFm) .rbindFineMappingResult else .rbindTwasWeights)
+}
+
+# Plan all joint methods for ONE spec: resolve its scope (optionally
+# region-restricting the traits), pick the joint cell, and plan it
+# (.jointCellWork(), with ALL methods so the twas ensemble layer can combine a
+# group's per-method fits).
+# @noRd
+.jointSpecWork <- function(
     spec,
     data,
     dataForm,
@@ -2831,7 +2943,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     pattern <- if (length(spec$axes) > 1L) "composed" else spec$axes[[1L]]
     cell <- .lookupJointCell(pattern, dataForm)
     spArgs <- c(args, list(axes = spec$axes))
-    .runJointCell(cell, pipeline, data, scope, jointMethods, spArgs)
+    .jointCellWork(cell, pipeline, data, scope, jointMethods, spArgs)
 }
 
 # One study's traits narrowed to those inside `region`; left alone when the
@@ -2914,8 +3026,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         variantIds = vids,
         weights = weights[, r],
         methodFits = fitParts,
-        weightStandardized = TRUE,
-        weightsDataType = cfg$dataType
+        weightStandardized = TRUE
     )
 }
 

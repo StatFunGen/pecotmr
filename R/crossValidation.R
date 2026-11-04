@@ -379,9 +379,9 @@ NULL
 
 # bplapply() on a copy of the caller's BPPARAM seeded by .seededBpparam(). A
 # worker's error comes back as BiocParallel's report on every element; the
-# first one is raised again with its own message, as a serial map would have
-# raised it. The extra arguments reach `.f` through bplapply(), whose own
-# formals include X and FUN, so pass an argument of either name by position.
+# first one is raised again with its own message and cause, as a serial map
+# would have raised it. The extra arguments reach `.f` through bplapply(), whose
+# own formals include X and FUN, so pass an argument of either name by position.
 # @noRd
 #' @importFrom BiocParallel bplapply
 .bpMap <- function(.x, .f, ..., BPPARAM, seed = NULL) {
@@ -397,7 +397,10 @@ NULL
     if (length(failed) == 0L) {
         cnd_signal(cnd)
     }
-    abort(conditionMessage(failed[[1L]]))
+    # Reclassed by BiocParallel, its message stops at its own line: a purrr
+    # error says only "In index: 1", and what it wraps is in `parent`.
+    first <- failed[[1L]]
+    abort(conditionMessage(first), parent = first$parent, call = first$call)
 }
 
 # @noRd

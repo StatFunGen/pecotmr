@@ -5,6 +5,24 @@
 # pair, and it computes no PP.H0-PP.H4 decomposition at all. Several tests
 # below guard exactly that boundary.
 
+test_that(".cbrTopVariable reads a set's top variable, tied or not", {
+    one <- data.frame(
+        top_variables = c("chr1:1:A:G", "chr1:2:A:G"),
+        row.names = c("cos1:y1_y2", "cos2:y1_y2")
+    )
+    expect_equal(pecotmr:::.cbrTopVariable(one, "cos2:y1_y2"), "chr1:2:A:G")
+    # Variables tied for the top get a row each; a longer id is another set,
+    # even listed first.
+    tied <- data.frame(
+        top_variables = c("chr1:7:A:G", "chr1:5:A:G", "chr1:6:A:G"),
+        row.names = c("cos1:y1_y2_y3", "cos1:y1_y2.1", "cos1:y1_y2.2")
+    )
+    expect_equal(pecotmr:::.cbrTopVariable(tied, "cos1:y1_y2"), "chr1:5:A:G")
+    expect_equal(pecotmr:::.cbrTopVariable(tied, "cos1:y1_y2_y3"), "chr1:7:A:G")
+    expect_true(is.na(pecotmr:::.cbrTopVariable(tied, "cos9:y1")))
+    expect_true(is.na(pecotmr:::.cbrTopVariable(NULL, "cos1:y1")))
+})
+
 test_that("ColocBoostResult: one element per confidence set", {
     x <- ColocBoostResult(
         list(.cbr_fake()),

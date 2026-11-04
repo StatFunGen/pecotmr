@@ -566,6 +566,59 @@ test_that("fineMappingAnnotations builds max and summed PIP over the traits", {
     expect_equal(.fma_col(annot, "credibleSet"), c(1, 1, 1, 0, 1, 0))
 })
 
+test_that("fineMappingAnnotations builds PIP columns from credible sets", {
+    # Two genes whose credible sets share variant 3; a variant outside any
+    # has no within_cs_pip, whatever its PIP.
+    rowOf <- function(idx, pip, within) {
+        ids <- sprintf("chr1:%d:A:G", idx * 100L)
+        FineMappingRow(
+            variantIds = ids,
+            susieFit = list(pip = stats::setNames(pip, ids)),
+            topLoci = data.frame(
+                variant_id = ids,
+                pip = pip,
+                within_cs_pip = within
+            )
+        )
+    }
+    x <- QtlFineMappingResult(
+        studyName = c("Q", "Q"),
+        context = c("ctx", "ctx"),
+        trait = c("g1", "g2"),
+        method = c("susie", "susie"),
+        entry = list(
+            rowOf(1:4, c(0.7, 0.2, 0.05, 0.05), c(0.7, NA, 0.04, NA)),
+            rowOf(3:6, c(0.6, 0.1, 0.2, 0.1), c(0.6, NA, NA, NA))
+        )
+    )
+    annot <- fineMappingAnnotations(
+        x,
+        .fma_ref(),
+        types = c("maxCppCs", "sumPipCs")
+    )
+    expect_equal(.fma_col(annot, "maxCppCs"), c(0.7, 0, 0.6, 0, 0, 0))
+    expect_equal(.fma_col(annot, "sumPipCs"), c(0.7, 0, 0.64, 0, 0, 0))
+    expect_setequal(
+        SummarizedExperiment::colData(annot)$type,
+        "continuous"
+    )
+    # They stay opt-in, and a fit without the column gives an empty column,
+    # which is dropped with the usual warning.
+    expect_false(any(str_detect(
+        colnames(fineMappingAnnotations(.fma_qtl(), .fma_ref())),
+        "Cs$"
+    )))
+    expect_warning(
+        none <- fineMappingAnnotations(
+            .fma_qtl(),
+            .fma_ref(),
+            types = c("maxCpp", "sumPipCs")
+        ),
+        "dropping 1 column"
+    )
+    expect_identical(colnames(none), "Q|ctx|susie|maxCpp")
+})
+
 test_that("fineMappingAnnotations rows follow the reference", {
     ref <- .fma_ref()
     annot <- fineMappingAnnotations(.fma_qtl(), ref)

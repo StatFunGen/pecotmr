@@ -417,6 +417,45 @@ test_that("matchVariants judges each strand-ambiguous (A/T) swap on its own", {
     )
 })
 
+test_that("matchVariants returns every matching pair under allPairs", {
+    # One-to-one, a target listed in both allele orders disagrees about its
+    # sign and is dropped; as a set question, both pairs stand.
+    bothOrders <- c("chr1:100:A:G", "chr1:100:G:A")
+    expect_length(pecotmr:::matchVariants("chr1:100:A:G", bothOrders)$idxA, 0L)
+    m <- pecotmr:::matchVariants("chr1:100:A:G", bothOrders, allPairs = TRUE)
+    expect_equal(m$idxA, c(1L, 1L))
+    expect_equal(m$idxB, 1:2)
+    expect_equal(m$sign, c(1, -1))
+    # One-to-one, a reference is claimed by its first target only.
+    heldTwice <- rep("chr1:100:A:G", 2L)
+    expect_equal(pecotmr:::matchVariants(heldTwice, "chr1:100:A:G")$idxA, 1L)
+    expect_equal(
+        pecotmr:::matchVariants(
+            heldTwice,
+            "chr1:100:A:G",
+            allPairs = TRUE
+        )$idxA,
+        1:2
+    )
+    # The alleles decide as ever.
+    expect_length(
+        pecotmr:::matchVariants(
+            "chr1:100:A:G",
+            "chr1:100:A:C",
+            allPairs = TRUE
+        )$idxA,
+        0L
+    )
+    expect_length(
+        pecotmr:::matchVariants(
+            "chr1:100:A:T",
+            "chr1:100:T:A",
+            allPairs = TRUE
+        )$idxA,
+        0L
+    )
+})
+
 test_that("matchVariants matches within maxDistance only when alleles agree", {
     a <- c("chr1:100:A:G", "chr1:500:C:T")
     b <- c("chr1:103:A:G", "chr1:520:C:T", "chr1:101:A:C")
@@ -694,6 +733,30 @@ test_that("harmonizeAlleles drops a target the reference cannot decide", {
         matchMinProp = 0
     )
     expect_equal(nrow(res$harmonizedData), 0L)
+})
+
+test_that("removeIndels refuses whatever isSnpAlleles does not call a SNP", {
+    ids <- c(
+        "chr1:100:A:G",
+        "chr1:200:A:AT",
+        "chr1:300:A:*",
+        "chr1:400:N:G",
+        "chr1:500:D:I"
+    )
+    expect_equal(sort(pecotmr:::matchVariants(ids, ids)$idxA), 1:5)
+    expect_equal(
+        pecotmr:::matchVariants(ids, ids, removeIndels = TRUE)$idxA,
+        1L
+    )
+    tgt <- .vid_df(c("1", "1"), c(100, 200), c("A", "A"), c("G", "*"))
+    res <- pecotmr:::harmonizeAlleles(
+        tgt,
+        tgt,
+        removeIndels = TRUE,
+        matchMinProp = 0
+    )
+    expect_equal(nrow(res$harmonizedData), 1L)
+    expect_equal(attr(res, "qcCounts")$droppedIndel, 1L)
 })
 
 test_that("harmonizeAlleles sees a strand-recorded second orientation too", {

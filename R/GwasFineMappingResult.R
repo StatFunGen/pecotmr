@@ -130,8 +130,8 @@ setClass(
 #'   \code{region}. Where it is \code{NULL}, or \code{NA} for a row, the
 #'   row's \code{blockId} is its own span, as \code{"chrom_start_end"}, so
 #'   every row is named by its block.
-#' @param dataType Optional assay / modality label ("bulk_rnaseq",
-#'   "methylation"), recorded as a per-row provenance column. Length 1 or
+#' @param dataType Optional molecular type ("expression", "methylation"),
+#'   recorded as a per-row provenance column. Length 1 or
 #'   one per row; \code{NULL} (default) omits the column.
 #' @param dataSource Optional per-row label for the kind of input the fit saw,
 #'   \code{"individual"} or \code{"sumstat"}. Where it is absent, the result

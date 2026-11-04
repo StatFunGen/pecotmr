@@ -395,30 +395,57 @@ NULL
     )
 }
 
-# TRUE when the all-ones vector lies in the column span of `B`, by least
-# squares on B'B (pivoted, so overlapping or duplicated columns do no harm),
-# which keeps a genome-wide B from being copied into a QR.
+# TRUE when the all-ones vector lies in the column span of `B`.
 # @noRd
 .h2SpansOnes <- function(B) {
-    decomp <- qr(crossprod(B))
-    beta <- coalesce(qr.coef(decomp, colSums(B)), 0)
-    max(abs(1 - as.vector(B %*% beta))) < 1e-6
+    max(abs(1 - as.vector(B %*% .h2OnesCoef(B)))) < 1e-6
+}
+
+# The least-squares coefficients of the all-ones vector on `B`, from B'B
+# (pivoted, so overlapping or duplicated columns do no harm), which keeps a
+# genome-wide B from being copied into a QR.
+# @noRd
+.h2OnesCoef <- function(B) {
+    unname(coalesce(qr.coef(qr(crossprod(B)), colSums(B)), 0))
 }
 
 # The partitioned heritabilities, enrichment and per-annotation coefficients
 # of a stratified fit, reported for the user's baseline annotations alone,
 # from its per-variant-effect coefficients `tau` over the design `A` and their
-# delete-one-block values `tauBlocks` (folds x columns). Annotations overlap
-# in general -- the base overlaps every one -- so an annotation's
-# heritability is (A'A tau)_a, not tau_a M_a, and the total is 1'A tau.
+# delete-one-block values `tauBlocks` (folds x columns).
 # @noRd
 .h2StratifiedReport <- function(A, tau, tauBlocks) {
     user <- attr(A, "userCols")
-    AtA <- crossprod(A)
+    tauSe <- apply(tauBlocks, 2L, .jackknifeSeFromLoo)[user]
+    list(
+        tau = tau[user],
+        tauSe = tauSe,
+        annotationJackknifeCoefs = tauBlocks[, user, drop = FALSE],
+        enrichment = bind_cols(
+            tibble(
+                annotation = colnames(A)[user],
+                tau = unname(tau[user]),
+                tauSe = unname(tauSe)
+            ),
+            .h2EnrichmentColumns(A, tau, tauBlocks)
+        )
+    )
+}
+
+# The enrichment of each of the user's annotations and the two shares it is
+# the ratio of. Annotations overlap in general -- the base overlaps every one
+# -- so an annotation's heritability is (A'A tau)_a, not tau_a M_a, and the
+# total is 1'A tau. These are shares of variants and of heritability only for
+# values in [0, 1], the domain Dey et al. (2020) define enrichment on; outside
+# it they depend on where the column's zero happens to be and are NA, while
+# tau stays reported.
+# @noRd
+.h2EnrichmentColumns <- function(A, tau, tauBlocks) {
+    user <- attr(A, "userCols")
+    AtA <- as.matrix(crossprod(A))
     size <- colSums(A)
     propSnps <- size[user] / nrow(A)
     propH2 <- as.vector(AtA %*% tau)[user] / sum(size * tau)
-    enrichment <- propH2 / propSnps
     blockH2 <- (tauBlocks %*% AtA)[, user, drop = FALSE]
     blockEnrichment <- sweep(
         blockH2 / as.vector(tauBlocks %*% size),
@@ -426,26 +453,32 @@ NULL
         propSnps,
         "/"
     )
-    enrichmentSe <- apply(blockEnrichment, 2L, .jackknifeSeFromLoo)
-    tauSe <- apply(tauBlocks, 2L, .jackknifeSeFromLoo)[user]
-    list(
-        tau = tau[user],
-        tauSe = tauSe,
-        annotationJackknifeCoefs = tauBlocks[, user, drop = FALSE],
-        enrichment = tibble(
-            annotation = colnames(A)[user],
-            tau = unname(tau[user]),
-            tauSe = unname(tauSe),
-            enrichment = unname(enrichment),
-            enrichmentSe = unname(enrichmentSe),
-            enrichmentP = unname(
-                pnorm(abs(enrichment - 1) / enrichmentSe, lower.tail = FALSE) *
-                    2
-            ),
-            propH2 = unname(propH2),
-            propSnps = unname(propSnps)
-        )
+    userCols <- A[, user, drop = FALSE]
+    outside <- which(colSums(userCols < 0 | userCols > 1) > 0)
+    columns <- list(
+        enrichment = unname(propH2 / propSnps),
+        enrichmentSe = unname(apply(blockEnrichment, 2L, .jackknifeSeFromLoo)),
+        enrichmentP = .h2EnrichmentP(AtA, size, nrow(A), tau, tauBlocks)[user],
+        propH2 = unname(propH2),
+        propSnps = unname(propSnps)
     )
+    as_tibble(map(columns, replace, list = outside, values = NA_real_))
+}
+
+# ldsc's test of enrichment (regressions.py, _overlap_output): a t test, on as
+# many degrees of freedom as blocks, of the per-variant heritability inside each
+# column against outside it, h2_a / M_a - (h2 - h2_a) / (M - M_a). That is
+# linear in tau and 0 exactly when the enrichment is 1, and unlike the
+# enrichment it has no denominator to take a block's noise from. NA where it is
+# undefined: a column covering every variant has no outside.
+# @noRd
+#' @importFrom stats pt
+.h2EnrichmentP <- function(AtA, size, M, tau, tauBlocks) {
+    difference <- AtA / size - sweep(-AtA, 2L, size, "+") / (M - size)
+    estimate <- as.vector(difference %*% tau)
+    se <- apply(tauBlocks %*% t(difference), 2L, .jackknifeSeFromLoo)
+    p <- 2 * pt(abs(estimate / se), nrow(tauBlocks), lower.tail = FALSE)
+    unname(if_else(se > 0, p, NA_real_))
 }
 
 # The result of a stratified or unstratified fit: `tau` and `tauBlocks` over
@@ -723,11 +756,13 @@ lderUnivariate <- function(z, n, eigenRef, annotations = NULL) {
         TRUE
     )
     jk <- .lderJackknife(blockStats, baselineMat, n, M, design$M_a, rough, TRUE)
+    # The fit's inflation a, on the scale the other estimators report: the
+    # intercept of the chi-square regression, 1 + N a, about 1 without any.
     .h2FitResult(
         h2 = fit$h2,
         h2Se = jk$h2Se,
-        intercept = fit$a,
-        interceptSe = jk$aSe,
+        intercept = 1 + n * fit$a,
+        interceptSe = n * jk$aSe,
         A = baselineMat,
         tau = fit$tau,
         tauBlocks = jk$annotationJackknifeCoefs,
@@ -857,9 +892,12 @@ NULL
 # Omega = S o S, with S = rawNtau * R Da R + R and Da = diag(rowSums(A)),
 # reduced to its leading eigenpairs carrying `cutpoint` of the eigenvalue
 # mass (eigen.cut in the original gLDSC implementation): Omega^-1 is applied
-# as V diag(1 / values) V' and never formed.
+# as V diag(1 / values) V' and never formed. A variant's entry of Da is its
+# plug-in variance, which a column taking negative values can drive below 0
+# and the square root in .gldscS() cannot take, so it is floored there; Omega
+# only weights the fit, whose mean model this leaves alone.
 .gldscOmegaEigen <- function(ld, Ab, rawNtau, cutpoint = 0.99) {
-    S <- .gldscS(ld, rowSums(Ab), rawNtau)
+    S <- .gldscS(ld, pmax(rowSums(Ab), 0), rawNtau)
     ei <- eigen(S^2, symmetric = TRUE)
     k <- which(cumsum(ei$values) / sum(ei$values) >= cutpoint)[1]
     list(
@@ -1130,9 +1168,10 @@ NULL
 # Unified HDL negative log-likelihood in b* = V'(z/sqrt(N)) units. Modeled
 # variance of rotated coordinate i is
 #   lamh2_i = s_i lam_i^2 - lam_i h2Total / nRef + int lam_i / n,
-# s_i = (ldAnnotScaled %*% h2a)_i and h2Total = sum(h2a). With a single 1/M
-# score column this is exactly llfun in the original HDL implementation
-# (Ning et al. 2020). param = c(h2_1, .., h2_nTau, int).
+# s_i = (ldAnnotScaled %*% h2a)_i and h2Total = sum(h2a * h2Share), `h2Share`
+# being what a unit of each parameter adds to the total (.hdlFitBasis()). With
+# a single 1/M score column this is exactly llfun in the original HDL
+# implementation (Ning et al. 2020). param = c(h2_1, .., h2_nTau, int).
 # `lim` is the original HDL's floor on the modelled per-direction variance
 # (llfun.R uses exp(-10)). It has to match: with 40% of a real reference's
 # eigen-directions near zero the floor is active for most of them, and the
@@ -1146,7 +1185,8 @@ NULL
     lam,
     bstar,
     ldAnnotScaled,
-    lim = exp(-10)
+    lim = exp(-10),
+    h2Share = 1
 ) {
     nTau <- ncol(ldAnnotScaled)
     h2a <- param[seq_len(nTau)]
@@ -1154,7 +1194,7 @@ NULL
     lamh2 <- pmax(
         as.vector(ldAnnotScaled %*% h2a) *
             lam^2 -
-            lam * sum(h2a) / nSamples +
+            lam * sum(h2a * h2Share) / nSamples +
             int * lam / n,
         lim
     )
@@ -1190,56 +1230,102 @@ NULL
     rep(sqrt(max(sum(zb^2) - sum(bstar^2), 0) / nNull), nNull)
 }
 
-# Genome-wide design: eigenvalues, rotated effects, block ids, the M_a-scaled
-# eigenvalue-score matrix, and M_a. Univariate uses a single all-ones score
-# column (l_{i,base} = 1) scaled by total M.
-.hdlDesign <- function(blockData, M, baselineMat) {
+# Genome-wide design: eigenvalues, rotated effects, block ids and the scaled
+# eigenvalue-score matrix, with the parametrization `basis` (.hdlFitBasis()).
+# Univariate uses a single all-ones score column (l_{i,base} = 1) scaled by
+# total M.
+.hdlDesign <- function(blockData, M, basis) {
     lam <- list_c(map(blockData, "lam"))
-    bstar <- list_c(map(blockData, "bstar"))
-    blockId <- rep(
-        seq_along(blockData),
-        lengths(map(blockData, "lam"))
-    )
-    if (is.null(baselineMat)) {
-        return(list(
-            lam = lam,
-            bstar = bstar,
-            blockId = blockId,
-            ldAnnotScaled = matrix(1 / M, length(lam), 1),
-            M_a = M
-        ))
+    fit <- basis %||%
+        list(transform = matrix(1), size = M, share = 1, lower = 0, upper = 1)
+    ldAnnot <- if (is.null(basis)) {
+        matrix(1, length(lam), 1)
+    } else {
+        ldAnnotList <- map(blockData, "ldAnnot")
+        exec(rbind, !!!ldAnnotList)
     }
-    M_a <- colSums(baselineMat)
-    ldAnnotList <- map(blockData, "ldAnnot")
-    ldAnnot <- exec(rbind, !!!ldAnnotList)
-    list(
+    list_assign(
+        fit,
         lam = lam,
-        bstar = bstar,
-        blockId = blockId,
-        ldAnnotScaled = sweep(ldAnnot, 2, M_a, "/"),
-        M_a = M_a,
-        baseAdded = !is_in(1L, attr(baselineMat, "userCols"))
+        bstar = list_c(map(blockData, "bstar")),
+        blockId = rep(seq_along(blockData), lengths(map(blockData, "lam"))),
+        ldAnnotScaled = sweep(ldAnnot %*% fit$transform, 2L, fit$size, "/")
     )
 }
 
-# Fit HDL by L-BFGS-B over (h2_1..h2_nTau, int); bounds h2_a in [0,1], int in
-# [0,10] (Ning et al. 2020). Parametrizing by per-annotation h2 (scale ~1)
-# keeps the L-BFGS-B finite differences well conditioned.
+# How a stratified fit parametrizes the design `A`, whose columns need not read
+# as heritabilities: the variance of a direction depends on a column only
+# through tau_a l_ia, and a column whose zero its values never reach, like a
+# z-score or x + 3, trades its coefficient against the base's without bound.
+# Such a column is centered, so the base absorbs its location, except where it
+# is part of what spans the all-ones vector: A* = A T with T = I - b c', for
+# Ab = 1 and c the columns' means. Then each parameter is tau*_a size_a, with
+# size_a the column's total absolute value, so it is on a scale near 1 even at
+# a mean of 0; it adds tau*_a sum(A*_a) = parameter * share_a to the total, and
+# tau = T tau* recovers the coefficients of `A`. Columns reaching 0 and never
+# going below it, binary ones and PIPs among them, stay as they are: the
+# parameter is the column's heritability, share 1 and T = I.
+#
+# Bounds: a parameter is bounded below by 0 only if some variant carries that
+# column alone among those left uncentered, since then tau_a is that variant's
+# own rate, as for the base or a partition's levels. Otherwise it is an excess
+# over another column's rate, in [-1, 1]. A centered column's parameter is in
+# [-2, 2]: its positive and negative parts cancel, and with non-negative
+# variant rates each is at most the total.
+# @noRd
+.hdlFitBasis <- function(A) {
+    ones <- .h2OnesCoef(A)
+    anchored <- colSums(A != 0) < nrow(A) & colSums(A < 0) == 0
+    centered <- !anchored & abs(ones) < 1e-8
+    means <- colSums(A) / nrow(A)
+    shift <- replace(numeric(ncol(A)), centered, means[centered])
+    size <- replace(
+        colSums(abs(A)),
+        centered,
+        .hdlCenteredSize(A[, centered, drop = FALSE], means[centered])
+    )
+    carried <- .hdlCarriedColumns(A[, !centered, drop = FALSE])
+    alone <- replace(logical(ncol(A)), !centered, carried)
+    list(
+        transform = diag(ncol(A)) - tcrossprod(ones, shift),
+        size = unname(size),
+        share = unname(replace(colSums(A) / size, centered, 0)),
+        lower = unname(if_else(centered, -2, if_else(alone, 0, -1))),
+        upper = unname(if_else(centered, 2, 1))
+    )
+}
+
+# The total absolute value of each column of `A` about its mean.
+# @noRd
+.hdlCenteredSize <- function(A, means) {
+    colSums(abs(as.matrix(A) - rep(means, each = nrow(A))))
+}
+
+# Whether some variant is non-zero on each column of `A` and on no other.
+# @noRd
+.hdlCarriedColumns <- function(A) {
+    nonZero <- A != 0
+    alone <- rowSums(nonZero) == 1L
+    colSums(nonZero[alone, , drop = FALSE]) > 0
+}
+
+# The coefficients of the design's columns from its parameters, one set per row
+# of `h2a`.
+# @noRd
+.hdlTau <- function(h2a, design) {
+    sweep(h2a, 2L, design$size, "/") %*% t(design$transform)
+}
+
+# Fit HDL by L-BFGS-B over (h2_1..h2_nTau, int), with each h2_a in the design's
+# bounds (.hdlFitBasis(); [0, 1] unstratified) and int in [0, 10] (Ning et al.
+# 2020). Parametrizing by per-annotation h2 (scale ~1) keeps the L-BFGS-B
+# finite differences well conditioned. The unstratified fit is upstream's,
+# optim()'s defaults included. A stratified one runs to a tighter tolerance, as
+# at the defaults its jackknife folds stop short of agreeing, which reads as
+# sampling noise in the standard errors.
 .hdlFit <- function(design, n, nSamples, warnOnBound = TRUE) {
     nTau <- ncol(design$ldAnnotScaled)
-    # Beside an added base column an annotation's parameter is its excess
-    # over the genome-wide rate, which a depleted annotation makes negative;
-    # only the base, and the columns of a baseline that spans the genome on
-    # its own, are heritabilities bounded below by 0.
-    lower <- c(
-        if (isTRUE(design$baseAdded)) {
-            c(0, rep(-1, nTau - 1L))
-        } else {
-            rep(0, nTau)
-        },
-        0
-    )
-    upper <- c(rep(1, nTau), 10)
+    upper <- c(design$upper, 10)
     opt <- optim(
         c(rep(0.1, nTau), 1),
         .hdlNll,
@@ -1248,15 +1334,17 @@ NULL
         lam = design$lam,
         bstar = design$bstar,
         ldAnnotScaled = design$ldAnnotScaled,
+        h2Share = design$share,
         method = "L-BFGS-B",
-        lower = lower,
-        upper = upper
+        lower = c(design$lower, 0),
+        upper = upper,
+        control = if (nTau > 1L) list(factr = 1e3, maxit = 5000L) else list()
     )
     if (warnOnBound) {
         .hdlWarnIfAtBound(opt$par, upper, n, nSamples)
     }
     h2a <- opt$par[seq_len(nTau)]
-    list(h2a = h2a, int = opt$par[nTau + 1L], h2 = sum(h2a))
+    list(h2a = h2a, int = opt$par[nTau + 1L], h2 = sum(h2a * design$share))
 }
 
 # HDL's likelihood carries a finite-reference term, -lam * h2 / nRef, that
@@ -1319,14 +1407,14 @@ NULL
 # Delete-one-block jackknife (Ning et al. 2020): refit leaving each block out,
 # SE = sqrt(mean((jack - mean)^2) * (nBlocks - 1)). Returns per-annotation and
 # total-h2 SEs, the intercept SE, and the LOO per-annotation blocks.
-.hdlJackknife <- function(blockData, M, baselineMat, n, nSamples) {
+.hdlJackknife <- function(blockData, M, basis, n, nSamples) {
     nBlocks <- length(blockData)
     loo <- map(
         seq_len(nBlocks),
         .hdlLooFit,
         blockData = blockData,
         M = M,
-        baselineMat = baselineMat,
+        basis = basis,
         n = n,
         nSamples = nSamples
     )
@@ -1335,7 +1423,7 @@ NULL
     intLoo <- map_dbl(loo, "int")
     list(
         h2aSe = apply(h2aBlocks, 2, .jackknifeSeFromLoo),
-        h2Se = .jackknifeSeFromLoo(rowSums(h2aBlocks)),
+        h2Se = .jackknifeSeFromLoo(map_dbl(loo, "h2")),
         intSe = .jackknifeSeFromLoo(intLoo),
         h2aBlocks = h2aBlocks
     )
@@ -1346,7 +1434,7 @@ NULL
 # =============================================================================
 
 # HDL-L's fit of one locus (HDL's HDL.L()), from the standardized marginal
-# effects `corInput` (z / sqrt(n)) and the locus' LD source `ld` from a
+# effects `corInput` (correlations) and the locus' LD source `ld` from a
 # reference of `nRef` samples: the rotated effects bstar = V' corInput over the
 # eigenvalues that cover 99% of the trace, with modelled variance h2 / M lam^2
 # - h2 lam / nRef + intercept lam / n (.hdlLocusVar()), h2 and the intercept
@@ -1534,7 +1622,8 @@ NULL
     h2Se = NA_real_,
     p = NA_real_,
     intercept = NA_real_,
-    scale = NA_real_
+    scale = NA_real_,
+    smallReference = FALSE
 ) {
     list(
         h2 = h2,
@@ -1542,7 +1631,8 @@ NULL
         p = p,
         nComponents = as.integer(nComponents),
         intercept = intercept,
-        scale = scale
+        scale = scale,
+        smallReference = smallReference
     )
 }
 
@@ -1566,36 +1656,71 @@ NULL
 # Werme et al. (2022, Methods) and LAVA's documentation describe it: LAVA's
 # code is not licensed for reuse, and none of it is used here. The marginal
 # correlations r_j = z_j / sqrt(z_j^2 + n_j - 2) are projected onto the K
-# standardized LD components of .lavaComponents() (no estimate with fewer
-# than 2): delta = Lambda_K^-1/2 Q_K' r. h2 is the adjusted R^2,
-# delta'delta - K sigma with sigma = (1 - delta'delta) / (n - K - 1) for the
-# mean sample size n, times the reference correction (nRef - K - 1) /
-# (nRef - 1) that LAVA's release notes describe; p is the F test of
-# delta = 0 on the corrected statistic. LAVA withholds h2 where K / n
-# exceeds 0.1; it is reported here at any K, since a cis window's K usually
-# does. Where delta'delta reaches 1, the LD contradicts the statistics and
-# both are NA.
+# standardized LD components of .lavaComponents(): delta = Lambda_K^-1/2 Q_K' r,
+# for the mean sample size n, with no estimate from fewer than 2 components or
+# with no degrees of freedom left. With phi how far the reference's LD lies
+# from the study's own (.lavaPhi()), the noise per component is
+# (1 - h2 + h2 phi) / (n - 1), which gives
+#   h2 = (delta'delta - m) / v, m = K / (n - 1), v = 1 + m (phi - 1).
+# At phi = 0 that is LAVA's adjusted R^2 exactly; for a reference sharing no
+# samples it matches, to first order, the correction (nRef - K - 1) / (nRef - 1)
+# that LAVA's release notes describe. LAVA's own noise term,
+# (1 - delta'delta) / (n - K - 1), holds at phi = 0 alone: past it, it leaves
+# h2 m in the estimate, and it has no answer once delta'delta reaches 1, as a
+# reference's components can with K / n large. p is .lavaP()'s. LAVA withholds
+# h2 where K / n exceeds 0.1; it is reported here at any K, since a cis window's
+# K usually does.
 # @noRd
-#' @importFrom stats pf
 .cisH2Lava <- function(z, nVariant, ld) {
+    .lavaFit(.zToCor(z, nVariant), mean(nVariant), ld)
+}
+
+# LAVA's estimate (.cisH2Lava()) from the correlations `r`.
+# @noRd
+.lavaFit <- function(r, n, ld) {
     dec <- .cisH2Eigen(ld)
-    n <- mean(nVariant)
     K <- .lavaComponents(dec$values, n)
-    if (K < 2L) {
+    if (K < 2L || n <= K + 1L) {
         return(.cisH2Result(K))
     }
-    r <- z / sqrt(z^2 + nVariant - 2)
     top <- seq_len(K)
     delta <- crossprod(dec$vectors[, top, drop = FALSE], r) /
         sqrt(dec$values[top])
     dtd <- sum(delta^2)
-    if (dtd >= 1) {
-        return(.cisH2Result(K))
+    overlap <- ld$referenceOverlap %||% 0
+    m <- K / (n - 1)
+    v <- 1 + m * (.lavaPhi(n, ld$nSamples, overlap) - 1)
+    .cisH2Result(
+        K,
+        h2 = (dtd - m) / v,
+        p = .lavaP(dtd, m, v, n),
+        smallReference = overlap == 0 && ld$nSamples <= 2 * n
+    )
+}
+
+# How far a reference's LD lies from the study's own, in units of its sampling
+# noise: n Var(r_study - r_reference), for n study samples, a reference of nRef
+# and the share `overlap` of the study's samples in it. 0 when the reference is
+# the study, about 1 for a panel of thousands, whatever the two share.
+# Divergence between the populations adds to it, unmodelled: measuring that
+# takes the study's own LD.
+# @noRd
+.lavaPhi <- function(n, nRef, overlap) {
+    1 + (1 - 2 * overlap) * n / nRef
+}
+
+# The test of delta = 0. Under it delta'delta = y'Ay / y'y, a ratio of quadratic
+# forms in the trait, with mean m and variance about 2 m v / (n + 1): a Beta
+# with those moments, at phi = 0 exactly the F test of the adjusted R^2.
+# NA where they fit no Beta, at a very small n.
+# @noRd
+#' @importFrom stats pbeta
+.lavaP <- function(dtd, m, v, n) {
+    s <- (1 - m) * (n + 1) / (2 * v) - 1
+    if (s <= 0) {
+        return(NA_real_)
     }
-    sigma <- (1 - dtd) / (n - K - 1)
-    scale <- (ld$nSamples - K - 1) / (ld$nSamples - 1)
-    p <- pf(dtd / sigma * scale / K, K, n - K - 1, lower.tail = FALSE)
-    .cisH2Result(K, h2 = (dtd - K * sigma) * scale, p = p)
+    pbeta(dtd, m * s, (1 - m) * s, lower.tail = FALSE)
 }
 
 # LAVA's number of LD components for a mean sample size n, as its
@@ -1607,12 +1732,18 @@ NULL
     as.integer(min(which(held >= 0.99)[[1L]], max(floor(0.75 * n), 2L)))
 }
 
-# HDL-L's estimate (.hdlLocusFit()) from the z and per-variant sample sizes:
-# HDL.L()'s effects z_j / sqrt(n_j) and its median sample size.
+# HDL-L's estimate (.hdlLocusFit()) from the z and per-variant sample sizes,
+# with HDL.L()'s median sample size, and two departures from it, both of which
+# matter for QTLs. HDL.L() reads z_j / sqrt(n_j) as the correlation, but a QTL's
+# z is a t statistic: t^2 / n = r^2 / (1 - r^2), which is 1.43 r^2 at r^2 = 0.3.
+# And it refers its likelihood ratio to a chi-square on 1 degree of freedom
+# though no heritability is on the boundary of h2's range, where the null
+# distribution is the equal mixture of that and a point mass at 0, so p is half
+# of .hdlLocusFit()'s.
 # @noRd
 .cisH2HdlL <- function(z, nVariant, ld) {
     fit <- .hdlLocusFit(
-        z / sqrt(nVariant),
+        .zToCor(z, nVariant),
         ld,
         median(nVariant),
         ld$nSamples
@@ -1620,7 +1751,7 @@ NULL
     .cisH2Result(
         fit$nComponents,
         h2 = fit$h2,
-        p = fit$p,
+        p = fit$p / 2,
         intercept = fit$intercept
     )
 }
@@ -1631,20 +1762,24 @@ NULL
 # and the standard error, with d profiled out of the likelihood instead of
 # FastHer's joint optimization: the n study samples' y ~ N(0, d (h2 X X' / m +
 # (1 - h2) I)) over the window's m variants, in the eigenbasis of the LD with
-# X'X = n R, X'y = sqrt(n) z and y'y = n. As FastHer does, z is rescaled to
-# the harmonic mean n of the per-variant sizes and the eigenpairs are kept
-# down to the one that reaches 99.999% of the trace (r of them). With a_k =
-# (Q'z)_k^2 / lambda_k and S their sum, the likelihood needs r < n and S < n,
-# which in-sample LD guarantees; the estimate is NA otherwise. d is profiled
-# out, h2 maximized over [0, 1), and its standard error is FastHer's, from
-# the expected information in (h2, d).
+# X'X = n R, X'y = n r and y'y = n. Departing from FastHer, which reads z_j /
+# sqrt(n_j) as the correlation r_j (see .cisH2HdlL()), r is the exact one: with
+# in-sample LD, strong QTLs otherwise push S to n and the estimate to NA. As
+# FastHer does, the harmonic mean n of the per-variant sizes is used and the
+# eigenpairs are kept down to the one that reaches 99.999% of the trace (r of
+# them). With a_k = n (Q'r)_k^2 / lambda_k and S their sum, the likelihood needs
+# r < n and S < n, which in-sample LD guarantees; the estimate is NA otherwise.
+# d is profiled out, h2 maximized over [0, 1), and its standard error is
+# FastHer's, from the expected information in (h2, d), and so holds under the
+# infinitesimal model that likelihood assumes.
 # @noRd
 #' @importFrom stats optimize
 .cisH2FastHer <- function(z, nVariant, ld) {
     n <- 1 / mean(1 / nVariant)
     dec <- .fastHerEigen(.cisH2Eigen(ld))
     r <- length(dec$values)
-    a <- as.vector(crossprod(dec$vectors, z * sqrt(n / nVariant)))^2 /
+    a <- n *
+        as.vector(crossprod(dec$vectors, .zToCor(z, nVariant)))^2 /
         dec$values
     if (r >= n || sum(a) >= n) {
         return(.cisH2Result(r))
@@ -1715,10 +1850,11 @@ NULL
 # sHDL candidate-annotation score statistics. Each eigen-direction's rotated
 # effect has modelled variance v_i = lamh2_i, and the likelihood's score for
 # a candidate's heritability is sum_i g_ic (bstar_i^2 / v_i^2 - 1 / v_i),
-# with g_ic = dv_i/dh2_c = l_ic lam_i^2 / M_c - lam_i / nPanel and
+# with g_ic = dv_i/dh2_c = l_ic lam_i^2 / size_c - share_c lam_i / nPanel, for
+# a column's total absolute value size_c and share_c = M_c / size_c, and
 # information weight 2 / v_i^2. The baseline heritabilities and the intercept
-# are the nuisance (.h2EfficientScoreBlocks()), with derivatives
-# l_ia lam_i^2 / M_a - lam_i / nPanel and lam_i / n.
+# are the nuisance (.h2EfficientScoreBlocks()), with derivatives from the fit's
+# own parameters (.hdlFitBasis()) and lam_i / n.
 .shdlStratified <- function(blockData, nPanel, annotations, design, lamh2, n) {
     candidate <- testedAnnotations(annotations)
     candMat <- assay(candidate, "annotations")
@@ -1728,8 +1864,17 @@ NULL
     lam <- design$lam
     blockCands <- map(blockData, "ldCand")
     ldCand <- exec(rbind, !!!blockCands)
-    gC <- .shdlGradient(sweep(ldCand, 2L, colSums(candMat), "/"), lam, nPanel)
-    G <- cbind(.shdlGradient(design$ldAnnotScaled, lam, nPanel), lam / n)
+    candSize <- colSums(abs(candMat))
+    gC <- .shdlGradient(
+        sweep(ldCand, 2L, candSize, "/"),
+        lam,
+        nPanel,
+        colSums(candMat) / candSize
+    )
+    G <- cbind(
+        .shdlGradient(design$ldAnnotScaled, lam, nPanel, design$share),
+        lam / n
+    )
     Ub <- .h2EfficientScoreBlocks(
         gC,
         G,
@@ -1745,12 +1890,12 @@ NULL
     )
 }
 
-# The derivative of each eigen-direction's modelled variance in an
-# annotation's heritability, from the annotation's LD scores scaled by its
-# size: l_ia lam_i^2 / M_a - lam_i / nPanel.
+# The derivative of each eigen-direction's modelled variance in a column's
+# parameter, from the column's LD scores scaled by its size: l_ia lam_i^2 /
+# size_a - share_a lam_i / nPanel.
 # @noRd
-.shdlGradient <- function(scaled, lam, nPanel) {
-    scaled * lam^2 - lam / nPanel
+.shdlGradient <- function(scaled, lam, nPanel, share) {
+    scaled * lam^2 - tcrossprod(lam, share) / nPanel
 }
 
 # =============================================================================
@@ -1771,17 +1916,18 @@ hdlUnivariate <- function(z, n, eigenRef, annotations = NULL) {
         baselineMat = baselineMat,
         candMat = .h2CandidateMat(annotations)
     )
-    design <- .hdlDesign(blockData, M, baselineMat)
+    basis <- if (!is.null(baselineMat)) .hdlFitBasis(baselineMat)
+    design <- .hdlDesign(blockData, M, basis)
     ft <- .hdlFit(design, n, nPanel)
-    jk <- .hdlJackknife(blockData, M, baselineMat, n, nPanel)
+    jk <- .hdlJackknife(blockData, M, basis, n, nPanel)
     .h2FitResult(
         h2 = ft$h2,
         h2Se = jk$h2Se,
         intercept = ft$int,
         interceptSe = jk$intSe,
         A = baselineMat,
-        tau = ft$h2a / design$M_a,
-        tauBlocks = sweep(jk$h2aBlocks, 2L, design$M_a, "/"),
+        tau = as.vector(.hdlTau(matrix(ft$h2a, 1L), design)),
+        tauBlocks = .hdlTau(jk$h2aBlocks, design),
         scoreStats = .hdlCandidateScores(
             blockData,
             nPanel,
@@ -2422,7 +2568,8 @@ sldscUnivariate <- function(z, n, ldRef, annotations = NULL, nIter = 2L) {
             p_value = NA_real_,
             n_snps = as.integer(M),
             n_components = NA_integer_,
-            scale = NA_real_
+            scale = NA_real_,
+            reference_overlap = NA_real_
         ),
         list(
             enrichment = list(result$enrichment),
@@ -2505,6 +2652,14 @@ setMethod(
 #' @param BPPARAM For a \code{QtlSumStats}: a \code{BiocParallelParam} over
 #'   the selected rows, each row's estimate on one worker. Default
 #'   \code{SerialParam()}.
+#' @param referenceOverlap For a \code{QtlSumStats}: the share of the study's
+#'   samples that are in the LD reference, from 0 to 1, one value or one per
+#'   selected row. Default 0. Usually unknown, and with a reference of thousands
+#'   it hardly matters (see Details): set it when the LD came from the study's
+#'   own samples or a small cohort holding them, 1 if it holds them all. Only
+#'   \code{"lava"} reads it, and its estimates record it in
+#'   \code{reference_overlap}: HDL-L's intercept absorbs what it measures, and
+#'   FastHer assumes the study's own LD.
 #' @export
 #' @importFrom BiocParallel SerialParam
 setMethod(
@@ -2518,7 +2673,8 @@ setMethod(
         contexts = NULL,
         traitId = NULL,
         cisWindow = NULL,
-        BPPARAM = SerialParam()
+        BPPARAM = SerialParam(),
+        referenceOverlap = 0
     ) {
         method <- arg_match(method, names(.cisH2Estimators))
         .cisH2AssertInput(sumstats, annotations)
@@ -2529,11 +2685,17 @@ setMethod(
             cisWindow,
             "estimateH2"
         )
+        rows <- .cisH2SelectedRows(selection)
         fits <- .bpMap(
-            .cisH2SelectedRows(selection),
+            rows,
             .cisH2Row,
             data = selection$data,
             method = method,
+            referenceOverlap = .cisH2RowOverlaps(
+                referenceOverlap,
+                rows,
+                length(selection$data)
+            ),
             BPPARAM = BPPARAM
         )
         out <- .h2EstimateNew(
@@ -2544,6 +2706,7 @@ setMethod(
         )
         .cisH2WarnEmpty(out)
         .cisH2WarnUndefined(out, method)
+        .cisH2WarnSmallReference(out, map_lgl(fits, "smallReference"))
         out
     }
 )
@@ -2591,10 +2754,32 @@ setMethod(
     rows
 }
 
-# One row's estimate, from its z and per-variant sample sizes against its LD
-# reference's block for those variants: the window it covers, and its values.
+# Each row of the data's reference overlap, from one value or one per selected
+# row.
 # @noRd
-.cisH2Row <- function(i, data, method) {
+.cisH2RowOverlaps <- function(referenceOverlap, rows, nRows) {
+    assertNumeric(
+        referenceOverlap,
+        lower = 0,
+        upper = 1,
+        any.missing = FALSE,
+        min.len = 1L
+    )
+    if (!is_in(length(referenceOverlap), c(1L, length(rows)))) {
+        abort(glue(
+            "estimateH2: `referenceOverlap` has {length(referenceOverlap)} ",
+            "values for {length(rows)} selected row(s); give one, or one per ",
+            "selected row."
+        ))
+    }
+    replace(numeric(nRows), rows, referenceOverlap)
+}
+
+# One row's estimate, from its z and per-variant sample sizes against its LD
+# reference's block for those variants: the window it covers, its values, and
+# whether LAVA's estimate rested on assuming no overlap with a small reference.
+# @noRd
+.cisH2Row <- function(i, data, method, referenceOverlap) {
     st <- as.character(data$study[[i]])
     ctx <- as.character(data$context[[i]])
     tr <- as.character(data$trait[[i]])
@@ -2607,9 +2792,16 @@ setMethod(
         require = c("Z", "N"),
         derive = "zFromBetaSe"
     )
-    fit <- .cisH2Fit(df, .rowLdRef(data, i), method, label)
+    fit <- .cisH2Fit(
+        df,
+        .rowLdRef(data, i),
+        method,
+        label,
+        referenceOverlap[[i]]
+    )
     list(
         window = .rowRegionAt(data, i),
+        smallReference = fit$smallReference,
         values = tibble(
             study = st,
             context = ctx,
@@ -2622,7 +2814,12 @@ setMethod(
             p_value = fit$p,
             n_snps = nrow(df),
             n_components = fit$nComponents,
-            scale = fit$scale
+            scale = fit$scale,
+            reference_overlap = if (identical(method, "lava")) {
+                referenceOverlap[[i]]
+            } else {
+                NA_real_
+            }
         )
     )
 }
@@ -2630,12 +2827,32 @@ setMethod(
 # One row's fit by `method`; NA when its window holds no variants, as there
 # is nothing to estimate from.
 # @noRd
-.cisH2Fit <- function(df, ldReference, method, label) {
+.cisH2Fit <- function(df, ldReference, method, label, referenceOverlap) {
     if (nrow(df) == 0L) {
         return(.cisH2Result(NA_integer_))
     }
     ld <- .cisH2LdSource(df$variant_id, ldReference, method, label)
-    exec(.cisH2Estimators[[method]], z = df$z, nVariant = df$N, ld = ld)
+    if (identical(method, "lava")) {
+        .cisH2AssertOverlap(mean(df$N), ld$nSamples, referenceOverlap, label)
+    }
+    exec(
+        .cisH2Estimators[[method]],
+        z = df$z,
+        nVariant = df$N,
+        ld = list_assign(ld, referenceOverlap = referenceOverlap)
+    )
+}
+
+# A reference cannot hold more of the study's samples than it has samples.
+# @noRd
+.cisH2AssertOverlap <- function(n, nRef, overlap, label) {
+    if (overlap * n <= nRef) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{label}: `referenceOverlap` = {overlap} puts {overlap * n} of the ",
+        "{n} study samples in an LD reference of {nRef}."
+    ))
 }
 
 # The row's LD source (.rssLdSource()) for its variants, refusing a missing
@@ -2685,9 +2902,32 @@ setMethod(
     warn(glue(
         "estimateH2: FastHer's likelihood is undefined for ",
         "{sum(undefined)} of {nrow(out)} gene(s), whose LD reference's rank ",
-        "or statistics reach the sample size (an external reference larger ",
-        "than the study); their h2 is NA: ",
+        "or statistics reach the sample size, as they can when the LD is not ",
+        "the study's own; their h2 is NA: ",
         "{str_flatten(out$trait[undefined], ', ')}."
+    ))
+}
+
+# Where the reference is no bigger than about the study, LAVA's estimate turns
+# on the samples they share, and it assumed none: LD from the study's own
+# samples comes out far too low. One warning lists the genes.
+# @noRd
+.cisH2WarnSmallReference <- function(out, small) {
+    if (!any(small)) {
+        return(invisible(NULL))
+    }
+    warn(c(
+        glue(
+            "estimateH2: the LD reference of {sum(small)} of {length(small)} ",
+            "gene(s) has at most twice the study's samples, so LAVA's ",
+            "estimate depends on how many they share, and ",
+            "`referenceOverlap = 0` assumes none: ",
+            "{str_flatten(out$trait[small], ', ')}."
+        ),
+        i = str_c(
+            "If the reference holds the study's samples, set ",
+            "`referenceOverlap`: 1 if it holds them all."
+        )
     ))
 }
 
@@ -2952,11 +3192,11 @@ h2EstimateToSldscTrait <- function(h2Est) {
 # @noRd
 # One HDL delete-one-block jackknife fold: refit leaving block `b` out.
 # @noRd
-.hdlLooFit <- function(b, blockData, M, baselineMat, n, nSamples) {
+.hdlLooFit <- function(b, blockData, M, basis, n, nSamples) {
     # The full-data fit already reported any bound it hit; repeating that
     # once per left-out block would bury it in noise.
     .hdlFit(
-        .hdlDesign(blockData[-b], M, baselineMat),
+        .hdlDesign(blockData[-b], M, basis),
         n,
         nSamples,
         warnOnBound = FALSE

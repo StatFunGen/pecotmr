@@ -150,10 +150,9 @@ colocPipeline(
 ## Enrichment-aware colocalisation (enloc mode)
 
 Passing a per-pair enrichment table --- the output of
-`qtlEnrichmentPipeline()` --- switches the pair from coloc to enloc. This is
-a port of `fastenloc`, not a reweighting of coloc: the priors are *derived*
-from the enrichment estimate rather than the baseline `p12` being scaled by
-it.
+`qtlEnrichmentPipeline()` --- scores the pair with `fastenloc`'s priors. They
+are *derived* from the enrichment estimate rather than the baseline `p12`
+being scaled by it.
 
 The estimator returns the enrichment parameters $(a_0, a_1)$ on the log-odds
 scale, and the priors follow as `fastenloc`'s `set_enrich_params` writes them,
@@ -177,10 +176,21 @@ and `colocP12` columns, so the table you pass already holds them. Because the
 enrichment determines the priors, supplying `priors` as well is an error
 rather than a silent precedence rule.
 
-What makes the scoring enloc rather than coloc is that the prior depends on
-whether the GWAS hit *is* the causal QTL --- $\sigma(a_0 + a_1)$ when it is,
-$\sigma(a_0)$ when it is not. coloc applies one $p_{12}$ to every shared
-configuration and cannot express that.
+In `fastenloc` the prior depends on whether the GWAS hit *is* the causal QTL
+--- $\sigma(a_0 + a_1)$ when it is, $\sigma(a_0)$ when it is not. coloc
+expresses that through these three priors, since
+$p_{12} / (p_1 p_2) \approx e^{a_1}$. Given Bayes factors for both traits,
+`fastenloc`'s configuration sum is coloc's formula up to a factor of
+$1 - p_1 - p_2 - p_{12}$ on H0 and on H3's inverse, and its documentation calls
+the two nearly identical, so `coloc.bf_bf` scores the pair here too. Note the
+trait order: $p_1$ above is the GWAS-only prior, while coloc's `p1` goes with
+its first trait, the QTL side, so the pipeline passes the table's `colocP2` as
+`p1` and `colocP1` as `p2`.
+
+Each effect's evidence comes from its own Bayes factors, on both sides. As with
+`fastenloc` on Bayes-factor input (its `compute_pip`), a QTL effect with no
+evidence is therefore not treated as certainly present, as SuSiE's `alpha`
+would have it, since each effect's `alpha` sums to 1.
 
 Pairs without a matching enrichment row fall back to the baseline priors with
 a warning. Four columns are added: `enrichment` and `p12Used` (the per-pair

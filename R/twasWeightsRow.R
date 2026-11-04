@@ -18,7 +18,7 @@ NULL
 #' @slot methodFits Per-method fit payload, or \code{NULL}.
 #' @slot cvResult Cross-validation payload, or \code{NULL}.
 #' @slot weightStandardized Whether the weights are on the standardized scale.
-#' @slot weightsDataType Optional data-type label.
+#' @slot weightsDataType Optional molecular type.
 #' @section Coercion: \code{as(x, "GRanges")} gives the row's variants with
 #'   their \code{weight} column: the element a collection stores for it.
 #' @seealso \code{\link{TwasWeightsRow}},
@@ -80,7 +80,8 @@ methods::setValidity("TwasWeightsRow", function(object) {
 #' @param cvResult Optional cross-validation payload.
 #' @param weightStandardized Whether the weights are already on the standardized
 #'   scale.
-#' @param weightsDataType Optional data-type label.
+#' @param weightsDataType Optional molecular type (\code{"expression"},
+#'   \code{"splicing"}).
 #' @return A \code{\linkS4class{TwasWeightsRow}}.
 #' @seealso \code{\link{FineMappingRow}}
 #' @examples
@@ -278,9 +279,9 @@ setMethod("weightStandardized", "TwasWeightsRow", function(x) {
     isTRUE(x@weightStandardized)
 })
 
-#' @rdname weightsDataType
+#' @rdname dataType
 #' @export
-setMethod("weightsDataType", "TwasWeightsRow", function(x) x@weightsDataType)
+setMethod("dataType", "TwasWeightsRow", function(x) x@weightsDataType)
 
 # @noRd
 setMethod("variants", "TwasWeightsRow", function(x) x@variants)

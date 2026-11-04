@@ -33,8 +33,7 @@ fineMappingPipeline(data, ...)
   dataDrivenPriorWeightsCutoff = 1e-10,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
-  fitRetention = c("slim", "full"),
-  dataType = NULL
+  fitRetention = c("slim", "full")
 )
 
 \S4method{fineMappingPipeline}{MultiStudyQtlDataset}(
@@ -62,8 +61,7 @@ fineMappingPipeline(data, ...)
   seed = NULL,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
-  fitRetention = c("slim", "full"),
-  dataType = NULL
+  fitRetention = c("slim", "full")
 )
 
 \S4method{fineMappingPipeline}{QtlSumStats}(
@@ -83,8 +81,7 @@ fineMappingPipeline(data, ...)
   susieRssParam = SusieRssParam(),
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam(),
-  residualizationParam = ResidualizationParam(),
-  dataType = NULL
+  residualizationParam = ResidualizationParam()
 )
 
 \S4method{fineMappingPipeline}{GwasSumStats}(
@@ -98,8 +95,7 @@ fineMappingPipeline(data, ...)
   susieRssParam = SusieRssParam(),
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam(),
-  residualizationParam = ResidualizationParam(),
-  dataType = NULL
+  residualizationParam = ResidualizationParam()
 )
 }
 \arguments{
@@ -165,7 +161,7 @@ studies, individual-level or summary-statistics, as above.}
 with \code{\link{GenotypeFilterParam}}: its \code{keepSamples} narrows
 the dataset once, and its MAF, MAC, variance, missingness,
 \code{keepVariants} and \code{keepIndel} settings apply to each
-extracted block, against that block's samples. A field left unset
+extracted block, against the samples being fit. A field left unset
 filters nothing. A \code{QtlDataset} records no filter of its own, so
 this is the only one. \code{QtlDataset} and
 \code{MultiStudyQtlDataset} input only.}
@@ -329,13 +325,6 @@ posterior
 matrices. The per-variant \code{topLoci} table is fully populated
 either way --- its per-credible-set columns are governed by
 \code{credibleSetParam}'s \code{perCsColumns}, not by this.}
-
-\item{dataType}{Optional assay / modality label for the phenotype the fit
-was run on (\code{"bulk_rnaseq"}, \code{"methylation"}), recorded as a
-per-row provenance column and published by \code{\link{writeBed}} /
-\code{\link{writeGwasVcf}}. \code{NULL} (default) omits
-the column. It cannot be derived --- the input carries the values, not
-what they measure.}
 
 \item{panelFilterParam}{LD-reference-panel filters for the summary-statistics
 and GWAS methods, built with \code{\link{PanelFilterParam}}. See

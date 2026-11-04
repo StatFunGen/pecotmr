@@ -25,7 +25,12 @@ Extract the per-annotation enrichment of an
     \item{partitioned}{tau-based enrichment of the baseline annotations,
       with columns \code{annotation}, \code{tau}, \code{tauSe},
       \code{enrichment}, \code{enrichmentSe}, \code{enrichmentP},
-      \code{propH2}, \code{propSnps}.}
+      \code{propH2}, \code{propSnps}. \code{enrichmentP} is ldsc's t test
+      of the per-variant heritability inside the annotation against
+      outside it. The last five are \code{NA} for an annotation with
+      values outside [0, 1], where they are not shares of the variants and
+      the heritability and depend on where the annotation's zero is; read
+      \code{tau} there.}
     \item{score test}{the score test over the tested (candidate)
       annotations, with columns \code{annotation}, \code{scoreZ},
       \code{scoreP}.}

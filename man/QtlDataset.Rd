@@ -8,7 +8,8 @@ QtlDataset(
   studyName,
   genotypes,
   phenotypes,
-  genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+  genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
+  dataType = NULL
 )
 }
 \arguments{
@@ -24,6 +25,14 @@ context. Each SE must have \code{rowRanges} carrying trait positions and
 \item{genotypeCovariates}{Numeric matrix of genotype-derived covariates
 (e.g., ancestry PCs); rows are samples. Becomes the \code{colData} of the
 genotype experiment.}
+
+\item{dataType}{Optional molecular type of each context (\code{"expression"},
+\code{"splicing"}, \code{"methylation"}): free text, one value for every
+context or a vector named by context. It cannot be derived, the phenotypes
+being only numbers, so pipelines read it from here and record it on what
+they fit, and \code{\link{ctwasPipeline}} models each type as its own. Kept
+in the context's \code{metadata()} as \code{dataType}, and read by
+\code{\link{dataType}}. \code{NULL} (default) leaves a context's as it is.}
 }
 \value{
 A \code{QtlDataset} object.
@@ -63,6 +72,7 @@ se <- SummarizedExperiment::SummarizedExperiment(
   rowRanges = rng
 )
 QtlDataset(
-    studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
+    studyName = "s1", genotypes = panel, phenotypes = list(brain = se),
+    dataType = "expression"
 )
 }

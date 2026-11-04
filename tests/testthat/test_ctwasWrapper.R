@@ -201,3 +201,74 @@ test_that("a ctwas step logs warnings only to the console, all to its file", {
     after <- utils::capture.output(logging::loginfo("after the step"))
     expect_true(any(grepl("after the step", after)))
 })
+
+test_that("ctwasCombinedPips combines each run's PIPs by gene", {
+    skip_if_not_installed("ctwas")
+    data(ctwasFinemapExample, envir = environment())
+    res <- asCtwasResult(ctwasFinemapExample)
+    combined <- ctwasCombinedPips(res)
+    expect_s3_class(combined, "tbl_df")
+    # The example's one gene, in one context: combining changes nothing.
+    gene <- S4Vectors::mcols(ctwasPosteriors(res))
+    expect_equal(combined$molecular_id, gene$molecular_id)
+    expect_equal(combined$combined_pip, gene$susie_pip)
+    expect_equal(combined$gwasStudy, gene$gwasStudy)
+    expect_equal(combined$method, gene$method)
+    expect_equal(
+        combined$protocol_example_bulk_rnaseq_pip,
+        gene$susie_pip
+    )
+    # A mapping reads the rows as genes.
+    mapped <- ctwasCombinedPips(
+        res,
+        mapping = data.frame(
+            molecular_id = gene$molecular_id,
+            gene_name = "geneA"
+        )
+    )
+    expect_equal(mapped$gene_name, "geneA")
+    expect_equal(mapped$combined_pip, gene$susie_pip)
+    expect_error(ctwasCombinedPips(list()), "must be a CtwasResult")
+})
+
+test_that("ctwasCombinedPips keeps runs apart, and studies in its columns", {
+    skip_if_not_installed("ctwas")
+    rows <- function(study, gwas) {
+        at <- IRanges::IRanges(c(100L, 200L), width = 1L)
+        CtwasResultEntry(
+            posteriors = GenomicRanges::GRanges(
+                "chr1",
+                at,
+                id = c("g1", "g2"),
+                region_id = "r1",
+                susie_pip = c(0.3, 0.2)
+            ),
+            susieAlpha = GenomicRanges::GRanges(
+                "chr1",
+                at,
+                id = c("g1", "g2"),
+                molecular_id = "gene",
+                region_id = "r1",
+                group = "g",
+                type = "QTL",
+                susie_set = 1L,
+                susie_alpha = c(0.3, 0.2),
+                cs = NA_character_,
+                in_cs = FALSE
+            )
+        )
+    }
+    res <- CtwasResult(
+        gwasStudy = c("D1", "D1", "D2"),
+        studyName = c("gtex", "cmc", "gtex"),
+        context = c("brain", "brain", "brain"),
+        method = c("susie", "susie", "susie"),
+        entry = list(rows(), rows(), rows())
+    )
+    combined <- ctwasCombinedPips(res)
+    expect_equal(combined$gwasStudy, c("D1", "D2"))
+    # One effect set across the studies of D1 sums them, D2's holds one study.
+    expect_equal(combined$combined_pip, c(1, 0.5))
+    expect_equal(combined$gtex_brain_pip, c(0.5, 0.5))
+    expect_equal(combined$cmc_brain_pip, c(0.5, NA))
+})
