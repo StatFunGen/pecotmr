@@ -32,10 +32,10 @@ test_that("sparsevbWeights is svb.fit's posterior mean, gamma * mu", {
 test_that("sparsevbWeights estimates the noise SD on the distinct columns", {
     skip_if_not_installed("sparsevb")
     d <- .sv_data()
-    # Variants in perfect LD give identical columns, which sparsevb's own
-    # noise estimate refuses.
+    # Variants in perfect LD give identical columns. sparsevb's own noise
+    # estimate refuses them when its check sees an exact tie in a random
+    # projection, which depends on the BLAS's rounding.
     X <- cbind(d$X, `chr1:900:A:G` = d$X[, 2])
-    expect_error(sparsevb::svb.fit(X, d$y), "duplicate columns")
     set.seed(1)
     w <- sparsevbWeights(X, d$y)
     set.seed(1)

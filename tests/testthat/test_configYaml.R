@@ -198,15 +198,23 @@ test_that("set values, nested records and awkward numbers round-trip", {
         TwasWeightsMethodsParam(methods = c("susie", "lasso")),
         PvalMethodsParam(aspu = AspuOptions(n.perm = 5000)),
         MashComponentParam(pca = list(subset = 1:5)),
-        # No 15-17 digit decimal of this one reads back exactly in R, so it
-        # is written as a hex float.
+        # Where R reads no 15-17 digit decimal of this one back exactly
+        # (macOS arm64), it is written as a hex float.
         CredibleSetParam(coverage = 0.123456789012345678),
         QtlEnrichmentParam(lambda = Inf, numGwas = 3e9),
         # NaN and NA_real_ each read back as themselves, not as the other.
         LdPruningOptions(maf = NaN, slide.max.n = NA_real_)
     )
     writeConfigToYaml(records, path)
-    expect_match(read_file(path), "coverage: 0x", fixed = TRUE)
+    # R's decimal reader rounds in long double, so which form it needs is
+    # the platform's.
+    decimal <- sprintf("%.17g", 0.123456789012345678)
+    readsBack <- as.numeric(decimal) == 0.123456789012345678
+    expect_match(
+        read_file(path),
+        str_c("coverage: ", if (readsBack) decimal else "0x"),
+        fixed = TRUE
+    )
     ctorNames <- map_chr(records, pecotmr:::.configCtorName)
     expect_identical(
         map(ctorNames, loadConfigFromYaml, filename = path),
