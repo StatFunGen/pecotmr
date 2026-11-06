@@ -242,6 +242,7 @@ The families, and the `methods =` name each answers to:
 | Penalized regression | `lasso`, `enet`, `ridge`, `mcp`, `scad`, `l0learn` | `lassoWeights()`, `enetWeights()`, `ridgeWeights()`, … |
 | Bayesian alphabet | `bayesA` … `bayesR` | `bayesAWeights()`, `bayesARssWeights()`, … |
 | Dirichlet process regression | `dprVb`, `dprGibbs`, `dprAdaptiveGibbs` | `dprVbWeights()`, `dprGibbsWeights()`, … |
+| Spike-and-slab VB | `sparsevb` (individual input only) | `sparsevbWeights()` |
 | PRS-CS | `prsCs` (sumstats input only) | `prsCsWeights()` |
 | LDpred2 | `ldpred2Auto`, `ldpred2Grid` (sumstats input only) | `ldpred2AutoWeights()`, `ldpred2GridWeights()` |
 | mr.mash / mr.ash | `mrmash`, `mrash` | `mrmashWeights()`, `mrashWeights()` |
@@ -256,7 +257,7 @@ reference instead of `X`/`y` — `lassosumRssWeights()` for `lasso`,
 `enetRssWeights()` and `ridgeRssWeights()` for `enet` and `ridge`,
 `mcpRssWeights()`, `sdprWeights()` (SDPR) for `dprGibbs`, `susieRssWeights()`,
 `bayesARssWeights()` through `bayesRRssWeights()` for the Bayesian alphabet,
-and so on; `dprVb` and `dprAdaptiveGibbs` have none.
+and so on; `dprVb`, `dprAdaptiveGibbs` and `sparsevb` have none.
 `enet` mixes the lasso and ridge penalties at `alpha = 0.5` on either input;
 `methods = list(enet = list(alpha = 0.3))` sets another mixing. Those are what
 `twasWeightsPipeline()` calls when the input is a `QtlSumStats`. The LD
@@ -316,7 +317,8 @@ candidate's coefficients.
 These methods, and LDpred2-grid, pick the returned candidate on held-out
 summary statistics:
 the statistics are split into training and held-out parts, the path is refit
-on each training part, and every candidate is scored by how much of the
+on each training part at the penalty values the full data took, and every
+candidate is scored by how much of the
 held-out part's variance it explains. Unlike a correlation, that score depends
 on the weights' scale, so a fit that nearly ignores the LD and predicts far
 more variance than the trait has does not win.
@@ -417,6 +419,14 @@ twasWeightsPipeline(
 -  `phenotypeFilterParam` is the run's phenotype QC (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).
+-  `h2` gives the Bayesian alphabet (`bayesA` to `bayesR`) and, on summary
+    statistics, LDpred2 a starting heritability for each trait in place of
+    their engines' guess of 0.5. An estimator's name (`"lava"`, `"hdlL"`,
+    `"fastHer"`, and on individual-level data `"greml"`) estimates each
+    trait's first, on the variants and samples its methods fit; the
+    `H2Estimate` that `estimateH2()` returns supplies values estimated
+    earlier. See the
+    [heritability vignette](heritability.html#starting-other-methods-from-it).
 
 ## Reading the result
 

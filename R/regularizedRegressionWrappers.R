@@ -19,6 +19,17 @@ NULL
 #'   \code{susieR::mr.ash} uses by default, built for these statistics.
 #' @param w0 Prior mixture weights (summing to 1), or \code{NULL} (default)
 #'   for equal weights.
+#' @param updateOrder The order the coordinate ascent updates the variants
+#'   in: \code{"decreasingLogBf"} (default), by decreasing marginal log Bayes
+#'   factor under the prior \code{mr.ash.rss} fits (\code{s0}, \code{w0}),
+#'   or \code{"consecutive"}, their order in \code{stat}. The engine has no
+#'   order of its own, so the variants are permuted before the fit, the LD
+#'   formed in that order, and the results put back after. On the
+#'   standardized scale (no \code{varY} with \code{seb}), or with
+#'   \code{standardize = TRUE}, the Bayes factors order the variants exactly
+#'   as \code{|z|} does. On real genotypes the default predicted slightly
+#'   better (explained variance about +0.005 over the column order) at no
+#'   cost in time.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing, \code{"slim"} and \code{"full"} attach the fitted
@@ -52,36 +63,30 @@ mrashRssWeights <- function(
     sigma2E = NULL,
     s0 = NULL,
     w0 = NULL,
+    updateOrder = c("decreasingLogBf", "consecutive"),
     fitRetention = c("none", "slim", "full"),
     methodArgs = MrashRssOptions()
 ) {
-    fitRetention <- arg_match(fitRetention)
+    retention <- arg_match(fitRetention)
+    ordering <- arg_match(updateOrder)
     .assertMethodOptions(methodArgs, "MrashRssOptions", "methodArgs")
     assertList(stat)
-    R <- .rssLdMatrix(stat, ldReference, "mrashRssWeights")
+    .rssStatVariantIds(stat, "mrashRssWeights")
     n <- median(stat$n)
-    shat <- as.numeric(stat$seb %||% numeric(0))
-    z <- .mrashRssZ(stat)
-    s0 <- s0 %||% .mrashRssDefaultGrid(n, z, shat, varY)
-    user <- as.list(methodArgs)
-    callArgs <- list_modify(
-        list(
-            bhat = as.numeric(stat$b %||% numeric(0)),
-            shat = shat,
-            z = z,
-            R = R,
-            var_y = varY,
-            n = n,
-            sigma2_e = sigma2E,
-            s0 = s0,
-            # A copy: mr.ash.rss() writes its fitted weights over the vector
-            # it is given, which would otherwise be the caller's.
-            w0 = (w0 %||% rep(1 / length(s0), length(s0))) + 0
-        ),
-        !!!user
+    inp <- list(
+        b = as.numeric(stat$b %||% numeric(0)),
+        shat = as.numeric(stat$seb %||% numeric(0)),
+        z = .mrashRssZ(stat),
+        n = n,
+        varY = varY,
+        sigma2E = sigma2E
     )
-    model <- exec(mr.ash.rss, !!!callArgs)
-    if (identical(fitRetention, "none")) {
+    prior <- .mrashRssPrior(s0, w0, inp)
+    perm <- .mrashRssOrder(ordering, inp, prior, methodArgs)
+    R <- .rssLdMatrix(stat, ldReference, "mrashRssWeights", perm)
+    callArgs <- .mrashRssCallArgs(inp, R, prior, methodArgs, perm)
+    model <- .mrashRssUnpermute(exec(mr.ash.rss, !!!callArgs), perm)
+    if (identical(retention, "none")) {
         return(model$mu1)
     }
     `attr<-`(
@@ -89,6 +94,132 @@ mrashRssWeights <- function(
         "fit",
         .withFitVariantIds(model, stat[["variantNames"]])
     )
+}
+
+# The prior mr.ash.rss() fits: the caller's grid `s0`, else susieR::mr.ash()'s
+# default built for these statistics, and the caller's weights `w0`, else
+# equal ones.
+# @noRd
+.mrashRssPrior <- function(s0, w0, inp) {
+    grid <- s0 %||% .mrashRssDefaultGrid(inp$n, inp$z, inp$shat, inp$varY)
+    list(s0 = grid, w0 = w0 %||% rep(1 / length(grid), length(grid)))
+}
+
+# The order the variants are given to mr.ash.rss() in, which it has none of
+# its own: NULL for "consecutive", their own, else by decreasing marginal
+# log Bayes factor under the prior it will fit (.mrashRssLogBf()), ties in
+# their own order.
+# @noRd
+.mrashRssOrder <- function(ordering, inp, prior, methodArgs) {
+    if (identical(ordering, "consecutive")) {
+        return(NULL)
+    }
+    standardize <- isTRUE(as.list(methodArgs)$standardize)
+    order(-.mrashRssLogBf(inp, prior, standardize))
+}
+
+# Each variant's marginal log Bayes factor under the prior mr.ash.rss()
+# fits, from the sufficient statistics it builds (susieR src/mr_ash_rss.h):
+# with adj = (n - 1) / (z^2 + n - 2), x'x = varY adj / seb^2 and x'y = z adj
+# varY / seb for a finite varY and seb, else x'x = n - 1 and x'y = z
+# sqrt(adj (n - 1)), the standardized scale; x'x = n - 1 again when it
+# standardizes. The residual variance is sigma2E, else varY when finite,
+# else 1. Where x'x is the same for every variant -- the standardized scale,
+# or standardize = TRUE -- the order is that of |z|.
+# @noRd
+.mrashRssLogBf <- function(inp, prior, standardize) {
+    adj <- (inp$n - 1) / (inp$z^2 + inp$n - 2)
+    finiteVarY <- !is.null(inp$varY) && is.finite(inp$varY)
+    unstandardized <- finiteVarY && length(inp$shat) > 0L
+    xtx <- if (unstandardized) {
+        inp$varY * adj / inp$shat^2
+    } else {
+        rep(inp$n - 1, length(inp$z))
+    }
+    xty <- if (unstandardized) {
+        inp$z * adj * inp$varY / inp$shat
+    } else {
+        inp$z * sqrt(adj * (inp$n - 1))
+    }
+    sx <- if (standardize) sqrt(xtx / (inp$n - 1)) else 1
+    sigma2 <- inp$sigma2E %||% (if (finiteVarY) inp$varY else 1)
+    .mixtureLogBf(xtx / sx^2, xty / sx, sigma2, prior$s0, prior$w0)
+}
+
+# mr.ash.rss()'s arguments, in the variants' order `perm` when one is given:
+# the statistics and a caller's mu1_init permuted (an empty bhat or seb left
+# empty), R already formed in that order. The caller's options come last.
+# @noRd
+.mrashRssCallArgs <- function(inp, R, prior, methodArgs, perm) {
+    idx <- perm %||% seq_along(inp$z)
+    user <- .mrashRssPermuteUser(as.list(methodArgs), perm)
+    list_modify(
+        list(
+            bhat = .rowsAt(inp$b, idx),
+            shat = .rowsAt(inp$shat, idx),
+            z = inp$z[idx],
+            R = R,
+            var_y = inp$varY,
+            n = inp$n,
+            sigma2_e = inp$sigma2E,
+            s0 = prior$s0,
+            # A copy: mr.ash.rss() writes its fitted weights over the vector
+            # it is given, which would otherwise be the caller's.
+            w0 = prior$w0 + 0
+        ),
+        !!!user
+    )
+}
+
+# The caller's options, with a mu1_init they give put in the order `perm`.
+# @noRd
+.mrashRssPermuteUser <- function(user, perm) {
+    if (is.null(perm) || length(user$mu1_init) == 0L) {
+        return(user)
+    }
+    list_assign(user, mu1_init = .rowsAt(user$mu1_init, perm))
+}
+
+# The fit's per-variant results put back in the statistics' order, from the
+# order `perm` the variants were fitted in: mu1, beta and the rows of
+# sigma2_1 and w1, as many as the fit has.
+# @noRd
+.mrashRssUnpermute <- function(model, perm) {
+    if (is.null(perm)) {
+        return(model)
+    }
+    fields <- intersect(c("mu1", "beta", "sigma2_1", "w1"), names(model))
+    restored <- set_names(
+        map(model[fields], .rowsAt, idx = order(perm)),
+        fields
+    )
+    list_assign(model, !!!restored)
+}
+
+# `x` at `idx`, by row for a matrix; an empty `x` stays empty, where
+# indexing it would give NAs.
+# @noRd
+.rowsAt <- function(x, idx) {
+    if (length(x) == 0L) {
+        return(x)
+    }
+    if (is.matrix(x)) x[idx, , drop = FALSE] else x[idx]
+}
+
+# The marginal log Bayes factor of each variant under mr.ash's mixture
+# prior, for x'x = `xtx`, x'y = `xty` and residual variance `sigma2`: the
+# effect is sum_k w_k N(0, sigma2 s_k), with s_k = `priorScale` and w_k =
+# `priorWeights`, so component k's log Bayes factor is -log(1 + kappa) / 2
+# + chi2 kappa / (2 (1 + kappa)), with kappa = s_k x'x and chi2 = (x'y)^2 /
+# (x'x sigma2) (susieR's bayes_ridge_sufficient()), and the variant's is
+# their log-sum-exp under the weights.
+# @noRd
+#' @importFrom matrixStats rowLogSumExps
+.mixtureLogBf <- function(xtx, xty, sigma2, priorScale, priorWeights) {
+    kappa <- outer(xtx, priorScale)
+    chi2 <- xty^2 / (xtx * sigma2)
+    logBf <- -0.5 * log1p(kappa) + 0.5 * chi2 * kappa / (1 + kappa)
+    rowLogSumExps(sweep(logBf, 2, log(priorWeights), "+"))
 }
 
 # The z-scores mr.ash.rss() fits: the statistics' own, or b / seb.
@@ -761,6 +892,41 @@ mrmashWeights <- function(
     `attr<-`(weights, "fit", .withFitVariantIds(fitList, variantIds))
 }
 
+# mr.ash's `update.order` for the wrapper's `updateOrder`: none for
+# "consecutive", which leaves the engine its column order, else the columns
+# by decreasing marginal log Bayes factor under the prior it will fit
+# (.mrashLogBf()), ties in column order.
+# @noRd
+.mrashUpdateOrder <- function(ordering, X, y, methodArgs) {
+    if (identical(ordering, "consecutive")) {
+        return(list())
+    }
+    list(update.order = order(-.mrashLogBf(X, y, as.list(methodArgs))))
+}
+
+# Each column's marginal log Bayes factor under the prior susieR::mr.ash()
+# fits (R/mr.ash.R): X and y centred for its intercept and X scaled when it
+# standardizes; the caller's grid `sa2`, else its default (2^((k - 1) / 25)
+# - 1)^2 n / median(w) with w the columns' sums of squares; the caller's
+# weights `pi`, else equal ones; the caller's residual variance `sigma2`,
+# else the variance of y.
+# @noRd
+#' @importFrom stats var
+.mrashLogBf <- function(X, y, settings) {
+    intercept <- settings$intercept %||% TRUE
+    Xc <- scale(X, center = intercept, scale = settings$standardize %||% FALSE)
+    yc <- if (intercept) y - mean(y) else y
+    w <- colSums(Xc^2)
+    sa2 <- settings$sa2 %||% ((2^((0:24) / 25) - 1)^2 / median(w) * nrow(X))
+    .mixtureLogBf(
+        w,
+        as.numeric(crossprod(Xc, yc)),
+        settings$sigma2 %||% var(y),
+        sa2,
+        settings$pi %||% rep(1 / length(sa2), length(sa2))
+    )
+}
+
 # The `beta.init` override for mr.ash: lasso weights when the caller supplied
 # none, or the caller's own initialisation restricted to the retained columns.
 # @noRd
@@ -1057,7 +1223,12 @@ mrmashRssWeights <- function(
 #'   inclusion probability themselves (\code{nIter}, \code{nBurnin},
 #'   \code{thin}, \code{pi}), so every constructor refuses its engine's
 #'   spelling of them, and hibayes' \code{seed} (drawn from R's random
-#'   number generator) and \code{threads} (one).
+#'   number generator) and \code{threads} (one). A wrapper's \code{h2}
+#'   reaches its engine in that engine's spelling: \code{h2} for qgg and
+#'   pecotmr's sampler, \code{R2} for BGLR, and for hibayes, which fixes its
+#'   own at 0.5, the variances \code{vg} and \code{ve}. The constructors
+#'   still take those, for a run that does not set \code{h2}; setting both
+#'   is an error.
 #'
 #'   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
 #'   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
@@ -1079,6 +1250,20 @@ mrmashRssWeights <- function(
 #'   enabling it would nest two frameworks and oversubscribe the machine.
 #'   The glasso and univariate-glmnet \code{mr.mash} initialisations are
 #'   single-threaded for the same reason.
+#'
+#'   \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
+#'   \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the
+#'   path is walked (\code{"strongRule"} or \code{"gradientRanked"}; see
+#'   \code{\link{penalizedRss}}).
+#'
+#'   \code{MrashOptions} refuses \code{update.order}, which
+#'   \code{mrashWeights()} sets from its own \code{updateOrder}.
+#'
+#'   \code{SparsevbOptions} takes \code{sparsevb::svb.fit}'s settings. The
+#'   per-variant ones (\code{mu}, \code{sigma}, \code{gamma} and
+#'   \code{update_order}) index the columns \code{sparsevbWeights()} fits,
+#'   which leave out zero-variance ones, and \code{svb.fit} reads
+#'   \code{update_order} counting from 0, though its documentation says 1.
 #'
 #'   \code{MrmashOptions} and \code{MrmashRssOptions} refuse
 #'   \code{nthreads}: mr.mash itself runs on one thread, because on macOS
@@ -1391,13 +1576,35 @@ L0learnOptions <- function(...) {
 
 #' @rdname twasEngineOptions
 #' @export
+SparsevbOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            Y = "supplied from the data by the pipeline"
+        ),
+        "SparsevbOptions"
+    )
+    .newMethodOptions(
+        "sparsevb::svb.fit",
+        defaults = list(),
+        extra = list(...),
+        label = "SparsevbOptions",
+        engine = "sparsevb"
+    )
+}
+
+#' @rdname twasEngineOptions
+#' @export
 MrashOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
         extra,
         c(
             X = "supplied from the data by the pipeline",
-            y = "supplied from the data by the pipeline"
+            y = "supplied from the data by the pipeline",
+            update.order = "mrashWeights()' own `updateOrder`"
         ),
         "MrashOptions"
     )
@@ -2002,6 +2209,15 @@ lassoWeights <- function(
 #' @importFrom stats predict
 #' @param X Numeric genotype / design matrix (samples x variants).
 #' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
+#' @param updateOrder The order the coordinate ascent updates the variants
+#'   in: \code{"consecutive"} (default), their column order, or
+#'   \code{"decreasingLogBf"}, by decreasing marginal log Bayes factor under
+#'   the prior \code{mr.ash} fits (its grid \code{sa2} and weights \code{pi},
+#'   from \code{methodArgs} or its defaults, and residual variance
+#'   \code{sigma2}, else the variance of \code{y}). It is passed as
+#'   \code{susieR::mr.ash}'s \code{update.order}, which
+#'   \code{\link{MrashOptions}} therefore refuses. Either way the fit starts
+#'   from lasso weights unless \code{methodArgs} gives \code{beta.init}.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing, \code{"slim"} the fitted model without its copy of the data
@@ -2022,19 +2238,22 @@ lassoWeights <- function(
 mrashWeights <- function(
     X,
     y,
+    updateOrder = c("consecutive", "decreasingLogBf"),
     fitRetention = c("none", "slim", "full"),
     retainX = FALSE,
     methodArgs = MrashOptions()
 ) {
     .assertMethodOptions(methodArgs, "MrashOptions", "methodArgs")
-    fitRetention <- arg_match(fitRetention)
-    .assertRetainX(retainX, fitRetention)
+    ordering <- arg_match(updateOrder)
+    retention <- arg_match(fitRetention)
+    .assertRetainX(retainX, retention)
     keep <- .dropZeroVariance(X, "mrashWeights")
     XKeep <- X[, keep, drop = FALSE]
     # as.list(): list_assign() rejects a MethodOptions outright as `.x`, the
     # same S4-SimpleList seam that makes c() append it instead of splicing.
     betaInit <- .mrashBetaInit(methodArgs, XKeep, y, X, keep)
-    argsList <- list_assign(as.list(methodArgs), !!!betaInit)
+    orderArg <- .mrashUpdateOrder(ordering, XKeep, y, methodArgs)
+    argsList <- list_assign(as.list(methodArgs), !!!betaInit, !!!orderArg)
     fit.mr.ash <- exec(mr.ash, X = XKeep, y = y, !!!argsList)
     # Zero-variance columns were never fitted and keep a zero weight.
     eff.wgt <- replace(
@@ -2042,11 +2261,11 @@ mrashWeights <- function(
         keep,
         predict(fit.mr.ash, type = "coefficients")[-1]
     )
-    if (identical(fitRetention, "none")) {
+    if (identical(retention, "none")) {
         return(eff.wgt)
     }
     kept <- switch(
-        fitRetention,
+        retention,
         slim = .withoutFields(fit.mr.ash, c("data", "update.order")),
         full = if (retainX) {
             fit.mr.ash
@@ -2206,9 +2425,9 @@ mrashWeights <- function(
 #'     Casella's form.
 #' }
 #' The same settings reach every engine: \code{nIter}, \code{nBurnin},
-#' \code{thin} and \code{pi} are renamed to each engine's own spelling, and
-#' everything else goes through \code{methodArgs}, built with the backend's
-#' own constructor.
+#' \code{thin}, \code{pi} and \code{h2} are renamed to each engine's own
+#' spelling, and everything else goes through \code{methodArgs}, built with
+#' the backend's own constructor.
 #'
 #' @param X A numeric matrix of genotypes (samples x variants).
 #' @param y A numeric vector of phenotypes, one per row of \code{X}.
@@ -2220,6 +2439,18 @@ mrashWeights <- function(
 #'   non-null effects, where each engine's estimate of it starts; \code{NULL}
 #'   gives 0.2 for \code{bayesB} and 0.1 for \code{bayesC}. Refused for the
 #'   other methods.
+#' @param h2 The trait's heritability in the window, which sets every
+#'   engine's starting variances and the scales of its priors: \code{NULL}
+#'   (the default) keeps each engine's own, 0.5; a number in [0, 1); or the
+#'   estimator to estimate it with first, on \code{X} and \code{y}:
+#'   \code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
+#'   \code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
+#'   0.001 and capped at 0.99, and an estimate that cannot be made leaves
+#'   the engine's default, with a warning. qgg reads it as \code{h2} and
+#'   BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
+#'   genetic and residual variances (\code{vg}, \code{ve}) its defaults
+#'   would give at \code{h2}. Setting that engine's spelling through
+#'   \code{methodArgs} as well is an error.
 #' @param nIter Integer. Total number of MCMC iterations, burn-in included,
 #'   on every engine. Default \code{5000}.
 #' @param nBurnin Integer. Number of burn-in iterations discarded; less than
@@ -2255,6 +2486,7 @@ bayesAlphabetWeights <- function(
     method,
     backend = NULL,
     pi = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2273,15 +2505,17 @@ bayesAlphabetWeights <- function(
     )
     assertVector(y, len = nrow(X))
     keep <- .dropZeroVariance(X, "bayesAlphabetWeights")
+    XKeep <- X[, keep, drop = FALSE]
     fit <- exec(
         .alphabetFitters$individual[[backend]],
-        X = X[, keep, drop = FALSE],
+        X = XKeep,
         y = y,
         method = method,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
         pi = pi,
+        h2 = .alphabetIndividualH2(h2, XKeep, y),
         methodArgs = methodArgs
     )
     posterior <- .alphabetPosterior(fit, backend)
@@ -2291,6 +2525,54 @@ bayesAlphabetWeights <- function(
     }
     kept <- if (identical(fitRetention, "full")) fit else posterior
     `attr<-`(weights, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
+}
+
+# The heritability an individual-level fit starts from (.h2Resolve()), an
+# estimate being made on the variants it fits.
+# @noRd
+.alphabetIndividualH2 <- function(h2, X, y) {
+    .h2Resolve(
+        h2,
+        .h2IndividualMethods(),
+        "bayesAlphabetWeights",
+        .h2IndividualFit,
+        list(X = X, y = y)
+    )
+}
+
+# Each backend's spelling of the heritability its priors start from.
+# hibayes fixes its own at 0.5, so it takes the variances that implies.
+# @noRd
+.alphabetH2Names <- list(
+    qgg = "h2",
+    bglr = "R2",
+    hibayes = c("vg", "ve"),
+    pecotmr = "h2"
+)
+
+# `methodArgs` with the heritability `h2` in its backend's spelling, added
+# through the constructor `ctorName`, so a value the caller also set there
+# is refused as given twice. hibayes gets the genetic and residual variances
+# its own defaults give at 0.5 (src/Bayes.cpp, src/SBayesD.cpp), at `h2`:
+# (dfvg - 2) / dfvg vary h2 and vary (1 - h2), `vary` being the phenotypic
+# variance it computes from its input.
+# @noRd
+.alphabetWithH2 <- function(methodArgs, ctorName, backend, h2, vary = NULL) {
+    if (is.null(h2)) {
+        return(methodArgs)
+    }
+    values <- if (identical(backend, "hibayes")) {
+        dfvg <- as.list(methodArgs)[["dfvg"]] %||% 4
+        c((dfvg - 2) / dfvg * vary * h2, vary * (1 - h2))
+    } else {
+        h2
+    }
+    exec(
+        .methodOptionsWith,
+        methodArgs,
+        ctorName,
+        !!!set_names(as.list(values), .alphabetH2Names[[backend]])
+    )
 }
 
 # A backend's posterior summaries over the variants it fitted: the effects'
@@ -2392,15 +2674,18 @@ bayesAlphabetWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     methodArgs
 ) {
     if (!requireNamespace("qgg", quietly = TRUE)) {
         abort("Package 'qgg' is required for backend = \"qgg\".")
     }
-    if (!is.null(pi)) {
-        methodArgs <- .methodOptionsWith(methodArgs, "QggOptions", pi = pi)
-    }
-    user <- as.list(methodArgs)
+    user <- as.list(.alphabetWithH2(
+        .alphabetQggPi(methodArgs, pi),
+        "QggOptions",
+        "qgg",
+        h2
+    ))
     callArgs <- list_modify(
         list(
             y = y,
@@ -2413,6 +2698,16 @@ bayesAlphabetWeights <- function(
         !!!user
     )
     exec(qgg::gbayes, !!!callArgs)
+}
+
+# qgg's record with bayesC's prior proportion `pi`, for the methods that
+# have one.
+# @noRd
+.alphabetQggPi <- function(methodArgs, pi) {
+    if (is.null(pi)) {
+        return(methodArgs)
+    }
+    .methodOptionsWith(methodArgs, "QggOptions", pi = pi)
 }
 
 # BGLR's sampler, through bglrWeights(), which keeps BGLR's files in a
@@ -2428,6 +2723,7 @@ bayesAlphabetWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     methodArgs
 ) {
     weights <- bglrWeights(
@@ -2439,7 +2735,7 @@ bayesAlphabetWeights <- function(
         thin = thin,
         etaArgs = if (is.null(pi)) list() else list(probIn = pi),
         fitRetention = "full",
-        methodArgs = methodArgs
+        methodArgs = .alphabetWithH2(methodArgs, "BglrOptions", "bglr", h2)
     )
     attr(weights, "fit", exact = TRUE)
 }
@@ -2456,20 +2752,20 @@ bayesAlphabetWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     methodArgs
 ) {
     if (!requireNamespace("hibayes", quietly = TRUE)) {
         abort("Package 'hibayes' is required for backend = \"hibayes\".")
     }
-    if (!is.null(pi)) {
-        methodArgs <- .methodOptionsWith(
-            methodArgs,
-            "HibayesOptions",
-            Pi = c(1 - pi, pi)
-        )
-    }
     ids <- as.character(seq_len(nrow(X)))
-    user <- as.list(methodArgs)
+    user <- as.list(.alphabetWithH2(
+        .alphabetHibayesPi(methodArgs, pi, "HibayesOptions"),
+        "HibayesOptions",
+        "hibayes",
+        h2,
+        var(y)
+    ))
     callArgs <- list_modify(
         list(
             formula = y ~ 1,
@@ -2487,6 +2783,16 @@ bayesAlphabetWeights <- function(
         !!!user
     )
     withr::with_preserve_seed(exec(hibayes::ibrm, !!!callArgs))
+}
+
+# hibayes' record, built by `ctorName`, with the prior proportions `Pi` of
+# the null and non-null effects, for the methods that have one.
+# @noRd
+.alphabetHibayesPi <- function(methodArgs, pi, ctorName) {
+    if (is.null(pi)) {
+        return(methodArgs)
+    }
+    .methodOptionsWith(methodArgs, ctorName, Pi = c(1 - pi, pi))
 }
 
 #' @title BayesA TWAS weights (scaled-t prior)
@@ -2512,6 +2818,7 @@ bayesAWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes"),
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2523,6 +2830,7 @@ bayesAWeights <- function(
         y,
         "bayesA",
         backend = arg_match(backend),
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2556,6 +2864,7 @@ bayesBWeights <- function(
     y,
     backend = c("bglr", "hibayes"),
     pi = 0.2,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2568,6 +2877,7 @@ bayesBWeights <- function(
         "bayesB",
         backend = arg_match(backend),
         pi = pi,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2602,6 +2912,7 @@ bayesCWeights <- function(
     y,
     backend = c("qgg", "hibayes"),
     pi = 0.1,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2614,6 +2925,7 @@ bayesCWeights <- function(
         "bayesC",
         backend = arg_match(backend),
         pi = pi,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2647,6 +2959,7 @@ bayesLWeights <- function(
     X,
     y,
     backend = c("qgg", "bglr", "hibayes"),
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2658,6 +2971,7 @@ bayesLWeights <- function(
         y,
         "bayesL",
         backend = arg_match(backend),
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2689,6 +3003,7 @@ bayesNWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes"),
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2700,6 +3015,7 @@ bayesNWeights <- function(
         y,
         "bayesN",
         backend = arg_match(backend),
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2731,6 +3047,7 @@ bayesRWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes"),
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2742,6 +3059,7 @@ bayesRWeights <- function(
         y,
         "bayesR",
         backend = arg_match(backend),
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -2802,6 +3120,18 @@ bayesRWeights <- function(
 #'   \code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.
 #' @param backend The engine, one the method has (see Description);
 #'   \code{NULL} picks the default for the LD reference.
+#' @param h2 The trait's heritability in the window, which sets every
+#'   engine's starting variances and the scales of its priors: \code{NULL}
+#'   (the default) keeps each engine's own, 0.5; a number in [0, 1); or the
+#'   estimator to estimate it with first, on \code{stat} and
+#'   \code{ldReference}: \code{"lava"}, \code{"hdlL"} or \code{"fastHer"}
+#'   (see \code{\link{estimateH2}}), taking the reference to share no
+#'   samples with the study. It is used floored at 0.001 and capped at 0.99,
+#'   and an estimate that cannot be made leaves the engine's default, with a
+#'   warning. qgg and pecotmr's sampler read it as \code{h2}; hibayes, which
+#'   fixes its own at 0.5, gets the genetic and residual variances
+#'   (\code{vg}, \code{ve}) its defaults would give at \code{h2}. Setting
+#'   that engine's spelling through \code{methodArgs} as well is an error.
 #' @inheritParams bayesAlphabetWeights
 #' @param shrinkCorr The LD shrinkage \eqn{c}: every engine reads
 #'   \eqn{cR + (1 - c)I}, qgg and hibayes as the matrix they are given,
@@ -2857,6 +3187,7 @@ bayesAlphabetRssWeights <- function(
     method,
     backend = NULL,
     pi = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2885,19 +3216,39 @@ bayesAlphabetRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         pi = pi,
+        h2 = .alphabetRssH2(h2, stat, ldReference),
         shrinkCorr = shrinkCorr,
         methodArgs = methodArgs
     )
+    .alphabetRssResult(fit, fitRetention, shrinkCorr, stat[["variantNames"]])
+}
+
+# The heritability a summary-statistics fit starts from (.h2Resolve()), an
+# estimate being made on its statistics and LD reference.
+# @noRd
+.alphabetRssH2 <- function(h2, stat, ldReference) {
+    label <- "bayesAlphabetRssWeights"
+    .h2Resolve(
+        h2,
+        .h2SumStatsMethods(),
+        label,
+        .h2StatFit,
+        list(stat = stat, ldReference = ldReference, label = label)
+    )
+}
+
+# A summary-statistics fit's weights, with its estimates, the shrinkage used
+# and the variants it was fitted on attached unless `fitRetention` is
+# "none".
+# @noRd
+.alphabetRssResult <- function(fit, fitRetention, shrinkCorr, ids) {
     if (identical(fitRetention, "none")) {
         return(fit$betaEst)
     }
     `attr<-`(
         fit$betaEst,
         "fit",
-        .withFitVariantIds(
-            c(fit, list(shrinkCorr = shrinkCorr)),
-            stat[["variantNames"]]
-        )
+        .withFitVariantIds(c(fit, list(shrinkCorr = shrinkCorr)), ids)
     )
 }
 
@@ -2968,18 +3319,21 @@ bayesAlphabetRssWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     shrinkCorr,
     methodArgs
 ) {
     if (!requireNamespace("qgg", quietly = TRUE)) {
         abort("Package 'qgg' is required for backend = \"qgg\".")
     }
-    if (!is.null(pi)) {
-        methodArgs <- .methodOptionsWith(methodArgs, "QggOptions", pi = pi)
-    }
     inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
     qin <- .alphabetQggInputs(inp)
-    user <- as.list(methodArgs)
+    user <- as.list(.alphabetWithH2(
+        .alphabetQggPi(methodArgs, pi),
+        "QggOptions",
+        "qgg",
+        h2
+    ))
     callArgs <- list_modify(
         list(
             stat = qin$stat,
@@ -3054,21 +3408,21 @@ bayesAlphabetRssWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     shrinkCorr,
     methodArgs
 ) {
     if (!requireNamespace("hibayes", quietly = TRUE)) {
         abort("Package 'hibayes' is required for backend = \"hibayes\".")
     }
-    if (!is.null(pi)) {
-        methodArgs <- .methodOptionsWith(
-            methodArgs,
-            "HibayesRssOptions",
-            Pi = c(1 - pi, pi)
-        )
-    }
     inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
-    user <- as.list(methodArgs)
+    user <- as.list(.alphabetWithH2(
+        .alphabetHibayesPi(methodArgs, pi, "HibayesRssOptions"),
+        "HibayesRssOptions",
+        "hibayes",
+        h2,
+        .hibayesRssVary(inp)
+    ))
     callArgs <- list_modify(
         list(
             sumstat = data.frame(
@@ -3096,6 +3450,15 @@ bayesAlphabetRssWeights <- function(
     list(betaEst = as.numeric(fit$alpha), backend = "hibayes")
 }
 
+# The phenotypic variance hibayes' sbrm() computes from the statistics it is
+# given (src/SBayesD.cpp): the mean over variants of n R_jj (b^2 + (N - 2)
+# se^2), over n - 1, n being the mean sample size truncated to an integer.
+# @noRd
+.hibayesRssVary <- function(inp) {
+    n <- as.integer(mean(inp$n))
+    mean(diag(inp$R) * n * (inp$bhat^2 + (inp$n - 2) * inp$seb^2)) / (n - 1)
+}
+
 # pecotmr's sampler, on a genotype reference's factor of the LD.
 # @noRd
 .alphabetPecotmrRssFit <- function(
@@ -3106,6 +3469,7 @@ bayesAlphabetRssWeights <- function(
     nBurnin,
     thin,
     pi,
+    h2,
     shrinkCorr,
     methodArgs
 ) {
@@ -3113,7 +3477,12 @@ bayesAlphabetRssWeights <- function(
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
     .rssValidateSource(bhat, ld, n)
-    user <- as.list(methodArgs)
+    user <- as.list(.alphabetWithH2(
+        methodArgs,
+        "BayesAlphabetRssOptions",
+        "pecotmr",
+        h2
+    ))
     callArgs <- list_modify(
         list(
             bhat = bhat,
@@ -3164,8 +3533,9 @@ bayesAlphabetRssWeights <- function(
 #' @param perVariantWeights \code{FALSE} (default) weights every variant by
 #'   n; \code{TRUE} weights each by qgg's 1 / (se^2 + b^2 / n_j), from its
 #'   own sample size.
-#' @param h2 The prior guess of the heritability that sets the starting
-#'   variances. Default \code{0.5}, qgg's and hibayes'.
+#' @param h2 The prior guess of the heritability, which sets the starting
+#'   variances and the scales of their priors. Default \code{0.5}, qgg's and
+#'   hibayes'.
 #' @param shrinkCorr The LD shrinkage \eqn{c}: the sampler reads
 #'   \eqn{cR + (1 - c)I}. Default 1, none.
 #' @param ldProjection The ridge \eqn{a} of SDPR's likelihood (Zhou and Zhao
@@ -3380,6 +3750,7 @@ bayesARssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3392,6 +3763,7 @@ bayesARssWeights <- function(
         ldReference,
         "bayesA",
         backend = backend,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3424,6 +3796,7 @@ bayesBRssWeights <- function(
     ldReference,
     backend = NULL,
     pi = 0.2,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3437,6 +3810,7 @@ bayesBRssWeights <- function(
         "bayesB",
         backend = backend,
         pi = pi,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3470,6 +3844,7 @@ bayesCRssWeights <- function(
     ldReference,
     backend = NULL,
     pi = 0.1,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3483,6 +3858,7 @@ bayesCRssWeights <- function(
         "bayesC",
         backend = backend,
         pi = pi,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3513,6 +3889,7 @@ bayesLRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3525,6 +3902,7 @@ bayesLRssWeights <- function(
         ldReference,
         "bayesL",
         backend = backend,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3556,6 +3934,7 @@ bayesNRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3568,6 +3947,7 @@ bayesNRssWeights <- function(
         ldReference,
         "bayesN",
         backend = backend,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3598,6 +3978,7 @@ bayesRRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
+    h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3610,6 +3991,7 @@ bayesRRssWeights <- function(
         ldReference,
         "bayesR",
         backend = backend,
+        h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3665,11 +4047,14 @@ bayesRRssWeights <- function(
 #'   (default) is pecotmr for a genotype reference and bigsnpr for an
 #'   \code{\link{LdMatrix}}; pecotmr's sampler reads only a genotype
 #'   reference.
-#' @param h2Init The starting heritability. \code{NULL} (default) estimates
-#'   it for the window by LAVA, as \code{\link{estimateH2}} does for QTL
-#'   summary statistics, which reads the reference's sample size, so an
-#'   \code{LdMatrix} must record \code{nSamples}. Floored at 0.001, which is
-#'   also the start where LAVA gives no estimate.
+#' @param h2Init The starting heritability: a number, or the estimator to
+#'   estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
+#'   \code{"fastHer"}, as \code{\link{estimateH2}} does for QTL summary
+#'   statistics, the reference taken to share no samples with the study.
+#'   \code{NULL} (default) is \code{"lava"}. LAVA and HDL-L read the
+#'   reference's sample size, so an \code{LdMatrix} must record
+#'   \code{nSamples}. Floored at 0.001, which is also the start where the
+#'   estimator gives no estimate.
 #' @param pInit The starting proportions of causal variants, one chain each.
 #' @param nIter,nBurnin Each chain's iterations, burn-in included, and its
 #'   burn-in.
@@ -3773,10 +4158,11 @@ ldpred2AutoWeights <- function(
 #'
 #' @inheritParams ldpred2AutoWeights
 #' @param p The proportions of causal variants in the grid.
-#' @param h2 The heritabilities in the grid. \code{NULL} (default) is the
-#'   window's LAVA estimate (see \code{h2Init} of
-#'   \code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4, as the
-#'   LDpred2 vignette scales LD score regression's.
+#' @param h2 The heritabilities in the grid: numbers, or one estimator,
+#'   whose estimate for the window (see \code{h2Init} of
+#'   \code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4 makes the
+#'   grid, as the LDpred2 vignette scales LD score regression's. \code{NULL}
+#'   (default) is \code{"lava"}.
 #' @param sparse Whether each fit sets an effect whose inclusion probability
 #'   falls below \code{p} to zero; both by default.
 #' @param shrinkCorr The LD shrinkage \eqn{c}: both engines read
@@ -3907,43 +4293,51 @@ ldpred2GridWeights <- function(
 }
 
 # The heritability LDpred2-auto starts from: the caller's, floored at 0.001
-# as bigsnpr floors it, else the window's LAVA estimate.
+# as bigsnpr floors it, else the window's estimate by the estimator it names,
+# LAVA when NULL.
 # @noRd
 .ldpred2H2 <- function(h2, inp, label) {
-    if (is.null(h2)) {
-        return(.ldpred2LavaH2(inp, label))
+    if (is.null(h2) || is.character(h2)) {
+        return(.ldpred2EstimateH2(h2 %||% "lava", inp, label))
     }
     assertNumber(h2, lower = 0, upper = 1)
     max(h2, 1e-3)
 }
 
-# The heritabilities of the grid: the caller's, else the window's LAVA
-# estimate times 0.3, 0.7, 1 and 1.4.
+# The heritabilities of the grid: the caller's, else the window's estimate by
+# the estimator it names (LAVA when NULL) times 0.3, 0.7, 1 and 1.4.
 # @noRd
 .ldpred2GridH2 <- function(h2, inp, label) {
-    if (!is.null(h2)) {
+    if (is.numeric(h2)) {
         .ldpred2AssertProportions(h2, "h2")
         return(h2)
     }
-    .ldpred2LavaH2(inp, label) * c(0.3, 0.7, 1, 1.4)
+    .ldpred2EstimateH2(h2 %||% "lava", inp, label) * c(0.3, 0.7, 1, 1.4)
 }
 
-# The window's heritability by LAVA (.cisH2Lava(), estimateH2()'s default
-# for QTL summary statistics), which reads the reference's sample size, taken to
-# share no samples with the study, and floored at bigsnpr's 0.001: the start too
-# where LAVA gives no estimate.
+# The window's heritability by `method`, one of estimateH2()'s estimators for
+# QTL summary statistics (.cisH2Estimators), the reference taken to share no
+# samples with the study, and floored at bigsnpr's 0.001: the start too
+# where the estimator gives no estimate.
 # @noRd
-.ldpred2LavaH2 <- function(inp, label) {
-    if (is.na(inp$ld$nSamples)) {
+.ldpred2EstimateH2 <- function(method, inp, label) {
+    estimator <- arg_match0(method, .h2SumStatsMethods(), arg_nm = "h2")
+    if (is_in(estimator, c("lava", "hdlL")) && is.na(inp$ld$nSamples)) {
         abort(c(
             glue(
-                "{label}: estimating the heritability by LAVA needs the ",
-                "LD reference's sample size."
+                "{label}: estimating the heritability by ",
+                "{.h2EstimatorNames[[estimator]]} needs the LD reference's ",
+                "sample size."
             ),
             i = "Build the LdMatrix with `nSamples`, or give the heritability."
         ))
     }
-    h2 <- .lavaFit(inp$bhat, mean(inp$n), inp$ld)$h2
+    h2 <- exec(
+        .cisH2Estimators[[estimator]],
+        z = .corToZ(inp$bhat, inp$n),
+        nVariant = inp$n,
+        ld = inp$ld
+    )$h2
     if (is.na(h2)) 1e-3 else max(h2, 1e-3)
 }
 
@@ -4368,10 +4762,10 @@ ldpred2GridWeights <- function(
 #' \hat\beta / \sqrt{n}}.
 #'
 #' Based on Mak et al (2017) "Polygenic scores via penalized regression on
-#' summary statistics", Genetic Epidemiology 41(6):469-480. It runs on the
-#' solver of \code{\link{penalizedRss}}, whose LASSO at \code{alpha = 1} is
-#' lassosum's coordinate descent: the same updates in the same order, so the
-#' same coefficients bit for bit.
+#' summary statistics", Genetic Epidemiology 41(6):469-480. It is
+#' \code{\link{penalizedRss}}'s LASSO at \code{alpha = 1}: lassosum's
+#' coordinate updates, walked down the path by ncvreg's strong-rule
+#' strategy unless \code{strategy} says otherwise.
 #'
 #' Internal: \code{\link{lassosumRssWeights}} is the public interface. It
 #' runs this over a grid of LD shrinkage values, forwards \code{lambda},
@@ -4384,10 +4778,15 @@ ldpred2GridWeights <- function(
 #'   window), as in \code{susieR::susie_rss()}. If shrinkage is desired, apply
 #'   it before passing (e.g., \code{(1-s)*R + s*I}).
 #' @param n Sample size of the GWAS.
-#' @param lambda A vector of L1 penalty values. Default: 20 values from 1e-4 to
-#'   0.1 on log scale.
+#' @param lambda A vector of L1 penalty values. \code{NULL} (default) is
+#'   \code{\link{penalizedRss}}'s default path: 20 values on a log scale from
+#'   the smallest at which every coefficient is zero down to ncvreg's
+#'   \code{lambda.min}, 0.1\% of it with more samples than variants and 5\%
+#'   otherwise.
 #' @param thr Convergence threshold. Default: 1e-4.
 #' @param maxiter Maximum number of iterations. Default: 10000.
+#' @param strategy How the path is walked; see \code{\link{penalizedRss}}.
+#'   \code{NULL} (default) is \code{"strongRule"}.
 #'
 #' @return A list containing:
 #'   \item{betaEst}{Posterior estimates of SNP effect sizes at best lambda.}
@@ -4404,9 +4803,10 @@ lassosumRss <- function(
     bhat,
     R,
     n,
-    lambda = exp(seq(log(0.0001), log(0.1), length.out = 20)),
+    lambda = NULL,
     thr = 1e-4,
-    maxiter = 10000
+    maxiter = 10000,
+    strategy = NULL
 ) {
     .penalizedRssPath(
         bhat,
@@ -4415,7 +4815,8 @@ lassosumRss <- function(
         spec = .rssPenalty("lasso"),
         lambda = lambda,
         thr = thr,
-        maxiter = maxiter
+        maxiter = maxiter,
+        strategy = strategy
     )
 }
 
@@ -4654,19 +5055,19 @@ lassosumRss <- function(
     ties[.lassosumFirstMax(cor[ties])]
 }
 
-# The shrinkage grid refit on a held-out split's training part.
+# The shrinkage grid refit on a held-out split's training part, at the
+# full-data fit's path values `grids`, so its candidates line up with the
+# full data's.
 # @noRd
-.rssRefitShrinkGrid <- function(trainCor, share, s, ld, n, config) {
-    fits <- map(
+.rssRefitShrinkGrid <- function(trainCor, share, s, ld, n, config, grids) {
+    .rssFitShrinkGrid(
         s,
-        .rssFitAtS,
-        solverInput = trainCor * sqrt(share * n),
-        ld = ld,
-        n = share * n,
-        config = config
-    )
-    fitBetas <- map(fits, "beta")
-    exec(cbind, !!!fitBetas)
+        trainCor * sqrt(share * n),
+        ld,
+        share * n,
+        config,
+        grids
+    )$beta
 }
 
 # Held-out selection draws the reference's sampling noise, so it needs the
@@ -4727,7 +5128,8 @@ lassosumRss <- function(
 # list. Shared by lassosumRss and penalizedRss, which differ only in which C++
 # solver they pass as `solveFn` (and penalizedRss's per-penalty gamma default).
 # `ld` is an LD source: the matrix, or a factor of it with the shrinkage the
-# factor solver applies itself.
+# factor solver applies itself. An empty `lambda` leaves the path to the
+# solver (the L0 family's default), returned in the order it solved it.
 .rssSolvePath <- function(bhat, ld, n, lambda, solveFn, solveArgs = list()) {
     .rssValidateSource(bhat, ld, n)
     z <- bhat / sqrt(n)
@@ -4736,8 +5138,9 @@ lassosumRss <- function(
     # argument sets, and both callers know theirs statically, so an unknown
     # solver argument should be an error here rather than reaching the solver.
     solved <- exec(solveFn, z, lambda[order], ld, !!!solveArgs)
+    ownPath <- length(lambda) == 0L
     # Reorder back to original lambda order via the inverse permutation.
-    invOrder <- order(order)
+    invOrder <- if (ownPath) seq_along(solved$lambda) else order(order)
     beta <- solved$beta[, invOrder, drop = FALSE]
     fbeta <- solved$fbeta[invOrder]
     list_assign(
@@ -4746,21 +5149,23 @@ lassosumRss <- function(
         conv = solved$conv[invOrder],
         loss = solved$loss[invOrder],
         fbeta = fbeta,
-        lambda = lambda,
+        lambda = if (ownPath) as.numeric(solved$lambda) else lambda,
         nparams = as.integer(colSums(beta != 0)),
         betaEst = as.numeric(beta[, which.min(fbeta)])
     )
 }
 
 # Per-`s` fit for one RSS method: one penalized path at the wrapper's
-# penalty, or, for l0learn, one per value of its lambda0 grid. Returns
-# list(beta, meta).
+# penalty, or, for l0learn, one lambda0 path per value of its L1 grid.
+# `grid` is the path to solve at, a held-out refit's full-data values (NULL
+# for the full-data fit itself). Returns list(beta, meta, grid), `grid` the
+# path values solved at, for the refits.
 # @noRd
-.rssFitOne <- function(solverInput, ld, n, sVal, config) {
+.rssFitOne <- function(solverInput, ld, n, sVal, config, grid = NULL) {
     if (identical(config$method, "l0learn")) {
-        return(.rssFitL0learn(solverInput, ld, n, sVal, config))
+        return(.rssFitL0learn(solverInput, ld, n, sVal, config, grid))
     }
-    .rssFitPenalized(solverInput, ld, n, sVal, config)
+    .rssFitPenalized(solverInput, ld, n, sVal, config, grid)
 }
 
 # Shared per-candidate frame for a single-path model: the shrinkage s and
@@ -4779,25 +5184,42 @@ lassosumRss <- function(
 }
 
 # The penalized path for one s, against `ld` shrunk to that s: the wrapper's
-# penalty, `config$spec`, under the caller's path options.
+# penalty, `config$spec`, under the caller's path options, at `grid` when
+# given.
 # @noRd
-.rssFitPenalized <- function(solverInput, ld, n, sVal, config) {
+.rssFitPenalized <- function(solverInput, ld, n, sVal, config, grid = NULL) {
     model <- .penalizedRssOn(
         solverInput,
         ld,
         n,
         config$spec,
-        config$options
+        .rssGridOptions(config$options, grid)
     )
-    list(beta = model$beta, meta = .rssPathMeta(sVal, model))
+    list(
+        beta = model$beta,
+        meta = .rssPathMeta(sVal, model),
+        grid = model$lambda
+    )
 }
 
-# L0Learn path for one s: one penalizedRss fit per lambda0, column-bound.
+# The path options of one fit: the caller's, with `path` as the path when
+# given.
 # @noRd
-.rssFitL0learn <- function(solverInput, ld, n, sVal, config) {
-    fits <- map(
-        config$lambda0,
-        .rssL0LambdaFit,
+.rssGridOptions <- function(options, path) {
+    if (is.null(path)) {
+        return(options)
+    }
+    list_assign(options, lambda = path)
+}
+
+# L0Learn path for one s: one warm-started lambda0 path per value of the L1
+# grid, column-bound. `grid`, when given, holds each L1 value's lambda0 path.
+# @noRd
+.rssFitL0learn <- function(solverInput, ld, n, sVal, config, grid = NULL) {
+    fits <- map2(
+        config$lambda1,
+        grid %||% vector("list", length(config$lambda1)),
+        .rssL0PathFit,
         solverInput = solverInput,
         ld = ld,
         n = n,
@@ -4808,7 +5230,8 @@ lassosumRss <- function(
     metaList <- map(fits, "meta")
     list(
         beta = exec(cbind, !!!betaList),
-        meta = bind_rows(metaList)
+        meta = bind_rows(metaList),
+        grid = map(fits, "grid")
     )
 }
 
@@ -4867,10 +5290,12 @@ lassosumRss <- function(
 }
 
 # The LD matrix itself, for the engines that take nothing else (mr.ash.rss,
-# mr.mash.rss).
+# mr.mash.rss), formed over the variants in the order `perm` when given, so
+# that a permuted fit needs no second p x p copy.
 # @noRd
-.rssLdMatrix <- function(stat, ldReference, label) {
-    .ldFromRef(ldReference, .rssStatVariantIds(stat, label), label)
+.rssLdMatrix <- function(stat, ldReference, label, perm = NULL) {
+    ids <- .rssStatVariantIds(stat, label)
+    .ldFromRef(ldReference, ids[perm %||% seq_along(ids)], label)
 }
 
 # The variant ids an LD reference is matched on.
@@ -4902,10 +5327,11 @@ lassosumRss <- function(
     if (is.null(described)) NA_integer_ else NROW(described)
 }
 
-# One shrinkage level's fit against R_s = (1 - s) R + s I.
+# One shrinkage level's fit against R_s = (1 - s) R + s I, at `grid` when
+# given.
 # @noRd
-.rssFitAtS <- function(sVal, solverInput, ld, n, config) {
-    .rssFitOne(solverInput, .rssShrunkLd(ld, sVal), n, sVal, config)
+.rssFitAtS <- function(sVal, grid, solverInput, ld, n, config) {
+    .rssFitOne(solverInput, .rssShrunkLd(ld, sVal), n, sVal, config, grid)
 }
 
 # An LD source shrunk to R_s = (1 - s) R + s I: the source carries s to the
@@ -4934,18 +5360,61 @@ lassosumRss <- function(
     selection = c("heldOut", "ldQuadratic", "minFbeta"),
     fitRetention = c("none", "slim", "full")
 ) {
-    selection <- arg_match(selection)
-    fitRetention <- arg_match(fitRetention)
-    if (selection == "heldOut") {
+    mode <- arg_match(selection)
+    retention <- arg_match(fitRetention)
+    .rssCheckStrategy(config)
+    if (mode == "heldOut") {
         .rssCheckHeldOutLd(ld, config$label)
     }
-    ld <- .rssSolverSource(ld, config$spec)
+    solverLd <- .rssSolverSource(ld, config$spec)
     n <- median(stat$n)
-    p <- .ldSourceSize(ld)
-    corInput <- .lassosumClampCor(.rssMarginalCor(stat, n = n, p = p))
-    solverInput <- corInput * sqrt(n)
-    fits <- map(
+    corInput <- .lassosumClampCor(
+        .rssMarginalCor(stat, n = n, p = .ldSourceSize(solverLd))
+    )
+    search <- .rssFitShrinkGrid(s, corInput * sqrt(n), solverLd, n, config)
+    picked <- .rssShrinkGridSelect(
+        mode,
+        search,
+        corInput,
+        solverLd,
+        n,
         s,
+        config
+    )
+    weights <- .rssFinalize(
+        as.numeric(picked$beta),
+        picked,
+        search$meta,
+        config
+    )
+    .rssAttachGridFit(
+        weights,
+        search$beta,
+        search$meta,
+        picked$index,
+        retention,
+        stat[["variantNames"]]
+    )
+}
+
+# A strategy the caller's options name is checked before the grid starts,
+# so a misspelled one fails here rather than inside the first fit.
+# @noRd
+.rssCheckStrategy <- function(config) {
+    .rssStrategy(config$options$strategy, config$spec$penalty)
+    invisible(NULL)
+}
+
+# The grid over s: each s's path against the LD shrunk to it, at `grids`,
+# the path values a held-out refit takes from the full-data fit (NULL for
+# that fit, which solves at the caller's or the default path). Returns the
+# candidates' coefficients (`beta`), their path table (`meta`) and the path
+# values each s solved at (`grids`).
+# @noRd
+.rssFitShrinkGrid <- function(s, solverInput, ld, n, config, grids = NULL) {
+    fits <- map2(
+        s,
+        grids %||% vector("list", length(s)),
         .rssFitAtS,
         solverInput = solverInput,
         ld = ld,
@@ -4953,38 +5422,21 @@ lassosumRss <- function(
         config = config
     )
     fitBetas <- map(fits, "beta")
-    candidateBeta <- exec(cbind, !!!fitBetas)
-    candidateMeta <- bind_rows(map(fits, "meta"))
-    selectorResult <- .rssShrinkGridSelect(
-        selection,
-        candidateBeta,
-        candidateMeta,
-        corInput,
-        ld,
-        n,
-        s,
-        config
-    )
-    bestBeta <- as.numeric(selectorResult$beta)
-    weights <- .rssFinalize(bestBeta, selectorResult, candidateMeta, config)
-    .rssAttachGridFit(
-        weights,
-        candidateBeta,
-        candidateMeta,
-        selectorResult$index,
-        fitRetention,
-        stat[["variantNames"]]
+    list(
+        beta = exec(cbind, !!!fitBetas),
+        meta = bind_rows(map(fits, "meta")),
+        grids = map(fits, "grid")
     )
 }
 
-# The candidate `selection` picks from the grid: by held-out prediction,
-# refitting the grid on a split of the statistics; by the LD quadratic form;
-# or by the solver's smallest F-beta.
+# The candidate `selection` picks from the grid `search`
+# (.rssFitShrinkGrid()): by held-out prediction, refitting the grid on a
+# split of the statistics at the full-data path values; by the LD quadratic
+# form; or by the solver's smallest F-beta.
 # @noRd
 .rssShrinkGridSelect <- function(
     selection,
-    candidateBeta,
-    candidateMeta,
+    search,
     corInput,
     ld,
     n,
@@ -4994,17 +5446,23 @@ lassosumRss <- function(
     switch(
         selection,
         heldOut = .rssSelectHeldOut(
-            candidateBeta,
+            search$beta,
             corInput,
             ld,
             n,
             list(
                 fn = ".rssRefitShrinkGrid",
-                args = list(s = s, ld = ld, n = n, config = config)
+                args = list(
+                    s = s,
+                    ld = ld,
+                    n = n,
+                    config = config,
+                    grids = search$grids
+                )
             )
         ),
-        ldQuadratic = .lassosumSelectLdQuadratic(candidateBeta, corInput, ld),
-        minFbeta = .lassosumSelectMinFbeta(candidateBeta, candidateMeta)
+        ldQuadratic = .lassosumSelectLdQuadratic(search$beta, corInput, ld),
+        minFbeta = .lassosumSelectMinFbeta(search$beta, search$meta)
     )
 }
 
@@ -5046,8 +5504,9 @@ lassosumRss <- function(
 #' \code{selection = "heldOut"} splits the statistics four times into a
 #' training part, 75\% of the samples, and its held-out remainder, drawing
 #' each split from the statistics and the LD as PUMAS does (Zhao et al.
-#' 2021). The path is refit on each training part, every candidate is scored
-#' on the held-out part by the variance of it that it explains,
+#' 2021). The path is refit on each training part, at the penalty values
+#' the full data took, and every candidate is scored on the held-out part by
+#' the variance of it that it explains,
 #' \deqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta, \quad
 #'   \hat\Sigma = (1 - w) R + w I,}
 #' and the full-data fit at the (\code{s}, lambda) with the best mean score
@@ -5345,6 +5804,36 @@ lassosumRssWeights <- function(
 #' \eqn{(R + \lambda I)^{-1} z}, which is read for the whole path from one
 #' eigendecomposition of \eqn{R}.
 #'
+#' On standardized data the objective is exactly twice ncvreg's,
+#' \eqn{\frac{1}{2n}\|y - X\beta\|^2 + P(\beta)}, and twice L0Learn's,
+#' \eqn{\frac12\|r\|^2 + \lambda_0\|\beta\|_0 + \lambda_1\|\beta\|_1 +
+#' \lambda_2\|\beta\|_2^2}, so a penalty value means here what it means
+#' there.
+#'
+#' @section Path strategies:
+#' The path is warm-started from its largest value down. Values at or above
+#' the smallest at which every coefficient is zero are recorded without being
+#' solved, and each later one is solved by one of two strategies:
+#' \describe{
+#'   \item{\code{"strongRule"}}{ncvreg's: the sequential strong rule screens
+#'     each step; coordinate descent cycles, in index order, over every
+#'     coordinate that has been active; then scans of the strong set, and of
+#'     the rest, add any coordinate that leaves zero. The default for LASSO,
+#'     MCP and SCAD.}
+#'   \item{\code{"gradientRanked"}}{L0Learn's: each step cycles coordinates
+#'     in decreasing size of their gradient at the previous solution,
+#'     screened to the support and the 1000 next, sweeps only the support
+#'     once it has held for two sweeps, and checks every zero coordinate at
+#'     convergence. Unlike L0Learn, the support is always swept and the
+#'     ranking always uses the current gradient. The default for the L0
+#'     family.}
+#' }
+#' For LASSO, the elastic net and the ridge the strategies reach the same
+#' solution; for MCP, SCAD and L0 they can reach different local optima.
+#' Either stops a solve when no coefficient moved by \code{thr} or more in a
+#' sweep, ncvreg's test; L0Learn's relative change in the objective is not
+#' used.
+#'
 #' Internal: \code{\link{enetRssWeights}}, \code{\link{ridgeRssWeights}},
 #' \code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
 #' \code{\link{l0learnRssWeights}} are the public interface, with
@@ -5359,13 +5848,17 @@ lassosumRssWeights <- function(
 #' @param n GWAS sample size (positive scalar).
 #' @param penalty Penalty type: \code{"lasso"}, \code{"MCP"}, \code{"SCAD"},
 #'   \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.
-#' @param lambda Numeric vector of regularization parameter values along which
-#'   to trace a solution path (warm-started, largest-first). For LASSO/MCP/SCAD
-#'   this is the primary penalty strength; for L0 variants it controls the L1
-#'   component. \code{NULL} (default) is 20 values from 1e-4 to 0.1 on a log
-#'   scale, divided by \code{max(alpha, 0.001)} as glmnet sizes its path, so
-#'   the L1 share spans the same range at any \code{alpha} and a ridge path
-#'   runs from 0.1 to 100.
+#' @param lambda For LASSO, MCP and SCAD, the path: the penalty strengths to
+#'   trace the solution along (warm-started, largest first). \code{NULL}
+#'   (default) is ncvreg's path: 20 values on a log scale from
+#'   \eqn{\lambda_{max} = \max_j |z_j| / \alpha}, the smallest at which every
+#'   coefficient is zero, down to ncvreg's \code{lambda.min}:
+#'   \eqn{10^{-3} \lambda_{max}} when the \code{n} samples outnumber the
+#'   variants and \eqn{0.05 \lambda_{max}} otherwise, where the fits below it
+#'   are near-unpenalized regressions on more variants than samples. A ridge,
+#'   with no such value, is sized as glmnet sizes one, as if \code{alpha}
+#'   were 0.001, and keeps the full three decades. For the L0 family, the
+#'   fixed L1 weight \eqn{\lambda_1} (one value; \code{NULL} is 0).
 #' @param gamma Concavity parameter for MCP (default 3) or SCAD (default 3.7).
 #'   Ignored for LASSO and L0 variants.
 #' @param alpha Elastic-net mixing for LASSO, MCP and SCAD, in \code{[0, 1]}:
@@ -5373,25 +5866,41 @@ lassosumRssWeights <- function(
 #'   penalty is \eqn{2 P(\beta; l_1) + l_2 \beta^T \beta}, glmnet's mixing.
 #'   Default 1, no ridge term. For LASSO, 0.5 is the elastic net and 0 ridge;
 #'   MCP and SCAD need \code{alpha > 0}. Ignored by the L0 variants.
-#' @param lambda0 L0 penalty weight (number of non-zeros). Required for L0
-#'   variants; ignored otherwise. Default 0.
+#' @param lambda0 For the L0 family, the path: the L0 weights to trace the
+#'   solution along (warm-started, largest first). \code{NULL} (default) is
+#'   the solver's own path: under \code{"gradientRanked"}, L0Learn's
+#'   adaptive one, each step letting the next coordinate enter, until 100 are
+#'   non-zero or 100 points are taken, solved at the geometric midpoints of
+#'   its values, since a held-out refit at the values themselves, each just
+#'   below a coordinate's entry threshold, often takes a different support;
+#'   20 values on a log scale
+#'   over three decades below the largest useful value under
+#'   \code{"strongRule"}. Ignored otherwise.
 #' @param lambda2 L2 penalty weight for L0L2 variant. Default 0.
-#' @param thr Convergence threshold. Default 1e-4. The ridge, solved
+#' @param thr Convergence threshold: a solve stops when no coefficient moved by
+#'   \code{thr} or more in a sweep. Default 1e-4. The ridge, solved exactly,
+#'   does not use it.
+#' @param maxiter Maximum coordinate descent sweeps per solve. Default 10000.
+#'   The scans for coordinates leaving zero do not count. The ridge, solved
 #'   exactly, does not use it.
-#' @param maxiter Maximum coordinate descent iterations per lambda. Default
-#'   10000. The ridge, solved exactly, does not use it.
 #' @param maxSwaps Maximum swap rounds for L0 variants. Default 100. Set to 0 to
 #'   disable swaps.
+#' @param strategy How the path is walked: \code{"strongRule"} or
+#'   \code{"gradientRanked"} (see Path strategies). \code{NULL} (default) is
+#'   \code{"strongRule"} for LASSO, MCP and SCAD and \code{"gradientRanked"}
+#'   for the L0 family.
 #'
 #' @return A list with components:
 #' \describe{
-#'   \item{beta}{p x length(lambda) matrix of coefficient estimates.}
-#'   \item{lambda}{The lambda values used.}
-#'   \item{conv}{Convergence indicators (1 = converged).}
-#'   \item{loss}{Quadratic loss at each lambda.}
-#'   \item{fbeta}{Full penalized objective at each lambda.}
-#'   \item{nparams}{Number of non-zero coefficients at each lambda.}
-#'   \item{betaEst}{Coefficient vector at the lambda minimizing fbeta.}
+#'   \item{beta}{p x (path length) matrix of coefficient estimates.}
+#'   \item{lambda}{The path values used: lambda, or lambda0 for the L0
+#'     family.}
+#'   \item{conv}{Convergence indicators: 1 when every solve at that point,
+#'     including those after swaps, converged within \code{maxiter} sweeps.}
+#'   \item{loss}{Quadratic loss at each point.}
+#'   \item{fbeta}{Full penalized objective at each point.}
+#'   \item{nparams}{Number of non-zero coefficients at each point.}
+#'   \item{betaEst}{Coefficient vector at the point minimizing fbeta.}
 #' }
 #'
 #' @keywords internal
@@ -5403,58 +5912,109 @@ penalizedRss <- function(
     lambda = NULL,
     gamma = NULL,
     alpha = 1.0,
-    lambda0 = 0,
+    lambda0 = NULL,
     lambda2 = 0,
     thr = 1e-4,
     maxiter = 10000,
-    maxSwaps = 100
+    maxSwaps = 100,
+    strategy = NULL
 ) {
+    pen <- arg_match(penalty)
+    l0 <- .rssIsL0(pen)
     .penalizedRssPath(
         bhat,
         list(R = R),
         n,
         spec = .rssPenalty(
-            arg_match(penalty),
+            pen,
             alpha = alpha,
             gamma = gamma,
-            lambda0 = lambda0,
+            lambda1 = if (l0) lambda %||% 0 else 0,
             lambda2 = lambda2,
             maxSwaps = maxSwaps
         ),
-        lambda = lambda,
+        lambda = if (l0) lambda0 else lambda,
         thr = thr,
-        maxiter = maxiter
+        maxiter = maxiter,
+        strategy = strategy
     )
 }
 
 # The penalty a fit minimizes, as one checked record: the solver's penalty
 # name, the elastic-net mixing `alpha`, the MCP / SCAD concavity `gamma`
-# (their usual default when NULL) and the L0 settings. Each weight wrapper
-# builds it from its own arguments before its shrinkage grid starts, so the
-# penalty is the wrapper's alone and only the path (lambda, thr, maxiter) is
-# left to the caller's options.
+# (their usual default when NULL) and the L0 family's fixed L1 and L2
+# weights, `lambda1` and `lambda2`. Each weight wrapper builds it from its
+# own arguments before its shrinkage grid starts, so the penalty is the
+# wrapper's alone and only the path (lambda, thr, maxiter, strategy) is left
+# to the caller's options.
 # @noRd
 #' @importFrom checkmate assertCount assertNumber
 .rssPenalty <- function(
     penalty,
     alpha = 1,
     gamma = NULL,
-    lambda0 = 0,
+    lambda1 = 0,
     lambda2 = 0,
     maxSwaps = 0
 ) {
     .rssCheckAlpha(penalty, alpha)
     assertNumber(gamma, finite = TRUE, null.ok = TRUE)
-    assertNumber(lambda0, lower = 0, finite = TRUE)
+    assertNumber(lambda1, lower = 0, finite = TRUE)
     assertNumber(lambda2, lower = 0, finite = TRUE)
     assertCount(maxSwaps)
     list(
         penalty = penalty,
         alpha = alpha,
         gamma = gamma %||% switch(penalty, SCAD = 3.7, MCP = 3.0, 0.0),
-        lambda0 = lambda0,
+        lambda1 = lambda1,
         lambda2 = lambda2,
         maxSwaps = maxSwaps
+    )
+}
+
+# Whether `penalty` is one of the L0 family, whose path is over lambda0.
+# @noRd
+.rssIsL0 <- function(penalty) {
+    is_in(penalty, c("L0", "L0L1", "L0L2"))
+}
+
+# The path strategy a penalty runs under: the caller's, else strong-rule
+# screening for LASSO, MCP and SCAD and gradient ranking for the L0 family,
+# each its reference implementation's (ncvreg's, L0Learn's).
+# @noRd
+.rssStrategy <- function(strategy, penalty) {
+    if (is.null(strategy)) {
+        return(if (.rssIsL0(penalty)) "gradientRanked" else "strongRule")
+    }
+    arg_match0(
+        strategy,
+        c("strongRule", "gradientRanked"),
+        arg_nm = "strategy"
+    )
+}
+
+# The constants the path solver works to, in one place for R and C++: a
+# default path's `points` and its last value over its first, `ratio`, and
+# for a lambda path on fewer samples than variants, `ratioFewSamples`
+# (ncvreg's lambda.min, 0.001 and 0.05; .rssDefaultLambda()); for gradient
+# ranking, the `screenSize` coordinates swept outside the support and the
+# `stableSweeps` the support must hold before only it is swept; and for the
+# adaptive lambda0 path, its `maxSupport` non-zeros and `maxPoints` points,
+# L0Learn's defaults (screenSize, activeSetNum - 1, maxSuppSize, nLambda),
+# and `offEdge`, whether the path is solved at the midpoints of its values
+# rather than at the full data's entry thresholds, where held-out refits
+# score a different support than the one returned.
+# @noRd
+.rssPathControl <- function() {
+    list(
+        points = 20L,
+        ratio = 1e-3,
+        ratioFewSamples = 0.05,
+        screenSize = 1000L,
+        stableSweeps = 2L,
+        maxSupport = 100L,
+        maxPoints = 100L,
+        offEdge = TRUE
     )
 }
 
@@ -5474,42 +6034,82 @@ penalizedRss <- function(
 
 # penalizedRss() on an LD source: the matrix, or a factor of it with its
 # shrinkage, which the factor solver applies without forming R. `spec` is the
-# penalty (.rssPenalty()); the rest is the path, its default sized by the L1
-# share.
+# penalty (.rssPenalty()); the rest is the path -- in lambda, or lambda0 for
+# the L0 family -- and how it is walked (.rssStrategy()).
 # @noRd
-.penalizedRssPath <- function(bhat, ld, n, spec, lambda, thr, maxiter) {
-    lambda <- lambda %||% .rssDefaultLambda(spec$alpha)
-    assertNumeric(lambda, lower = 0, any.missing = FALSE)
+.penalizedRssPath <- function(
+    bhat,
+    ld,
+    n,
+    spec,
+    lambda,
+    thr,
+    maxiter,
+    strategy = NULL
+) {
+    assertNumeric(lambda, lower = 0, any.missing = FALSE, null.ok = TRUE)
     assertNumber(thr, lower = 0, finite = TRUE)
     assertCount(maxiter, positive = TRUE)
+    walk <- .rssStrategy(strategy, spec$penalty)
+    # The inputs are checked before the default path reads them.
+    .rssValidateSource(bhat, ld, n)
+    path <- lambda %||% .rssDefaultPath(bhat / sqrt(n), n, spec)
     .rssSolvePath(
         bhat,
         ld,
         n,
-        lambda,
+        path,
         .rssPenalizedSolve,
-        solveArgs = c(spec, list(thr = thr, maxiter = maxiter))
+        solveArgs = c(
+            spec,
+            list(thr = thr, maxiter = maxiter, strategy = walk)
+        )
     )
 }
 
-# The default lambda path: 20 values from 1e-4 to 0.1, sized for an L1
-# penalty on correlation-scale effects, divided by max(alpha, 0.001) as glmnet
-# sizes its own. The L1 share then spans the same range at any alpha, and a
-# ridge path (alpha = 0) runs from 0.1 to 100; at alpha = 1 it is the
-# lassosum default unchanged.
+# The default path for the marginal correlations `z` of `n` samples: none
+# for the L0 family, whose solver then takes its own (.rssSolvePath()), and
+# the default lambda path otherwise.
 # @noRd
-.rssDefaultLambda <- function(alpha) {
-    exp(seq(log(1e-4), log(0.1), length.out = 20L)) / max(alpha, 1e-3)
+.rssDefaultPath <- function(z, n, spec) {
+    if (.rssIsL0(spec$penalty)) {
+        return(numeric(0))
+    }
+    .rssDefaultLambda(z, spec$alpha, n)
+}
+
+# The default lambda path, ncvreg's: from lambda_max = max|z| / alpha, the
+# smallest lambda at which every coefficient is zero, down to its
+# lambda.min in 20 values evenly on a log scale (.rssPathControl()). That is
+# 0.1% of lambda_max when the `n` samples outnumber the variants, and 5%
+# otherwise, where the fits below it are near-unpenalized regressions on
+# more variants than samples, which held-out selection does not pick and
+# which take most of the solver's time. A ridge (alpha = 0) has no such
+# lambda, so it is sized as glmnet sizes its own, as if alpha were 0.001,
+# and keeps the full depth: none of its fits is sparse.
+# @noRd
+.rssDefaultLambda <- function(z, alpha, n) {
+    control <- .rssPathControl()
+    ratio <- if (alpha == 0 || n > length(z)) {
+        control$ratio
+    } else {
+        control$ratioFewSamples
+    }
+    lambdaMax <- max(abs(z), 0) / max(alpha, 1e-3)
+    lambdaMax * ratio^seq(0, 1, length.out = control$points)
 }
 
 # .penalizedRssPath() for the penalty `spec` under the caller's path
-# `options` -- lambda, thr and maxiter, all an options bag may hold --
-# penalizedRss()'s own defaults filling the rest. A matrix takes exactly the
-# path penalizedRss() does.
+# `options` -- lambda, thr, maxiter and strategy, all an options bag may
+# hold -- penalizedRss()'s own defaults filling the rest. A matrix takes
+# exactly the path penalizedRss() does.
 # @noRd
 .penalizedRssOn <- function(bhat, ld, n, spec, options) {
     path <- list_modify(
-        .formalDefaults(penalizedRss, c("lambda", "thr", "maxiter")),
+        .formalDefaults(
+            penalizedRss,
+            c("lambda", "thr", "maxiter", "strategy")
+        ),
         !!!options
     )
     exec(
@@ -5728,8 +6328,10 @@ mcpRssWeights <- function(
 #' \alpha} and \eqn{l_2 = \lambda (1 - \alpha)} the penalty is
 #' \eqn{2 l_1 \|\beta\|_1 + l_2 \beta^T \beta}, so \code{alpha = 1} is the
 #' lasso and \code{alpha = 0} ridge (\code{\link{ridgeRssWeights}}). The
-#' default lambda path is divided by \code{max(alpha, 0.001)}, as glmnet
-#' sizes its own, so the L1 share spans the same range at any \code{alpha}.
+#' default lambda path is ncvreg's: 20 values on a log scale from
+#' \eqn{\max_j |z_j| / \alpha}, the smallest at which every weight is zero,
+#' down to 0.1\% of it with more samples than variants and 5\% otherwise,
+#' so the L1 share spans the same range at any \code{alpha}.
 #'
 #' The LD shrinkage adds a ridge term of its own, since
 #' \eqn{\beta^T R_s \beta = (1 - s) \beta^T R \beta + s \beta^T \beta}: every
@@ -5792,10 +6394,12 @@ enetRssWeights <- function(
 #'
 #' Fits ridge regression on the RSS objective, \code{\link{enetRssWeights}}
 #' at \code{alpha = 0}: the penalty is \eqn{\lambda \beta^T \beta}, and the
-#' default lambda path runs from 0.1 to 100. Searches over a shrinkage grid
-#' \code{s} as well, whose own ridge term \eqn{s \beta^T \beta} adds to it;
-#' model selection uses held-out summary statistics by default (see
-#' \code{\link{lassosumRssWeights}}).
+#' default lambda path is sized as glmnet sizes a ridge's, as if
+#' \code{alpha} were 0.001: 20 values on a log scale from
+#' \eqn{1000 \max_j |z_j|} down to \eqn{\max_j |z_j|}. Searches over a
+#' shrinkage grid \code{s} as well, whose own ridge term
+#' \eqn{s \beta^T \beta} adds to it; model selection uses held-out summary
+#' statistics by default (see \code{\link{lassosumRssWeights}}).
 #'
 #' Every fit is exact: the ridge has the closed form
 #' \eqn{((1 - s) R + (s + \lambda) I)^{-1} z}, read from one
@@ -5874,10 +6478,17 @@ ridgeRssWeights <- function(
 #'   Default \code{"L0"}.
 #' @param s Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
 #'   0.5, 0.9, 1.0)}.
-#' @param lambda0 Numeric vector of L0 penalty values to search over. Default:
-#'   \code{exp(seq(log(0.001), log(1), length.out = 10))}.
-#' @param lambda Numeric vector of L1 penalty values (for L0L1). Default:
-#'   \code{c(0)} (no L1 unless L0L1 is used).
+#' @param lambda0 Numeric vector of L0 penalty values to search over, solved
+#'   as one warm-started path from the largest down. \code{NULL} (default) is
+#'   the solver's own path for each shrinkage level and L1 value: L0Learn's
+#'   adaptive one, from the smallest value at which every coefficient is zero,
+#'   each step letting the next variant enter, until 100 are non-zero or 100
+#'   values are taken, solved at the geometric midpoints of its values (see
+#'   \code{\link{penalizedRss}}). Held-out refits solve at the values the
+#'   full data took.
+#' @param lambda Numeric vector of L1 penalty values (for L0L1), each with its
+#'   own lambda0 path. Default: ten values from 1e-4 to 0.1 on a log scale for
+#'   L0L1, and \code{0} (no L1) otherwise.
 #' @param lambda2 L2 penalty weight (for L0L2). Default 0.
 #' @param maxSwaps Maximum swap rounds per lambda. Default 100.
 #' @param fitRetention How much of the search is kept as the \code{"fit"}
@@ -5916,7 +6527,7 @@ l0learnRssWeights <- function(
     ldReference,
     penalty = c("L0", "L0L1", "L0L2"),
     s = c(0.2, 0.5, 0.9, 1.0),
-    lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
+    lambda0 = NULL,
     lambda = NULL,
     lambda2 = 0,
     selection = c("heldOut", "ldQuadratic", "minFbeta"),
@@ -5931,13 +6542,18 @@ l0learnRssWeights <- function(
         c(lambda = "l0learnRssWeights' own `lambda`"),
         "l0learnRssWeights"
     )
-    penalty <- arg_match(penalty)
-    selection <- arg_match(selection)
-    fitRetention <- arg_match(fitRetention)
-    # The L0 penalty, lambda0 left to the sweep over its grid.
-    spec <- .rssPenalty(penalty, lambda2 = lambda2, maxSwaps = maxSwaps)
-    assertNumeric(lambda0, lower = 0, finite = TRUE, any.missing = FALSE)
-    lambda <- .l0learnRssLambda(lambda, penalty)
+    pen <- arg_match(penalty)
+    mode <- arg_match(selection)
+    retention <- arg_match(fitRetention)
+    # The L0 penalty; each L1 value of the grid gets its own lambda0 path.
+    spec <- .rssPenalty(pen, lambda2 = lambda2, maxSwaps = maxSwaps)
+    assertNumeric(
+        lambda0,
+        lower = 0,
+        finite = TRUE,
+        any.missing = FALSE,
+        null.ok = TRUE
+    )
     .rssShrinkGridWeights(
         stat,
         .rssLdSource(stat, ldReference, "l0learnRssWeights"),
@@ -5946,12 +6562,34 @@ l0learnRssWeights <- function(
             method = "l0learn",
             spec = spec,
             lambda0 = lambda0,
-            options = list_assign(as.list(methodArgs), lambda = lambda),
+            lambda1 = .l0learnRssLambda(lambda, pen),
+            options = as.list(methodArgs),
             label = "l0learnRssWeights"
         ),
-        selection,
-        fitRetention
+        mode,
+        retention
     )
+}
+
+# One s's lambda0 path at the fixed L1 weight `l1Val`, warm-started from the
+# largest lambda0 down: at `path` when given (a held-out refit's full-data
+# values), else the caller's lambda0 grid, else the solver's own path.
+# @noRd
+.rssL0PathFit <- function(l1Val, path, solverInput, ld, n, sVal, config) {
+    model <- .penalizedRssOn(
+        solverInput,
+        ld,
+        n,
+        list_assign(config$spec, lambda1 = l1Val),
+        .rssGridOptions(config$options, path %||% config$lambda0)
+    )
+    meta <- mutate(
+        .rssPathMeta(sVal, model),
+        lambda0 = .data$lambda,
+        lambda = l1Val,
+        .after = "s"
+    )
+    list(beta = model$beta, meta = meta, grid = model$lambda)
 }
 
 # The L1 component's grid: the caller's, else ten values on a log scale for
@@ -6488,6 +7126,88 @@ dprAdaptiveGibbsWeights <- function(
         retainX = retainX,
         methodArgs = methodArgs
     )
+}
+
+#' Compute Weights Using Spike-and-Slab Variational Bayes
+#'
+#' Fits a linear model with a spike-and-slab prior by mean-field variational
+#' Bayes, via \code{sparsevb::svb.fit} (Ray and Szabo 2022), and returns each
+#' variant's posterior mean effect, \code{gamma * mu}: its inclusion
+#' probability times its slab mean. The slab is Laplace unless
+#' \code{methodArgs} sets \code{slab = "gaussian"}. sparsevb starts from
+#' ridge and lasso fits, and by default updates the variants in decreasing
+#' order of their ridge estimates.
+#'
+#' The noise SD is \code{methodArgs}' \code{noise_sd} when it sets one.
+#' Otherwise it is estimated as sparsevb would, by
+#' \code{selectiveInference::estimateSigma}, but on the distinct columns of
+#' \code{X}: that estimator refuses identical columns, which variants in
+#' perfect LD give it, and dropping exact copies of a column leaves its
+#' lasso fit unchanged.
+#'
+#' Two behaviours of sparsevb 0.1.1 are left as they are. With
+#' \code{intercept = TRUE}, the \code{intercept} it returns is the ridge
+#' estimate it started from, not the fitted one; the weights do not use it.
+#' With the Gaussian slab, the log-odds of inclusion carry an extra 0.5 that
+#' the update it implements (Carbonetto and Stephens 2012) does not have.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing, \code{"slim"} and \code{"full"} the fitted posterior
+#'   (\code{mu}, \code{sigma}, \code{gamma} and \code{intercept}, over the
+#'   variants fitted), which keeps no copy of the data, so the two retaining
+#'   levels behave alike here. Either names the variants it was fitted on,
+#'   in \code{variantIds}.
+#' @param methodArgs Options forwarded to \code{sparsevb::svb.fit}, built
+#'   with \code{\link{SparsevbOptions}}. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be
+#'   silently ignored.
+#' @return A numeric vector of length \code{ncol(X)} of variant weights;
+#'   zero-variance columns receive weight 0. Unless
+#'   \code{fitRetention = "none"} the fit is attached as attribute
+#'   \code{"fit"}.
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' sparsevbWeights(X, y)
+#' @export
+sparsevbWeights <- function(
+    X,
+    y,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = SparsevbOptions()
+) {
+    .assertMethodOptions(methodArgs, "SparsevbOptions", "methodArgs")
+    retention <- arg_match(fitRetention)
+    if (!requireNamespace("sparsevb", quietly = TRUE)) {
+        abort("Package 'sparsevb' is required for this function.")
+    }
+    keep <- .dropZeroVariance(X, "sparsevbWeights")
+    XKeep <- X[, keep, drop = FALSE]
+    user <- as.list(methodArgs)
+    noise <- .sparsevbNoiseSd(XKeep, y, user)
+    fit <- exec(sparsevb::svb.fit, X = XKeep, Y = y, !!!user, !!!noise)
+    weights <- replace(rep(0, ncol(X)), keep, fit$mu * fit$gamma)
+    if (identical(retention, "none")) {
+        return(weights)
+    }
+    `attr<-`(weights, "fit", .withFitVariantIds(fit, colnames(XKeep)))
+}
+
+# svb.fit's `noise_sd` when the caller set none: its own estimator,
+# selectiveInference::estimateSigma(), on the distinct columns. That
+# estimator refuses identical columns, which variants in perfect LD give it,
+# and dropping exact copies of a column leaves its lasso fit unchanged.
+# @noRd
+.sparsevbNoiseSd <- function(X, y, user) {
+    if (is_in("noise_sd", names(user))) {
+        return(list())
+    }
+    distinct <- X[, !duplicated(X, MARGIN = 2L), drop = FALSE]
+    list(noise_sd = selectiveInference::estimateSigma(distinct, y)$sigmahat)
 }
 # Starting coefficients as a plain matrix: .mrmashInitCoefficients()
 # returns the fit it used, and only its Bhat is wanted here.
@@ -7381,25 +8101,28 @@ buildMrmashPriorMatrices <- function(
     penalty,
     gamma,
     alpha,
-    lambda0,
+    lambda1,
     lambda2,
     thr,
     maxiter,
-    maxSwaps
+    maxSwaps,
+    strategy
 ) {
     if (.rssIsRidge(penalty, alpha)) {
         return(.rssRidgeSolve(z, lam, ld))
     }
     settings <- list(
-        lambdaR = lam,
+        pathR = lam,
         penaltyStr = penalty,
+        strategyStr = strategy,
         gamma = gamma,
         alpha = alpha,
-        lambda0 = lambda0,
+        lambda1 = lambda1,
         lambda2 = lambda2,
         thr = thr,
         maxiter = as.integer(maxiter),
-        maxSwaps = as.integer(maxSwaps)
+        maxSwaps = as.integer(maxSwaps),
+        control = .rssPathControl()
     )
     if (!is.null(ld$ldFactor)) {
         return(exec(
@@ -7413,7 +8136,7 @@ buildMrmashPriorMatrices <- function(
     exec(
         penalizedRssCpp,
         zR = z,
-        LD = list(blk1 = ld$R),
+        ldR = ld$R,
         shrink = ld$shrink %||% 0,
         !!!settings
     )
@@ -7476,22 +8199,6 @@ buildMrmashPriorMatrices <- function(
 .rssInverseAbove <- function(x, top) {
     kept <- x > rep(sqrt(.Machine$double.eps) * top, each = nrow(x))
     replace(array(0, dim(x)), kept, 1 / x[kept])
-}
-
-# One L0Learn fit at lambda0 = `l0Val`: penalizedRss over the lambda path.
-# @noRd
-.rssL0LambdaFit <- function(l0Val, solverInput, ld, n, sVal, config) {
-    model <- .penalizedRssOn(
-        solverInput,
-        ld,
-        n,
-        list_assign(config$spec, lambda0 = l0Val),
-        config$options
-    )
-    list(
-        beta = model$beta,
-        meta = mutate(.rssPathMeta(sVal, model), lambda0 = l0Val, .after = "s")
-    )
 }
 
 # The minimum of one CV-mean path vector (coerced numeric).

@@ -947,10 +947,11 @@ setMethod(
         .jointTwasSuppliedArgs(args$methodArgs, keys)
     # FM-fit injection: an FM-derived token extracts its weights from the
     # precomputed fine-mapping fit rather than refitting.
-    withFit <- .jointTwasInjectFit(
-        supplied %||% list(),
+    withFit <- .twasWithH2(
+        .jointTwasInjectFit(supplied %||% list(), token, fittedModels),
         token,
-        fittedModels
+        args$h2,
+        "individual"
     )
     if (!isTRUE(cfg$estimatePi) || !is_in(token, c("bayesC", "bayesB"))) {
         return(withFit)
@@ -2392,7 +2393,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     block = NULL
 ) {
     grp <- .jointGroupProvenance(g, data, args)
-    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block)
+    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block, tokens)
     perTokenEntries <- compact(set_names(
         map(
             tokens,
@@ -2450,12 +2451,39 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # and the requested window is only ever known to the caller. Both are read back
 # as args$af / args$region where the entries are post-processed.
 # @noRd
-.jointGroupFitArgs <- function(g, pipeline, args, block) {
+.jointGroupFitArgs <- function(g, pipeline, args, block, tokens) {
     af <- .jointAfForGroup(g, block)
     list_assign(
         .twasGroupArgs(g, pipeline, args),
         af = af,
-        region = args$region
+        region = args$region,
+        h2 = .jointGroupH2(g, pipeline, tokens)
+    )
+}
+
+# What a TWAS run's `h2` gives an individual-level group's one trait
+# (.twasRowH2()), made once, before the group's methods are fitted, on the
+# genotypes and phenotype they fit.
+# @noRd
+.jointGroupH2 <- function(g, pipeline, tokens) {
+    if (!is(pipeline, "TwasJointPipeline") || !is(g, "IndividualJointGroup")) {
+        return(NULL)
+    }
+    cond <- .jgConditions(g)
+    spec <- .jpConfig(pipeline)$h2
+    if (is.null(spec) || nrow(cond) != 1L) {
+        return(NULL)
+    }
+    .twasRowH2(
+        spec,
+        .h2TupleKey(cond$study, cond$context, cond$trait),
+        glue(
+            "twasWeightsPipeline(QtlDataset): study='{cond$study}', ",
+            "context='{cond$context}', trait='{cond$trait}'"
+        ),
+        .h2IndividualFit,
+        list(X = .jgX(g), y = .jgY(g)[, 1L]),
+        tokens
     )
 }
 

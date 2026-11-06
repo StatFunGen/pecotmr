@@ -56,6 +56,7 @@ fineMappingPipeline(data, ...)
   residualizationParam = ResidualizationParam(),
   signalScreenParam = SignalScreenParam(),
   susieRssParam = SusieRssParam(),
+  h2 = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
@@ -79,6 +80,7 @@ fineMappingPipeline(data, ...)
   verbose = 1,
   fitRetention = c("slim", "full"),
   susieRssParam = SusieRssParam(),
+  h2 = NULL,
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam(),
   residualizationParam = ResidualizationParam()
@@ -359,6 +361,25 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
     which meant a misspelled option was dropped silently; the
     constructor checks the names against that function's live formals.
 }}
+
+\item{h2}{For \code{QtlSumStats} input (and a
+\code{MultiStudyQtlDataset}'s summary statistics), each trait's
+heritability in its window, which sets the residual variance of its
+SuSiE-RSS fits to \eqn{1 - h^2} on the z scale instead of 1.
+\code{susie_rss} holds that variance fixed by default, and with a cis
+heritability of 0.3 the true one is 0.7. \code{NULL} (the default)
+leaves it at 1. An estimator estimates each trait's first, on the
+variants and LD its fits read: \code{"lava"}, \code{"hdlL"} or
+\code{"fastHer"} (see \code{\link{estimateH2}}), the reference taken to
+share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
+\code{estimateH2()} returns, gives each selected (study, context, trait)
+its row's estimate, and must hold exactly one row for each. A value is
+used floored at 0.001 and capped at 0.99, and a trait with no estimate
+keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
+chained from \code{susieInf} or not; \code{susieInf} re-estimates its
+residual variance every sweep, and \code{ser} and \code{mvsusie} take
+none from it. A \code{residual_variance} set through \code{methods}
+wins.}
 }
 \value{
 A \code{QtlFineMappingResult} keyed by \code{(study, context,

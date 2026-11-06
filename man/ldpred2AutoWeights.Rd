@@ -35,11 +35,14 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{LdMatrix}}; pecotmr's sampler reads only a genotype
 reference.}
 
-\item{h2Init}{The starting heritability. \code{NULL} (default) estimates
-it for the window by LAVA, as \code{\link{estimateH2}} does for QTL
-summary statistics, which reads the reference's sample size, so an
-\code{LdMatrix} must record \code{nSamples}. Floored at 0.001, which is
-also the start where LAVA gives no estimate.}
+\item{h2Init}{The starting heritability: a number, or the estimator to
+estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
+\code{"fastHer"}, as \code{\link{estimateH2}} does for QTL summary
+statistics, the reference taken to share no samples with the study.
+\code{NULL} (default) is \code{"lava"}. LAVA and HDL-L read the
+reference's sample size, so an \code{LdMatrix} must record
+\code{nSamples}. Floored at 0.001, which is also the start where the
+estimator gives no estimate.}
 
 \item{pInit}{The starting proportions of causal variants, one chain each.}
 

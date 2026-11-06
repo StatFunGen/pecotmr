@@ -283,16 +283,6 @@ test_that("penalizedRss reproduces glmnet's elastic-net path on exact LD", {
     d <- .prs_standardized()
     lam <- c(0.1, 0.05, 0.02, 0.01)
     for (a in c(1, 0.5, 0.2)) {
-        rss <- penalizedRss(
-            bhat = d$z * sqrt(d$n),
-            R = d$R,
-            n = d$n,
-            penalty = "lasso",
-            alpha = a,
-            lambda = lam,
-            thr = 1e-12,
-            maxiter = 1e5
-        )
         gl <- glmnet::glmnet(
             d$X,
             d$y,
@@ -302,12 +292,68 @@ test_that("penalizedRss reproduces glmnet's elastic-net path on exact LD", {
             intercept = FALSE,
             control = list(thresh = 1e-14)
         )
-        expect_equal(
-            rss$beta,
-            unname(as.matrix(gl$beta)),
-            tolerance = 1e-6,
-            label = str_c("alpha = ", a)
-        )
+        for (strategy in c("strongRule", "gradientRanked")) {
+            rss <- penalizedRss(
+                bhat = d$z * sqrt(d$n),
+                R = d$R,
+                n = d$n,
+                penalty = "lasso",
+                alpha = a,
+                lambda = lam,
+                thr = 1e-12,
+                maxiter = 1e5,
+                strategy = strategy
+            )
+            expect_equal(
+                rss$beta,
+                unname(as.matrix(gl$beta)),
+                tolerance = 1e-6,
+                label = str_c("alpha = ", a, ", ", strategy)
+            )
+        }
+    }
+})
+
+test_that("strongRule follows ncvreg's path for the lasso, MCP and SCAD", {
+    # ncvreg minimizes (1/2n)||y - X b||^2 + P(b; lambda alpha) +
+    # lambda (1 - alpha) b'b / 2, half the RSS objective on standardized
+    # data, and walks it the same way: strong rule, ever-active set, scans.
+    # So the two reach the same local optima, MCP's and SCAD's included.
+    skip_if_not_installed("ncvreg")
+    d <- .prs_standardized(n = 300L, p = 40L)
+    lam <- exp(seq(log(0.3), log(0.003), length.out = 12))
+    for (pen in c("lasso", "MCP", "SCAD")) {
+        gamma <- if (pen == "SCAD") 3.7 else 3
+        for (a in c(1, 0.5)) {
+            nc <- ncvreg::ncvreg(
+                d$X,
+                d$y,
+                penalty = pen,
+                gamma = gamma,
+                alpha = a,
+                lambda = lam,
+                eps = 1e-12,
+                max.iter = 1e6
+            )
+            rss <- penalizedRss(
+                bhat = d$z * sqrt(d$n),
+                R = d$R,
+                n = d$n,
+                penalty = pen,
+                gamma = gamma,
+                alpha = a,
+                lambda = lam,
+                thr = 1e-12,
+                maxiter = 1e6,
+                strategy = "strongRule"
+            )
+            expect_equal(
+                rss$beta,
+                unname(as.matrix(nc$beta[-1L, ])),
+                tolerance = 1e-6,
+                label = str_c(pen, " at alpha = ", a)
+            )
+        }
     }
 })
 
@@ -365,6 +411,45 @@ test_that("fbeta is the objective the operators minimize, at any alpha", {
     }
 })
 
+test_that("the L0 family's fbeta uses its own weights, whatever alpha is", {
+    # 2 lambda0 ||b||_0 + 2 lambda1 ||b||_1 + 2 lambda2 ||b||^2: the weights
+    # the descent used, with alpha (a LASSO / MCP / SCAD setting) ignored.
+    d <- .prs_standardized()
+    lambda0 <- c(0.02, 0.005, 0.001)
+    cases <- list(
+        L0 = c(lambda1 = 0, lambda2 = 0),
+        L0L1 = c(lambda1 = 0.01, lambda2 = 0),
+        L0L2 = c(lambda1 = 0, lambda2 = 0.05)
+    )
+    for (pen in names(cases)) {
+        w <- cases[[pen]]
+        res <- penalizedRss(
+            bhat = d$z * sqrt(d$n),
+            R = d$R,
+            n = d$n,
+            penalty = pen,
+            alpha = 0.5,
+            lambda = w[["lambda1"]],
+            lambda0 = lambda0,
+            lambda2 = w[["lambda2"]]
+        )
+        for (k in seq_along(lambda0)) {
+            b <- res$beta[, k]
+            objective <- sum(b * (d$R %*% b)) -
+                2 * sum(b * d$z) +
+                2 * lambda0[[k]] * sum(b != 0) +
+                2 * w[["lambda1"]] * sum(abs(b)) +
+                2 * w[["lambda2"]] * sum(b^2)
+            expect_equal(
+                res$fbeta[[k]],
+                objective,
+                tolerance = 1e-10,
+                label = str_c(pen, " at lambda0 ", lambda0[[k]])
+            )
+        }
+    }
+})
+
 test_that("the updates are exact when the LD diagonal is not 1", {
     # The curvature of one coordinate is v + l2. ncvreg writes it v (1 + l2),
     # the same only at v = 1, so with a ridge term and a diagonal of 2 its
@@ -374,40 +459,77 @@ test_that("the updates are exact when the LD diagonal is not 1", {
     lam <- 0.03
     for (pen in c("lasso", "MCP", "SCAD")) {
         gamma <- if (pen == "SCAD") 3.7 else 3
-        b <- penalizedRss(
-            bhat = d$z * sqrt(d$n),
-            R = R2,
-            n = d$n,
-            penalty = pen,
-            alpha = 0.5,
-            lambda = lam,
-            gamma = gamma,
-            thr = 1e-13,
-            maxiter = 1e5
-        )$beta[, 1]
-        l1 <- lam * 0.5
-        # Half the gradient of the smooth part and the ridge term.
-        grad <- as.numeric(R2 %*% b) - d$z + lam * 0.5 * b
-        nz <- b != 0
-        expect_gt(sum(nz), 0L)
-        stationary <- grad[nz] +
-            sign(b[nz]) * .prs_dpen(abs(b[nz]), l1, pen, gamma)
-        expect_lt(max(abs(stationary)), 1e-8, label = pen)
-        expect_true(all(abs(grad[!nz]) <= l1 + 1e-9), label = pen)
+        for (strategy in c("strongRule", "gradientRanked")) {
+            b <- penalizedRss(
+                bhat = d$z * sqrt(d$n),
+                R = R2,
+                n = d$n,
+                penalty = pen,
+                alpha = 0.5,
+                lambda = lam,
+                gamma = gamma,
+                thr = 1e-13,
+                maxiter = 1e5,
+                strategy = strategy
+            )$beta[, 1]
+            l1 <- lam * 0.5
+            # Half the gradient of the smooth part and the ridge term.
+            grad <- as.numeric(R2 %*% b) - d$z + lam * 0.5 * b
+            nz <- b != 0
+            label <- str_c(pen, ", ", strategy)
+            expect_gt(sum(nz), 0L, label = label)
+            stationary <- grad[nz] +
+                sign(b[nz]) * .prs_dpen(abs(b[nz]), l1, pen, gamma)
+            expect_lt(max(abs(stationary)), 1e-8, label = label)
+            expect_true(all(abs(grad[!nz]) <= l1 + 1e-9), label = label)
+        }
     }
 })
 
-test_that("the default lambda path is scaled by the L1 share", {
+test_that("the default lambda path starts where every coefficient is zero", {
+    # glmnet's and ncvreg's: from lambda_max = max|z| / alpha down three
+    # decades in 20 values evenly on a log scale.
     d <- .prs_standardized(p = 6L)
     bhat <- d$z * sqrt(d$n)
-    base <- exp(seq(log(1e-4), log(0.1), length.out = 20))
-    expect_equal(penalizedRss(bhat, d$R, d$n)$lambda, base)
-    expect_equal(penalizedRss(bhat, d$R, d$n, alpha = 0.5)$lambda, base / 0.5)
-    expect_equal(penalizedRss(bhat, d$R, d$n, alpha = 0)$lambda, base / 1e-3)
+    steps <- 1e-3^seq(0, 1, length.out = 20)
+    lambdaMax <- max(abs(d$z))
+    fit <- penalizedRss(bhat, d$R, d$n)
+    expect_equal(fit$lambda, lambdaMax * steps)
+    # The first point is exactly empty, recorded as converged, and the next
+    # lets the strongest variant in.
+    expect_true(all(fit$beta[, 1] == 0))
+    expect_identical(fit$conv[[1]], 1L)
+    expect_gt(sum(fit$beta[, 2] != 0), 0L)
+    expect_equal(
+        penalizedRss(bhat, d$R, d$n, alpha = 0.5)$lambda,
+        lambdaMax / 0.5 * steps
+    )
+    # A ridge has no such value; glmnet sizes it as if alpha were 0.001.
+    expect_equal(
+        penalizedRss(bhat, d$R, d$n, alpha = 0)$lambda,
+        lambdaMax / 1e-3 * steps
+    )
     # A path the caller gives is used as given.
     expect_equal(
         penalizedRss(bhat, d$R, d$n, alpha = 0.5, lambda = c(0.2, 0.1))$lambda,
         c(0.2, 0.1)
+    )
+})
+
+test_that("with no more samples than variants the path stops at 5%", {
+    # ncvreg's lambda.min: below 5% of lambda_max the fits are
+    # near-unpenalized regressions on more variants than samples. A ridge
+    # has no sparse fits to skip and keeps its full depth.
+    d <- .prs_standardized(n = 40L, p = 60L)
+    bhat <- d$z * sqrt(d$n)
+    lambdaMax <- max(abs(d$z))
+    expect_equal(
+        penalizedRss(bhat, d$R, d$n)$lambda,
+        lambdaMax * 0.05^seq(0, 1, length.out = 20)
+    )
+    expect_equal(
+        penalizedRss(bhat, d$R, d$n, alpha = 0)$lambda,
+        lambdaMax / 1e-3 * 1e-3^seq(0, 1, length.out = 20)
     )
 })
 
@@ -427,7 +549,7 @@ test_that("alpha is a share in [0, 1], above 0 for MCP and SCAD", {
     expect_error(penalizedRss(bhat, d$R, d$n, maxSwaps = -1), "maxSwaps")
 })
 
-test_that("lassosumRss is penalizedRss's lasso at alpha = 1, bit for bit", {
+test_that("lassosumRss is exactly penalizedRss's lasso at alpha = 1", {
     d <- .prs_standardized()
     bhat <- d$z * sqrt(d$n)
     lassosum <- lassosumRss(bhat, d$R, d$n)
@@ -435,6 +557,347 @@ test_that("lassosumRss is penalizedRss's lasso at alpha = 1, bit for bit", {
     expect_identical(lassosum$beta, lasso$beta)
     expect_identical(lassosum$conv, lasso$conv)
     expect_identical(lassosum$fbeta, lasso$fbeta)
+})
+
+# ---- Path strategies ------------------------------------------------------
+
+# The solver called directly, so a test can set the path constants: the dense
+# route on the matrix `ld`, or with `factor = TRUE` the factor route on it.
+.prs_solve <- function(
+    z,
+    ld,
+    path,
+    penalty,
+    strategy,
+    ...,
+    factor = FALSE,
+    control = list()
+) {
+    fixed <- list(
+        zR = z,
+        shrink = 0,
+        pathR = path,
+        penaltyStr = penalty,
+        strategyStr = strategy,
+        gamma = 3,
+        alpha = 1,
+        lambda1 = 0,
+        lambda2 = 0,
+        thr = 1e-12,
+        maxiter = 100000L,
+        maxSwaps = 0L,
+        control = modifyList(pecotmr:::.rssPathControl(), control)
+    )
+    args <- modifyList(fixed, list(...))
+    if (factor) {
+        return(exec(pecotmr:::penalizedRssFactorCpp, factorR = ld, !!!args))
+    }
+    exec(pecotmr:::penalizedRssCpp, ldR = ld, !!!args)
+}
+
+# Centered columns and response of unit norm, L0Learn's own scale, with R =
+# X'X and z = X'y their correlations.
+.prs_unitNorm <- function(n = 300L, p = 150L, seed = 11L) {
+    set.seed(seed)
+    X <- matrix(rnorm(n * p), n, p)
+    beta <- replace(numeric(p), c(3, 30, 47, 52), c(1, -0.8, 0.6, 0.5))
+    y <- as.numeric(X %*% beta) + rnorm(n)
+    Xc <- scale(X, scale = FALSE)
+    Xs <- sweep(Xc, 2, sqrt(colSums(Xc^2)), "/")
+    yc <- y - mean(y)
+    ys <- yc / sqrt(sum(yc^2))
+    list(
+        X = Xs,
+        y = ys,
+        R = crossprod(Xs),
+        z = as.numeric(crossprod(Xs, ys))
+    )
+}
+
+test_that("gradientRanked follows L0Learn's lambda0 path for L0", {
+    # On unit-norm data the RSS objective is twice L0Learn's, so its adaptive
+    # lambda0 path, each step letting the next coordinate enter, is ours.
+    skip_if_not_installed("L0Learn")
+    d <- .prs_unitNorm()
+    fit <- L0Learn::L0Learn.fit(
+        d$X,
+        d$y,
+        penalty = "L0",
+        algorithm = "CD",
+        intercept = FALSE,
+        maxSuppSize = 20,
+        rtol = 1e-12,
+        atol = 1e-14
+    )
+    ours <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0",
+        "gradientRanked",
+        control = list(maxSupport = 20L, offEdge = FALSE)
+    )
+    theirs <- as.matrix(fit$beta[[1]])
+    k <- seq_len(min(8L, length(fit$lambda[[1]]), length(ours$lambda)))
+    expect_gte(length(k), 4L)
+    expect_equal(ours$lambda[k], fit$lambda[[1]][k], tolerance = 1e-5)
+    for (i in k) {
+        expect_identical(
+            which(ours$beta[, i] != 0),
+            which(theirs[, i] != 0),
+            info = i
+        )
+    }
+})
+
+test_that("the two strategies reach the same lasso and elastic-net fits", {
+    # Convex: one optimum, whichever order reaches it. A screen of three
+    # makes gradient ranking screen at this size.
+    d <- .prs_standardized(n = 300L, p = 40L)
+    lam <- exp(seq(log(0.2), log(0.002), length.out = 10))
+    for (a in c(1, 0.5)) {
+        strong <- .prs_solve(
+            d$z,
+            d$R,
+            lam,
+            "lasso",
+            "strongRule",
+            alpha = a,
+            shrink = 0.2,
+            thr = 1e-13
+        )
+        ranked <- .prs_solve(
+            d$z,
+            d$R,
+            lam,
+            "lasso",
+            "gradientRanked",
+            alpha = a,
+            shrink = 0.2,
+            thr = 1e-13,
+            control = list(screenSize = 3L)
+        )
+        expect_equal(
+            ranked$beta,
+            strong$beta,
+            tolerance = 1e-8,
+            label = str_c("alpha = ", a)
+        )
+    }
+})
+
+# How far `b` is from its own coordinate-wise L0 updates given the rest, the
+# minimum the solver claims at convergence.
+.prs_l0CoordinateGap <- function(b, z, R, lambda0) {
+    v <- diag(R)
+    t <- z - as.numeric(R %*% b) + v * b
+    reg <- abs(t) / v
+    update <- ifelse(reg <= sqrt(2 * lambda0 / v), 0, sign(t) * reg)
+    max(abs(update - b))
+}
+
+test_that("every point of an L0 path is a coordinate-wise minimum", {
+    # A screen of three would leave the support out of the sweeps if it were
+    # not always kept, as L0Learn's prefix can.
+    d <- .prs_unitNorm(p = 60L)
+    for (strategy in c("strongRule", "gradientRanked")) {
+        fit <- .prs_solve(
+            d$z,
+            d$R,
+            numeric(0),
+            "L0",
+            strategy,
+            control = list(screenSize = 3L)
+        )
+        gaps <- map_dbl(
+            seq_along(fit$lambda),
+            function(k) {
+                .prs_l0CoordinateGap(fit$beta[, k], d$z, d$R, fit$lambda[[k]])
+            }
+        )
+        expect_lt(max(gaps), 1e-8, label = strategy)
+        expect_true(all(fit$conv == 1L), label = strategy)
+    }
+})
+
+# The lambda0 L0Learn's rule (Grid1D.cpp) takes after point k - 1 of `fit`,
+# recomputed from that point's coefficients.
+.prs_nextLambda0 <- function(k, fit, z, R, lambda1, lambda2) {
+    b <- fit$beta[, k - 1L]
+    g <- abs(z - as.numeric(R %*% b))
+    entryValues <- pmax(g - lambda1, 0)^2 / (2 * (diag(R) + 2 * lambda2))
+    entry <- max(entryValues[b == 0])
+    prev <- fit$lambda[[k - 1L]]
+    same <- k > 2L && identical(b != 0, fit$beta[, k - 2L] != 0)
+    if (same) {
+        return(min(0.8 * prev, 0.97 * entry))
+    }
+    if (0.99 * entry >= prev) 0.97 * prev else 0.99 * entry
+}
+
+test_that("the adaptive lambda0 path follows L0Learn's rule", {
+    # lambda2 > 0 shows the ranking reads the current gradient, which
+    # L0Learn's L0L2 does not.
+    d <- .prs_unitNorm(p = 60L)
+    cases <- list(L0 = c(0, 0), L0L1 = c(0.02, 0), L0L2 = c(0, 0.05))
+    for (pen in names(cases)) {
+        w <- cases[[pen]]
+        fit <- .prs_solve(
+            d$z,
+            d$R,
+            numeric(0),
+            pen,
+            "gradientRanked",
+            lambda1 = w[[1]],
+            lambda2 = w[[2]],
+            maxSwaps = 10L,
+            control = list(offEdge = FALSE)
+        )
+        # The first point is the smallest lambda0 at which all are zero.
+        first <- max(
+            pmax(abs(d$z) - w[[1]], 0)^2 / (2 * (diag(d$R) + 2 * w[[2]]))
+        )
+        expect_equal(fit$lambda[[1]], first, label = pen)
+        expect_true(all(fit$beta[, 1] == 0), label = pen)
+        expect_gt(length(fit$lambda), 3L, label = pen)
+        expected <- map_dbl(
+            seq_along(fit$lambda)[-1L],
+            .prs_nextLambda0,
+            fit = fit,
+            z = d$z,
+            R = d$R,
+            lambda1 = w[[1]],
+            lambda2 = w[[2]]
+        )
+        expect_equal(fit$lambda[-1L], expected, tolerance = 1e-10, label = pen)
+    }
+})
+
+test_that("the adaptive default is solved at the midpoints of its values", {
+    # Its values sit at the full data's entry thresholds, where held-out
+    # refits take a different support than the full data did; the default
+    # path is the geometric midpoints of consecutive values, the first kept.
+    d <- .prs_unitNorm(p = 60L)
+    edges <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0",
+        "gradientRanked",
+        control = list(offEdge = FALSE)
+    )$lambda
+    fit <- .prs_solve(d$z, d$R, numeric(0), "L0", "gradientRanked")
+    k <- length(edges)
+    expect_gt(k, 3L)
+    expect_equal(fit$lambda, c(edges[[1]], sqrt(edges[-1L] * edges[-k])))
+    expect_true(all(fit$beta[, 1] == 0))
+    # strongRule's geometric default has no edges to leave.
+    geometric <- .prs_solve(d$z, d$R, numeric(0), "L0", "strongRule")
+    expect_equal(
+        geometric$lambda,
+        geometric$lambda[[1]] * 1e-3^seq(0, 1, length.out = 20)
+    )
+})
+
+test_that("the L0 family's default paths stop where they should", {
+    d <- .prs_unitNorm(p = 60L)
+    bySupport <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0",
+        "gradientRanked",
+        control = list(maxSupport = 5L, offEdge = FALSE)
+    )
+    nnz <- colSums(bySupport$beta != 0)
+    expect_gte(nnz[[length(nnz)]], 5L)
+    expect_true(all(nnz[-length(nnz)] < 5L))
+    byLength <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0",
+        "gradientRanked",
+        control = list(maxPoints = 4L, offEdge = FALSE)
+    )
+    expect_length(byLength$lambda, 4L)
+    # No coordinate can enter once lambda1 exceeds every |z|: one point.
+    none <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0L1",
+        "gradientRanked",
+        lambda1 = max(abs(d$z)) + 0.01,
+        control = list(offEdge = FALSE)
+    )
+    expect_length(none$lambda, 1L)
+    expect_true(all(none$beta == 0))
+    # Under strongRule the default is geometric down from the same value.
+    geometric <- .prs_solve(d$z, d$R, numeric(0), "L0", "strongRule")
+    expect_equal(
+        geometric$lambda,
+        bySupport$lambda[[1]] * 1e-3^seq(0, 1, length.out = 20)
+    )
+})
+
+test_that("the solver refuses a convex penalty without a path, or rising", {
+    d <- .prs_standardized(p = 6L)
+    expect_error(
+        .prs_solve(d$z, d$R, numeric(0), "lasso", "strongRule"),
+        "needs at least one lambda"
+    )
+    expect_error(
+        .prs_solve(d$z, d$R, c(0.01, 0.1), "lasso", "strongRule"),
+        "non-increasing"
+    )
+    expect_error(
+        .prs_solve(d$z, d$R, 0.1, "lasso", "sideways"),
+        "Unknown strategy"
+    )
+    expect_error(
+        penalizedRss(d$z * sqrt(d$n), d$R, d$n, strategy = "sideways"),
+        "strategy"
+    )
+})
+
+test_that("the solver is deterministic on both routes and strategies", {
+    set.seed(3)
+    X <- matrix(rbinom(80 * 50, 2, 0.3), 80, 50)
+    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
+    R <- crossprod(ldFactor) / (nrow(ldFactor) - 1)
+    z <- as.numeric(R %*% replace(numeric(50), c(4, 20), c(0.3, -0.2))) +
+        rnorm(50, sd = 0.05)
+    lam <- exp(seq(log(0.1), log(0.001), length.out = 6))
+    for (strategy in c("strongRule", "gradientRanked")) {
+        for (pen in c("lasso", "L0")) {
+            path <- if (pen == "L0") numeric(0) else lam
+            for (factor in c(FALSE, TRUE)) {
+                ld <- if (factor) ldFactor else R
+                first <- .prs_solve(
+                    z,
+                    ld,
+                    path,
+                    pen,
+                    strategy,
+                    factor = factor,
+                    maxSwaps = 5L,
+                    shrink = 0.2
+                )
+                second <- .prs_solve(
+                    z,
+                    ld,
+                    path,
+                    pen,
+                    strategy,
+                    factor = factor,
+                    maxSwaps = 5L,
+                    shrink = 0.2
+                )
+                expect_identical(first, second)
+            }
+        }
+    }
 })
 
 # The ridge's minimizer at shrinkage s and penalty l, from its normal
@@ -482,18 +945,20 @@ test_that("a ridge is solved in closed form, on the matrix or a factor", {
     # penalizedRss() at alpha = 0 takes it: the minimum coordinate descent
     # converges to.
     descent <- pecotmr:::penalizedRssCpp(
-        z,
-        list(d$R),
-        0,
-        lambda,
-        "lasso",
-        0,
-        0,
-        0,
-        0,
-        1e-13,
-        100000L,
-        0L
+        zR = z,
+        ldR = d$R,
+        shrink = 0,
+        pathR = lambda,
+        penaltyStr = "lasso",
+        strategyStr = "strongRule",
+        gamma = 0,
+        alpha = 0,
+        lambda1 = 0,
+        lambda2 = 0,
+        thr = 1e-13,
+        maxiter = 100000L,
+        maxSwaps = 0L,
+        control = pecotmr:::.rssPathControl()
     )
     expect_equal(
         penalizedRss(z * 10, d$R, 100, alpha = 0, lambda = lambda)$beta,
@@ -675,7 +1140,7 @@ test_that(".rssPenalty checks a penalty once and fills MCP / SCAD's gamma", {
     expect_equal(pen("MCP", gamma = 5)$gamma, 5)
     expect_equal(pen("lasso", alpha = 0)$alpha, 0)
     expect_error(pen("SCAD", gamma = Inf), "gamma")
-    expect_error(pen("L0", lambda0 = -1), "lambda0")
+    expect_error(pen("L0L1", lambda1 = -1), "lambda1")
     expect_error(pen("L0L2", lambda2 = -1), "lambda2")
     expect_error(pen("L0", maxSwaps = -1), "maxSwaps")
     expect_error(pen("MCP", alpha = 0), "above 0 for MCP")

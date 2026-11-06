@@ -93,8 +93,9 @@ held-out summary statistics.
 \code{selection = "heldOut"} splits the statistics four times into a
 training part, 75\% of the samples, and its held-out remainder, drawing
 each split from the statistics and the LD as PUMAS does (Zhao et al.
-2021). The path is refit on each training part, every candidate is scored
-on the held-out part by the variance of it that it explains,
+2021). The path is refit on each training part, at the penalty values
+the full data took, and every candidate is scored on the held-out part by
+the variance of it that it explains,
 \deqn{2 c_h^T \beta - \beta^T \hat\Sigma \beta, \quad
   \hat\Sigma = (1 - w) R + w I,}
 and the full-data fit at the (\code{s}, lambda) with the best mean score

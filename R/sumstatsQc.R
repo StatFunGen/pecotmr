@@ -1498,6 +1498,7 @@ slalom <- function(
     leadVariantChoice = "pvalue",
     ldMethod = "sample"
 ) {
+    arg_match(leadVariantChoice, c("pvalue", "abf"))
     .ldRequireOneSource(R, X)
     .slalomOnSource(
         zScore,
@@ -2700,11 +2701,13 @@ setClass(
 #'   \code{4.0}.
 #' @param r2Threshold Minimum r-squared with the lead variant for a variant to
 #'   be tested. Default \code{0.6}.
-#' @param leadVariantChoice How the lead variant is chosen. Default
-#'   \code{"pvalue"}.
+#' @param leadVariantChoice How the lead variant is chosen: \code{"pvalue"}
+#'   (default), the smallest p-value, or \code{"abf"}, the highest ABF
+#'   posterior probability.
 #' @return A \code{SlalomParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' SlalomParam(r2Threshold = 0.8)
+#' @importFrom checkmate assertChoice makeAssertCollection
 #' @export
 SlalomParam <- function(
     standardError = NULL,
@@ -2722,6 +2725,20 @@ SlalomParam <- function(
         leadVariantChoice = leadVariantChoice
     )
 }
+
+# The lead-variant rule is one of slalom()'s two, checked where the bundle is
+# built, so a misspelled one is reported against the argument that set it.
+setValidity("SlalomParam", function(object) {
+    coll <- makeAssertCollection()
+    assertChoice(
+        object@leadVariantChoice,
+        c("pvalue", "abf"),
+        .var.name = "leadVariantChoice",
+        add = coll
+    )
+    problems <- coll$getMessages()
+    if (length(problems) == 0L) TRUE else problems
+})
 
 #' @rdname DentistParam
 #' @aliases DentistParam-class

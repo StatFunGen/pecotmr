@@ -489,13 +489,11 @@ test_that("PvalMethodsParam pairs each method with its own constructor", {
         gbj = GbjOptions(pairwise_cors = 0.1),
         fisher = list(side = 1)
     )
-    # The entries live in one named-list slot rather than ten nullable
-    # ones: a record configuring aspu used to show nine NULL slots.
-    expect_setequal(names(rec$methods), c("aspu", "gbj", "fisher"))
-    expect_setequal(names(rec), "methods")
+    # Each method is its own slot, and names() reports the ones that are set.
+    expect_setequal(names(rec), c("aspu", "gbj", "fisher"))
     # A plain list is routed through that method's constructor, so it picks
     # up the pecotmr default the constructor carries.
-    expect_equal(rec$methods$fisher$adjust, "generalized")
+    expect_equal(rec$fisher$adjust, "generalized")
     expect_error(
         PvalMethodsParam(gbj = AspuOptions()),
         "was built with the constructor for 'aspu'"
@@ -503,9 +501,9 @@ test_that("PvalMethodsParam pairs each method with its own constructor", {
     # The five GBJ tests share one engine, so one constructor serves them all.
     expect_s4_class(PvalMethodsParam(minp = GbjOptions()), "PvalMethodsParam")
     expect_s4_class(PvalMethodsParam(minp = GbjOptions()), "MethodParam")
-    # Each entry is still an engine argument bag; only the container changed.
-    expect_s4_class(rec$methods$aspu, "MethodOptions")
-    expect_null(rec$methods$minp)
+    # Each entry is still an engine argument bag.
+    expect_s4_class(rec$aspu, "MethodOptions")
+    expect_null(rec$minp)
     # acat / hmp / bonferroni / gates are real combinePValues methods but
     # take no options, so they are not formals. The ten that do are, which
     # is why R rejects these before the constructor body runs -- the
@@ -519,17 +517,17 @@ test_that("PvalMethodsParam pairs each method with its own constructor", {
 })
 
 test_that("combinePValues finds a configured method by name, not position", {
-    # .combinePvalMethodArgs reads the entries out of the `methods` slot
-    # and matches by name, so every configured method must resolve to its
-    # own entry -- and a plain list() must still work as "no settings".
+    # .combinePvalMethodArgs reads the set entries out of the record and
+    # matches by name, so every configured method must resolve to its own
+    # entry -- and a plain list() must still work as "no settings".
     rec <- PvalMethodsParam(
         aspu = AspuOptions(n.perm = 100),
         fisher = PoolrOptions(side = 1)
     )
-    for (m in names(rec$methods)) {
+    for (m in names(rec)) {
         expect_identical(
             pecotmr:::.combinePvalMethodArgs(rec, m),
-            rec$methods[[m]],
+            rec[[m]],
             info = m
         )
     }

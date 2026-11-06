@@ -261,6 +261,14 @@ reference:
       - VariantPruningParam
       - WeightSelectionParam
 
+  - subtitle: "Config files"
+    desc: >
+      Read and write these records as YAML, one mapping per record keyed by
+      its constructor.
+    contents:
+      - loadConfigFromYaml
+      - writeConfigToYaml
+
   - title: "Manifest loaders"
     desc: >
       Build the individual-level and summary-statistic containers from a
@@ -672,6 +680,7 @@ reference:
       - ldpred2AutoWeights
       - ldpred2GridWeights
       - dprWeights
+      - sparsevbWeights
 
   - subtitle: "mr.mash / mr.ash"
     contents:

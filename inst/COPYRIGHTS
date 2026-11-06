@@ -50,7 +50,11 @@ each under a license compatible with GPL-3.
 6. L0Learn
    https://github.com/hazimehh/L0Learn
    Copyright (c) 2021 Hussein Hazimeh. License: MIT (text below).
-   - src/penalized_rss.cpp: the L0 swap step, ported from CDL012Swaps.cpp.
+   - src/penalized_rss.cpp: the L0 thresholding (CDL0.h, CDL012.h); the
+     gradientRanked path strategy, its |gradient|-ranked cycling, screening,
+     support restriction and full check (CD.h, CDL0.h, CDL012.h); the
+     adaptive lambda0 path (Grid1D.cpp); and the L0 swap step, ported from
+     CDL012Swaps.cpp.
 
 7. lassosum
    https://github.com/tshmak/lassosum
@@ -184,6 +188,15 @@ each under a license compatible with GPL-3.
     (text below).
     - R/regularizedRegressionWrappers.R: the description of mr.mash's fit in
       mrmashWrapper()'s documentation (after mr_mash.R).
+
+23. ncvreg
+    https://github.com/pbreheny/ncvreg
+    Copyright (C) Patrick Breheny, Ryan Miller and Logan Harris. License:
+    GPL-3.
+    - src/penalized_rss.cpp: the MCP and SCAD thresholding operators (after
+      ncvreg_init.c) and the strongRule path strategy, its sequential strong
+      rule, ever-active set and violation scans (after cdfit_gaussian() in
+      gaussian.c).
 
 
 MIT License (items 3, 6, 7, 12, 13, 14, 15, 16, 19, 20 and 22, with the

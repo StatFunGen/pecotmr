@@ -7,6 +7,7 @@
 mrashWeights(
   X,
   y,
+  updateOrder = c("consecutive", "decreasingLogBf"),
   fitRetention = c("none", "slim", "full"),
   retainX = FALSE,
   methodArgs = MrashOptions()
@@ -16,6 +17,16 @@ mrashWeights(
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
 \item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+
+\item{updateOrder}{The order the coordinate ascent updates the variants
+in: \code{"consecutive"} (default), their column order, or
+\code{"decreasingLogBf"}, by decreasing marginal log Bayes factor under
+the prior \code{mr.ash} fits (its grid \code{sa2} and weights \code{pi},
+from \code{methodArgs} or its defaults, and residual variance
+\code{sigma2}, else the variance of \code{y}). It is passed as
+\code{susieR::mr.ash}'s \code{update.order}, which
+\code{\link{MrashOptions}} therefore refuses. Either way the fit starts
+from lasso weights unless \code{methodArgs} gives \code{beta.init}.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches

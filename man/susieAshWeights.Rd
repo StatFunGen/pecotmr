@@ -28,8 +28,9 @@ intermediates, so the two retaining levels behave alike here.}
 Numeric vector of variant weights.
 }
 \description{
-Extracts coefficients from an existing SuSiE-ASH fit or fits
-`susieR::susie()` with `unmappable_effects = "ash"`.
+Extracts coefficients from an existing SuSiE-ASH fit
+(`susieR::susie()` with `unmappable_effects = "ash"`), as
+\code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 }
 \examples{
 data(eqtlRegionExample)

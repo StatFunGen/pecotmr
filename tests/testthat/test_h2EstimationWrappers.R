@@ -3574,3 +3574,161 @@ test_that("estimateH2 refuses what a cis estimate cannot be made from", {
         heritabilityEstimate(estimateH2(unsized, method = "fastHer"))
     ))
 })
+
+# ---- estimateH2 on a QtlDataset; h2 for the methods that start from it ----
+test_that("estimateH2 gives each QtlDataset trait its in-sample cis estimate", {
+    data(qtlDatasetExample, envir = environment())
+    fit <- estimateH2(qtlDatasetExample, cisWindow = 1e6)
+    expect_s4_class(fit, "H2Estimate")
+    expect_identical(length(fit), 1L)
+    expect_identical(methodNames(fit), "lava")
+    expect_identical(as.character(fit$study), "study1")
+    expect_identical(as.character(fit$context), "brain")
+    expect_identical(as.character(fit$trait), "ENSG_example")
+    expect_true(is.finite(heritabilityEstimate(fit)))
+    # The genotypes are the study's own LD.
+    expect_identical(fit$reference_overlap, 1)
+    # The element is the trait's analysis window.
+    expect_gt(sum(IRanges::width(fit[[1]])), 0L)
+    for (m in c("hdlL", "fastHer")) {
+        expect_true(
+            is.finite(heritabilityEstimate(
+                estimateH2(qtlDatasetExample, method = m, cisWindow = 1e6)
+            )),
+            info = m
+        )
+    }
+})
+
+test_that("an in-sample estimate reads a trait's genotypes as their own LD", {
+    fx <- .cisH2StrongQtl(13L, h2 = 0.2)
+    fit <- pecotmr:::.h2IndividualFit("lava", fx$Xs, fx$y)
+    want <- pecotmr:::.cisH2Lava(
+        fx$z,
+        rep(fx$n, length(fx$z)),
+        list(R = fx$R, nSamples = fx$n, referenceOverlap = 1)
+    )
+    expect_equal(fit$h2, want$h2, tolerance = 1e-6)
+    expect_identical(fit$nSnps, ncol(fx$Xs))
+    # A constant column carries nothing and is left out.
+    constant <- pecotmr:::.h2IndividualFit("lava", cbind(fx$Xs, 1), fx$y)
+    expect_equal(constant$h2, fit$h2)
+    expect_identical(constant$nSnps, ncol(fx$Xs))
+    # A window where nothing varies has no estimate.
+    none <- pecotmr:::.h2IndividualFit("lava", matrix(1, 20, 3), rnorm(20))
+    expect_true(is.na(none$h2))
+    expect_identical(none$nSnps, 0L)
+})
+
+test_that("GREML is qgg's REML on the window's relationship matrix", {
+    skip_if_not_installed("qgg")
+    fx <- .cisH2StrongQtl(13L, h2 = 0.4)
+    fit <- pecotmr:::.h2IndividualFit("greml", fx$Xs, fx$y)
+    Xs <- scale(fx$Xs)
+    theta <- as.numeric(
+        qgg::greml(y = fx$y, GRM = list(tcrossprod(Xs) / ncol(Xs)))$theta
+    )
+    expect_equal(fit$h2, theta[[1L]] / sum(theta))
+    expect_true(is.finite(fit$h2Se) && fit$h2Se > 0)
+    expect_true(is.na(fit$p))
+})
+
+test_that("estimateH2 on a QtlDataset refuses what it cannot estimate", {
+    data(qtlDatasetExample, envir = environment())
+    expect_error(
+        estimateH2(qtlDatasetExample, annotations = list()),
+        "takes no `annotations`"
+    )
+    two <- GenomicRanges::GRanges(c("chr22:1-1000", "chr22:5000-6000"))
+    expect_error(
+        estimateH2(qtlDatasetExample, region = two),
+        "estimate one region at a time"
+    )
+    expect_error(
+        estimateH2(qtlDatasetExample, method = "hdl"),
+        "must be one of"
+    )
+    # GREML needs genotypes.
+    expect_error(
+        estimateH2(.cisH2Example(), method = "greml"),
+        "must be one of"
+    )
+    # No trait with samples in common with its genotypes leaves nothing.
+    expect_error(
+        pecotmr:::.h2IndividualEstimate(list(), "lava", qtlDatasetExample),
+        "no selected trait shares two or more samples"
+    )
+})
+
+test_that("a supplied or estimated heritability is settled for the methods", {
+    fakeFit <- function(method, value) list(h2 = value)
+    resolve <- function(h2, value = 0.4) {
+        pecotmr:::.h2Resolve(
+            h2,
+            c("lava", "greml"),
+            "test",
+            fakeFit,
+            list(value = value)
+        )
+    }
+    expect_null(resolve(NULL))
+    expect_identical(resolve(0.3), 0.3)
+    # Floored and capped, keeping every engine's variances positive.
+    expect_identical(resolve(0), 0.001)
+    expect_identical(resolve(0.995), 0.99)
+    expect_identical(resolve("greml", 2), 0.99)
+    expect_identical(resolve("lava"), 0.4)
+    expect_error(resolve(1), "must be below 1")
+    expect_error(resolve(-0.1))
+    expect_error(resolve("LAVA"), "must be one of")
+    # No estimate leaves the method its own default.
+    expect_warning(
+        expect_null(resolve("lava", NA_real_)),
+        "no heritability estimate could be made"
+    )
+})
+
+test_that("an H2Estimate gives a run each selected trait's value, once each", {
+    x <- .cisH2Example()
+    est <- estimateH2(x, referenceOverlap = 1)
+    tuples <- tibble::tibble(
+        study = "study1",
+        context = "brain",
+        trait = "ENSG_example"
+    )
+    spec <- pecotmr:::.h2PipelineSpec(est, "lava", tuples, "test")
+    key <- pecotmr:::.h2TupleKey("study1", "brain", "ENSG_example")
+    expect_equal(unname(spec$values), heritabilityEstimate(est))
+    expect_equal(
+        pecotmr:::.h2ForTrait(spec, key, "test", NULL, list()),
+        min(max(heritabilityEstimate(est), 0.001), 0.99)
+    )
+    # A condition the run derives, such as a principal component, has no row
+    # and keeps its default.
+    expect_null(pecotmr:::.h2ForTrait(
+        spec,
+        pecotmr:::.h2TupleKey("study1", "brain", "PC1"),
+        "test",
+        NULL,
+        list()
+    ))
+    other <- tibble::tibble(
+        study = "study1",
+        context = "brain",
+        trait = "ENSG_other"
+    )
+    expect_error(
+        pecotmr:::.h2PipelineSpec(est, "lava", rbind(tuples, other), "test"),
+        "holds no row for 1 selected"
+    )
+    both <- c(est, estimateH2(x, method = "fastHer"))
+    expect_error(
+        pecotmr:::.h2PipelineSpec(both, "lava", tuples, "test"),
+        "holds several rows"
+    )
+    expect_identical(
+        pecotmr:::.h2PipelineSpec("fastHer", c("lava", "fastHer"), tuples, "t"),
+        list(method = "fastHer")
+    )
+    expect_null(pecotmr:::.h2PipelineSpec(NULL, "lava", tuples, "test"))
+})

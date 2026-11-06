@@ -24,13 +24,15 @@ NULL
 
 #' @title Estimate SNP Heritability
 #' @description Estimate SNP heritability, genome-wide from GWAS summary
-#'   statistics or per trait in its cis window from QTL summary statistics.
-#'   From a \code{GwasSumStats} and an LD reference, one of four methods
-#'   (S-LDSC, g-LDSC, LDER, or HDL/sHDL) gives one genome-wide estimate;
-#'   supplying \code{annotations} makes any of them stratified. From a
-#'   \code{QtlSumStats}, one of three methods (LAVA, HDL-L or FastHer) gives
-#'   one estimate per selected (study, context, trait) row, each from the
-#'   row's own statistics and LD reference.
+#'   statistics or per trait in its cis window from QTL summary statistics
+#'   or individual-level QTL data. From a \code{GwasSumStats} and an LD
+#'   reference, one of four methods (S-LDSC, g-LDSC, LDER, or HDL/sHDL) gives
+#'   one genome-wide estimate; supplying \code{annotations} makes any of them
+#'   stratified. From a \code{QtlSumStats}, one of three methods (LAVA, HDL-L
+#'   or FastHer) gives one estimate per selected (study, context, trait) row,
+#'   each from the row's own statistics and LD reference. From a
+#'   \code{QtlDataset}, those three or GREML give one estimate per selected
+#'   (study, context, trait), each from the trait's own genotypes.
 #' @details Each per-trait method is written from its authors' published
 #'   estimator and reports what they report. All three read a row's \code{z}
 #'   as the t statistic of a marginal regression, the correlation being
@@ -89,23 +91,40 @@ NULL
 #'       undefined when the reference's rank, or the statistics' squared
 #'       norm in the LD's metric, reaches the sample size, as it can with LD
 #'       from outside the study; such traits are \code{NA}, with a warning.}
+#'     \item{\code{"greml"}}{(a \code{QtlDataset} only) GREML: the restricted
+#'       maximum likelihood of the trait's genetic and residual variances, by
+#'       \code{qgg::greml} on the relationship matrix \eqn{X X' / p} of the
+#'       window's \eqn{p} standardized genotypes, as FUSION estimates a gene's
+#'       cis heritability. Its standard error is the delta method's, from the
+#'       variances' asymptotic covariance; it reports no p-value.}
 #'   }
 #'   Every per-trait method assumes the LD reference matches the population
 #'   of the statistics, as the QC step (\code{\link{summaryStatsQc}})
 #'   checks. LAVA and HDL-L read the reference's sample size, so an
 #'   \code{\link{LdMatrix}} reference must record \code{nSamples}. A trait
 #'   whose window holds no variants is \code{NA}, with a warning.
-#' @param sumstats A \code{GwasSumStats}, or a \code{QtlSumStats} that has
-#'   been through \code{\link{summaryStatsQc}}, each row with an LD
-#'   reference.
+#'
+#'   From a \code{QtlDataset}, a trait's genotypes are its own LD. The three
+#'   summary-statistic methods read each variant's marginal statistic against
+#'   the trait, computed from those genotypes and its phenotype, with the
+#'   reference being the study's own samples (\code{referenceOverlap = 1}),
+#'   so LAVA's estimate is exactly the adjusted \eqn{R^2} of the trait on the
+#'   genotypes' components. Each trait is estimated on the window, samples,
+#'   filters and residualized, scaled genotypes and phenotype that
+#'   \code{\link{twasWeightsPipeline}} fits it on.
+#' @param data A \code{GwasSumStats}; a \code{QtlSumStats} that has been
+#'   through \code{\link{summaryStatsQc}}, each row with an LD reference; or
+#'   a \code{QtlDataset}.
 #' @param ldRef For a \code{GwasSumStats}, an \code{LdStatistic} object
 #'   (method-appropriate subclass): an \code{\link{LdScore}} for
 #'   \code{"sldsc"} / \code{"gldsc"}, an \code{\link{LdEigen}} for
 #'   \code{"lder"} / \code{"hdl"}. Build either from loaded LD with
 #'   \code{\link{buildLdScore}} / \code{\link{buildLdEigen}}. Omitted for a
-#'   \code{QtlSumStats}, whose rows carry their own.
+#'   \code{QtlSumStats}, whose rows carry their own, and for a
+#'   \code{QtlDataset}, whose genotypes give their own.
 #' @param method Character. For a \code{QtlSumStats}, one of \code{"lava"}
-#'   (the default), \code{"hdlL"} or \code{"fastHer"} (see Details). For a
+#'   (the default), \code{"hdlL"} or \code{"fastHer"}; for a
+#'   \code{QtlDataset}, one of those or \code{"greml"} (see Details). For a
 #'   \code{GwasSumStats}, one of \code{"lder"} (the default),
 #'   \code{"sldsc"}, \code{"gldsc"} or \code{"hdl"}:
 #'   \describe{
@@ -130,8 +149,8 @@ NULL
 #'   1), or \code{NULL} when it holds one.
 #' @return An \code{\linkS4class{H2Estimate}}. From a \code{GwasSumStats},
 #'   one row: the study's genome-wide estimate, whose element holds no
-#'   ranges. From a \code{QtlSumStats}, one row per selected (study,
-#'   context, trait), whose element is the window it covers.
+#'   ranges. From a \code{QtlSumStats} or a \code{QtlDataset}, one row per
+#'   selected (study, context, trait), whose element is the window it covers.
 #' @references Werme J, van der Sluis S, Posthuma D, de Leeuw CA (2022). An
 #'   integrated framework for local genetic correlation analysis. Nature
 #'   Genetics 54, 274-282.
@@ -169,11 +188,15 @@ NULL
 #' # Per-trait cis heritability, each row against its own LD reference.
 #' data(qtlSumStatsExample)
 #' estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+#'
+#' # From individual-level data, on each trait's own genotypes.
+#' data(qtlDatasetExample)
+#' estimateH2(qtlDatasetExample, cisWindow = 1e6)
 #' @export
 setGeneric(
     "estimateH2",
     function(
-        sumstats,
+        data,
         ldRef,
         method = "lder",
         annotations = NULL,

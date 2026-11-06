@@ -525,7 +525,10 @@ test_that("show renders a Param with nothing set", {
     out <- capture.output(show(MashComponentParam()))
     expect_true(any(str_detect(out, "MashComponentParam")))
     expect_true(any(str_detect(out, fixed("(nothing set)"))))
-    expect_true(any(str_detect(out, "unset: components")))
+    expect_true(any(str_detect(
+        out,
+        fixed("unset: canonical, pca, flash, flashNonneg")
+    )))
 })
 
 test_that("show names a nested Options record by its engine", {
@@ -648,10 +651,49 @@ test_that("$<- refuses unknown and fixed settings, naming why", {
         cs$maxNumSingleEffects <- 3L,
         "needs a refit. Build a new CredibleSetParam\\(\\) instead"
     )
-    mc <- MashComponentParam()
-    expect_error(mc$components <- list(), "assembles it from")
+})
+
+test_that("$<- sets one component or method through its constructor", {
+    mc <- MashComponentParam(pca = list(subset = 1:3))
+    mc$flash <- list()
+    expect_identical(
+        mc,
+        MashComponentParam(pca = list(subset = 1:3), flash = list())
+    )
+    mc$pca <- NULL
+    expect_setequal(names(mc), "flash")
+    # The constructor's own check still runs: an entry built for another
+    # component is refused.
+    expect_error(
+        mc$canonical <- CovFlashOptions(),
+        "was built with the constructor for 'flash'"
+    )
     pv <- PvalMethodsParam(aspu = AspuOptions(n.perm = 5000))
-    expect_error(pv$methods <- list(), "one argument per method")
+    pv$fisher <- list(side = 1)
+    expect_identical(
+        pv,
+        PvalMethodsParam(
+            aspu = AspuOptions(n.perm = 5000),
+            fisher = list(side = 1)
+        )
+    )
+})
+
+test_that("every Param's constructor takes exactly its slots", {
+    # `$<-` rebuilds a record through its constructor from its slots, and
+    # writeConfigToYaml() writes the slots as the constructor's arguments, so
+    # a slot the constructor does not take breaks both.
+    ctors <- stringr::str_subset(
+        getNamespaceExports("pecotmr"),
+        "^[A-Z][A-Za-z0-9]*Param$"
+    )
+    for (name in ctors) {
+        expect_identical(
+            sort(names(formals(get(name, envir = asNamespace("pecotmr"))))),
+            sort(slotNames(name)),
+            info = name
+        )
+    }
 })
 
 test_that(".assertMethodParam names the record it was handed", {

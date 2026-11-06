@@ -11,6 +11,7 @@
 \alias{DprOptions}
 \alias{NcvregOptions}
 \alias{L0learnOptions}
+\alias{SparsevbOptions}
 \alias{MrashOptions}
 \alias{MrashRssOptions}
 \alias{PrsCsOptions}
@@ -39,6 +40,8 @@ DprOptions(...)
 NcvregOptions(...)
 
 L0learnOptions(...)
+
+SparsevbOptions(...)
 
 MrashOptions(...)
 
@@ -95,7 +98,12 @@ Options forwarded to the engine behind a TWAS weight method,
   inclusion probability themselves (\code{nIter}, \code{nBurnin},
   \code{thin}, \code{pi}), so every constructor refuses its engine's
   spelling of them, and hibayes' \code{seed} (drawn from R's random
-  number generator) and \code{threads} (one).
+  number generator) and \code{threads} (one). A wrapper's \code{h2}
+  reaches its engine in that engine's spelling: \code{h2} for qgg and
+  pecotmr's sampler, \code{R2} for BGLR, and for hibayes, which fixes its
+  own at 0.5, the variances \code{vg} and \code{ve}. The constructors
+  still take those, for a run that does not set \code{h2}; setting both
+  is an error.
 
   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
@@ -117,6 +125,20 @@ Options forwarded to the engine behind a TWAS weight method,
   enabling it would nest two frameworks and oversubscribe the machine.
   The glasso and univariate-glmnet \code{mr.mash} initialisations are
   single-threaded for the same reason.
+
+  \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
+  \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the
+  path is walked (\code{"strongRule"} or \code{"gradientRanked"}; see
+  \code{\link{penalizedRss}}).
+
+  \code{MrashOptions} refuses \code{update.order}, which
+  \code{mrashWeights()} sets from its own \code{updateOrder}.
+
+  \code{SparsevbOptions} takes \code{sparsevb::svb.fit}'s settings. The
+  per-variant ones (\code{mu}, \code{sigma}, \code{gamma} and
+  \code{update_order}) index the columns \code{sparsevbWeights()} fits,
+  which leave out zero-variance ones, and \code{svb.fit} reads
+  \code{update_order} counting from 0, though its documentation says 1.
 
   \code{MrmashOptions} and \code{MrmashRssOptions} refuse
   \code{nthreads}: mr.mash itself runs on one thread, because on macOS

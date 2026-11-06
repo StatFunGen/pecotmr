@@ -204,9 +204,7 @@ setReplaceMethod("$", "MethodParam", function(x, name, value) {
 
 # Settings `$<-` refuses, by class, and why. CredibleSetParam's L / Lgreedy
 # seed each SuSiE-family fit's own arguments, so changing one needs a refit;
-# a record that took the new value would look applied without being so. The
-# other two are assembled by their constructors from several arguments, so
-# there is no single value to put back.
+# a record that took the new value would look applied without being so.
 # @noRd
 .PARAM_FIXED_FIELDS <- list(
     CredibleSetParam = c(
@@ -218,15 +216,6 @@ setReplaceMethod("$", "MethodParam", function(x, name, value) {
             "it seeds each SuSiE-family fit's own arguments, so changing it ",
             "needs a refit"
         )
-    ),
-    MashComponentParam = c(
-        components = str_c(
-            "MashComponentParam() assembles it from its canonical / pca / ",
-            "flash / flashNonneg arguments"
-        )
-    ),
-    PvalMethodsParam = c(
-        methods = "PvalMethodsParam() assembles it from one argument per method"
     )
 )
 
@@ -244,9 +233,10 @@ setReplaceMethod("$", "MethodParam", function(x, name, value) {
 }
 
 # The record rebuilt by its own constructor from every current setting plus
-# the replaced one. Every settable class's constructor takes exactly its
-# slots, so a replacement runs the constructor's normalisation and checks
-# rather than a bare slot write that could store what construction refuses.
+# the replaced one. Every class's constructor takes exactly its slots -- a
+# test holds each one to that -- so a replacement runs the constructor's
+# normalisation and checks rather than a bare slot write that could store
+# what construction refuses.
 # @noRd
 .paramRebuild <- function(x, name, value) {
     cls <- class(x)[[1L]]

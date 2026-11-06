@@ -1853,6 +1853,23 @@ test_that("pvalue lead is the most negative z, abf lead the highest PIP", {
     )
 })
 
+test_that("a lead-variant rule other than pvalue or abf is refused", {
+    # Anything but "pvalue" used to be read as "abf".
+    expect_error(
+        SlalomParam(leadVariantChoice = "pval"),
+        "leadVariantChoice': Must be element of set \\{'pvalue','abf'\\}"
+    )
+    slalomParam <- SlalomParam()
+    expect_error(
+        slalomParam$leadVariantChoice <- "pval",
+        "leadVariantChoice': Must be element of set"
+    )
+    expect_error(
+        slalom(zScore = c(-3, 1), R = diag(2), leadVariantChoice = "pval"),
+        "`leadVariantChoice` must be one of \"pvalue\" or \"abf\""
+    )
+})
+
 # ============================================================================
 # DENTIST-S outlier detection
 # ============================================================================

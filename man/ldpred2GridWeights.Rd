@@ -38,10 +38,11 @@ reference.}
 
 \item{p}{The proportions of causal variants in the grid.}
 
-\item{h2}{The heritabilities in the grid. \code{NULL} (default) is the
-window's LAVA estimate (see \code{h2Init} of
-\code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4, as the
-LDpred2 vignette scales LD score regression's.}
+\item{h2}{The heritabilities in the grid: numbers, or one estimator,
+whose estimate for the window (see \code{h2Init} of
+\code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4 makes the
+grid, as the LDpred2 vignette scales LD score regression's. \code{NULL}
+(default) is \code{"lava"}.}
 
 \item{sparse}{Whether each fit sets an effect whose inclusion probability
 falls below \code{p} to zero; both by default.}

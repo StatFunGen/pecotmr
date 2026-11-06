@@ -1,42 +1,76 @@
-// penalized_rss.cpp — Coordinate descent for penalized regression on RSS objective
+// penalized_rss.cpp -- coordinate descent for penalized regression on the RSS
+// objective, along a path of penalty values.
 //
 // The package's one RSS coordinate-descent solver, for the penalties
-//   LASSO, MCP, SCAD, L0, L0L1, L0L2
-// lassosum (Mak et al 2017) is its LASSO at alpha = 1: the same updates in the
-// same order, so the same coefficients bit for bit.
-//
-// The LASSO updates follow lassosum's elnet()
-// (https://github.com/tshmak/lassosum, Copyright (c) 2016 tshmak, MIT), and
-// the L0 swap step is ported from L0Learn's CDL012Swaps.cpp
-// (https://github.com/hazimehh/L0Learn, Copyright (c) 2021 Hussein Hazimeh,
-// MIT). Their license notice is in inst/COPYRIGHTS.
-//
-// Objective (smooth part): min_beta  beta'R beta - 2 beta'z + penalty(beta)
-// where R is the LD matrix shrunk to R_s = (1 - s) R + s I (s = `shrink`;
-// 0 for an LD matrix already shrunk) and z = bhat / sqrt(n).
+//   LASSO (with glmnet's elastic-net mixing), MCP, SCAD, L0, L0L1, L0L2.
+// It minimises
+//   beta'R_s beta - 2 beta'z + penalty(beta),   R_s = (1 - s) R + s I,
+// with z the marginal correlations and s = `shrink` (0 for an LD matrix
+// already shrunk). On standardized data this is exactly twice ncvreg's
+// objective, (1/2n)||y - X beta||^2 + P(beta) with (1/n)||x_j||^2 = 1, and
+// twice L0Learn's, (1/2)||r||^2 + lambda0 ||beta||_0 + lambda1 ||beta||_1 +
+// lambda2 ||beta||_2^2 with unit-norm columns and response, so a penalty
+// value means here what it means there.
 //
 // LASSO, MCP and SCAD mix in a ridge term the way glmnet and ncvreg do:
 // l1 = lambda * alpha, l2 = lambda * (1 - alpha), penalty = 2 P(beta; l1) +
-// l2 beta'beta. LASSO with alpha < 1 is the elastic net, alpha = 0 ridge.
+// l2 beta'beta, and their path is over lambda. The L0 family's path is over
+// lambda0 with lambda1 and lambda2 fixed: penalty = 2 lambda0 ||beta||_0 +
+// 2 lambda1 ||beta||_1 + 2 lambda2 ||beta||_2^2.
 //
-// The coordinate descent update is identical across penalties; only the
-// proximal/thresholding operator differs.  MCP/SCAD operators are ported
-// from ncvreg (Breheny & Huang 2011).  L0 thresholding follows L0Learn
-// (Hazimeh & Mazumder 2020) with an optional swap phase.
+// Two strategies walk the path. Both are warm-started down it, and both
+// record the values at or above pathMax -- the smallest at which every
+// coefficient is zero -- without solving:
+//   strongRule      ncvreg's cdfit_gaussian: the sequential strong rule
+//                   screens each step, coordinate descent cycles in index
+//                   order over every coordinate ever active, and scans of the
+//                   strong set and then of the rest add each coordinate that
+//                   leaves zero. The L0 family has no strong rule, so there
+//                   every coordinate is strong.
+//   gradientRanked  L0Learn's (CD.h, CDL0.h, CDL012.h): each step cycles
+//                   coordinates in decreasing |gradient| at the previous
+//                   solution, screened to the support and the next
+//                   screenSize, sweeps only the support once it has held for
+//                   stableSweeps sweeps, and checks every zero coordinate at
+//                   convergence. Unlike L0Learn, the support is always swept
+//                   and the ranking is always the current gradient.
+// A solve stops when no coefficient moved by `thr` or more in a sweep,
+// ncvreg's test on this scale; L0Learn's relative change in the objective is
+// not used, so `thr` means the same under both. The L0 family's default
+// path, when the caller gives none, is L0Learn's adaptive lambda0 path under
+// gradientRanked, solved at the midpoints of its values (off_edge()), and a
+// geometric one from pathMax under strongRule, and L0Learn's swaps follow
+// either.
+//
+// The coordinate update follows lassosum's elnet()
+// (https://github.com/tshmak/lassosum, Copyright (c) 2016 tshmak, MIT). The
+// MCP and SCAD operators and the strongRule path are ported from ncvreg
+// (https://github.com/pbreheny/ncvreg, Copyright (c) Patrick Breheny, GPL-3),
+// and the L0 thresholding, the gradientRanked path, the adaptive lambda0
+// path and the swaps from L0Learn (https://github.com/hazimehh/L0Learn,
+// Copyright (c) 2021 Hussein Hazimeh, MIT). Their license notices are in
+// inst/COPYRIGHTS.
 
 #include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <numeric>
 #include <string>
+#include <vector>
 
 #include "rss_ld.h"
 
 using namespace cpp11;
 using namespace arma;
 
-// ---- Penalty enum --------------------------------------------------------
+// ---- Penalties and strategies --------------------------------------------
 
 enum Penalty { PEN_LASSO = 0, PEN_MCP = 1, PEN_SCAD = 2, PEN_L0 = 3 };
+
+enum Strategy { STRONG_RULE = 0, GRADIENT_RANKED = 1 };
 
 static Penalty parse_penalty(const std::string& s) {
   if (s == "lasso") return PEN_LASSO;
@@ -47,10 +81,23 @@ static Penalty parse_penalty(const std::string& s) {
   return PEN_LASSO; // unreachable
 }
 
+static Strategy parse_strategy(const std::string& s) {
+  if (s == "strongRule")     return STRONG_RULE;
+  if (s == "gradientRanked") return GRADIENT_RANKED;
+  cpp11::stop("Unknown strategy: '%s'. Use strongRule or gradientRanked.", s.c_str());
+  return STRONG_RULE; // unreachable
+}
+
+// The penalty weights at one point of the path: l1 and l2 multiply the L1
+// and L2 terms, lambda0 the L0 term.
+struct PointPenalty {
+  double l1;
+  double l2;
+  double lambda0;
+};
+
 // ---- Thresholding operators ----------------------------------------------
-// v = R_jj (diagonal of LD matrix for coordinate j)
-// l1, l2 = L1 and L2 penalty weights (for elastic net: l1 = lambda*alpha,
-//          l2 = lambda*(1-alpha))
+// v = (R_s)_jj, the curvature of coordinate j's quadratic.
 //
 // Each operator is the exact minimizer of the one-coordinate problem
 // v b^2 - 2 z b + 2 P(b; l1) + l2 b^2, whose curvature is a = v + l2. ncvreg
@@ -92,7 +139,8 @@ static inline double scad_thresh(double z, double l1, double l2,
 }
 
 // L0 (+L1+L2) — Hazimeh & Mazumder 2020
-// Soft-threshold for L1, then hard-threshold for L0.
+// Soft-threshold for L1, then hard-threshold for L0. A coefficient exactly at
+// its threshold stays zero, as L0Learn's does and as the lasso's does at l1.
 // lambda0 = L0 penalty weight, l1 = L1 weight, l2 = L2 weight
 static inline double l0_thresh(double z, double lambda0,
                                double l1, double l2, double v) {
@@ -101,20 +149,17 @@ static inline double l0_thresh(double z, double lambda0,
   double denom = v + 2.0 * l2;
   double reg = (az - l1) / denom;
   double thr = std::sqrt(2.0 * lambda0 / denom);
-  if (reg < thr) return 0.0;
+  if (reg <= thr) return 0.0;
   return std::copysign(reg, z);
 }
 
-// ---- Per-coordinate thresholding dispatch --------------------------------
-
 static inline double apply_threshold(Penalty pen, double t, double v,
-                                     double l1, double l2,
-                                     double gamma, double lambda0) {
+                                     const PointPenalty& pp, double gamma) {
   switch (pen) {
-    case PEN_LASSO: return lasso_thresh(t, l1, l2, v);
-    case PEN_MCP:   return mcp_thresh(t, l1, l2, gamma, v);
-    case PEN_SCAD:  return scad_thresh(t, l1, l2, gamma, v);
-    case PEN_L0:    return l0_thresh(t, lambda0, l1, l2, v);
+    case PEN_LASSO: return lasso_thresh(t, pp.l1, pp.l2, v);
+    case PEN_MCP:   return mcp_thresh(t, pp.l1, pp.l2, gamma, v);
+    case PEN_SCAD:  return scad_thresh(t, pp.l1, pp.l2, gamma, v);
+    case PEN_L0:    return l0_thresh(t, pp.lambda0, pp.l1, pp.l2, v);
   }
   return 0.0; // unreachable
 }
@@ -138,320 +183,649 @@ static double scad_penalty_single(double bj, double lambda, double gamma) {
   return lambda * lambda * (gamma + 1.0) / 2.0;
 }
 
-// The penalty the thresholding operators minimize: 2 P(beta; l1) + l2
-// beta'beta, so MCP and SCAD are evaluated at l1 = lambda * alpha, the
-// threshold the operators use, not at lambda.
+// The penalty the thresholding operators minimize, read from the same
+// weights the descent used: 2 P(beta; l1) + l2 beta'beta for LASSO, MCP and
+// SCAD, and 2 lambda0 ||beta||_0 + 2 l1 ||beta||_1 + 2 l2 ||beta||_2^2 for
+// the L0 family.
 static double compute_penalty(Penalty pen, const vec& beta,
-                               double lambda, double alpha, double gamma,
-                               double lambda0, double lambda2) {
+                              const PointPenalty& pp, double gamma) {
   double val = 0.0;
-  double l1 = lambda * alpha;
-  double l2 = lambda * (1.0 - alpha);
-  int p = beta.n_elem;
+  uword p = beta.n_elem;
   switch (pen) {
     case PEN_LASSO:
-      val = 2.0 * l1 * sum(abs(beta)) + l2 * dot(beta, beta);
+      val = 2.0 * pp.l1 * sum(abs(beta)) + pp.l2 * dot(beta, beta);
       break;
     case PEN_MCP:
-      for (int j = 0; j < p; j++)
-        val += 2.0 * mcp_penalty_single(beta(j), l1, gamma);
-      val += l2 * dot(beta, beta);
+      for (uword j = 0; j < p; j++)
+        val += 2.0 * mcp_penalty_single(beta(j), pp.l1, gamma);
+      val += pp.l2 * dot(beta, beta);
       break;
     case PEN_SCAD:
-      for (int j = 0; j < p; j++)
-        val += 2.0 * scad_penalty_single(beta(j), l1, gamma);
-      val += l2 * dot(beta, beta);
+      for (uword j = 0; j < p; j++)
+        val += 2.0 * scad_penalty_single(beta(j), pp.l1, gamma);
+      val += pp.l2 * dot(beta, beta);
       break;
     case PEN_L0: {
-      int nnz = 0;
-      for (int j = 0; j < p; j++)
-        if (beta(j) != 0.0) nnz++;
-      val = 2.0 * lambda0 * nnz +
-            2.0 * l1 * sum(abs(beta)) +
-            2.0 * lambda2 * dot(beta, beta);
+      double nnz = static_cast<double>(accu(beta != 0.0));
+      val = 2.0 * pp.lambda0 * nnz + 2.0 * pp.l1 * sum(abs(beta)) +
+            2.0 * pp.l2 * dot(beta, beta);
       break;
     }
   }
   return val;
 }
 
-// ---- Single-block coordinate descent -------------------------------------
-// `ld` answers R's entries for the current beta (rss_ld.h): DenseLd tracks
-// R * beta as a running sum, FactorLd tracks F * beta.
+// ---- Settings ------------------------------------------------------------
+
+// The constants the path works to (R's .rssPathControl()).
+struct PathControl {
+  int points;        // length of a default geometric path
+  double ratio;      // its last value over its first
+  int screenSize;    // gradientRanked: coordinates swept outside the support
+  int stableSweeps;  // gradientRanked: sweeps the support holds before only
+                     // it is swept
+  int maxSupport;    // adaptive lambda0 path: stop at this many non-zeros
+  int maxPoints;     // adaptive lambda0 path: at most this many points
+  bool offEdge;      // adaptive lambda0 path: solve it at the midpoints of
+                     // its values (off_edge())
+};
+
+static PathControl parse_control(const list& control) {
+  PathControl c;
+  c.points       = as_cpp<int>(control["points"]);
+  c.ratio        = as_cpp<double>(control["ratio"]);
+  c.screenSize   = as_cpp<int>(control["screenSize"]);
+  c.stableSweeps = as_cpp<int>(control["stableSweeps"]);
+  c.maxSupport   = as_cpp<int>(control["maxSupport"]);
+  c.maxPoints    = as_cpp<int>(control["maxPoints"]);
+  c.offEdge      = as_cpp<bool>(control["offEdge"]);
+  return c;
+}
+
+struct PathSettings {
+  Penalty pen;
+  Strategy strategy;
+  double gamma;
+  double alpha;    // LASSO, MCP, SCAD
+  double lambda1;  // L0 family
+  double lambda2;  // L0 family
+  double thr;
+  int maxiter;
+  int maxSwaps;
+  PathControl control;
+};
+
+// The path's points, in the order solved.
+struct PathResult {
+  std::vector<vec> beta;
+  std::vector<double> value;
+  std::vector<int> conv;
+  std::vector<double> loss;
+  std::vector<double> fbeta;
+};
+
+// Whether the swaps keep the columns of R_s they read: a factor's column
+// costs O(mp) to form, a dense one only the O(p) of copying it.
+template <class Ld> struct KeepsColumns { static const bool value = false; };
+template <> struct KeepsColumns<FactorLd> { static const bool value = true; };
+
+// ---- The path solver -----------------------------------------------------
+// `ld` answers R_s's entries for the current beta (rss_ld.h): DenseLd tracks
+// R * beta as a running sum, FactorLd tracks F * beta. It is built once for
+// the whole path, its running product carried from point to point with beta.
 
 template <class Ld>
-static int penalized_cd_rss(Penalty pen, double lambda, double gamma,
-                            double alpha, double lambda0, double lambda2,
-                            Ld& ld, const vec& z,
-                            double thr, vec& beta, int maxiter) {
-  int p = z.n_elem;
-  double l1, l2;
-
-  // For LASSO/MCP/SCAD the elastic net decomposition applies
-  if (pen != PEN_L0) {
-    l1 = lambda * alpha;
-    l2 = lambda * (1.0 - alpha);
-  } else {
-    // For L0 variants, lambda controls the L1 part directly,
-    // lambda2 controls L2 separately
-    l1 = lambda;
-    l2 = lambda2;
+class PathSolver {
+public:
+  PathSolver(const PathSettings& settings, Ld& ld, const vec& z)
+      : st_(settings), ld_(ld), z_(z), p_(z.n_elem), v_(z.n_elem),
+        beta_(z.n_elem, fill::zeros), absGrad_(abs(z)),
+        ever_(z.n_elem, 0), strong_(z.n_elem, 0), supportChanged_(false),
+        pathMax_(0.0) {
+    for (uword j = 0; j < p_; j++) v_(j) = ld_.diag(j);
   }
 
-  int conv = 0;
-  for (int k = 0; k < maxiter; k++) {
+  // The caller's path, or for the L0 family with none the default one.
+  PathResult run(const vec& path) {
+    pathMax_ = path_max();
+    if (path.n_elem > 0) {
+      double prev = pathMax_;
+      for (uword k = 0; k < path.n_elem; k++) {
+        solve_point(path(k), prev);
+        prev = path(k);
+      }
+    } else if (st_.strategy == GRADIENT_RANKED) {
+      adaptive_path();
+    } else {
+      geometric_path();
+    }
+    return result_;
+  }
+
+private:
+  enum ScanSet { IN_STRONG, OUTSIDE_STRONG };
+
+  const PathSettings& st_;
+  Ld& ld_;
+  const vec& z_;
+  uword p_;
+  vec v_;
+  vec beta_;
+  vec absGrad_;  // |z - R_s beta| at the last recorded point (or swap)
+  std::vector<unsigned char> ever_;    // strongRule: ever active
+  std::vector<unsigned char> strong_;  // strongRule: ever strong
+  std::vector<uword> everList_;        // ever_ in index order
+  std::map<uword, vec> columns_;       // the swaps' columns (FactorLd)
+  bool supportChanged_;
+  double pathMax_;
+  PathResult result_;
+
+  PointPenalty point_penalty(double value) const {
+    if (st_.pen == PEN_L0) return PointPenalty{st_.lambda1, st_.lambda2, value};
+    return PointPenalty{value * st_.alpha, value * (1.0 - st_.alpha), 0.0};
+  }
+
+  // The largest path value at which a zero coefficient with gradient |g|
+  // leaves zero: |g| / alpha for LASSO, MCP and SCAD (infinite for a ridge),
+  // and (|g| - l1)^2 / (2 (v + 2 l2)) for the L0 family, L0Learn's
+  // (Xrmax - lambda1)^2 / (2 (1 + 2 lambda2)) at v = 1.
+  double entry_value(double absg, double v) const {
+    if (st_.pen == PEN_L0) {
+      double excess = std::max(absg - st_.lambda1, 0.0);
+      return excess * excess / (2.0 * (v + 2.0 * st_.lambda2));
+    }
+    if (st_.alpha <= 0.0) return std::numeric_limits<double>::infinity();
+    return absg / st_.alpha;
+  }
+
+  double path_max() const {
+    double best = 0.0;
+    for (uword j = 0; j < p_; j++)
+      best = std::max(best, entry_value(std::abs(z_(j)), v_(j)));
+    return best;
+  }
+
+  // The largest entry value among the zero coefficients, from the gradient
+  // at the last recorded point.
+  double largest_entry() const {
+    double best = 0.0;
+    for (uword j = 0; j < p_; j++)
+      if (beta_(j) == 0.0)
+        best = std::max(best, entry_value(absGrad_(j), v_(j)));
+    return best;
+  }
+
+  uword support_size() const { return accu(beta_ != 0.0); }
+
+  // One point: recorded as zero at or above pathMax while beta is still zero
+  // (ncvreg's closed-form first point), solved otherwise; `prev` is the
+  // point before it, or pathMax for the first.
+  void solve_point(double value, double prev) {
+    PointPenalty pp = point_penalty(value);
+    if (support_size() == 0 && value >= pathMax_ * (1.0 - 1e-12)) {
+      finish_point(value, pp, 1);
+      return;
+    }
+    int conv = solve(pp, value, prev);
+    if (st_.pen == PEN_L0 && st_.maxSwaps > 0)
+      conv = std::min(conv, swap_phase(pp, value, prev));
+    finish_point(value, pp, conv);
+  }
+
+  int solve(const PointPenalty& pp, double value, double prev) {
+    if (st_.strategy == STRONG_RULE) return solve_strong(pp, value, prev);
+    return solve_ranked(pp);
+  }
+
+  // Record the point. The gradient z - R_s beta computed here feeds the next
+  // point's screening, ranking and adaptive lambda0, and its loss
+  // beta'R_s beta - 2 z'beta.
+  void finish_point(double value, const PointPenalty& pp, int conv) {
+    vec Rsb = ld_.product(beta_);
+    absGrad_ = abs(z_ - Rsb);
+    double loss = dot(beta_, Rsb) - 2.0 * dot(z_, beta_);
+    result_.beta.push_back(beta_);
+    result_.value.push_back(value);
+    result_.conv.push_back(conv);
+    result_.loss.push_back(loss);
+    result_.fbeta.push_back(loss + compute_penalty(st_.pen, beta_, pp, st_.gamma));
+  }
+
+  // One coordinate's exact update; returns how far it moved.
+  double update_coordinate(uword j, const PointPenalty& pp) {
+    double bj = beta_(j);
+    // Partial correlation: z_j - sum_{k != j} (R_s)_jk beta_k
+    double t = z_(j) - ld_.row(j, beta_) + v_(j) * bj;
+    double b = apply_threshold(st_.pen, t, v_(j), pp, st_.gamma);
+    if (b == bj) return 0.0;
+    beta_(j) = b;
+    ld_.update(j, b - bj);
+    if ((bj == 0.0) != (b == 0.0)) supportChanged_ = true;
+    return std::abs(b - bj);
+  }
+
+  // One sweep over `set`, in its order; returns the largest move.
+  double sweep(const std::vector<uword>& set, const PointPenalty& pp) {
     double dlx = 0.0;
-    for (int j = 0; j < p; j++) {
-      double bj = beta(j);
-      double v = ld.diag(j);
-      // Partial correlation: z_j - sum_{k!=j} R[j,k]*beta[k]
-      double t = z(j) - ld.row(j, beta) + v * bj;
-
-      // Apply penalty-specific thresholding
-      beta(j) = apply_threshold(pen, t, v, l1, l2, gamma, lambda0);
-
-      if (beta(j) == bj) continue;
-      double del = beta(j) - bj;
-      dlx = std::max(dlx, std::abs(del));
-      // Update the running R * beta
-      ld.update(j, del);
-    }
+    for (uword j : set) dlx = std::max(dlx, update_coordinate(j, pp));
     cpp11::check_user_interrupt();
-    if (dlx < thr) {
-      conv = 1;
-      break;
+    return dlx;
+  }
+
+  // ---- strongRule (ncvreg's cdfit_gaussian) ----
+
+  // ncvreg's sequential strong rule at `value` after `prev`: a coordinate
+  // whose |gradient| at the previous solution is above the bound joins the
+  // strong set. Minus infinity (every coordinate strong) where the rule does
+  // not apply or is not finite.
+  double strong_cutoff(double value, double prev) const {
+    double cut = -std::numeric_limits<double>::infinity();
+    switch (st_.pen) {
+      case PEN_LASSO: cut = 2.0 * value - prev; break;
+      case PEN_MCP:
+        cut = value + st_.gamma / (st_.gamma - 1.0) * (value - prev);
+        break;
+      case PEN_SCAD:
+        cut = value + st_.gamma / (st_.gamma - 2.0) * (value - prev);
+        break;
+      case PEN_L0: break;
+    }
+    cut *= st_.alpha;
+    if (!std::isfinite(cut)) return -std::numeric_limits<double>::infinity();
+    return cut;
+  }
+
+  // Descent over the ever-active set until it converges, a scan of the
+  // strong set for coordinates that leave zero, and once that finds none a
+  // scan of the rest; any found joins the ever-active set and the descent
+  // resumes. 1 when a scan of the rest finds none within `maxiter` sweeps.
+  int solve_strong(const PointPenalty& pp, double value, double prev) {
+    double cut = strong_cutoff(value, prev);
+    for (uword j = 0; j < p_; j++)
+      if (!strong_[j] && absGrad_(j) > cut) strong_[j] = 1;
+    int budget = st_.maxiter;
+    while (true) {
+      do {
+        if (!descend(everList_, pp, budget)) return 0;
+      } while (scan(pp, IN_STRONG));
+      if (!scan(pp, OUTSIDE_STRONG)) return 1;
     }
   }
-  return conv;
-}
 
-// ---- L0 swap optimization (single block) ---------------------------------
-// Attempts to improve the L0 solution by swapping non-zero coefficients
-// with zero ones that have higher correlation with the residual.
-// Ported from L0Learn CDL012Swaps.cpp.
+  // Coordinate descent over `set` until no coefficient moves by thr or more
+  // in a sweep; false if the `budget` of sweeps runs out first.
+  bool descend(const std::vector<uword>& set, const PointPenalty& pp,
+               int& budget) {
+    while (budget > 0) {
+      budget--;
+      if (sweep(set, pp) < st_.thr) return true;
+    }
+    return false;
+  }
 
-template <class Ld>
-static bool l0_swap_round(double lambda0, double l1, double l2,
-                          Ld& ld, const vec& z,
-                          double thr, vec& beta, int maxiter) {
-  int p = beta.n_elem;
-  bool found_better = false;
-
-  // Collect non-zero indices
-  std::vector<int> nnz_idx;
-  for (int i = 0; i < p; i++)
-    if (beta(i) != 0.0) nnz_idx.push_back(i);
-
-  for (int ii = 0; ii < (int)nnz_idx.size(); ii++) {
-    int i = nnz_idx[ii];
-    // Compute partial correlation for all variables with beta[i] added back
-    // riX_j = z_j - Rbeta_j + R_ji * beta_i
-    vec riX = z - ld.product(beta) + ld.column(i) * beta(i);
-
-    double max_corr = -1.0;
-    int max_idx = -1;
-    for (int j = 0; j < p; j++) {
-      if (beta(j) == 0.0 && std::abs(riX(j)) > max_corr) {
-        max_corr = std::abs(riX(j));
-        max_idx = j;
+  // ncvreg's scans: each coordinate of the set not yet active (so at zero)
+  // updated in index order, joining the active and strong sets if it leaves
+  // zero. Whether any did.
+  bool scan(const PointPenalty& pp, ScanSet which) {
+    bool added = false;
+    for (uword j = 0; j < p_; j++) {
+      if (ever_[j]) continue;
+      if ((which == IN_STRONG) != (strong_[j] != 0)) continue;
+      if (update_coordinate(j, pp) > 0.0) {
+        ever_[j] = 1;
+        strong_[j] = 1;
+        added = true;
       }
     }
-    if (max_idx < 0) continue;
+    if (added) rebuild_ever_list();
+    return added;
+  }
 
-    // Check if swap is worthwhile
-    double denom = ld.diag(max_idx) + 2.0 * l2;
-    if (max_corr > denom * std::abs(beta(i)) + l1) {
-      // Perform swap: zero out i, set j to optimal
-      double old_bi = beta(i);
-      beta(i) = 0.0;
-      ld.update(i, -old_bi);
+  void rebuild_ever_list() {
+    everList_.clear();
+    for (uword j = 0; j < p_; j++)
+      if (ever_[j]) everList_.push_back(j);
+  }
 
-      double t_j = z(max_idx) - ld.row(max_idx, beta) + ld.diag(max_idx) * 0.0;
-      beta(max_idx) = l0_thresh(t_j, lambda0, l1, l2, ld.diag(max_idx));
-      if (beta(max_idx) != 0.0) {
-        ld.update(max_idx, beta(max_idx));
+  // ---- gradientRanked (L0Learn's CD) ----
+
+  // The support and the screenSize coordinates outside it with the largest
+  // |gradient| at the previous solution, in decreasing |gradient| (ties by
+  // index).
+  std::vector<uword> ranked_set() const {
+    std::vector<uword> order(p_);
+    std::iota(order.begin(), order.end(), 0);
+    std::stable_sort(order.begin(), order.end(), [this](uword a, uword b) {
+      return absGrad_(a) > absGrad_(b);
+    });
+    std::vector<uword> set;
+    int screened = 0;
+    for (uword j : order) {
+      if (beta_(j) != 0.0) {
+        set.push_back(j);
+      } else if (screened < st_.control.screenSize) {
+        set.push_back(j);
+        screened++;
       }
+    }
+    return set;
+  }
 
-      // Re-run CD from swapped solution.
-      // For PEN_L0: inside penalized_cd_rss, l1 = lambda param, l2 = lambda2.
-      penalized_cd_rss(PEN_L0, l1, 0.0, 1.0, lambda0, l2,
-                       ld, z, thr, beta, maxiter);
-      found_better = true;
-      break; // restart from scratch
+  // Sweeps of the ranked set; once its support has held for stableSweeps
+  // sweeps only the support is swept (L0Learn's RestrictSupport). At
+  // convergence every zero coordinate is checked (L0Learn's CWMinCheck);
+  // those that leave zero join the set and the sweeps resume. 1 when a check
+  // finds none within `maxiter` sweeps.
+  int solve_ranked(const PointPenalty& pp) {
+    std::vector<uword> set = ranked_set();
+    std::vector<unsigned char> inSet(p_, 0);
+    for (uword j : set) inSet[j] = 1;
+    int stable = 0;
+    for (int budget = st_.maxiter; budget > 0; budget--) {
+      supportChanged_ = false;
+      double dlx = sweep(set, pp);
+      stable = supportChanged_ ? 0 : stable + 1;
+      if (stable == st_.control.stableSweeps) restrict_to_support(set, inSet);
+      if (dlx >= st_.thr) continue;
+      std::vector<uword> added = check_zeros(pp);
+      if (added.empty()) return 1;
+      for (uword j : added) {
+        if (inSet[j]) continue;
+        set.push_back(j);
+        inSet[j] = 1;
+      }
+      stable = 0;
+    }
+    return 0;
+  }
+
+  void restrict_to_support(std::vector<uword>& set,
+                           std::vector<unsigned char>& inSet) const {
+    std::vector<uword> kept;
+    for (uword j : set) {
+      if (beta_(j) != 0.0) {
+        kept.push_back(j);
+      } else {
+        inSet[j] = 0;
+      }
+    }
+    set.swap(kept);
+  }
+
+  // Each zero coordinate updated in index order; those that left zero.
+  std::vector<uword> check_zeros(const PointPenalty& pp) {
+    std::vector<uword> added;
+    for (uword j = 0; j < p_; j++) {
+      if (beta_(j) != 0.0) continue;
+      if (update_coordinate(j, pp) > 0.0) added.push_back(j);
+    }
+    return added;
+  }
+
+  // ---- Paths for the L0 family without one ----
+
+  // L0Learn's lambda0 path (Grid1D.cpp): from pathMax, each next value is
+  // 0.99 of the largest entry value outside the support, 0.97 of the last
+  // value when that is not smaller, and after a point that left the support
+  // unchanged the smaller of 0.8 of the last value and 0.97 of the entry
+  // value. It stops at maxSupport non-zeros, maxPoints points, or when no
+  // coordinate can enter.
+  void adaptive_path() {
+    double value = pathMax_;
+    solve_point(value, value);
+    for (int k = 1; k < st_.control.maxPoints; k++) {
+      if (support_size() >= static_cast<uword>(st_.control.maxSupport)) break;
+      double entry = largest_entry();
+      if (!(entry > 0.0)) break;
+      double next;
+      if (same_support_as_previous()) {
+        next = std::min(0.8 * value, 0.97 * entry);
+      } else {
+        next = 0.99 * entry >= value ? 0.97 * value : 0.99 * entry;
+      }
+      solve_point(next, value);
+      value = next;
     }
   }
-  return found_better;
-}
 
-// ---- One block at one lambda: coordinate descent, then the L0 swaps ------
+  // Whether the last two recorded points share a support.
+  bool same_support_as_previous() const {
+    std::size_t k = result_.beta.size();
+    if (k < 2) return false;
+    const vec& last = result_.beta[k - 1];
+    const vec& before = result_.beta[k - 2];
+    for (uword j = 0; j < p_; j++)
+      if ((last(j) != 0.0) != (before(j) != 0.0)) return false;
+    return true;
+  }
 
-template <class Ld>
-static int penalized_block(Penalty pen, double lambda, double gamma,
-                           double alpha, double lambda0, double lambda2,
-                           Ld& ld, const vec& z, double thr, vec& beta,
-                           int maxiter, int maxSwaps) {
-  int conv = penalized_cd_rss(pen, lambda, gamma, alpha, lambda0, lambda2,
-                              ld, z, thr, beta, maxiter);
-  // L0 swap phase (per block)
-  if (pen == PEN_L0 && maxSwaps > 0) {
-    for (int sw = 0; sw < maxSwaps; sw++) {
-      bool improved = l0_swap_round(lambda0, lambda, lambda2, ld, z, thr,
-                                    beta, maxiter);
-      if (!improved) break;
+  // `points` values from pathMax down to `ratio` of it, evenly on a log
+  // scale.
+  void geometric_path() {
+    int points = st_.control.points;
+    double prev = pathMax_;
+    for (int k = 0; k < points; k++) {
+      double frac = points > 1 ? static_cast<double>(k) / (points - 1) : 0.0;
+      double value = pathMax_ * std::pow(st_.control.ratio, frac);
+      solve_point(value, prev);
+      prev = value;
     }
   }
-  return conv;
+
+  // ---- L0Learn's swaps (CDL012Swaps.cpp) ----
+
+  // Rounds of swaps, each followed by a fresh solve under the strategy, until
+  // a round finds none or maxSwaps rounds have run. The smallest convergence
+  // flag of those solves.
+  int swap_phase(const PointPenalty& pp, double value, double prev) {
+    int conv = 1;
+    for (int round = 0; round < st_.maxSwaps; round++) {
+      if (!swap_once(pp)) break;
+      conv = std::min(conv, solve(pp, value, prev));
+    }
+    return conv;
+  }
+
+  // One round: the first support member, in index order, whose best
+  // replacement outside the support has a larger partial correlation than
+  // it can be held at, (v + 2 l2) |beta_i| + l1, is zeroed and the
+  // replacement set to its own L0 update. False when no member qualifies.
+  bool swap_once(const PointPenalty& pp) {
+    vec g = z_ - ld_.product(beta_);
+    for (uword i = 0; i < p_; i++) {
+      double bi = beta_(i);
+      if (bi == 0.0) continue;
+      vec col = column(i);
+      double best = -1.0;
+      uword jstar = p_;
+      for (uword j = 0; j < p_; j++) {
+        if (beta_(j) != 0.0) continue;
+        double r = std::abs(g(j) + col(j) * bi);
+        if (r > best) {
+          best = r;
+          jstar = j;
+        }
+      }
+      if (jstar == p_) continue;
+      if (best <= (v_(jstar) + 2.0 * pp.l2) * std::abs(bi) + pp.l1) continue;
+      beta_(i) = 0.0;
+      ld_.update(i, -bi);
+      double t = z_(jstar) - ld_.row(jstar, beta_);
+      double b = l0_thresh(t, pp.lambda0, pp.l1, pp.l2, v_(jstar));
+      if (b != 0.0) {
+        beta_(jstar) = b;
+        ld_.update(jstar, b);
+        ever_[jstar] = 1;
+        strong_[jstar] = 1;
+        rebuild_ever_list();
+      }
+      absGrad_ = abs(z_ - ld_.product(beta_));
+      return true;
+    }
+    return false;
+  }
+
+  vec column(uword i) {
+    if (!KeepsColumns<Ld>::value) return ld_.column(i);
+    auto it = columns_.find(i);
+    if (it == columns_.end()) it = columns_.emplace(i, ld_.column(i)).first;
+    return it->second;
+  }
+};
+
+// ---- Entry-point helpers -------------------------------------------------
+
+static PathSettings parse_settings(const std::string& penaltyStr,
+                                   const std::string& strategyStr,
+                                   double gamma, double alpha, double lambda1,
+                                   double lambda2, double thr, int maxiter,
+                                   int maxSwaps, const list& control) {
+  PathSettings st;
+  st.pen = parse_penalty(penaltyStr);
+  st.strategy = parse_strategy(strategyStr);
+  st.gamma = gamma;
+  st.alpha = alpha;
+  st.lambda1 = lambda1;
+  st.lambda2 = lambda2;
+  st.thr = thr;
+  st.maxiter = maxiter;
+  st.maxSwaps = maxSwaps;
+  st.control = parse_control(control);
+  return st;
 }
 
-// The lambda path's results, in the shape both entry points return.
-static cpp11::writable::list penalized_path_result(const mat& beta_mat,
-                                                   const vec& lambda,
-                                                   const Col<int>& conv_vec,
-                                                   const vec& loss_vec,
-                                                   const vec& fbeta_vec) {
+// Whether the path to solve is the L0 family's adaptive default, which is
+// solved off its edges (off_edge()).
+static bool adaptive_default(const PathSettings& st, const vec& path) {
+  return path.n_elem == 0 && st.pen == PEN_L0 &&
+         st.strategy == GRADIENT_RANKED && st.control.offEdge;
+}
+
+// The adaptive lambda0 path's values sit just below the full data's entry
+// thresholds, each where one more coordinate leaves zero. A held-out refit at
+// such a value often does not take the support the full data did, so
+// selection would score a sparser model than it returns, and a coordinate
+// that hurts would pass. The path is solved instead at the geometric
+// midpoints of consecutive values, the first kept, which on real genotypes
+// recovered all the accuracy the edges lost.
+static vec off_edge(const std::vector<double>& values) {
+  vec out(values.size());
+  for (uword k = 0; k < values.size(); k++)
+    out(k) = k == 0 ? values[0] : std::sqrt(values[k - 1] * values[k]);
+  return out;
+}
+
+// A caller's path must be non-increasing (R's .rssSolvePath() sorts it), and
+// only the L0 family has a default to fall back on when it is empty.
+static void check_path(const vec& path, Penalty pen) {
+  if (path.n_elem == 0 && pen != PEN_L0)
+    cpp11::stop("A LASSO, MCP or SCAD path needs at least one lambda.");
+  for (uword k = 1; k < path.n_elem; k++)
+    if (path(k) > path(k - 1))
+      cpp11::stop("The penalty path must be non-increasing.");
+}
+
+// The path's results, in the shape both entry points return.
+static cpp11::writable::list path_result(const PathResult& res, uword p) {
   using namespace cpp11::literals;
+  uword npoints = res.value.size();
+  mat beta(p, npoints);
+  for (uword k = 0; k < npoints; k++) beta.col(k) = res.beta[k];
+  vec value(res.value);
+  Col<int> conv(npoints);
+  for (uword k = 0; k < npoints; k++) conv(k) = res.conv[k];
+  vec loss(res.loss);
+  vec fbeta(res.fbeta);
   writable::list result({
-    "beta"_nm   = as_doubles_matrix(beta_mat),
-    "lambda"_nm = as_doubles(lambda),
-    "conv"_nm   = as_integers(conv_vec),
-    "loss"_nm   = as_doubles(loss_vec),
-    "fbeta"_nm  = as_doubles(fbeta_vec)
+    "beta"_nm   = as_doubles_matrix(beta),
+    "lambda"_nm = as_doubles(value),
+    "conv"_nm   = as_integers(conv),
+    "loss"_nm   = as_doubles(loss),
+    "fbeta"_nm  = as_doubles(fbeta)
   });
   return result;
 }
 
 // ---- Registered entry points ---------------------------------------------
 
-// `shrink` is s: each block is fitted against R_s = (1 - s) R + s I, which
-// is never formed (DenseLd).
+// The path against the LD matrix R, fitted as R_s = (1 - s) R + s I with s =
+// `shrink`, which is never formed (DenseLd). `pathR` is the path, in lambda
+// for LASSO, MCP and SCAD and in lambda0 for the L0 family, non-increasing,
+// and for the L0 family may be empty for the default path. `control` holds
+// the path constants (R's .rssPathControl()).
 [[cpp11::register]]
 cpp11::writable::list penalizedRssCpp(
     const doubles& zR,
-    const list& LD,
+    const doubles_matrix<>& ldR,
     double shrink,
-    const doubles& lambdaR,
+    const doubles& pathR,
     const std::string& penaltyStr,
+    const std::string& strategyStr,
     double gamma,
     double alpha,
-    double lambda0,
+    double lambda1,
     double lambda2,
     double thr,
     int maxiter,
-    int maxSwaps) {
+    int maxSwaps,
+    const list& control) {
 
-  Penalty pen = parse_penalty(penaltyStr);
+  PathSettings st = parse_settings(penaltyStr, strategyStr, gamma, alpha,
+                                   lambda1, lambda2, thr, maxiter, maxSwaps,
+                                   control);
   vec z = as_Col(zR);
-  vec lambda = as_Col(lambdaR);
-
-  // Cache LD blocks
-  int n_blocks = LD.size();
-  std::vector<mat> ld_blocks(n_blocks);
-  std::vector<int> block_start(n_blocks), block_end(n_blocks);
-  int p = 0;
-  for (int b = 0; b < n_blocks; b++) {
-    ld_blocks[b] = as_Mat(doubles_matrix<>(LD[b]));
-    block_start[b] = p;
-    p += ld_blocks[b].n_rows;
-    block_end[b] = p - 1;
+  mat R = as_Mat(ldR);
+  if (R.n_rows != z.n_elem || R.n_cols != z.n_elem)
+    cpp11::stop("The LD matrix is %d x %d but there are %d z-scores.",
+                (int)R.n_rows, (int)R.n_cols, (int)z.n_elem);
+  vec path = as_Col(pathR);
+  check_path(path, st.pen);
+  if (adaptive_default(st, path)) {
+    DenseLd scout(R, shrink, vec(z.n_elem, fill::zeros));
+    PathSolver<DenseLd> first(st, scout, z);
+    path = off_edge(first.run(path).value);
   }
-
-  if ((int)z.n_elem != p)
-    cpp11::stop("Length of z must equal total rows across all LD blocks.");
-
-  int nlambda = lambda.n_elem;
-  mat beta_mat(p, nlambda, fill::zeros);
-  Col<int> conv_vec(nlambda, fill::zeros);
-  vec loss_vec(nlambda, fill::zeros);
-  vec fbeta_vec(nlambda, fill::zeros);
-
-  // Working beta — warm-started across lambda path
-  vec beta(p, fill::zeros);
-
-  for (int i = 0; i < nlambda; i++) {
-    // Block-wise coordinate descent
-    int out = 1;
-    for (int b = 0; b < n_blocks; b++) {
-      const mat& Rb = ld_blocks[b];
-      int s = block_start[b];
-      int e = block_end[b];
-      vec z_blk = z.subvec(s, e);
-      vec beta_blk = beta.subvec(s, e);
-      DenseLd ld(Rb, shrink, beta_blk);
-
-      int conv_blk = penalized_block(pen, lambda(i), gamma, alpha, lambda0,
-                                     lambda2, ld, z_blk, thr, beta_blk,
-                                     maxiter, maxSwaps);
-      beta.subvec(s, e) = beta_blk;
-      out = std::min(out, conv_blk);
-    }
-
-    beta_mat.col(i) = beta;
-    conv_vec(i) = out;
-
-    // Compute loss = beta'R_s beta - 2 z'beta (block-wise)
-    double loss = -2.0 * dot(z, beta);
-    for (int b = 0; b < n_blocks; b++) {
-      const mat& Rb = ld_blocks[b];
-      int s = block_start[b];
-      int e = block_end[b];
-      vec beta_blk = beta.subvec(s, e);
-      loss += (1.0 - shrink) * as_scalar(beta_blk.t() * Rb * beta_blk)
-              + shrink * dot(beta_blk, beta_blk);
-    }
-    loss_vec(i) = loss;
-    fbeta_vec(i) = loss + compute_penalty(pen, beta, lambda(i), alpha,
-                                           gamma, lambda0, lambda2);
-  }
-
-  return penalized_path_result(beta_mat, lambda, conv_vec, loss_vec, fbeta_vec);
+  DenseLd ld(R, shrink, vec(z.n_elem, fill::zeros));
+  PathSolver<DenseLd> solver(st, ld, z);
+  return path_result(solver.run(path), z.n_elem);
 }
 
-// penalizedRssCpp() for one LD block given by a factor F of R = F'F / (m - 1)
-// and shrunk to R_s = (1 - s) R + s I: the same lambda path, the same updates
-// and swaps, without forming R or R_s.
+// penalizedRssCpp() with the LD given by a factor F of R = F'F / (m - 1),
+// shrunk to R_s = (1 - s) R + s I: the same path, updates and swaps, without
+// forming R or R_s.
 [[cpp11::register]]
 cpp11::writable::list penalizedRssFactorCpp(
     const doubles& zR,
     const doubles_matrix<>& factorR,
     double shrink,
-    const doubles& lambdaR,
+    const doubles& pathR,
     const std::string& penaltyStr,
+    const std::string& strategyStr,
     double gamma,
     double alpha,
-    double lambda0,
+    double lambda1,
     double lambda2,
     double thr,
     int maxiter,
-    int maxSwaps) {
+    int maxSwaps,
+    const list& control) {
 
-  Penalty pen = parse_penalty(penaltyStr);
+  PathSettings st = parse_settings(penaltyStr, strategyStr, gamma, alpha,
+                                   lambda1, lambda2, thr, maxiter, maxSwaps,
+                                   control);
   vec z = as_Col(zR);
-  vec lambda = as_Col(lambdaR);
   mat F = as_Mat(factorR);
   if (F.n_cols != z.n_elem)
     cpp11::stop("The LD factor has %d columns but there are %d z-scores.",
                 (int)F.n_cols, (int)z.n_elem);
-
-  int p = z.n_elem;
-  int nlambda = lambda.n_elem;
-  mat beta_mat(p, nlambda, fill::zeros);
-  Col<int> conv_vec(nlambda, fill::zeros);
-  vec loss_vec(nlambda, fill::zeros);
-  vec fbeta_vec(nlambda, fill::zeros);
-
-  // Working beta — warm-started across lambda path
-  vec beta(p, fill::zeros);
-
-  for (int i = 0; i < nlambda; i++) {
-    FactorLd ld(F, shrink, beta);
-    conv_vec(i) = penalized_block(pen, lambda(i), gamma, alpha, lambda0,
-                                  lambda2, ld, z, thr, beta, maxiter, maxSwaps);
-    beta_mat.col(i) = beta;
-    double loss = -2.0 * dot(z, beta) + ld.quad(beta);
-    loss_vec(i) = loss;
-    fbeta_vec(i) = loss + compute_penalty(pen, beta, lambda(i), alpha,
-                                           gamma, lambda0, lambda2);
+  vec path = as_Col(pathR);
+  check_path(path, st.pen);
+  if (adaptive_default(st, path)) {
+    FactorLd scout(F, shrink, vec(z.n_elem, fill::zeros));
+    PathSolver<FactorLd> first(st, scout, z);
+    path = off_edge(first.run(path).value);
   }
-
-  return penalized_path_result(beta_mat, lambda, conv_vec, loss_vec, fbeta_vec);
+  FactorLd ld(F, shrink, vec(z.n_elem, fill::zeros));
+  PathSolver<FactorLd> solver(st, ld, z);
+  return path_result(solver.run(path), z.n_elem);
 }

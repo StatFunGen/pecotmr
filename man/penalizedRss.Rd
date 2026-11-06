@@ -12,11 +12,12 @@ penalizedRss(
   lambda = NULL,
   gamma = NULL,
   alpha = 1,
-  lambda0 = 0,
+  lambda0 = NULL,
   lambda2 = 0,
   thr = 1e-04,
   maxiter = 10000,
-  maxSwaps = 100
+  maxSwaps = 100,
+  strategy = NULL
 )
 }
 \arguments{
@@ -30,13 +31,17 @@ window), as in \code{lassosumRss()}.}
 \item{penalty}{Penalty type: \code{"lasso"}, \code{"MCP"}, \code{"SCAD"},
 \code{"L0"}, \code{"L0L1"}, or \code{"L0L2"}.}
 
-\item{lambda}{Numeric vector of regularization parameter values along which
-to trace a solution path (warm-started, largest-first). For LASSO/MCP/SCAD
-this is the primary penalty strength; for L0 variants it controls the L1
-component. \code{NULL} (default) is 20 values from 1e-4 to 0.1 on a log
-scale, divided by \code{max(alpha, 0.001)} as glmnet sizes its path, so
-the L1 share spans the same range at any \code{alpha} and a ridge path
-runs from 0.1 to 100.}
+\item{lambda}{For LASSO, MCP and SCAD, the path: the penalty strengths to
+trace the solution along (warm-started, largest first). \code{NULL}
+(default) is ncvreg's path: 20 values on a log scale from
+\eqn{\lambda_{max} = \max_j |z_j| / \alpha}, the smallest at which every
+coefficient is zero, down to ncvreg's \code{lambda.min}:
+\eqn{10^{-3} \lambda_{max}} when the \code{n} samples outnumber the
+variants and \eqn{0.05 \lambda_{max}} otherwise, where the fits below it
+are near-unpenalized regressions on more variants than samples. A ridge,
+with no such value, is sized as glmnet sizes one, as if \code{alpha}
+were 0.001, and keeps the full three decades. For the L0 family, the
+fixed L1 weight \eqn{\lambda_1} (one value; \code{NULL} is 0).}
 
 \item{gamma}{Concavity parameter for MCP (default 3) or SCAD (default 3.7).
 Ignored for LASSO and L0 variants.}
@@ -47,30 +52,47 @@ penalty is \eqn{2 P(\beta; l_1) + l_2 \beta^T \beta}, glmnet's mixing.
 Default 1, no ridge term. For LASSO, 0.5 is the elastic net and 0 ridge;
 MCP and SCAD need \code{alpha > 0}. Ignored by the L0 variants.}
 
-\item{lambda0}{L0 penalty weight (number of non-zeros). Required for L0
-variants; ignored otherwise. Default 0.}
+\item{lambda0}{For the L0 family, the path: the L0 weights to trace the
+solution along (warm-started, largest first). \code{NULL} (default) is
+the solver's own path: under \code{"gradientRanked"}, L0Learn's
+adaptive one, each step letting the next coordinate enter, until 100 are
+non-zero or 100 points are taken, solved at the geometric midpoints of
+its values, since a held-out refit at the values themselves, each just
+below a coordinate's entry threshold, often takes a different support;
+20 values on a log scale
+over three decades below the largest useful value under
+\code{"strongRule"}. Ignored otherwise.}
 
 \item{lambda2}{L2 penalty weight for L0L2 variant. Default 0.}
 
-\item{thr}{Convergence threshold. Default 1e-4. The ridge, solved
-exactly, does not use it.}
+\item{thr}{Convergence threshold: a solve stops when no coefficient moved by
+\code{thr} or more in a sweep. Default 1e-4. The ridge, solved exactly,
+does not use it.}
 
-\item{maxiter}{Maximum coordinate descent iterations per lambda. Default
-10000. The ridge, solved exactly, does not use it.}
+\item{maxiter}{Maximum coordinate descent sweeps per solve. Default 10000.
+The scans for coordinates leaving zero do not count. The ridge, solved
+exactly, does not use it.}
 
 \item{maxSwaps}{Maximum swap rounds for L0 variants. Default 100. Set to 0 to
 disable swaps.}
+
+\item{strategy}{How the path is walked: \code{"strongRule"} or
+\code{"gradientRanked"} (see Path strategies). \code{NULL} (default) is
+\code{"strongRule"} for LASSO, MCP and SCAD and \code{"gradientRanked"}
+for the L0 family.}
 }
 \value{
 A list with components:
 \describe{
-  \item{beta}{p x length(lambda) matrix of coefficient estimates.}
-  \item{lambda}{The lambda values used.}
-  \item{conv}{Convergence indicators (1 = converged).}
-  \item{loss}{Quadratic loss at each lambda.}
-  \item{fbeta}{Full penalized objective at each lambda.}
-  \item{nparams}{Number of non-zero coefficients at each lambda.}
-  \item{betaEst}{Coefficient vector at the lambda minimizing fbeta.}
+  \item{beta}{p x (path length) matrix of coefficient estimates.}
+  \item{lambda}{The path values used: lambda, or lambda0 for the L0
+    family.}
+  \item{conv}{Convergence indicators: 1 when every solve at that point,
+    including those after swaps, converged within \code{maxiter} sweeps.}
+  \item{loss}{Quadratic loss at each point.}
+  \item{fbeta}{Full penalized objective at each point.}
+  \item{nparams}{Number of non-zero coefficients at each point.}
+  \item{betaEst}{Coefficient vector at the point minimizing fbeta.}
 }
 }
 \description{
@@ -85,6 +107,37 @@ ridge (LASSO at \code{alpha = 0}) has a closed form instead,
 eigendecomposition of \eqn{R}.
 }
 \details{
+On standardized data the objective is exactly twice ncvreg's,
+\eqn{\frac{1}{2n}\|y - X\beta\|^2 + P(\beta)}, and twice L0Learn's,
+\eqn{\frac12\|r\|^2 + \lambda_0\|\beta\|_0 + \lambda_1\|\beta\|_1 +
+\lambda_2\|\beta\|_2^2}, so a penalty value means here what it means
+there.
+}
+\section{Path strategies}{
+
+The path is warm-started from its largest value down. Values at or above
+the smallest at which every coefficient is zero are recorded without being
+solved, and each later one is solved by one of two strategies:
+\describe{
+  \item{\code{"strongRule"}}{ncvreg's: the sequential strong rule screens
+    each step; coordinate descent cycles, in index order, over every
+    coordinate that has been active; then scans of the strong set, and of
+    the rest, add any coordinate that leaves zero. The default for LASSO,
+    MCP and SCAD.}
+  \item{\code{"gradientRanked"}}{L0Learn's: each step cycles coordinates
+    in decreasing size of their gradient at the previous solution,
+    screened to the support and the 1000 next, sweeps only the support
+    once it has held for two sweeps, and checks every zero coordinate at
+    convergence. Unlike L0Learn, the support is always swept and the
+    ranking always uses the current gradient. The default for the L0
+    family.}
+}
+For LASSO, the elastic net and the ridge the strategies reach the same
+solution; for MCP, SCAD and L0 they can reach different local optima.
+Either stops a solve when no coefficient moved by \code{thr} or more in a
+sweep, ncvreg's test; L0Learn's relative change in the objective is not
+used.
+
 Internal: \code{\link{enetRssWeights}}, \code{\link{ridgeRssWeights}},
 \code{\link{scadRssWeights}}, \code{\link{mcpRssWeights}} and
 \code{\link{l0learnRssWeights}} are the public interface, with
@@ -93,4 +146,5 @@ of LD shrinkage values, forward its options through
 \code{\link{PenalizedRssOptions}}, and with \code{fitRetention} return
 the paths as the \code{"fit"} attribute of their weights.
 }
+
 \keyword{internal}

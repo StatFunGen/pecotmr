@@ -8,6 +8,7 @@ bayesLWeights(
   X,
   y,
   backend = c("qgg", "bglr", "hibayes"),
+  h2 = NULL,
   nIter = 5000,
   nBurnin = 1000,
   thin = 5,
@@ -22,6 +23,19 @@ bayesLWeights(
 
 \item{backend}{\code{"qgg"} (default), \code{"bglr"} or
 \code{"hibayes"}.}
+
+\item{h2}{The trait's heritability in the window, which sets every
+engine's starting variances and the scales of its priors: \code{NULL}
+(the default) keeps each engine's own, 0.5; a number in [0, 1); or the
+estimator to estimate it with first, on \code{X} and \code{y}:
+\code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
+\code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
+0.001 and capped at 0.99, and an estimate that cannot be made leaves
+the engine's default, with a warning. qgg reads it as \code{h2} and
+BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
+genetic and residual variances (\code{vg}, \code{ve}) its defaults
+would give at \code{h2}. Setting that engine's spelling through
+\code{methodArgs} as well is an error.}
 
 \item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
 on every engine. Default \code{5000}.}

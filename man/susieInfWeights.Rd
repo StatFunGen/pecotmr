@@ -28,8 +28,9 @@ intermediates, so the two retaining levels behave alike here.}
 Numeric vector of variant weights.
 }
 \description{
-Extracts coefficients from an existing SuSiE-inf fit or fits
-`susieR::susie()` with `unmappable_effects = "inf"`.
+Extracts coefficients from an existing SuSiE-inf fit
+(`susieR::susie()` with `unmappable_effects = "inf"`), as
+\code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 }
 \section{Non-zero weights with zero PIPs}{
  SuSiE-inf decomposes effects into a
