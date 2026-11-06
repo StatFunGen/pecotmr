@@ -1855,6 +1855,11 @@ setMethod("show", "TwasWeights", function(object) {
         impl = "l0learnWeights",
         args = list()
     ),
+    sparsevb = list(
+        fn = "sparsevb_weights",
+        impl = "sparsevbWeights",
+        args = list()
+    ),
     ser = list(
         fn = "ser_weights",
         impl = "serWeights",
@@ -1955,6 +1960,7 @@ setMethod("show", "TwasWeights", function(object) {
         scad = c("scadWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
         mcp = c("mcpWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
         l0learn = c("l0learnWeights", "L0Learn::L0Learn.cvfit"),
+        sparsevb = c("sparsevbWeights", "sparsevb::svb.fit"),
         mrash = c("mrashWeights", "susieR::mr.ash"),
         mrmash = c(
             "mrmashWeights",

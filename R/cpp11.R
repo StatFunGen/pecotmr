@@ -20,12 +20,12 @@ ldThresholdComponents <- function(standardized, threshold, stripe) {
   .Call(`_pecotmr_ldThresholdComponents`, standardized, threshold, stripe)
 }
 
-penalizedRssCpp <- function(zR, LD, shrink, lambdaR, penaltyStr, gamma, alpha, lambda0, lambda2, thr, maxiter, maxSwaps) {
-  .Call(`_pecotmr_penalizedRssCpp`, zR, LD, shrink, lambdaR, penaltyStr, gamma, alpha, lambda0, lambda2, thr, maxiter, maxSwaps)
+penalizedRssCpp <- function(zR, ldR, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control) {
+  .Call(`_pecotmr_penalizedRssCpp`, zR, ldR, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control)
 }
 
-penalizedRssFactorCpp <- function(zR, factorR, shrink, lambdaR, penaltyStr, gamma, alpha, lambda0, lambda2, thr, maxiter, maxSwaps) {
-  .Call(`_pecotmr_penalizedRssFactorCpp`, zR, factorR, shrink, lambdaR, penaltyStr, gamma, alpha, lambda0, lambda2, thr, maxiter, maxSwaps)
+penalizedRssFactorCpp <- function(zR, factorR, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control) {
+  .Call(`_pecotmr_penalizedRssFactorCpp`, zR, factorR, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control)
 }
 
 qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed) {

@@ -320,6 +320,20 @@ test_that("learnTwasWeights: character weightMethods input is accepted", {
     expect_equal(methodNames(result), "lasso")
 })
 
+test_that("learnTwasWeights fits sparsevb, its options from a plain list", {
+    skip_if_not_installed("sparsevb")
+    d <- makeData()
+    result <- learnTwasWeights(
+        d$X,
+        d$Y,
+        weightMethods = list(sparsevb_weights = list(slab = "gaussian"))
+    )
+    expect_equal(methodNames(result), "sparsevb")
+    w <- .weightsByMethod(result, "sparsevbWeights")
+    expect_equal(dim(w), c(ncol(d$X), 1L))
+    expect_setequal(order(-abs(w[, 1]))[1:3], 1:3)
+})
+
 test_that("learnTwasWeights: zero-variance columns are filtered, weighted 0", {
     d <- makeData(n = 50, p = 10, add_zero_var_col = TRUE)
     p_with_extra <- ncol(d$X) # 11 columns, last is zero-var
@@ -2182,7 +2196,9 @@ test_that("an RSS method accepts its own penalty settings and no other's", {
     # The penalty reaches .penalizedRssPath() as the wrapper's record, so
     # every chain shares that hop without taking each other's settings.
     accepted <- function(tk) pecotmr:::.twasChainAccepted(tk, "QtlSumStats")
-    path <- c("lambda", "thr", "maxiter")
+    # The path settings, the strategy that walks it among them, are every
+    # penalized chain's.
+    path <- c("lambda", "thr", "maxiter", "strategy")
     l0Only <- c("lambda0", "lambda2", "maxSwaps")
     expect_true(all(is_in(path, accepted("lasso"))))
     expect_false(any(is_in(
@@ -2199,6 +2215,15 @@ test_that("an RSS method accepts its own penalty settings and no other's", {
         accepted("l0learn")
     )))
     expect_false(any(is_in(c("alpha", "gamma"), accepted("l0learn"))))
+})
+
+test_that("mr.ash's update order is accepted on both input kinds", {
+    for (kind in c("QtlDataset", "QtlSumStats")) {
+        expect_true(
+            is_in("updateOrder", pecotmr:::.twasChainAccepted("mrash", kind)),
+            info = kind
+        )
+    }
 })
 
 test_that("every RSS chain yields a checkable argument set", {

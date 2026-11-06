@@ -3,13 +3,20 @@ NULL
 
 # Declared here rather than beside its constructor (far below) because
 # MashComponentSelection references it and MashPriorParam needs that union.
+# One slot per component, holding its record, or NULL when it is not
+# selected.
 #' @rdname MashComponentParam
 #' @aliases MashComponentParam-class
 #' @exportClass MashComponentParam
 setClass(
     "MashComponentParam",
     contains = "MethodParam",
-    slots = c(components = "list_OR_NULL")
+    slots = c(
+        canonical = "MethodOptions_OR_NULL",
+        pca = "MethodOptions_OR_NULL",
+        flash = "MethodOptions_OR_NULL",
+        flashNonneg = "MethodOptions_OR_NULL"
+    )
 )
 
 # Both take either a name or that component/engine's own record, which is why
@@ -652,10 +659,11 @@ mashCovarianceComponents <- function(
 
 # Both arguments arrive already normalized -- a MashComponentParam and an
 # Options record or NULL -- so this only splits them into the shapes the
-# cov_* chain downstream expects. NULL engine is "none": no refinement.
+# cov_* chain downstream expects. as.list() gives the selected components,
+# in declaration order. NULL engine is "none": no refinement.
 # @noRd
 .mashResolvePriorChoice <- function(components, engine) {
-    entries <- slot(components, "components") %||% list()
+    entries <- as.list(components)
     list(
         components = names(entries),
         componentArgs = entries,
@@ -901,14 +909,12 @@ MashComponentParam <- function(
         ),
         is.null
     )
-    # One named-list slot rather than one nullable slot per component, so a
-    # record selecting pca shows that and not three NULLs. The formals stay
-    # named, so R still rejects a misspelled component.
+    # One slot per argument, so the record's settings are its constructor's
+    # arguments: `$`, `$<-` and names() work per component, and show() lists
+    # only the components that are set. The formals stay named, so R still
+    # rejects a misspelled component.
     entries <- .mashComponentEntries(given)
-    new(
-        "MashComponentParam",
-        components = if (length(entries) == 0L) NULL else entries
-    )
+    exec(new, "MashComponentParam", !!!entries)
 }
 
 # Each entry validated and built the same way: a plain list is spliced into

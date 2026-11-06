@@ -72,8 +72,10 @@ statistics by default (see \code{\link{lassosumRssWeights}}).
 \alpha} and \eqn{l_2 = \lambda (1 - \alpha)} the penalty is
 \eqn{2 l_1 \|\beta\|_1 + l_2 \beta^T \beta}, so \code{alpha = 1} is the
 lasso and \code{alpha = 0} ridge (\code{\link{ridgeRssWeights}}). The
-default lambda path is divided by \code{max(alpha, 0.001)}, as glmnet
-sizes its own, so the L1 share spans the same range at any \code{alpha}.
+default lambda path is ncvreg's: 20 values on a log scale from
+\eqn{\max_j |z_j| / \alpha}, the smallest at which every weight is zero,
+down to 0.1\% of it with more samples than variants and 5\% otherwise,
+so the L1 share spans the same range at any \code{alpha}.
 
 The LD shrinkage adds a ridge term of its own, since
 \eqn{\beta^T R_s \beta = (1 - s) \beta^T R \beta + s \beta^T \beta}: every

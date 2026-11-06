@@ -11,6 +11,7 @@ mrashRssWeights(
   sigma2E = NULL,
   s0 = NULL,
   w0 = NULL,
+  updateOrder = c("decreasingLogBf", "consecutive"),
   fitRetention = c("none", "slim", "full"),
   methodArgs = MrashRssOptions()
 )
@@ -38,6 +39,18 @@ residual variance, or \code{NULL} (default) for the grid
 
 \item{w0}{Prior mixture weights (summing to 1), or \code{NULL} (default)
 for equal weights.}
+
+\item{updateOrder}{The order the coordinate ascent updates the variants
+in: \code{"decreasingLogBf"} (default), by decreasing marginal log Bayes
+factor under the prior \code{mr.ash.rss} fits (\code{s0}, \code{w0}),
+or \code{"consecutive"}, their order in \code{stat}. The engine has no
+order of its own, so the variants are permuted before the fit, the LD
+formed in that order, and the results put back after. On the
+standardized scale (no \code{varY} with \code{seb}), or with
+\code{standardize = TRUE}, the Bayes factors order the variants exactly
+as \code{|z|} does. On real genotypes the default predicted slightly
+better (explained variance about +0.005 over the column order) at no
+cost in time.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches

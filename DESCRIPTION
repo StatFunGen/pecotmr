@@ -106,9 +106,11 @@ Suggests:
     robustbase,
     RSQLite,
     rtracklayer,
+    selectiveInference,
     SeqArray,
     SNPRelate,
     snpStats,
+    sparsevb,
     testthat,
     udr,
     VariantAnnotation,
@@ -161,6 +163,7 @@ Collate:
     'ld.R'
     'colocPipeline.R'
     'colocboostPipeline.R'
+    'configYaml.R'
     'cpp11.R'
     'crossValidation.R'
     'ctwasPipeline.R'

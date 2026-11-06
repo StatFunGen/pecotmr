@@ -145,6 +145,23 @@ Each row of the `QtlSumStats` collection names its LD reference (here a
 genotype panel); the pipeline pulls each region's LD from its row's reference
 automatically.
 
+On z statistics SuSiE-RSS holds its residual variance at 1, while the true
+one is 1 minus the trait's heritability in the window. `h2` sets it from that
+heritability for `susie` and `susieAsh`: an estimator's name (`"lava"`,
+`"hdlL"` or `"fastHer"`) estimates each trait's first, on its row's statistics
+and LD, taking the reference to share no samples with the study, and the
+`H2Estimate` that `estimateH2()` returns supplies values estimated earlier,
+with whatever `referenceOverlap` they need. Here the reference holds the
+study's own samples:
+
+```{r sumstats-qtl-h2, eval=FALSE}
+fineMappingPipeline(
+    qtlSumStatsExample,
+    methods = "susie",
+    h2 = estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+)
+```
+
 ## GWAS summary-statistics fine-mapping
 
 ```{r sumstats-gwas}

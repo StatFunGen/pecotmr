@@ -1720,16 +1720,14 @@ test_that("MashComponentParam takes plain lists or constructors per entry", {
     )
     expect_s4_class(ca, "MashComponentParam")
     expect_s4_class(ca, "MethodParam")
-    # Naming a component selects it. The entries live in one named-list
-    # slot rather than one nullable slot per component: a record selecting
-    # pca used to show three NULL slots, which told a reader nothing.
-    expect_setequal(names(ca$components), c("canonical", "pca"))
-    expect_null(ca$components$flash)
-    expect_setequal(names(ca), "components")
+    # Naming a component selects it: each component is its own slot, and
+    # names() reports the ones that are set.
+    expect_setequal(names(ca), c("canonical", "pca"))
+    expect_null(ca$flash)
     # Each entry is still an engine argument bag, whichever form it arrived
     # in: a plain list is spliced into that component's constructor.
-    expect_s4_class(ca$components$pca, "MethodOptions")
-    expect_equal(ca$components$pca$subset, 1:5)
+    expect_s4_class(ca$pca, "MethodOptions")
+    expect_equal(ca$pca$subset, 1:5)
     expect_error(MashComponentParam(pca = list(nope = 1)), "unknown argument")
     expect_error(
         MashComponentParam(pca = CovCanonicalOptions()),

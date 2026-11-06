@@ -41,17 +41,17 @@ extern "C" SEXP _pecotmr_ldThresholdComponents(SEXP standardized, SEXP threshold
   END_CPP11
 }
 // penalized_rss.cpp
-cpp11::writable::list penalizedRssCpp(const doubles& zR, const list& LD, double shrink, const doubles& lambdaR, const std::string& penaltyStr, double gamma, double alpha, double lambda0, double lambda2, double thr, int maxiter, int maxSwaps);
-extern "C" SEXP _pecotmr_penalizedRssCpp(SEXP zR, SEXP LD, SEXP shrink, SEXP lambdaR, SEXP penaltyStr, SEXP gamma, SEXP alpha, SEXP lambda0, SEXP lambda2, SEXP thr, SEXP maxiter, SEXP maxSwaps) {
+cpp11::writable::list penalizedRssCpp(const doubles& zR, const doubles_matrix<>& ldR, double shrink, const doubles& pathR, const std::string& penaltyStr, const std::string& strategyStr, double gamma, double alpha, double lambda1, double lambda2, double thr, int maxiter, int maxSwaps, const list& control);
+extern "C" SEXP _pecotmr_penalizedRssCpp(SEXP zR, SEXP ldR, SEXP shrink, SEXP pathR, SEXP penaltyStr, SEXP strategyStr, SEXP gamma, SEXP alpha, SEXP lambda1, SEXP lambda2, SEXP thr, SEXP maxiter, SEXP maxSwaps, SEXP control) {
   BEGIN_CPP11
-    return cpp11::as_sexp(penalizedRssCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const list&>>(LD), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambdaR), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(penaltyStr), cpp11::as_cpp<cpp11::decay_t<double>>(gamma), cpp11::as_cpp<cpp11::decay_t<double>>(alpha), cpp11::as_cpp<cpp11::decay_t<double>>(lambda0), cpp11::as_cpp<cpp11::decay_t<double>>(lambda2), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter), cpp11::as_cpp<cpp11::decay_t<int>>(maxSwaps)));
+    return cpp11::as_sexp(penalizedRssCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(ldR), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(pathR), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(penaltyStr), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(strategyStr), cpp11::as_cpp<cpp11::decay_t<double>>(gamma), cpp11::as_cpp<cpp11::decay_t<double>>(alpha), cpp11::as_cpp<cpp11::decay_t<double>>(lambda1), cpp11::as_cpp<cpp11::decay_t<double>>(lambda2), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter), cpp11::as_cpp<cpp11::decay_t<int>>(maxSwaps), cpp11::as_cpp<cpp11::decay_t<const list&>>(control)));
   END_CPP11
 }
 // penalized_rss.cpp
-cpp11::writable::list penalizedRssFactorCpp(const doubles& zR, const doubles_matrix<>& factorR, double shrink, const doubles& lambdaR, const std::string& penaltyStr, double gamma, double alpha, double lambda0, double lambda2, double thr, int maxiter, int maxSwaps);
-extern "C" SEXP _pecotmr_penalizedRssFactorCpp(SEXP zR, SEXP factorR, SEXP shrink, SEXP lambdaR, SEXP penaltyStr, SEXP gamma, SEXP alpha, SEXP lambda0, SEXP lambda2, SEXP thr, SEXP maxiter, SEXP maxSwaps) {
+cpp11::writable::list penalizedRssFactorCpp(const doubles& zR, const doubles_matrix<>& factorR, double shrink, const doubles& pathR, const std::string& penaltyStr, const std::string& strategyStr, double gamma, double alpha, double lambda1, double lambda2, double thr, int maxiter, int maxSwaps, const list& control);
+extern "C" SEXP _pecotmr_penalizedRssFactorCpp(SEXP zR, SEXP factorR, SEXP shrink, SEXP pathR, SEXP penaltyStr, SEXP strategyStr, SEXP gamma, SEXP alpha, SEXP lambda1, SEXP lambda2, SEXP thr, SEXP maxiter, SEXP maxSwaps, SEXP control) {
   BEGIN_CPP11
-    return cpp11::as_sexp(penalizedRssFactorCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(factorR), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lambdaR), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(penaltyStr), cpp11::as_cpp<cpp11::decay_t<double>>(gamma), cpp11::as_cpp<cpp11::decay_t<double>>(alpha), cpp11::as_cpp<cpp11::decay_t<double>>(lambda0), cpp11::as_cpp<cpp11::decay_t<double>>(lambda2), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter), cpp11::as_cpp<cpp11::decay_t<int>>(maxSwaps)));
+    return cpp11::as_sexp(penalizedRssFactorCpp(cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(factorR), cpp11::as_cpp<cpp11::decay_t<double>>(shrink), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(pathR), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(penaltyStr), cpp11::as_cpp<cpp11::decay_t<const std::string&>>(strategyStr), cpp11::as_cpp<cpp11::decay_t<double>>(gamma), cpp11::as_cpp<cpp11::decay_t<double>>(alpha), cpp11::as_cpp<cpp11::decay_t<double>>(lambda1), cpp11::as_cpp<cpp11::decay_t<double>>(lambda2), cpp11::as_cpp<cpp11::decay_t<double>>(thr), cpp11::as_cpp<cpp11::decay_t<int>>(maxiter), cpp11::as_cpp<cpp11::decay_t<int>>(maxSwaps), cpp11::as_cpp<cpp11::decay_t<const list&>>(control)));
   END_CPP11
 }
 // qtl_enrichment.cpp
@@ -120,8 +120,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_dentistIterativeImputeFactor", (DL_FUNC) &_pecotmr_dentistIterativeImputeFactor, 12},
     {"_pecotmr_ldThresholdComponents",        (DL_FUNC) &_pecotmr_ldThresholdComponents,         3},
     {"_pecotmr_ldpred2FactorCpp",             (DL_FUNC) &_pecotmr_ldpred2FactorCpp,             16},
-    {"_pecotmr_penalizedRssCpp",              (DL_FUNC) &_pecotmr_penalizedRssCpp,              12},
-    {"_pecotmr_penalizedRssFactorCpp",        (DL_FUNC) &_pecotmr_penalizedRssFactorCpp,        12},
+    {"_pecotmr_penalizedRssCpp",              (DL_FUNC) &_pecotmr_penalizedRssCpp,              14},
+    {"_pecotmr_penalizedRssFactorCpp",        (DL_FUNC) &_pecotmr_penalizedRssFactorCpp,        14},
     {"_pecotmr_prsCsCpp",                     (DL_FUNC) &_pecotmr_prsCsCpp,                     15},
     {"_pecotmr_prsCsFactorCpp",               (DL_FUNC) &_pecotmr_prsCsFactorCpp,               15},
     {"_pecotmr_qtlEnrichmentCpp",             (DL_FUNC) &_pecotmr_qtlEnrichmentCpp,             11},

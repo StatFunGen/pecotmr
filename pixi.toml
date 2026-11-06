@@ -111,6 +111,7 @@ r45 = {features = ["r45"]}
 "r-robustbase" = "*"
 "r-rsqlite" = "*"
 "r-softimpute" = "*"
+"r-sparsevb" = "*"
 "r-stringr" = "*"
 "r-susier" = "*"
 "r-tibble" = "*"

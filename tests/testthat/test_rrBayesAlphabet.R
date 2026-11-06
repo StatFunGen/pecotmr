@@ -814,3 +814,160 @@ test_that("hibayes' form sends a refused jump to the null class", {
         .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2)
     ))
 })
+
+# ---- h2 ----
+test_that("h2 reaches qgg once, from the wrapper", {
+    skip_if_not_installed("qgg")
+    d <- .baXy()
+    seen <- NULL
+    local_mocked_bindings(
+        gbayes = function(...) {
+            seen <<- list(...)
+            list(bm = rep(0, 10))
+        },
+        .package = "qgg"
+    )
+    invisible(bayesNWeights(d$X, d$y, h2 = 0.2, nIter = 20, nBurnin = 5))
+    expect_equal(seen$h2, 0.2)
+    # NULL leaves the engine its own default, so none is sent.
+    invisible(bayesNWeights(d$X, d$y, nIter = 20, nBurnin = 5))
+    expect_null(seen$h2)
+    # Alone, the engine's own spelling still reaches it...
+    invisible(bayesNWeights(
+        d$X,
+        d$y,
+        nIter = 20,
+        nBurnin = 5,
+        methodArgs = QggOptions(h2 = 0.3)
+    ))
+    expect_equal(seen$h2, 0.3)
+    # ...but both together are the same setting twice.
+    expect_error(
+        bayesNWeights(d$X, d$y, h2 = 0.2, methodArgs = QggOptions(h2 = 0.3)),
+        "given twice: h2"
+    )
+})
+
+test_that("each backend reads h2 as its engine spells it", {
+    skip_if_not_installed("BGLR")
+    skip_if_not_installed("hibayes")
+    withH2 <- pecotmr:::.alphabetWithH2
+    expect_equal(
+        as.list(withH2(BglrOptions(), "BglrOptions", "bglr", 0.2)),
+        list(R2 = 0.2)
+    )
+    expect_equal(
+        as.list(withH2(
+            BayesAlphabetRssOptions(),
+            "BayesAlphabetRssOptions",
+            "pecotmr",
+            0.2
+        )),
+        list(h2 = 0.2)
+    )
+    # hibayes fixes its own at 0.5, so it gets the variances its defaults
+    # would give at 0.2: (dfvg - 2) / dfvg vary h2 and vary (1 - h2).
+    hib <- as.list(
+        withH2(HibayesOptions(), "HibayesOptions", "hibayes", 0.2, 2)
+    )
+    expect_equal(hib[c("vg", "ve")], list(vg = 0.5 * 2 * 0.2, ve = 2 * 0.8))
+    six <- as.list(withH2(
+        HibayesOptions(dfvg = 6),
+        "HibayesOptions",
+        "hibayes",
+        0.2,
+        2
+    ))
+    expect_equal(six[["vg"]], 4 / 6 * 2 * 0.2)
+    expect_identical(
+        withH2(QggOptions(), "QggOptions", "qgg", NULL),
+        QggOptions()
+    )
+})
+
+test_that("h2 = 0.5, every engine's own default, changes no fit", {
+    skip_if_not_installed("qgg")
+    skip_if_not_installed("hibayes")
+    skip_if_not_installed("BGLR")
+    d <- .baXy()
+    run <- function(method, backend, h2 = NULL) {
+        set.seed(1)
+        suppressMessages(bayesAlphabetWeights(
+            d$X,
+            d$y,
+            method,
+            backend = backend,
+            h2 = h2,
+            nIter = 60,
+            nBurnin = 10
+        ))
+    }
+    engines <- list(
+        c("bayesN", "qgg"),
+        c("bayesB", "bglr"),
+        c("bayesN", "hibayes")
+    )
+    for (b in engines) {
+        expect_equal(
+            run(b[[1L]], b[[2L]], 0.5),
+            run(b[[1L]], b[[2L]]),
+            tolerance = 1e-8,
+            info = b[[2L]]
+        )
+    }
+    s <- .rrwPanelStatLd()
+    runRss <- function(backend, ld, h2 = NULL) {
+        set.seed(1)
+        suppressMessages(bayesAlphabetRssWeights(
+            s$stat,
+            ld,
+            "bayesN",
+            backend = backend,
+            h2 = h2,
+            nIter = 60,
+            nBurnin = 10
+        ))
+    }
+    for (b in list(
+        list("qgg", s$ldMatrix),
+        list("hibayes", s$ldMatrix),
+        list("pecotmr", s$panel)
+    )) {
+        expect_equal(
+            runRss(b[[1L]], b[[2L]], 0.5),
+            runRss(b[[1L]], b[[2L]]),
+            tolerance = 1e-8,
+            info = b[[1L]]
+        )
+    }
+})
+
+test_that("h2 can be estimated first, on the data the fit reads", {
+    skip_if_not_installed("qgg")
+    d <- .baXy(n = 120, p = 30)
+    seen <- NULL
+    local_mocked_bindings(
+        gbayes = function(...) {
+            seen <<- list(...)
+            list(bm = rep(0, 30))
+        },
+        .package = "qgg"
+    )
+    invisible(bayesNWeights(d$X, d$y, h2 = "lava", nIter = 20, nBurnin = 5))
+    want <- pecotmr:::.h2IndividualFit("lava", d$X, d$y)$h2
+    expect_equal(seen$h2, min(max(want, 0.001), 0.99))
+    expect_error(bayesNWeights(d$X, d$y, h2 = "lavaa"), "must be one of")
+    s <- .rrwPanelStatLd()
+    got <- suppressWarnings(
+        pecotmr:::.alphabetRssH2("lava", s$stat, s$panel)
+    )
+    est <- suppressWarnings(
+        pecotmr:::.h2StatFit("lava", s$stat, s$panel, "test")$h2
+    )
+    expect_equal(got, min(max(est, 0.001), 0.99))
+    # GREML needs genotypes.
+    expect_error(
+        bayesNRssWeights(s$stat, s$panel, h2 = "greml"),
+        "must be one of"
+    )
+})

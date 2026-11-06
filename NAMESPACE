@@ -115,6 +115,7 @@ export(SerOptions)
 export(SignalScreenParam)
 export(SlalomParam)
 export(SldscData)
+export(SparsevbOptions)
 export(SumstatsCleaningParam)
 export(SumstatsFilterParam)
 export(SusieAshOptions)
@@ -274,6 +275,7 @@ export(ldReference)
 export(ldpred2AutoWeights)
 export(ldpred2GridWeights)
 export(learnTwasWeights)
+export(loadConfigFromYaml)
 export(loadGenotypeRegion)
 export(loadGwasSumStatsFromManifest)
 export(loadMultiStudyQtlDatasetFromManifest)
@@ -371,6 +373,7 @@ export(sldscPostprocessingPipeline)
 export(sldscResults)
 export(sldscSubsetMeta)
 export(sliceMashData)
+export(sparsevbWeights)
 export(standardizeSldscTrait)
 export(stratifiedHeritabilityEnrichment)
 export(studyName)
@@ -402,6 +405,7 @@ export(variantIds)
 export(waldTestPval)
 export(weightStandardized)
 export(writeBed)
+export(writeConfigToYaml)
 export(writeGwasVcf)
 export(z)
 exportClasses(AnnotationMatrix)
@@ -753,12 +757,17 @@ importFrom(dplyr,
 )
 importFrom(glue,glue)
 importFrom(magrittr,is_in)
-importFrom(matrixStats,colSds)
+importFrom(matrixStats,
+  colSds,
+  rowLogSumExps
+)
 importFrom(metafor,rma)
 importFrom(methods,
   "slot<-",
   as,
   coerce,
+  extends,
+  getSlots,
   is,
   new,
   setClass,
@@ -775,6 +784,7 @@ importFrom(purrr,
   detect_index,
   discard,
   discard_at,
+  every,
   exec,
   imap,
   keep,
@@ -811,8 +821,10 @@ importFrom(readr,
   col_character,
   col_integer,
   cols,
+  read_file,
   read_lines,
-  read_table
+  read_table,
+  write_file
 )
 importFrom(rlang,
   "!!!",
@@ -820,15 +832,21 @@ importFrom(rlang,
   abort,
   arg_match,
   arg_match0,
+  as_string,
   call2,
   caller_arg,
+  caller_env,
   cnd_signal,
   eval_bare,
   fn_env,
   fn_fmls,
+  has_name,
   hash,
   inform,
+  is_bare_atomic,
   is_named,
+  is_scalar_atomic,
+  is_string,
   obj_address,
   try_fetch,
   warn
@@ -917,4 +935,8 @@ importFrom(vctrs,
   vec_unique_loc
 )
 importFrom(vroom,vroom)
+importFrom(yaml,
+  as.yaml,
+  yaml.load
+)
 useDynLib(pecotmr, .registration = TRUE)

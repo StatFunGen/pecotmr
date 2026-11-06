@@ -385,7 +385,7 @@ pvalAspu <- function(
 # @noRd
 .pvalMethodEntriesOf <- function(pvalMethodsParam) {
     if (is(pvalMethodsParam, "PvalMethodsParam")) {
-        return(slot(pvalMethodsParam, "methods") %||% list())
+        return(as.list(pvalMethodsParam))
     }
     pvalMethodsParam %||% list()
 }
@@ -842,13 +842,26 @@ PoolrOptions <- function(...) {
     )
 }
 
+# One slot per method, holding its record, or NULL when it is not
+# configured.
 #' @rdname PvalMethodsParam
 #' @aliases PvalMethodsParam-class
 #' @exportClass PvalMethodsParam
 setClass(
     "PvalMethodsParam",
     contains = "MethodParam",
-    slots = c(methods = "list_OR_NULL")
+    slots = c(
+        fisher = "MethodOptions_OR_NULL",
+        stouffer = "MethodOptions_OR_NULL",
+        invchisq = "MethodOptions_OR_NULL",
+        gbj = "MethodOptions_OR_NULL",
+        bj = "MethodOptions_OR_NULL",
+        hc = "MethodOptions_OR_NULL",
+        ghc = "MethodOptions_OR_NULL",
+        minp = "MethodOptions_OR_NULL",
+        gbj_omni = "MethodOptions_OR_NULL",
+        aspu = "MethodOptions_OR_NULL"
+    )
 )
 
 #' @title Per-Method Options for combinePValues
@@ -906,15 +919,12 @@ PvalMethodsParam <- function(
         ),
         is.null
     )
-    # One named-list slot rather than one nullable slot per method: a
-    # record configuring aspu showed eight NULL slots and one set, which
-    # tells a reader nothing. The formals stay named, so R still rejects a
-    # misspelled method before the body runs.
+    # One slot per argument, so the record's settings are its constructor's
+    # arguments: `$`, `$<-` and names() work per method, and show() lists
+    # only the methods that are set. The formals stay named, so R still
+    # rejects a misspelled method before the body runs.
     entries <- .pvalMethodEntries(given)
-    new(
-        "PvalMethodsParam",
-        methods = if (length(entries) == 0L) NULL else entries
-    )
+    exec(new, "PvalMethodsParam", !!!entries)
 }
 
 # Each entry validated and built the same way: a plain list is spliced into

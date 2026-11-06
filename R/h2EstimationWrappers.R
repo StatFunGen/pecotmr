@@ -2584,9 +2584,9 @@ sldscUnivariate <- function(z, n, ldRef, annotations = NULL, nIter = 2L) {
 #' @export
 setMethod(
     "estimateH2",
-    signature(sumstats = "GwasSumStats", ldRef = "LdStatistic"),
+    signature(data = "GwasSumStats", ldRef = "LdStatistic"),
     function(
-        sumstats,
+        data,
         ldRef,
         method = "lder",
         annotations = NULL,
@@ -2595,14 +2595,14 @@ setMethod(
     ) {
         method <- arg_match(method, c("lder", "gldsc", "sldsc", "hdl"))
         .validateMethodRef(method, ldRef)
-        studyName <- .estimateH2ResolveStudy(sumstats, studyName)
-        .h2ValidateInputs(sumstats, studyName, ldRef, annotations)
-        z <- z(sumstats, studyName = studyName)
-        rawN <- median(sampleSize(sumstats, studyName = studyName))
-        M <- nSnps(sumstats, studyName = studyName)
-        # Legacy heritability-wrapper correction (separate from the SuSiE RSS
-        # binaryTraitModel handling in the fine-mapping pipeline).
-        varY <- varY(sumstats, studyName = studyName)
+        studyName <- .estimateH2ResolveStudy(data, studyName)
+        .h2ValidateInputs(data, studyName, ldRef, annotations)
+        z <- z(data, studyName = studyName)
+        rawN <- median(sampleSize(data, studyName = studyName))
+        M <- nSnps(data, studyName = studyName)
+        # A study that records its trait's variance has its sample size
+        # divided by it.
+        varY <- varY(data, studyName = studyName)
         n <- if (is.null(varY)) rawN else rawN / varY
         result <- .estimateH2Dispatch(
             method,
@@ -2664,9 +2664,9 @@ setMethod(
 #' @importFrom BiocParallel SerialParam
 setMethod(
     "estimateH2",
-    signature(sumstats = "QtlSumStats", ldRef = "missing"),
+    signature(data = "QtlSumStats", ldRef = "missing"),
     function(
-        sumstats,
+        data,
         ldRef,
         method = "lava",
         annotations = NULL,
@@ -2677,9 +2677,9 @@ setMethod(
         referenceOverlap = 0
     ) {
         method <- arg_match(method, names(.cisH2Estimators))
-        .cisH2AssertInput(sumstats, annotations)
+        .cisH2AssertInput(data, annotations)
         selection <- .qssSelection(
-            sumstats,
+            data,
             contexts,
             traitId,
             cisWindow,
@@ -2702,7 +2702,7 @@ setMethod(
             map(fits, "window"),
             as.list(list_rbind(map(fits, "values"))),
             .h2NoObjects(length(fits)),
-            sumstats
+            data
         )
         .cisH2WarnEmpty(out)
         .cisH2WarnUndefined(out, method)
@@ -2722,19 +2722,25 @@ setMethod(
             "result."
         ))
     }
-    if (!is.null(annotations)) {
-        abort(c(
-            str_c(
-                "estimateH2: a cis estimate from QTL summary statistics takes ",
-                "no `annotations`."
-            ),
-            i = str_c(
-                "They partition a genome-wide estimate from GWAS summary ",
-                "statistics."
-            )
-        ))
+    .h2RefuseAnnotations(annotations, "QTL summary statistics")
+}
+
+# A cis estimate takes none of the genome-wide estimators' annotations.
+# @noRd
+.h2RefuseAnnotations <- function(annotations, source) {
+    if (is.null(annotations)) {
+        return(invisible(NULL))
     }
-    invisible(NULL)
+    abort(c(
+        glue(
+            "estimateH2: a cis estimate from {source} takes no ",
+            "`annotations`."
+        ),
+        i = str_c(
+            "They partition a genome-wide estimate from GWAS summary ",
+            "statistics."
+        )
+    ))
 }
 
 # The rows the selection keeps, refusing an empty selection.
@@ -2802,25 +2808,37 @@ setMethod(
     list(
         window = .rowRegionAt(data, i),
         smallReference = fit$smallReference,
-        values = tibble(
-            study = st,
-            context = ctx,
-            trait = tr,
-            method = method,
-            h2 = fit$h2,
-            h2_se = fit$h2Se,
-            intercept = fit$intercept,
-            intercept_se = NA_real_,
-            p_value = fit$p,
-            n_snps = nrow(df),
-            n_components = fit$nComponents,
-            scale = fit$scale,
-            reference_overlap = if (identical(method, "lava")) {
-                referenceOverlap[[i]]
-            } else {
-                NA_real_
-            }
+        values = .cisH2Values(
+            st,
+            ctx,
+            tr,
+            method,
+            fit,
+            nrow(df),
+            referenceOverlap[[i]]
         )
+    )
+}
+
+# One estimate's H2Estimate values, from a per-trait fit (.cisH2Result()) on
+# `nSnps` variants. Only LAVA reads the reference overlap, so only its rows
+# record it.
+# @noRd
+.cisH2Values <- function(st, ctx, tr, method, fit, nSnps, overlap) {
+    tibble(
+        study = st,
+        context = ctx,
+        trait = tr,
+        method = method,
+        h2 = fit$h2,
+        h2_se = fit$h2Se,
+        intercept = fit$intercept,
+        intercept_se = NA_real_,
+        p_value = fit$p,
+        n_snps = as.integer(nSnps),
+        n_components = fit$nComponents,
+        scale = fit$scale,
+        reference_overlap = if (identical(method, "lava")) overlap else NA_real_
     )
 }
 
@@ -2864,16 +2882,24 @@ setMethod(
         abort(glue("{label}: the row has no LD reference."))
     }
     ld <- .rssLdSource(list(variantNames = ids), ldReference, label)
-    if (is_in(method, c("lava", "hdlL")) && is.na(ld$nSamples)) {
-        abort(c(
-            glue(
-                "{label}: method = \"{method}\" reads the LD reference's ",
-                "sample size."
-            ),
-            i = "Build the LdMatrix with `nSamples`."
-        ))
-    }
+    .h2AssertReferenceSize(method, ld$nSamples, label)
     ld
+}
+
+# LAVA and HDL-L read the LD reference's sample size, which an LdMatrix
+# records only when built with it.
+# @noRd
+.h2AssertReferenceSize <- function(method, nSamples, label) {
+    if (!is_in(method, c("lava", "hdlL")) || !is.na(nSamples)) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "{label}: method = \"{method}\" reads the LD reference's ",
+            "sample size."
+        ),
+        i = "Build the LdMatrix with `nSamples`."
+    ))
 }
 
 # A gene whose window holds no variants has no estimate; one warning lists
@@ -2929,6 +2955,432 @@ setMethod(
             "`referenceOverlap`: 1 if it holds them all."
         )
     ))
+}
+
+# =============================================================================
+# estimateH2 on a QtlDataset -- one in-sample estimate per trait
+# =============================================================================
+
+# The estimators of a trait's cis heritability from summary statistics.
+# @noRd
+.h2SumStatsMethods <- function() {
+    names(.cisH2Estimators)
+}
+
+# The estimators of a trait's cis heritability from its own genotypes: the
+# summary-statistic ones, read in-sample, and GREML.
+# @noRd
+.h2IndividualMethods <- function() {
+    c(.h2SumStatsMethods(), "greml")
+}
+
+# Each per-trait estimator's name as its authors write it, for messages.
+# @noRd
+.h2EstimatorNames <- c(
+    lava = "LAVA",
+    hdlL = "HDL-L",
+    fastHer = "FastHer",
+    greml = "GREML"
+)
+
+#' @rdname estimateH2
+#' @param region For a \code{QtlDataset}: optionally, one region that every
+#'   selected trait is analysed over, as \code{\link{twasWeightsPipeline}}
+#'   takes it; otherwise each trait's own window (see \code{cisWindow}).
+#' @param genotypeFilterParam,residualizationParam,phenotypeFilterParam For a
+#'   \code{QtlDataset}: the genotype filters, the covariate residualization
+#'   and the phenotype filters, as \code{\link{twasWeightsPipeline}} takes
+#'   them, so that each estimate is on the genotypes and phenotype that the
+#'   trait's TWAS fits are on.
+#' @export
+setMethod(
+    "estimateH2",
+    signature(data = "QtlDataset", ldRef = "missing"),
+    function(
+        data,
+        ldRef,
+        method = "lava",
+        annotations = NULL,
+        contexts = NULL,
+        traitId = NULL,
+        region = NULL,
+        cisWindow = NULL,
+        genotypeFilterParam = GenotypeFilterParam(),
+        residualizationParam = ResidualizationParam(),
+        phenotypeFilterParam = PhenotypeFilterParam()
+    ) {
+        estimator <- arg_match(method, .h2IndividualMethods())
+        .h2RefuseAnnotations(annotations, "individual-level data")
+        .h2AssertOneRegion(region, cisWindow)
+        filter <- .qtlResolveFilter(genotypeFilterParam)
+        qd <- .qtlRestrictSamples(data, filter$keepSamples)
+        work <- .h2QtlDatasetWork(
+            qd,
+            estimator,
+            parseContexts(contexts, qd),
+            parseTraitIds(traitId, qd),
+            region,
+            list(
+                cisWindow = cisWindow,
+                residualizationParam = residualizationParam,
+                phenotypeFilter = .qtlResolvePhenotypeFilter(
+                    phenotypeFilterParam,
+                    naDefault = "drop",
+                    naAllowed = c("drop", "impute"),
+                    caller = "estimateH2"
+                )
+            )
+        )
+        .h2IndividualEstimate(
+            .qtlRunWork(work, qd, filter, residualizationParam),
+            estimator,
+            qd
+        )
+    }
+)
+
+# One region at most: a trait analysed over several would have several
+# estimates, and an H2Estimate holds one per (study, context, trait, method).
+# @noRd
+.h2AssertOneRegion <- function(region, cisWindow) {
+    .rejectRegionWithCisWindow(region, cisWindow, "estimateH2(QtlDataset)")
+    if (length(region) <= 1L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "estimateH2(QtlDataset): `region` has {length(region)} ranges; ",
+        "estimate one region at a time."
+    ))
+}
+
+# The plan of a QtlDataset's estimates: one per selected (context, trait),
+# enumerated and built as twasWeightsPipeline() builds its univariate fits,
+# so that each is on the same window, samples, filters and residualized,
+# scaled genotypes and phenotype.
+# @noRd
+.h2QtlDatasetWork <- function(qd, method, contexts, traitId, region, args) {
+    xRegion <- .makeXRegions(region, FALSE)[[1L]]
+    useCtx <- .twasQdsResolveContexts(qd, contexts)
+    scope <- .twasQdsScope(
+        studyName(qd),
+        useCtx,
+        .twasQdsResolveTraits(
+            qd,
+            useCtx,
+            traitId,
+            xRegion,
+            "estimateH2(QtlDataset)"
+        ),
+        if (.hasNestedTraitSelection(traitId)) traitId
+    )
+    regionArgs <- c(args, list(region = xRegion))
+    units <- .enumUnivariateIndividual(qd, scope, regionArgs)
+    .qtlWork(
+        units,
+        map(units, .unitSpec, data = qd, args = regionArgs),
+        .h2UnitFit,
+        list(method = method, selection = scope$traitSelection),
+        .h2FlattenRows
+    )
+}
+
+# One unit's estimates, one per (context, trait) group it builds on `block`.
+# @noRd
+.h2UnitFit <- function(unit, method, selection, block = NULL) {
+    groups <- .unitGroups(unit, block) |>
+        map(.jointGroupSelect, traitId = selection) |>
+        compact()
+    map(groups, .h2GroupRow, method = method, window = block$window)
+}
+
+# One group's estimate: its window and its H2Estimate values.
+# @noRd
+.h2GroupRow <- function(g, method, window) {
+    cond <- .jgConditions(g)
+    fit <- .h2IndividualFit(method, .jgX(g), .jgY(g)[, 1L])
+    list(
+        window = window,
+        values = .cisH2Values(
+            cond$study[[1L]],
+            cond$context[[1L]],
+            cond$trait[[1L]],
+            method,
+            fit,
+            fit$nSnps,
+            1
+        )
+    )
+}
+
+# The estimates of a plan's units as one list, the units with none left out.
+# @noRd
+.h2FlattenRows <- function(results) {
+    list_flatten(compact(results))
+}
+
+# A trait's estimate by `method` from its genotypes `X` (samples x variants)
+# and phenotype `y`, on the variants that vary, with how many there are. The
+# summary-statistic estimators read each variant's marginal t statistic
+# against the trait, with the genotypes as the LD and the reference the
+# study's own samples: LAVA's estimate is then the adjusted R^2 of the trait
+# on the genotypes' components.
+# @noRd
+#' @importFrom matrixStats colSds
+#' @importFrom stats cor
+.h2IndividualFit <- function(method, X, y) {
+    sds <- colSds(X)
+    Xs <- scale(X[, !is.na(sds) & sds > 0, drop = FALSE])
+    fit <- if (ncol(Xs) == 0L) {
+        .cisH2Result(NA_integer_)
+    } else if (identical(method, "greml")) {
+        .h2Greml(Xs, y)
+    } else {
+        n <- nrow(Xs)
+        exec(
+            .cisH2Estimators[[method]],
+            z = .corToZ(as.vector(cor(Xs, y)), n),
+            nVariant = rep(n, ncol(Xs)),
+            ld = list(ldFactor = Xs, nSamples = n, referenceOverlap = 1)
+        )
+    }
+    c(fit, list(nSnps = ncol(Xs)))
+}
+
+# The t statistic of a marginal regression whose correlation is `r`, on `n`
+# samples: the inverse of .zToCor().
+# @noRd
+.corToZ <- function(r, n) {
+    r * sqrt((n - 2) / (1 - r^2))
+}
+
+# GREML: the trait's genetic and residual variances by qgg's REML on the
+# relationship matrix of the standardized genotypes `Xs`, h2 the genetic
+# share, its standard error the delta method's from the variances' inverse
+# average information.
+# @noRd
+.h2Greml <- function(Xs, y) {
+    if (!requireNamespace("qgg", quietly = TRUE)) {
+        abort("Package 'qgg' is required for method = \"greml\".")
+    }
+    fit <- qgg::greml(
+        y = as.numeric(y),
+        GRM = list(tcrossprod(Xs) / ncol(Xs))
+    )
+    theta <- as.numeric(fit$theta)
+    total <- sum(theta)
+    gradient <- c(theta[[2L]], -theta[[1L]]) / total^2
+    .cisH2Result(
+        NA_integer_,
+        h2 = theta[[1L]] / total,
+        h2Se = sqrt(drop(crossprod(gradient, fit$asd %*% gradient)))
+    )
+}
+
+# A QtlDataset's estimates as an H2Estimate, on the genotypes' genome.
+# @noRd
+.h2IndividualEstimate <- function(rows, method, qd) {
+    if (length(rows) == 0L) {
+        abort(str_c(
+            "estimateH2(QtlDataset): no selected trait shares two or more ",
+            "samples with its genotypes."
+        ))
+    }
+    out <- .h2EstimateNew(
+        map(rows, "window"),
+        as.list(list_rbind(map(rows, "values"))),
+        .h2NoObjects(length(rows)),
+        .qtlGenotypeSe(qd)
+    )
+    .cisH2WarnUndefined(out, method)
+    out
+}
+
+# =============================================================================
+# A trait's heritability for the methods that start from one
+# =============================================================================
+#
+# The Bayesian alphabet, SuSiE-RSS and LDpred2 can start from a trait's cis
+# heritability: a value, or an estimator's estimate on the method's own data.
+# A weight function takes `h2` as one or the other; a pipeline takes an
+# estimator to run on each trait, or an H2Estimate to read each trait's from.
+
+# The heritability `h2` gives a method: NULL for none, which leaves each
+# engine its own default; a supplied number; or the estimate of the estimator
+# it names, one of `methods`, made by `fit(method, !!!fitArgs)`, which only
+# runs then. Settled by .h2Settle().
+# @noRd
+.h2Resolve <- function(h2, methods, label, fit, fitArgs) {
+    if (is.null(h2)) {
+        return(NULL)
+    }
+    if (is.numeric(h2)) {
+        return(.h2Settle(.h2AssertValue(h2, label), label))
+    }
+    method <- arg_match0(h2, methods, arg_nm = "h2")
+    .h2Settle(exec(fit, method, !!!fitArgs)$h2, label)
+}
+
+# A supplied heritability: one number in [0, 1).
+# @noRd
+#' @importFrom checkmate assertNumber
+.h2AssertValue <- function(h2, label) {
+    assertNumber(h2, lower = 0, upper = 1, .var.name = "h2")
+    if (h2 >= 1) {
+        abort(glue("{label}: `h2` must be below 1, not {h2}."))
+    }
+    h2
+}
+
+# A heritability as the methods use it: floored at 0.001 and capped at 0.99,
+# which keeps every engine's starting variances and SuSiE-RSS's residual
+# variance positive. An estimate that could not be made (NA) gives NULL, so
+# the method keeps its own default, with a warning naming `label`.
+# @noRd
+.h2Settle <- function(value, label) {
+    if (is.na(value)) {
+        warn(glue(
+            "{label}: no heritability estimate could be made, so the method ",
+            "keeps its own default."
+        ))
+        return(NULL)
+    }
+    min(max(value, 0.001), 0.99)
+}
+
+# A summary-statistic estimator on a method's own z, per-variant sample sizes
+# and LD source (.rssLdSource()), the reference sharing no samples with the
+# study, as estimateH2() assumes by default. Where that assumption decides
+# LAVA's estimate, as estimateH2() warns, so does this.
+# @noRd
+.h2SumStatsFit <- function(method, z, n, ld, label) {
+    .h2AssertReferenceSize(method, ld$nSamples, label)
+    fit <- exec(
+        .cisH2Estimators[[method]],
+        z = z,
+        nVariant = n,
+        ld = list_assign(ld, referenceOverlap = 0)
+    )
+    if (isTRUE(fit$smallReference)) {
+        warn(c(
+            glue(
+                "{label}: the LD reference has at most twice the study's ",
+                "samples, so LAVA's estimate depends on how many they share, ",
+                "and this assumes none."
+            ),
+            i = str_c(
+                "If the reference holds the study's samples, pass ",
+                "estimateH2(..., referenceOverlap = ) as `h2` instead."
+            )
+        ))
+    }
+    fit
+}
+
+# .h2SumStatsFit() on a summary-statistic weight function's own `stat` and
+# LD reference, whose LD source is formed only here, when an estimate is
+# asked for.
+# @noRd
+.h2StatFit <- function(method, stat, ldReference, label) {
+    ld <- .rssLdSource(stat, ldReference, label)
+    p <- .ldSourceSize(ld)
+    n <- median(stat$n)
+    .h2SumStatsFit(
+        method,
+        .corToZ(.rssMarginalCor(stat, n = n, p = p), n),
+        rep_len(stat$n, p),
+        ld,
+        label
+    )
+}
+
+# A pipeline's `h2`, checked once at entry: NULL; an estimator, one of
+# `methods`, to run on each trait; or an H2Estimate, which must hold exactly
+# one row for each of the (study, context, trait) `tuples` the run selected.
+# @noRd
+.h2PipelineSpec <- function(h2, methods, tuples, label) {
+    if (is.null(h2)) {
+        return(NULL)
+    }
+    if (is(h2, "H2Estimate")) {
+        return(list(values = .h2EstimateValues(h2, tuples, label)))
+    }
+    list(method = arg_match0(h2, methods, arg_nm = "h2"))
+}
+
+# The (study, context, trait) of a summary-statistics collection's `rows`.
+# @noRd
+.h2RowTuples <- function(data, rows) {
+    tibble(
+        study = as.character(data$study[rows]),
+        context = as.character(data$context[rows]),
+        trait = as.character(data$trait[rows])
+    )
+}
+
+# Row `i`'s LD reference records its sample size, where `method` reads it.
+# @noRd
+.h2AssertRowReference <- function(i, data, method, label) {
+    ref <- .rowLdRef(data, i)
+    if (is.null(method) || is.null(ref)) {
+        return(invisible(NULL))
+    }
+    .h2AssertReferenceSize(method, .ldRefNoiseN(ref), label)
+}
+
+# The heritability of each of `tuples` in an H2Estimate, keyed by
+# .h2TupleKey(), refusing a tuple it has no row for or several rows for (one
+# per method, say).
+# @noRd
+.h2EstimateValues <- function(est, tuples, label) {
+    have <- .h2TupleKey(est$study, est$context, est$trait)
+    want <- unique(.h2TupleKey(tuples$study, tuples$context, tuples$trait))
+    .h2AssertTuples(setdiff(want, have), "holds no row for", label)
+    .h2AssertTuples(
+        intersect(want, have[duplicated(have)]),
+        "holds several rows (one per method?) for",
+        label
+    )
+    set_names(as.numeric(est$h2), have)[want]
+}
+
+# One (study, context, trait) as a lookup key.
+# @noRd
+.h2TupleKey <- function(study, context, trait) {
+    str_c(study, context, trait, sep = "\r")
+}
+
+# Refuse the tuples `keys`, which an H2Estimate `problem`, naming them.
+# @noRd
+.h2AssertTuples <- function(keys, problem, label) {
+    if (length(keys) == 0L) {
+        return(invisible(NULL))
+    }
+    shown <- str_flatten(
+        str_replace_all(utils::head(keys, 5L), "\r", "/"),
+        ", "
+    )
+    abort(glue(
+        "{label}: the `h2` H2Estimate {problem} {length(keys)} selected ",
+        "(study, context, trait): {shown}."
+    ))
+}
+
+# One trait's heritability under a pipeline's settled `spec`: none, its
+# H2Estimate row's (`key`), or its estimate by `fit(method, !!!fitArgs)`. A
+# condition the run derives itself, such as a top principal component, has
+# no row and keeps its default.
+# @noRd
+.h2ForTrait <- function(spec, key, label, fit, fitArgs) {
+    if (is.null(spec)) {
+        return(NULL)
+    }
+    if (!is.null(spec$values)) {
+        if (!is_in(key, names(spec$values))) {
+            return(NULL)
+        }
+        return(.h2Settle(spec$values[[key]], label))
+    }
+    .h2Settle(exec(fit, spec$method, !!!fitArgs)$h2, label)
 }
 
 # =============================================================================

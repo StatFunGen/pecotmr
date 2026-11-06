@@ -52,8 +52,9 @@ individual-level form, unscaled).}
 n; \code{TRUE} weights each by qgg's 1 / (se^2 + b^2 / n_j), from its
 own sample size.}
 
-\item{h2}{The prior guess of the heritability that sets the starting
-variances. Default \code{0.5}, qgg's and hibayes'.}
+\item{h2}{The prior guess of the heritability, which sets the starting
+variances and the scales of their priors. Default \code{0.5}, qgg's and
+hibayes'.}
 
 \item{shrinkCorr}{The LD shrinkage \eqn{c}: the sampler reads
 \eqn{cR + (1 - c)I}. Default 1, none.}

@@ -31,8 +31,9 @@ intermediates, so the two retaining levels behave alike here.}
 Numeric vector of variant weights.
 }
 \description{
-Extracts coefficients from an existing SuSiE-ASH-RSS fit or fits
-\code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}.
+Extracts coefficients from an existing SuSiE-ASH-RSS fit
+(\code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}), as
+\code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 }
 \examples{
 data(eqtlRegionExample)

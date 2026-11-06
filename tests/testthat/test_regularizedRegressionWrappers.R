@@ -886,6 +886,51 @@ test_that("scad, mcp and l0learn RSS weights pass fitRetention through", {
     expect_equal(ncol(attr(l0, "fit")$beta), 2L)
 })
 
+test_that("held-out refits solve at the full data's path values", {
+    # The default paths depend on the data -- lambda_max on the
+    # correlations, the L0 family's adaptive path on every fit along it --
+    # so a refit left to its own would line its candidates up with the full
+    # data's by position alone. It is handed the full data's values instead.
+    f <- .rrwStatLd()
+    real <- pecotmr:::.penalizedRssPath
+    calls <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .penalizedRssPath = function(bhat, ld, n, spec, lambda, ...) {
+            fit <- real(bhat, ld, n, spec, lambda, ...)
+            record <- list(given = lambda, used = fit$lambda, s = ld$shrink)
+            calls$log <- c(calls$log, list(record))
+            fit
+        }
+    )
+    for (fn in list(lassosumRssWeights, l0learnRssWeights)) {
+        calls$log <- list()
+        set.seed(1)
+        fn(f$stat, f$ldReference, s = c(0.5, 1))
+        full <- calls$log[1:2]
+        refits <- calls$log[-(1:2)]
+        expect_true(all(map_lgl(full, function(x) is.null(x$given))))
+        expect_length(refits, 8L)
+        for (refit in refits) {
+            match <- full[[which(map_dbl(full, "s") == refit$s)]]
+            expect_equal(refit$given, match$used)
+        }
+    }
+})
+
+test_that("a misspelled strategy fails before the grid starts", {
+    f <- .rrwStatLd()
+    cnd <- tryCatch(
+        lassosumRssWeights(
+            f$stat,
+            f$ldReference,
+            methodArgs = LassosumOptions(strategy = "sideways")
+        ),
+        error = identity
+    )
+    expect_match(conditionMessage(cnd), "strategy")
+    expect_null(cnd$parent)
+})
+
 test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     # The factor route keeps F beta rather than R_s beta, so R_s is never
     # formed; the coordinate updates, the L0 swaps and the path are the same.
@@ -898,9 +943,11 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
     beta <- replace(numeric(120), c(5, 40, 90), c(0.3, -0.2, 0.25))
     z <- as.vector(R %*% beta) + rnorm(120, sd = 0.05)
     lambda <- exp(seq(log(0.1), log(0.001), length.out = 8))
+    lambda0 <- exp(seq(log(0.05), log(5e-4), length.out = 8))
     # lassosum is the lasso at alpha = 1; below it, the elastic net and ridge.
     # L0L2 adds its fixed ridge weight lambda2, which both routes apply in
-    # the shared thresholding, swaps and objective.
+    # the shared thresholding, swaps and objective. The L0 family's path is
+    # in lambda0; the last two rows take the solver's own path.
     cases <- data.frame(
         penalty = c(
             "lasso",
@@ -911,45 +958,72 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
             "SCAD",
             "L0",
             "L0L2",
+            "L0L2",
+            "L0",
             "L0L2"
         ),
-        alpha = c(1, 0.5, 0, 1, 0.5, 1, 1, 1, 1),
-        lambda2 = c(0, 0, 0, 0, 0, 0, 0, 0.05, 0.5)
+        alpha = c(1, 0.5, 0, 1, 0.5, 1, 1, 1, 1, 1, 1),
+        lambda2 = c(0, 0, 0, 0, 0, 0, 0, 0.05, 0.5, 0, 0.05),
+        ownPath = c(rep(FALSE, 9), TRUE, TRUE)
     )
+    # A small screen, so gradient ranking screens at this size.
+    control <- modifyList(pecotmr:::.rssPathControl(), list(screenSize = 5L))
     for (s in c(0.2, 0.9)) {
         Rs <- (1 - s) * R + s * diag(120)
-        for (k in seq_len(nrow(cases))) {
-            args <- list(
-                lambdaR = lambda,
-                penaltyStr = cases$penalty[[k]],
-                gamma = 3.7,
-                alpha = cases$alpha[[k]],
-                lambda0 = 0.001,
-                lambda2 = cases$lambda2[[k]],
-                thr = 1e-6,
-                maxiter = 1000L,
-                maxSwaps = 10L
-            )
-            label <- str_c(
-                cases$penalty[[k]],
-                ", alpha = ",
-                cases$alpha[[k]],
-                ", lambda2 = ",
-                cases$lambda2[[k]]
-            )
-            dense <- exec(pecotmr:::penalizedRssCpp, z, list(R), s, !!!args)
-            expect_equal(
-                dense,
-                exec(pecotmr:::penalizedRssCpp, z, list(Rs), 0, !!!args),
-                tolerance = 1e-10,
-                label = label
-            )
-            expect_equal(
-                exec(pecotmr:::penalizedRssFactorCpp, z, ldFactor, s, !!!args),
-                dense,
-                tolerance = 1e-8,
-                label = label
-            )
+        for (strategy in c("strongRule", "gradientRanked")) {
+            for (k in seq_len(nrow(cases))) {
+                l0 <- startsWith(cases$penalty[[k]], "L0")
+                path <- if (cases$ownPath[[k]]) {
+                    numeric(0)
+                } else if (l0) {
+                    lambda0
+                } else {
+                    lambda
+                }
+                args <- list(
+                    pathR = path,
+                    penaltyStr = cases$penalty[[k]],
+                    strategyStr = strategy,
+                    gamma = 3.7,
+                    alpha = cases$alpha[[k]],
+                    lambda1 = 0,
+                    lambda2 = cases$lambda2[[k]],
+                    thr = 1e-6,
+                    maxiter = 1000L,
+                    maxSwaps = 10L,
+                    control = control
+                )
+                label <- str_c(
+                    cases$penalty[[k]],
+                    ", alpha = ",
+                    cases$alpha[[k]],
+                    ", lambda2 = ",
+                    cases$lambda2[[k]],
+                    ", own path = ",
+                    cases$ownPath[[k]],
+                    ", ",
+                    strategy
+                )
+                dense <- exec(pecotmr:::penalizedRssCpp, z, R, s, !!!args)
+                expect_equal(
+                    dense,
+                    exec(pecotmr:::penalizedRssCpp, z, Rs, 0, !!!args),
+                    tolerance = 1e-10,
+                    label = label
+                )
+                expect_equal(
+                    exec(
+                        pecotmr:::penalizedRssFactorCpp,
+                        z,
+                        ldFactor,
+                        s,
+                        !!!args
+                    ),
+                    dense,
+                    tolerance = 1e-8,
+                    label = label
+                )
+            }
         }
     }
     # The two routes agreeing would not show lambda2 is applied at all; the
@@ -959,15 +1033,17 @@ test_that("the RSS solvers run on a factor of the LD as on the LD itself", {
             z,
             ldFactor,
             0.2,
-            lambdaR = lambda,
+            pathR = lambda0,
             penaltyStr = "L0L2",
+            strategyStr = "gradientRanked",
             gamma = 3.7,
             alpha = 1,
-            lambda0 = 0.001,
+            lambda1 = 0,
             lambda2 = lambda2,
             thr = 1e-6,
             maxiter = 1000L,
-            maxSwaps = 10L
+            maxSwaps = 10L,
+            control = control
         )$beta
     }
     expect_false(isTRUE(all.equal(l0Fit(0.5), l0Fit(0))))
@@ -1358,7 +1434,9 @@ test_that("held-out selection refuses a fit far larger than the trait", {
     )
     predicted <- function(b) sum(b * (R %*% b))
     fit <- attr(w, "fit")
-    atOne <- fit$beta[, which(fit$path$s == 1)[20L]]
+    # The least penalized fit at s = 1, chosen by value, not grid position.
+    sOne <- which(fit$path$s == 1)
+    atOne <- fit$beta[, sOne[which.min(fit$path$lambda[sOne])]]
     expect_gt(predicted(atOne), 100 * h2)
     expect_lt(predicted(as.numeric(w)), 2 * h2)
     expect_equal(
