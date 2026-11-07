@@ -1756,6 +1756,52 @@ test_that("ensembleWeights omits ensemble_performance (in-sample R^2)", {
     expect_false("ensemble_performance" %in% names(res))
 })
 
+test_that("ensembleWeights cross-validates the ensemble by cross-fitting", {
+    cv <- makeCvResult(n = 200, K = 3, seed = 5)
+    samples <- rownames(cv$prediction[[1L]])
+    y <- set_names(cv$.y, samples)
+    res <- ensembleWeights(cv, Y = y)
+    expect_named(
+        res$metrics,
+        c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
+    )
+    expect_named(res$predictions, samples)
+    # Fold 1 is predicted with coefficients fit on the other folds alone...
+    P <- exec(cbind, !!!map(cv$prediction, as.numeric))
+    held <- cv$samplePartition$Fold[match(
+        samples,
+        cv$samplePartition$Sample
+    )] ==
+        1L
+    zeta <- .solveEnsembleQuadprog(P[!held, ], y[!held], 3L)
+    expect_equal(unname(res$predictions[held]), drop(P[held, ] %*% zeta))
+    # ... so it is not the full-data fit scored on its own samples.
+    expect_false(isTRUE(all.equal(
+        unname(res$predictions),
+        drop(P %*% res$methodCoef)
+    )))
+    expect_equal(res$metrics[["rsq"]], cor(res$predictions, y)^2)
+    # An unnamed Y is placed by the predictions' own sample names.
+    expect_equal(ensembleWeights(cv, Y = cv$.y)$predictions, res$predictions)
+})
+
+test_that("a cross-fit fold with one varying method gives it full weight", {
+    # As the full-data fit does, without repeating its message per fold.
+    P <- cbind(a = c(1, 2, 3, 4), b = rep(0, 4L))
+    expect_equal(.ensembleTrainZeta(P, c(1, 2, 3, 4), "quadprog", 1), c(1, 0))
+})
+
+test_that("ensembleWeights reports no ensemble CV without the folds", {
+    cv <- makeCvResult(n = 100, K = 3, seed = 6)
+    y <- set_names(cv$.y, rownames(cv$prediction[[1L]]))
+    unfolded <- ensembleWeights(list(prediction = cv$prediction), Y = y)
+    expect_null(unfolded$predictions)
+    expect_null(unfolded$metrics)
+    # Nor when a sample has no fold.
+    partial <- list_assign(cv, samplePartition = cv$samplePartition[-1L, ])
+    expect_null(ensembleWeights(partial, Y = y)$predictions)
+})
+
 test_that("ensembleWeights: per-method R^2 values lie between 0 and 1", {
     cv <- makeCvResult(n = 200, K = 4, seed = 21)
     res <- ensembleWeights(cv, Y = cv$.y)

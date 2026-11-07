@@ -7,7 +7,9 @@
 
 # A minimal stand-in for a colocboost object, shaped like the real one:
 # cos_details keyed by cos_id, purity as a SQUARE matrix over sets, and
-# top variables as a data frame with set ids for rownames.
+# top variables as a data frame with set ids for rownames. `outcomeNpc`, one
+# named vector per set, adds each outcome's NPC as colocboost reports it: a
+# table per set with the outcomes as rownames.
 .cbr_fake <- function(
     ids = "cos1:y1_y2",
     outcomes = list(c("t1", "t2")),
@@ -15,7 +17,8 @@
     variants = list("chr1:200:C:T"),
     npc = 0.9,
     nRegion = 4L,
-    focal = FALSE
+    focal = FALSE,
+    outcomeNpc = NULL
 ) {
     regionIds <- str_c("chr1:", seq_len(nRegion) * 100L, ":C:T")
     vcp <- set_names(seq_len(nRegion) / (nRegion * 2), regionIds)
@@ -25,6 +28,31 @@
         ncol = length(ids),
         dimnames = list(ids, ids)
     )
+    details <- list(
+        cos = list(
+            cos_index = set_names(members, ids),
+            cos_variables = set_names(variants, ids)
+        ),
+        cos_outcomes = list(
+            outcome_name = set_names(outcomes, ids)
+        ),
+        cos_vcp = set_names(
+            rep(list(as.numeric(vcp)), length(ids)),
+            ids
+        ),
+        cos_npc = set_names(rep(npc, length(ids)), ids),
+        cos_min_npc_outcome = set_names(rep(npc, length(ids)), ids),
+        cos_purity = list(min_abs_cor = purity),
+        cos_top_variables = data.frame(
+            top_index = unlist(members),
+            top_variables = unlist(variants),
+            row.names = ids,
+            stringsAsFactors = FALSE
+        )
+    )
+    npcTables <- if (!is.null(outcomeNpc)) {
+        list(cos_outcomes_npc = set_names(map(outcomeNpc, .cbr_npcTable), ids))
+    }
     structure(
         list(
             cos_summary = tibble(
@@ -34,30 +62,19 @@
                 top_variable_vcp = rep(0.8, length(ids))
             ),
             vcp = vcp,
-            cos_details = list(
-                cos = list(
-                    cos_index = set_names(members, ids),
-                    cos_variables = set_names(variants, ids)
-                ),
-                cos_outcomes = list(
-                    outcome_name = set_names(outcomes, ids)
-                ),
-                cos_vcp = set_names(
-                    rep(list(as.numeric(vcp)), length(ids)),
-                    ids
-                ),
-                cos_npc = set_names(rep(npc, length(ids)), ids),
-                cos_min_npc_outcome = set_names(rep(npc, length(ids)), ids),
-                cos_purity = list(min_abs_cor = purity),
-                cos_top_variables = data.frame(
-                    top_index = unlist(members),
-                    top_variables = unlist(variants),
-                    row.names = ids,
-                    stringsAsFactors = FALSE
-                )
-            )
+            cos_details = c(details, npcTables)
         ),
         class = "colocboost"
+    )
+}
+
+# One set's per-outcome NPC table, as colocboost reports it.
+.cbr_npcTable <- function(npc) {
+    data.frame(
+        outcomes_index = seq_along(npc),
+        relative_logLR = NA_real_,
+        npc_outcome = unname(npc),
+        row.names = names(npc)
     )
 }
 

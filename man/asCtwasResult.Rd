@@ -25,8 +25,10 @@ Decompose the raw list returned by
   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasGroupPriors}
   \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
-  path. The GWAS study is read from \code{z_snp$study} and the (single)
-  weight method from the weights.
+  path. The GWAS study is read from \code{z_snp$study}, and the method
+  label from the run's \code{resolvedMethod} (\code{"best"}, or its one
+  method; for a result made before that was carried, the one method of its
+  weights).
 }
 \examples{
 data(ctwasFinemapExample)

@@ -2614,12 +2614,14 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             cv$metrics[["rsq"]]
         } else {
             NA_real_
-        }
+        },
+        partition = cv$samplePartition
     )
 }
 
-# Per-condition CV predictions + weights + R^2 across the group's methods.
-# Returns list(preds, wts, rsq), skipping methods with no CV / weights.
+# Per-condition CV predictions + weights + R^2 across the group's methods, and
+# the fold partition their predictions share. Returns list(preds, wts, rsq,
+# partition), skipping methods with no CV / weights.
 # @noRd
 .twasEnsembleCollect <- function(r, perTokenEntries, tokens) {
     parts <- compact(map(
@@ -2641,7 +2643,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             map(parts, "weights"),
             str_c(contributing, "_weights")
         ),
-        rsq = set_names(map_dbl(parts, "rsq"), contributing)
+        rsq = set_names(map_dbl(parts, "rsq"), contributing),
+        partition = parts[[1L]]$partition
     )
 }
 
@@ -2667,7 +2670,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ens <- try_fetch(
         ensembleWeights(
             cvResults = list(
-                prediction = coll$preds[str_c(passing, "_predicted")]
+                prediction = coll$preds[str_c(passing, "_predicted")],
+                samplePartition = coll$partition
             ),
             Y = Y[, r],
             twasWeightList = coll$wts[str_c(passing, "_weights")],
@@ -2680,16 +2684,33 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (is.null(ens) || is.null(ens$ensembleTwasWeights)) {
         return(NULL)
     }
+    .twasEnsembleRow(
+        ens,
+        coll$partition,
+        variantIds(perTokenEntries[[passing[1L]]][[r]]),
+        stdz
+    )
+}
+
+# The ensemble's row: its combined weights, and a cvResult recording its
+# cross-fit out-of-fold predictions and metrics over its methods' folds, as
+# each method's does, beside the stacking coefficients and the methods' own
+# R^2. `fallbackIds` names the weights when the ensemble's do not.
+# @noRd
+.twasEnsembleRow <- function(ens, partition, fallbackIds, stdz) {
     ew <- ens$ensembleTwasWeights
     vids <- (if (!is.null(names(ew))) names(ew) else rownames(ew)) %||%
-        variantIds(perTokenEntries[[passing[1L]]][[r]])
+        fallbackIds
     TwasWeightsRow(
         variantIds = vids,
         weights = as.numeric(ew),
-        cvResult = list(
+        cvResult = compact(list(
+            samplePartition = partition,
+            predictions = ens$predictions,
+            metrics = ens$metrics,
             methodCoef = ens$methodCoef,
             methodPerformance = ens$methodPerformance
-        ),
+        )),
         weightStandardized = stdz
     )
 }

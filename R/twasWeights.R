@@ -962,13 +962,6 @@ TwasWeights <- function(
     )
 }
 
-# `x` with only the methods `methods` (camelCase tokens).
-# @noRd
-.twasKeepMethods <- function(x, methods) {
-    cells <- .twasCells(x)
-    .twasKeepCells(x, cells[is_in(cells$method, methods), ])
-}
-
 # ---- combining ---------------------------------------------------------------
 
 # Collections `parts` as one: their cells regrouped, so the methods one gene

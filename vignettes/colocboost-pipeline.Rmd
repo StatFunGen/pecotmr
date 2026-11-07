@@ -72,17 +72,27 @@ GWAS layer.
 
 ```{r xqtl-only}
 res <- colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
-str(res, max.level = 1L)
+res
 ```
 
-The result is a named list with four entries:
+The result is a `ColocBoostResult`: one element per confidence set across
+the runs, colocalized or outcome-specific (`isColocalized`), with the
+`analysis` column naming the run each came from. `colocPairs()` gives one
+row per set, `colocBoostOutcomes()` one row per set and outcome with that
+outcome's NPC, and `colocVariants()` one row per member variant.
+`computingTime()` lists the runs and their timings.
 
-- `xqtl_coloc` — output of the QTL-only run (NULL when `xqtlColoc = FALSE`)
--  `joint_gwas` — output of the joint QTL+GWAS run (NULL when `jointGwas =
-    FALSE`)
--  `separate_gwas` — list of per-GWAS focal runs (empty when `separateGwas =
-    FALSE`)
-- `computing_time` — per-variant timing record
+Each run's `colocboost` object is kept too, even for a run that found no
+set. `colocboostFit()` returns it for colocboost's own functions, such as
+`colocboost::colocboost_plot()` and
+`colocboost::get_robust_colocalization()`:
+
+```{r xqtl-fit}
+fit <- colocboostFit(res, analysis = "xqtl_coloc")
+class(fit)
+```
+
+`fitRetention = "none"` drops these objects when only the sets are wanted.
 
 ## QTL + GWAS (joint model)
 
@@ -93,7 +103,7 @@ res2 <- colocboostPipeline(
     xqtlColoc = FALSE,
     jointGwas = TRUE
 )
-names(res2)
+computingTime(res2)
 ```
 
 Each GWAS study is one outcome: the rows of the study that the QTL data
@@ -115,8 +125,11 @@ res3 <- colocboostPipeline(
     xqtlColoc = FALSE,
     separateGwas = TRUE
 )
-names(res3$separate_gwas)
+computingTime(res3)
 ```
+
+A `separate_gwas` run is picked out by its GWAS study as well:
+`colocboostFit(res3, analysis = "separate_gwas", gwasStudy = "trait1")`.
 
 ## Sumstats-only colocalization
 
@@ -183,7 +196,8 @@ colocboostPipeline(
     jointGwas = FALSE,
     separateGwas = FALSE,
     # Forwarded to colocboost::colocboost
-    methodArgs = ColocboostOptions(M = 10)
+    methodArgs = ColocboostOptions(M = 10),
+    fitRetention = "full" # keep each run's colocboost object
 )
 ```
 

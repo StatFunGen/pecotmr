@@ -170,7 +170,8 @@ BoundaryMergeParam <- function(
     ctwasPriorParam,
     variantPruningParam,
     boundaryMergeParam,
-    methodArgs
+    methodArgs,
+    weightSelectionParam
 ) {
     .assertMethodParam(ctwasPriorParam, "CtwasPriorParam")
     .assertMethodParam(
@@ -182,6 +183,7 @@ BoundaryMergeParam <- function(
         "BoundaryMergeParam"
     )
     .assertMethodOptions(methodArgs, "CtwasOptions", "methodArgs")
+    .assertMethodParam(weightSelectionParam, "WeightSelectionParam")
 }
 
 #' @title Causal TWAS Pipeline (cTWAS, multi LD block)
@@ -263,11 +265,14 @@ BoundaryMergeParam <- function(
 #'   variants, so its weights are not renormalized over the variants kept.
 #' @param twasZ Optional \code{GRanges} of TWAS Z-scores (output of
 #'   \code{\link{causalInferencePipeline}}). When supplied, each weighted
-#'   gene's Z -- the row of its \code{(qtlStudy, context, trait, method)}
-#'   for the GWAS study of \code{gwasSumStats} -- is used as the
+#'   gene's Z -- the TWAS row of its \code{(qtlStudy, context, trait,
+#'   method)} for the GWAS study of \code{gwasSumStats} -- is used as the
 #'   \code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
-#'   Every weighted gene needs exactly one; rows for other genes, methods or
-#'   GWAS studies are ignored.
+#'   Every weighted gene needs exactly one, so \code{twasZ} must hold the
+#'   method each gene is run with: chosen with the same
+#'   \code{weightSelectionParam}, or a superset such as \code{methods =
+#'   "all"}. Rows for other genes, methods or GWAS studies, and MR rows, are
+#'   ignored.
 #' @param fineMappingResult Optional \code{QtlFineMappingResult}: the genes'
 #'   own fine-mapping, whose per-variant PIP and credible-set membership the
 #'   CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
@@ -281,12 +286,18 @@ BoundaryMergeParam <- function(
 #'   \code{"susie"}. Required with a \code{fineMappingResult}, since the
 #'   weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
 #'   names no fine-mapping fit. Default \code{NULL}.
-#' @param method Character (length 1): which TWAS method's weights to feed
-#'   into ctwas for each (study, context, trait) gene, one method per run.
-#'   \code{NULL} (default) uses the pre-combined \code{"ensemble"} weights of
-#'   \code{TwasWeights}. Weights with no ensemble, and fine-mapping results as
-#'   the weight source, have no default: name the method (e.g.
-#'   \code{"mrash"}, or a fine-mapping method such as \code{"susie"}).
+#' @param weightSelectionParam Which method's weights each gene (each
+#'   \code{(study, context, trait)}) is modelled with, built with
+#'   \code{\link{WeightSelectionParam}}, as in
+#'   \code{\link{causalInferencePipeline}}. A cTWAS run models one weight per
+#'   gene. By default (\code{methods = "best"}) one run takes each gene's
+#'   best method by cross-validated r-squared, the genes' methods mixed, and
+#'   its results are labelled \code{method = "best"}; the gene ids keep each
+#'   gene's own method. A gene whose methods carry no r-squared to pick one
+#'   by is then refused, unless it has just one. \code{methods = "all"}, or
+#'   several named methods, runs cTWAS once per method, one after another,
+#'   the results labelled by method in one \code{CtwasResult}; a single
+#'   named method is one run.
 #' @param maxNumSingleEffects Integer. Max number of single effects in cTWAS
 #'   fine-mapping. Default \code{5}. Pass-through to
 #'   \code{ctwas::ctwas_sumstats}.
@@ -355,7 +366,8 @@ BoundaryMergeParam <- function(
 #' gwasByRegion <- summaryStatsQc(gss,
 #'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' ctwasPipeline(gwasSumStats = gwasByRegion,
-#'   twasWeights = list(ctwasWeightsExample), method = "susie",
+#'   twasWeights = list(ctwasWeightsExample),
+#'   weightSelectionParam = WeightSelectionParam(methods = "susie"),
 #'   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
 #'   methodArgs = CtwasOptions(
@@ -371,7 +383,7 @@ ctwasPipeline <- function(
     twasZ = NULL,
     fineMappingResult = NULL,
     fineMappingMethod = NULL,
-    method = NULL,
+    weightSelectionParam = WeightSelectionParam(),
     maxNumSingleEffects = 5L,
     BPPARAM = SerialParam(),
     ctwasPriorParam = CtwasPriorParam(),
@@ -384,45 +396,82 @@ ctwasPipeline <- function(
         ctwasPriorParam,
         variantPruningParam,
         boundaryMergeParam,
-        methodArgs
+        methodArgs,
+        weightSelectionParam
     )
     .assertBpparam(BPPARAM)
     .ctwasRequireNamedLists(gwasSumStats, twasWeights)
-    build <- .inputsBuild(
-        list(gwasSumStats, twasWeights, twasZ, fineMappingResult),
-        "ctwasPipeline"
+    plan <- .ctwasPlanRuns(
+        gwasSumStats,
+        twasWeights,
+        twasZ,
+        fineMappingResult,
+        fineMappingMethod,
+        weightSelectionParam
     )
-    method <- .ctwasResolveMethod(twasWeights, method)
-    .ctwasCheckFitCoverage(twasWeights, method, "ctwasPipeline()")
-    rows <- .ctwasRunMethod(
-        method,
-        gwasSumStats = gwasSumStats,
-        twasWeights = twasWeights,
-        twasZ = twasZ,
-        fineMappingResult = fineMappingResult,
-        fineMappingMethod = fineMappingMethod,
+    rows <- list_c(map(
+        plan$runs,
+        .ctwasRunMethod,
+        plan = plan,
         variantPruningParam = variantPruningParam,
         ctwasPriorParam = ctwasPriorParam,
         BPPARAM = BPPARAM,
         maxNumSingleEffects = maxNumSingleEffects,
         boundaryMergeParam = boundaryMergeParam,
-        gwasStudy = .ctwasGwasStudy(gwasSumStats),
         keepSnps = keepSnps,
         methodArgs = methodArgs
+    ))
+    .ctwasRequireRows(rows, map_chr(plan$runs, "label"))
+    .withGenome(.ctwasRowsToResult(rows), plan$build)
+}
+
+# What a pipeline's runs share: the inputs' genome build, the resolved inputs
+# `inp`, the runs the weight choice makes (.ctwasRunPlan()), their first pass
+# `fp`, and the supplied `twasZ` with the GWAS study it is read for.
+# @noRd
+.ctwasPlanRuns <- function(
+    gwasSumStats,
+    twasWeights,
+    twasZ,
+    fineMappingResult,
+    fineMappingMethod,
+    weightSelectionParam
+) {
+    build <- .inputsBuild(
+        list(gwasSumStats, twasWeights, twasZ, fineMappingResult),
+        "ctwasPipeline"
     )
-    .ctwasRequireRows(rows, method)
-    .withGenome(.ctwasRowsToResult(rows), build)
+    inp <- .ctwasResolveInputs(
+        gwasSumStats,
+        twasWeights,
+        twasZ,
+        fineMappingResult,
+        fineMappingMethod
+    )
+    list(
+        build = build,
+        inp = inp,
+        runs = .ctwasRunPlan(
+            inp$twasWeights,
+            weightSelectionParam,
+            "ctwasPipeline()"
+        ),
+        fp = .ctwasFirstPassOf(inp),
+        twasZ = twasZ,
+        gwasStudy = .ctwasGwasStudy(gwasSumStats)
+    )
 }
 
 # A run that modeled no gene has no result to return.
 # @noRd
-.ctwasRequireRows <- function(rows, method) {
+.ctwasRequireRows <- function(rows, labels) {
     if (length(rows) > 0L) {
         return(invisible(NULL))
     }
     abort(glue(
         "ctwasPipeline: no genes were modeled (the weight sources ",
-        "produced no usable gene weights for method '{method}')."
+        "produced no usable gene weights for method(s) ",
+        "{str_flatten(labels, ', ')})."
     ))
 }
 
@@ -468,34 +517,28 @@ ctwasPipeline <- function(
     )
 }
 
-# One cTWAS run for method `m`: assemble inputs -> estimate params -> screen ->
-# fine-map -> boundary-merge -> per-context row-specs.
+# One cTWAS run of `run` over what the pipeline's runs share, `plan`
+# (.ctwasPlanRuns()): assemble inputs -> estimate params -> screen ->
+# fine-map -> boundary-merge -> per-context row-specs, labelled by the run.
 # @noRd
 .ctwasRunMethod <- function(
-    m,
-    gwasSumStats,
-    twasWeights,
-    twasZ,
-    fineMappingResult,
-    fineMappingMethod,
+    run,
+    plan,
     variantPruningParam,
     ctwasPriorParam,
     BPPARAM,
     maxNumSingleEffects,
     boundaryMergeParam,
-    gwasStudy,
     keepSnps,
     methodArgs
 ) {
-    # ctwasPipeline() has already warned about the rows whose fits this reads.
-    inputs <- .muffleFitCoverage(assembleCtwasInputs(
-        gwasSumStats = gwasSumStats,
-        twasWeights = twasWeights,
-        twasZ = twasZ,
-        fineMappingResult = fineMappingResult,
-        fineMappingMethod = fineMappingMethod,
-        method = m,
-        variantPruningParam = variantPruningParam
+    # The run plan has already warned about the rows whose fits this reads.
+    inputs <- .muffleFitCoverage(.ctwasAssembleRun(
+        plan$inp,
+        plan$fp,
+        run,
+        variantPruningParam,
+        plan$twasZ
     ))
     merged <- .ctwasRunStages(
         inputs,
@@ -507,8 +550,8 @@ ctwasPipeline <- function(
     )
     .ctwasRunToRows(
         merged,
-        gwasStudy = gwasStudy,
-        method = m,
+        gwasStudy = plan$gwasStudy,
+        method = run$label,
         keepSnps = keepSnps
     )
 }
@@ -556,11 +599,17 @@ ctwasPipeline <- function(
 #'   \code{ctwasPipeline()} for the one-shot path.
 #'
 #' @inheritParams ctwasPipeline
+#' @param weightSelectionParam Which method's weights each gene is modelled
+#'   with, built with \code{\link{WeightSelectionParam}}, as in
+#'   \code{\link{ctwasPipeline}}. These are one cTWAS run's inputs, so the
+#'   choice must make one run: \code{"best"}, or a single method;
+#'   \code{ctwasPipeline} runs one per method for several.
 #' @return A list with elements \code{z_snp}, \code{z_gene} (NULL when no
 #'   \code{twasZ}), \code{weights}, \code{region_info}, \code{snp_map},
 #'   \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun},
-#'   \code{resolvedMethod}, and \code{gwas_n}, the GWAS's median sample size
-#'   (\code{NA} when it records none).
+#'   \code{resolvedMethod}, the run's label (\code{"best"}, or its one
+#'   method), and \code{gwas_n}, the GWAS's median sample size (\code{NA}
+#'   when it records none).
 #' @examples
 #' data(ctwasWeightsExample)
 #' ldDir <- system.file("extdata", "ld_reference", "chr22",
@@ -577,7 +626,8 @@ ctwasPipeline <- function(
 #' gwasByRegion <- summaryStatsQc(gss,
 #'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' assembleCtwasInputs(gwasSumStats = gwasByRegion,
-#'   twasWeights = list(ctwasWeightsExample), method = "susie")
+#'   twasWeights = list(ctwasWeightsExample),
+#'   weightSelectionParam = WeightSelectionParam(methods = "susie"))
 #' @export
 assembleCtwasInputs <- function(
     gwasSumStats,
@@ -585,32 +635,46 @@ assembleCtwasInputs <- function(
     twasZ = NULL,
     fineMappingResult = NULL,
     fineMappingMethod = NULL,
-    method = NULL,
+    weightSelectionParam = WeightSelectionParam(),
     variantPruningParam = VariantPruningParam()
 ) {
     .assertMethodParam(
         variantPruningParam,
         "VariantPruningParam"
     )
+    .assertMethodParam(weightSelectionParam, "WeightSelectionParam")
     inp <- .ctwasResolveInputs(
         gwasSumStats,
         twasWeights,
         twasZ,
         fineMappingResult,
-        fineMappingMethod,
-        method
+        fineMappingMethod
     )
-    regionIds <- names(inp$gwasSumStats)
-    fp <- .ctwasFirstPass(
-        regionIds,
-        inp$gwasSumStats,
+    runs <- .ctwasRunPlan(
         inp$twasWeights,
-        inp$globalPanelInfo
+        weightSelectionParam,
+        "assembleCtwasInputs()"
     )
+    .ctwasAssertOneRun(runs)
+    .ctwasAssembleRun(
+        inp,
+        .ctwasFirstPassOf(inp),
+        runs[[1L]],
+        variantPruningParam,
+        twasZ
+    )
+}
+
+# One cTWAS run's inputs from the resolved inputs `inp` and their first pass
+# `fp`: the genes' weights cut to the run's chosen weight sets, labelled by
+# the run (.ctwasRunPlan()).
+# @noRd
+.ctwasAssembleRun <- function(inp, fp, run, variantPruningParam, twasZ) {
+    regionIds <- names(inp$gwasSumStats)
     weightsList <- .ctwasSecondPass(
         regionIds,
         inp$twasWeights,
-        inp$method,
+        run$cells,
         fp,
         inp$fineMappingResult,
         .ctwasPruningCutoffs(variantPruningParam),
@@ -621,21 +685,52 @@ assembleCtwasInputs <- function(
         fp,
         weightsList,
         list(twasZ = twasZ, gwasStudy = inp$gwasStudy),
-        inp$method
+        run$label
     )
+}
+
+# The first pass over the resolved inputs `inp`, which no weight choice
+# changes, so a pipeline's runs share it.
+# @noRd
+.ctwasFirstPassOf <- function(inp) {
+    .ctwasFirstPass(
+        names(inp$gwasSumStats),
+        inp$gwasSumStats,
+        inp$twasWeights,
+        inp$globalPanelInfo
+    )
+}
+
+# An assembled input set is one cTWAS run.
+# @noRd
+.ctwasAssertOneRun <- function(runs) {
+    if (length(runs) == 1L) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "assembleCtwasInputs: the weight choice makes {length(runs)} ",
+            "cTWAS runs, one per method ",
+            "({str_flatten(map_chr(runs, 'label'), ', ')}), and these are one ",
+            "run's inputs."
+        ),
+        i = str_c(
+            "Name one method, use methods = \"best\", or let ctwasPipeline() ",
+            "run one per method."
+        )
+    ))
 }
 
 # The inputs of assembleCtwasInputs(), checked and resolved in the order a bad
 # one should fail: the GWAS split by block with its panel summary, the weights
-# placed on those blocks, the fine-mapping source and the weight method.
+# placed on those blocks, and the fine-mapping source.
 # @noRd
 .ctwasResolveInputs <- function(
     gwasSumStats,
     twasWeights,
     twasZ,
     fineMappingResult,
-    fineMappingMethod,
-    method
+    fineMappingMethod
 ) {
     .ctwasValidateGwasList(gwasSumStats)
     globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
@@ -646,25 +741,17 @@ assembleCtwasInputs <- function(
         .ctwasGwasStudy(gwasSumStats)
     }
     byBlock <- .ctwasGwasByBlock(gwasSumStats)
-    twasWeights <- .ctwasResolveAndValidateWeights(twasWeights, byBlock)
+    placed <- .ctwasResolveAndValidateWeights(twasWeights, byBlock)
     .ctwasValidateOptional(twasZ, fineMappingResult)
-    fineMappingResult <- .ctwasRescueSource(
-        fineMappingResult,
-        fineMappingMethod
-    )
-    resolvedMethod <- .ctwasResolveMethod(twasWeights, method)
-    .ctwasCheckFitCoverage(
-        twasWeights,
-        resolvedMethod,
-        "assembleCtwasInputs()"
-    )
     list(
         gwasSumStats = byBlock,
-        twasWeights = twasWeights,
+        twasWeights = placed,
         globalPanelInfo = globalPanelInfo,
         gwasStudy = gwasStudy,
-        fineMappingResult = fineMappingResult,
-        method = resolvedMethod
+        fineMappingResult = .ctwasRescueSource(
+            fineMappingResult,
+            fineMappingMethod
+        )
     )
 }
 
@@ -1000,14 +1087,15 @@ assembleCtwasInputs <- function(
     )
 }
 
-# Second pass: the genes' weight entries, keyed by gene id. Each gene is
-# prepared from the block its weights were placed in, whichever blocks they
-# reach, and the variances then read each block's LD once, over all the genes.
+# Second pass: the genes' weight entries, keyed by gene id, each gene's being
+# the weight set of it `chosen` names (.ctwasRunPlan()). Each gene is prepared
+# from the block its weights were placed in, whichever blocks they reach, and
+# the variances then read each block's LD once, over all the genes.
 # @noRd
 .ctwasSecondPass <- function(
     regionIds,
     twasWeights,
-    resolvedMethod,
+    chosen,
     fp,
     fineMappingResult,
     cutoffs,
@@ -1024,7 +1112,7 @@ assembleCtwasInputs <- function(
         regionIds,
         .ctwasRegionGenes,
         twasWeights = twasWeights,
-        resolvedMethod = resolvedMethod,
+        chosen = chosen,
         ctx = ctx
     )
     .ctwasGeneEntries(
@@ -1043,18 +1131,18 @@ assembleCtwasInputs <- function(
 }
 
 # The genes placed in one region, prepared up to their weight variances, or NULL
-# when the region has no weights for the resolved method.
+# when the region holds none of the chosen weight sets.
 # @noRd
-.ctwasRegionGenes <- function(rid, twasWeights, resolvedMethod, ctx) {
+.ctwasRegionGenes <- function(rid, twasWeights, chosen, ctx) {
     tw <- twasWeights[[rid]]
     if (is.null(tw)) {
         return(NULL)
     }
-    twMethod <- .ctwasFilterMethod(tw, resolvedMethod)
-    if (is.null(twMethod)) {
+    twChosen <- .ctwasKeepChosen(tw, chosen)
+    if (is.null(twChosen)) {
         return(NULL)
     }
-    .ctwasPreparedGenes(twMethod, ctx)
+    .ctwasPreparedGenes(twChosen, ctx)
 }
 
 # Concatenate the per-region pieces into the ctwas-shape input list.
@@ -1319,7 +1407,8 @@ estCtwasGroupPriors <- function(
 #' gwasByRegion <- summaryStatsQc(gss,
 #'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 #' inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
-#'   twasWeights = list(ctwasWeightsExample), method = "susie")
+#'   twasWeights = list(ctwasWeightsExample),
+#'   weightSelectionParam = WeightSelectionParam(methods = "susie"))
 #' est <- estCtwasGroupPriors(inp,
 #'   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
@@ -1374,7 +1463,10 @@ finemapCtwasRegions <- function(
         snp_map = screenResult$snp_map,
         LD_map = screenResult$LD_map,
         LD_loader_fun = screenResult$LD_loader_fun,
-        snpinfo_loader_fun = screenResult$snpinfo_loader_fun
+        snpinfo_loader_fun = screenResult$snpinfo_loader_fun,
+        # The run's label (assembleCtwasInputs()), which asCtwasResult()
+        # labels the result with: a "best" run's genes mix methods.
+        resolvedMethod = screenResult$resolvedMethod
     )
 }
 
@@ -1652,51 +1744,77 @@ mergeCtwasBoundaryRegions <- function(
     )
 }
 
-# Which TWAS method's weights a cTWAS run feeds into ctwas -- one per run, as
-# weights are homogeneous within a run. `twasWeights` is a flat weight source
-# or a list of them. A caller-supplied `method` is used once checked present.
-# Without one, TwasWeights default to their pre-combined "ensemble" weights.
-# Anything else has no default: TwasWeights without an ensemble leave several
-# methods to choose between, and a fine-mapping result's weights come from
-# one of its fine-mapping methods.
+# The cTWAS runs `weightSelectionParam` asks of `twasWeights` (a flat weight
+# source or a list of them), each modelling one weight per gene: under "best"
+# one run, labelled "best", each gene on its own best method; under "all" or
+# named methods one run per method, labelled by it. Each run holds its `label`
+# and its chosen `cells` (.selectWeightCells()). The rows narrowed since the
+# fits the choice and the runs read are warned about once.
 # @noRd
-.ctwasResolveMethod <- function(twasWeights, method = NULL) {
+.ctwasRunPlan <- function(twasWeights, weightSelectionParam, caller) {
     sources <- .ctwasWeightSources(twasWeights)
-    available <- unique(.ctwasConcatChr(map(sources, methodNames)))
-    if (length(available) == 0L) {
-        abort("ctwasPipeline: the weight sources carry no method entries.")
+    chosen <- .ctwasChosenCells(sources, weightSelectionParam, caller)
+    .ctwasCheckFitCoverage(sources, chosen, weightSelectionParam, caller)
+    if (identical(weightSelectionParam$methods, "best")) {
+        .ctwasAssertOnePerGene(chosen, caller)
+        return(list(list(label = "best", cells = chosen)))
     }
-    if (!is.null(method) && str_length(method) > 0L) {
-        if (!is_in(method, available)) {
-            msg <- glue(
-                "ctwasPipeline: method '{method}' not present in the weight ",
-                "sources (available: {str_flatten(available, ', ')})."
-            )
-            abort(msg)
-        }
-        return(method)
-    }
-    allTwas <- all(map_lgl(sources, methods::is, "TwasWeights"))
-    if (allTwas && is_in("ensemble", available)) {
-        return("ensemble")
-    }
-    abort(glue(
-        "ctwasPipeline: pass `method` to choose the weights. ",
-        "{.ctwasNoDefaultMethod(allTwas)} ",
-        "(available: {str_flatten(available, ', ')})."
-    ))
+    map(unique(chosen$method), .ctwasMethodRun, chosen = chosen)
 }
 
-# Why the weight sources have no default method, for the error above.
+# The weight sets of every source that `weightSelectionParam` keeps.
 # @noRd
-.ctwasNoDefaultMethod <- function(allTwas) {
-    if (allTwas) {
-        return("These TwasWeights carry no 'ensemble' weights to default to")
+.ctwasChosenCells <- function(sources, weightSelectionParam, caller) {
+    cells <- list_rbind(map(
+        sources,
+        .weightCells,
+        weightSelectionParam = weightSelectionParam
+    ))
+    if (is.null(cells) || nrow(cells) == 0L) {
+        abort(glue("{caller}: the weight sources carry no method entries."))
     }
-    str_c(
-        "A fine-mapping result's weights come from one of its fine-mapping ",
-        "methods"
-    )
+    chosen <- .selectWeightCells(cells, weightSelectionParam, caller)
+    if (nrow(chosen) == 0L) {
+        abort(glue(
+            "{caller}: no weights cleared WeightSelectionParam(cutoff = ",
+            "{weightSelectionParam$cutoff}, pvalCutoff = ",
+            "{weightSelectionParam$pvalCutoff})."
+        ))
+    }
+    chosen
+}
+
+# The run of method `m`: its weight sets of `chosen`.
+# @noRd
+.ctwasMethodRun <- function(m, chosen) {
+    list(label = m, cells = chosen[chosen$method == m, ])
+}
+
+# A "best" run models one weight per gene, so a gene left with several -- its
+# methods carrying no CV metric to pick one by -- is refused.
+# @noRd
+.ctwasAssertOnePerGene <- function(chosen, caller) {
+    gene <- str_c(chosen$study, chosen$context, chosen$trait, sep = "\r")
+    nMethods <- map_int(split(chosen$method, gene), n_distinct)
+    several <- names(nMethods)[nMethods > 1L]
+    if (length(several) == 0L) {
+        return(invisible(NULL))
+    }
+    first <- match(several[[1L]], gene)
+    abort(c(
+        glue(
+            "{caller}: {length(several)} gene(s), such as ",
+            "{chosen$trait[[first]]} ({chosen$study[[first]]}, ",
+            "{chosen$context[[first]]}), hold several methods with no CV ",
+            "metric to pick the best by, and a cTWAS run models one weight ",
+            "per gene."
+        ),
+        i = str_c(
+            "Name the method to use, WeightSelectionParam(methods = ",
+            "\"<method>\"), or run cTWAS once per method with ",
+            "methods = \"all\"."
+        )
+    ))
 }
 
 # The weight sources a `twasWeights` argument holds: itself when it is one
@@ -1712,33 +1830,41 @@ mergeCtwasBoundaryRegions <- function(
     compact(as.list(twasWeights))
 }
 
-# Warn once about the narrowed rows whose fits a run with `method` reads: the
-# TwasWeights rows of that method carrying a SuSiE fit, which renormalizes a
-# weight whose variants shrank. A narrowed row's fit no longer lines up with
-# its variants, so its weights go in without that step. Other weights are
-# used as the row holds them, and a fine-mapping weight source supplies its
-# topLoci effects, not its fit.
+# Warn once about the narrowed rows whose fits the choice and the runs read:
+# every row, when the choice reads the CV metrics, which describe the fits;
+# else the chosen TwasWeights cells carrying a SuSiE fit, which renormalizes
+# a weight whose variants shrank. A narrowed row's fit no longer lines up
+# with its variants, so its weights go in without that step. Other weights
+# are used as the row holds them, and a fine-mapping weight source supplies
+# its topLoci effects, not its fit.
 # @noRd
-.ctwasCheckFitCoverage <- function(twasWeights, method, caller) {
-    sources <- keep(
-        .ctwasWeightSources(twasWeights),
-        methods::is,
-        "TwasWeights"
-    )
+.ctwasCheckFitCoverage <- function(
+    sources,
+    chosen,
+    weightSelectionParam,
+    caller
+) {
+    if (.selectionReadsCv(weightSelectionParam)) {
+        return(.fitCoverageCheckedAll(sources, caller))
+    }
     .fitCoverageCheckedAll(
-        map(sources, .ctwasSusieFitRows, method = method),
+        map(
+            keep(sources, methods::is, "TwasWeights"),
+            .ctwasSusieFitRows,
+            chosen = chosen
+        ),
         caller
     )
 }
 
-# The entries of TwasWeights `tw` fitted by `method` whose stored fit is a
-# SuSiE fit, or NULL when it has none.
+# The chosen cells of TwasWeights `tw` whose stored fit is a SuSiE fit, or
+# NULL when it has none.
 # @noRd
-.ctwasSusieFitRows <- function(tw, method) {
+.ctwasSusieFitRows <- function(tw, chosen) {
     cells <- .twasCells(tw)
-    cells <- cells[cells$method == method, ]
-    susie <- map2_lgl(cells$row, cells$method, .ctwasCellHasSusieFit, x = tw)
-    if (!any(susie)) NULL else .twasKeepCells(tw, cells[susie, ])
+    picked <- cells[is_in(.cellKey(cells), .cellKey(chosen)), ]
+    susie <- map2_lgl(picked$row, picked$method, .ctwasCellHasSusieFit, x = tw)
+    if (!any(susie)) NULL else .twasKeepCells(tw, picked[susie, ])
 }
 
 # @noRd
@@ -2487,8 +2613,10 @@ mergeCtwasBoundaryRegions <- function(
 #'   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
 #'   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasGroupPriors}
 #'   \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
-#'   path. The GWAS study is read from \code{z_snp$study} and the (single)
-#'   weight method from the weights.
+#'   path. The GWAS study is read from \code{z_snp$study}, and the method
+#'   label from the run's \code{resolvedMethod} (\code{"best"}, or its one
+#'   method; for a result made before that was carried, the one method of its
+#'   weights).
 #' @param finemapResult A list from \code{\link{finemapCtwasRegions}} or
 #'   \code{\link{mergeCtwasBoundaryRegions}}.
 #' @param keepSnps Logical (length 1). Retain the context-agnostic SNP
@@ -2503,7 +2631,10 @@ mergeCtwasBoundaryRegions <- function(
 asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     assertFlag(keepSnps)
     gwasStudy <- .ctwasGwasStudyFromZSnp(finemapResult$z_snp)
-    method <- .ctwasMethodFromWeights(finemapResult$weights)
+    # The run's label, as assembleCtwasInputs() records it; a result made
+    # before it was carried names its one method in its weights.
+    method <- finemapResult$resolvedMethod %||%
+        .ctwasMethodFromWeights(finemapResult$weights)
     rows <- .ctwasRunToRows(
         finemapResult,
         gwasStudy = gwasStudy,
@@ -2513,22 +2644,31 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     .ctwasRowsToResult(rows)
 }
 
-# Cut a weight source to the resolved method, or NULL when it has none of it.
-# Used to enforce the "one ctwas gene per (study, context, trait)" semantics
-# -- the legacy pipeline fed a single best-CV-method weight per gene; the S4
-# TwasWeights may carry many methods, but ctwas should only see one. A
-# TwasWeights is cut along its method axis, a fine-mapping result by row.
+# Cut a weight source to the weight sets `chosen` names (.ctwasRunPlan()), or
+# NULL when it holds none of them. Used to enforce the "one ctwas gene per
+# (study, context, trait)" semantics -- the legacy pipeline fed a single
+# best-CV-method weight per gene; the S4 TwasWeights may carry many methods,
+# but a run should only see one per gene. A TwasWeights is cut to its chosen
+# cells, a fine-mapping result to its chosen rows.
 # @noRd
-.ctwasFilterMethod <- function(tw, method) {
-    if (!is_in(method, methodNames(tw))) {
-        return(NULL)
-    }
+.ctwasKeepChosen <- function(tw, chosen) {
     if (methods::is(tw, "TwasWeights")) {
-        return(.twasKeepMethods(tw, method))
+        cells <- .twasCells(tw)
+        kept <- cells[is_in(.cellKey(cells), .cellKey(chosen)), ]
+        if (nrow(kept) == 0L) {
+            return(NULL)
+        }
+        return(.twasKeepCells(tw, kept))
+    }
+    keep <- which(is_in(
+        .cellKey(.weightRowIds(tw)),
+        .cellKey(chosen)
+    ))
+    if (length(keep) == 0L) {
+        return(NULL)
     }
     # Row subset carries every column forward (joint* / region / ...); the old
     # hand-listed rebuild silently dropped them.
-    keep <- which(as.character(tw$method) == method)
     methods::initialize(tw[keep, ], ldReference = ldReference(tw))
 }
 
@@ -3810,18 +3950,19 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 }
 
 # z_gene from a supplied TWAS-Z GRanges (output of causalInferencePipeline):
-# each weighted gene's z, from the twasZ row of its (study, context, trait,
+# each weighted gene's z, from the TWAS row of its (study, context, trait,
 # method) for the run's GWAS study, under the gene's weight id with the
 # columns ctwas reads (.ctwasZGeneRow()). ctwas keeps only the genes whose
 # weight id z_gene names, so a weighted gene with no z is refused rather than
-# dropped. Rows for other genes, methods or GWAS studies are not this run's.
+# dropped. Rows for other genes, methods or GWAS studies, and MR rows, are
+# not this run's.
 # @noRd
 .ctwasBuildZGene <- function(twasZ, weightsList, gwasStudy) {
     if (length(weightsList) == 0L) {
         return(NULL)
     }
     rows <- .ctwasTwasZForStudy(
-        as_tibble(as.data.frame(S4Vectors::mcols(twasZ))),
+        .ctwasTwasRowsOnly(as_tibble(as.data.frame(S4Vectors::mcols(twasZ)))),
         gwasStudy
     )
     keys <- str_c(
@@ -3857,6 +3998,16 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         "|",
         entry$method
     )
+}
+
+# The TWAS rows of a twasZ table: its MR rows carry no Z, and may share a
+# TWAS row's key. A table with no `analysis` column holds TWAS rows only.
+# @noRd
+.ctwasTwasRowsOnly <- function(rows) {
+    if (!is_in("analysis", names(rows))) {
+        return(rows)
+    }
+    filter(rows, .data$analysis == "twas")
 }
 
 # The twasZ rows for the run's GWAS study `gwasStudyName` -- named apart from

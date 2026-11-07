@@ -27,7 +27,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   genotypeFilterParam = GenotypeFilterParam(),
   phenotypeFilterParam = PhenotypeFilterParam(),
   residualizationParam = ResidualizationParam(),
-  methodArgs = ColocboostOptions()
+  methodArgs = ColocboostOptions(),
+  fitRetention = c("full", "none")
 )
 
 \S4method{colocboostPipeline}{QtlSumStats}(
@@ -42,7 +43,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   separateGwas = FALSE,
   alleleFlip = TRUE,
   panelFilterParam = PanelFilterParam(),
-  methodArgs = ColocboostOptions()
+  methodArgs = ColocboostOptions(),
+  fitRetention = c("full", "none")
 )
 
 \S4method{colocboostPipeline}{MultiStudyQtlDataset}(
@@ -63,7 +65,8 @@ colocboostPipeline(qtlData, gwasSumStats = NULL, ...)
   genotypeFilterParam = GenotypeFilterParam(),
   phenotypeFilterParam = PhenotypeFilterParam(),
   residualizationParam = ResidualizationParam(),
-  methodArgs = ColocboostOptions()
+  methodArgs = ColocboostOptions(),
+  fitRetention = c("full", "none")
 )
 }
 \arguments{
@@ -197,6 +200,17 @@ function's formals, so a misspelled option errors instead of being
 dropped inside the run. The data slots the pipeline assembles itself
 (\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
 \code{focal_outcome_idx}) are refused.}
+
+\item{fitRetention}{Whether the result keeps the \code{colocboost} object
+each run returned. \code{"full"} (the default) keeps them whole, for
+\code{\link{colocboostFit}} to hand to \pkg{colocboost}'s own functions
+(\code{colocboost::colocboost_plot()},
+\code{colocboost::get_robust_colocalization()} and the rest);
+\code{"none"} keeps only the confidence sets and their statistics. A fit
+holds every outcome's z-scores and coefficients and the model's
+per-outcome profiles, so it grows with variants times outcomes: on a
+region of 387 variants and two outcomes it is about four times the size
+of the rest of the result.}
 }
 \value{
 A \code{\linkS4class{ColocBoostResult}}: one element per
@@ -209,8 +223,10 @@ A \code{\linkS4class{ColocBoostResult}}: one element per
 
   Project it with \code{\link{colocPairs}}, \code{\link{colocVariants}}
   or \code{\link{colocBoostOutcomes}}; timings are on
-  \code{\link{computingTime}} and the region-wide marginal
-  probabilities on \code{\link{regionVcp}}. \code{\link{ldReference}}
+  \code{\link{computingTime}}, the region-wide marginal
+  probabilities on \code{\link{regionVcp}}, and each run's
+  \code{colocboost} object on \code{\link{colocboostFit}}.
+  \code{\link{ldReference}}
   returns the LD references the summary statistics were matched against,
   each stored once, and the \code{ldReference} column of
   \code{colocBoostOutcomes()} names the one each outcome used. Its

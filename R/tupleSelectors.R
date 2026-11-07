@@ -2568,12 +2568,17 @@ setMethod("dataType", "RangedTupleList", function(x) {
 
 # The entries of a fits dictionary `entries` the rows with mcols `md` name:
 # what a subset keeps, so it holds its own rows' fits and not every row's.
+# Fits no row names are the collection's own -- a ColocBoostResult's, one per
+# run, describe the region its sets came from -- and are all kept.
 # @noRd
 .fitsInUse <- function(entries, md) {
     if (length(entries) == 0L || is.null(md)) {
         return(entries)
     }
     keyCols <- intersect(c("susieFit", "fits", "foldFits"), colnames(md))
+    if (length(keyCols) == 0L) {
+        return(entries)
+    }
     keys <- list_c(c(
         list(character(0)),
         map(keyCols, .fitKeysOfColumn, md = md)

@@ -18,13 +18,16 @@ ColocBoostResult(
 \item{results}{A named list of \code{colocboost} objects, one per analysis
 (\code{xqtl_coloc}, \code{joint_gwas}, or one entry per GWAS study for
 \code{separate_gwas}). \code{NULL} entries -- a run that failed or was not
-requested -- are skipped.}
+requested -- are skipped. Each is kept whole in the result, for
+\code{\link{colocboostFit}} to return.}
 
 \item{analysis}{Character vector, parallel to \code{results}, naming the
 analysis each element came from.}
 
 \item{gwasStudy}{Optional character vector, parallel to \code{results},
-naming the GWAS study for the per-study \code{separate_gwas} runs.}
+naming the GWAS study for the per-study \code{separate_gwas} runs. Runs
+of one analysis must each name their own study, so that every run can
+be told apart.}
 
 \item{outcomeInfo}{Data frame mapping outcome \code{name} to \code{study},
 \code{context}, \code{trait} and \code{dataForm}, and optionally to

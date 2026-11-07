@@ -134,7 +134,7 @@ ctwasWeightsExample$dataType <- S4Vectors::SimpleList(purrr::map(
 ctwasInputsExample <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = "susie"
+    weightSelectionParam = WeightSelectionParam(methods = "susie")
 )
 
 ctwasEstExample <- estCtwasGroupPriors(

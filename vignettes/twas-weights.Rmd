@@ -415,7 +415,11 @@ twasWeightsPipeline(
 
 -  `EnsembleParam(enabled = TRUE)` adds an additional `ensembleWeights` row to
     the collection — a weighted combination of the individual methods' CV
-    predictions, filtered by that bundle's `r2Threshold`.
+    predictions, filtered by that bundle's `r2Threshold`. The ensemble is
+    cross-validated over the same folds by cross-fitting (each fold predicted
+    with combination weights fit on the other folds), so its `cvResult()`
+    carries the same metrics as the methods' and it competes with them when
+    a pipeline picks each gene's best method.
 -  `phenotypeFilterParam` is the run's phenotype QC (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).

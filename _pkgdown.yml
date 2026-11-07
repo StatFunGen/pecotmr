@@ -356,6 +356,7 @@ reference:
     contents:
       - colocViews
       - colocBoostOutcomes
+      - colocboostFit
       - computingTime
       - ldReference
       - regionVcp

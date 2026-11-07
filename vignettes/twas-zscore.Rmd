@@ -22,12 +22,14 @@ knitr::opts_chunk$set(
 ## Overview
 
 `causalInferencePipeline()` pairs QTL fine-mapping and/or regularized
-regression weights one or more GWAS studies to produce, per `(qtlStudy,
-context, trait, method, gwasStudy)` tuple:
+regression weights with one or more GWAS studies to produce two kinds of
+row, told apart by the `analysis` column:
 
-- a **TWAS Z-score** (and p-value), and
--  when `fineMappingResult` is supplied, a **Mendelian Randomization
-    Wald-ratio** estimate over the QTL credible sets.
+- **TWAS rows** (`"twas"`): a TWAS Z-score and p-value per chosen
+    `(qtlStudy, context, trait, method)` weight set and GWAS study, and
+-  when `fineMappingResult` is supplied, **MR rows** (`"mr"`): a
+    Mendelian Randomization Wald-ratio estimate over the QTL credible sets,
+    per fine-mapping row and GWAS study.
 
 Three valid input combinations:
 
@@ -35,7 +37,13 @@ Three valid input combinations:
 |---|---|---|
 | `twasWeights` only | per-tuple weights from `TwasWeights` | no |
 | `fineMappingResult` only | SuSiE coefficients from `topLoci()` | yes |
-| both | weights from `TwasWeights` | yes (MR uses the FMR) |
+| both | weights from `TwasWeights` | yes, from the fine-mapping result alone |
+
+MR is driven by the fine-mapping result only: every gene and fine-mapping
+method it holds is estimated against every GWAS study it overlaps,
+whichever TWAS methods were chosen and whether or not `twasWeights` holds
+the gene. A fine-mapping method among the TWAS weights, such as `susie`, is
+a TWAS method like any other; MR never reads it.
 
 ```{r load-packages}
 library(pecotmr)
@@ -75,14 +83,40 @@ head(S4Vectors::mcols(res))
 
 The result is a `GRanges` object positioned at the variant span of each QTL
 weight set, with identity columns (`qtlStudy`, `context`, `trait`,
-`method`, `gwasStudy`) and the TWAS columns (`twasZ`, `twasPval`).
-MR columns are `NA` in this mode.
+`method`, `gwasStudy`), `analysis`, and the TWAS columns (`twasZ`,
+`twasPval`). With weights alone every row is a TWAS row, and its MR columns
+are `NA`.
+
+## Choosing TWAS methods
+
+`weightSelectionParam` picks which methods' weights are scored for each
+gene, from the cross-validation metrics the weights carry, through
+`WeightSelectionParam(methods =)`:
+
+- `"best"` (the default): each gene's method with the highest CV r-squared
+    whose weights are not all zero.
+- `"all"`: every method.
+- method names, e.g. `c("lasso", "mrash")`: those methods.
+
+`cutoff` (CV r-squared) and `pvalCutoff` (CV p-value) bound every choice.
+A gene whose methods carry no CV metric keeps them all, there being nothing
+to rank them by. The choice reads the weights alone, never a GWAS study, so
+`ctwasPipeline()` makes the same one from the same settings.
+
+```{r ci-methods, eval=FALSE}
+causalInferencePipeline(
+    gwasSumStats = gwasSumStatsS4Example,
+    twasWeights = tw,
+    weightSelectionParam = WeightSelectionParam(methods = "all", cutoff = 0.01)
+)
+```
 
 ## TWAS Z + MR (weights + fine-mapping)
 
 When you also pass `fineMappingResult`, the pipeline adds Wald-ratio MR
-on top of the TWAS computation. The MR uses each fine-mapping entry's
-`topLoci` rows as candidate instrumental variables.
+rows to the TWAS rows. The MR uses each fine-mapping entry's `topLoci` rows
+as candidate instrumental variables, and its row's `method` is the
+fine-mapping method.
 
 ```{r ci-both}
 res2 <- causalInferencePipeline(
@@ -92,6 +126,8 @@ res2 <- causalInferencePipeline(
     mrParam = MrParam(method = "ivwPerVariant", pipCutoff = 0.5)
 )
 S4Vectors::mcols(res2)[, c(
+    "method",
+    "analysis",
     "twasZ",
     "twasPval",
     "waldRatio",
@@ -121,7 +157,9 @@ causalInferencePipeline(
 
 When a `(qtlStudy, context, trait, gwasStudy)` group has TWAS results
 from multiple weight methods, `combineMethods` runs
-`combinePValues()` to produce a single combined p-value per group.
+`combinePValues()` to produce a single combined p-value per group. The
+default choice scores one method per gene, so combination wants
+`methods = "all"` or several named methods.
 
 ```{r ci-combine, eval=FALSE}
 # Multi-method weights so combination is meaningful
@@ -132,6 +170,7 @@ tw_multi <- twasWeightsPipeline(
 causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw_multi,
+    weightSelectionParam = WeightSelectionParam(methods = "all"),
     combineMethods = c("acat", "hmp")
 )
 ```
@@ -167,9 +206,11 @@ causalInferencePipeline(
     gwasSumStats = gwasSumStatsS4Example,
     twasWeights = tw,
     fineMappingResult = fmr,
+    weightSelectionParam = WeightSelectionParam(methods = "best"),
     mrParam = MrParam(
         method = "ivwPerVariant",
-        pipCutoff = 0.5 # cpipCutoff instead, for method = "csAware"
+        pipCutoff = 0.5, # cpipCutoff instead, for method = "csAware"
+        pvalCutoff = 1 # estimate MR only for genes with a TWAS p below this
     ),
     combineMethods = NULL
 ) # e.g. c("acat", "hmp")
@@ -177,14 +218,16 @@ causalInferencePipeline(
 
 ## Reading the result
 
-The `GRanges` output indexes results by the QTL variant span (the
-union of variants used in each tuple's weights). Extract per-tuple
-values with `S4Vectors::mcols()`:
+The `GRanges` output indexes results by the QTL variant span: a TWAS row
+sits at the span of its weights' variants the GWAS holds, and an MR row at
+the span of its fine-mapping row's variants. Extract per-tuple values with
+`S4Vectors::mcols()`:
 
 ```{r ci-mcols, eval=FALSE}
 mc <- as.data.frame(S4Vectors::mcols(res2))
-# Significant TWAS hits at Bonferroni alpha = 0.05 across rows
-mc[mc$twasPval < 0.05 / nrow(mc), ]
+twasRows <- mc[mc$analysis == "twas", ]
+# Significant TWAS hits at Bonferroni alpha = 0.05 across TWAS rows
+twasRows[twasRows$twasPval < 0.05 / nrow(twasRows), ]
 ```
 
 # Session info

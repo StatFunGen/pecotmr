@@ -4609,8 +4609,9 @@ setMethod(
 #'
 #' @param cvResults Output of \code{\link{twasWeightsCv}}, with
 #'   \code{$prediction} (named list of method -> out-of-fold prediction matrix,
-#'   keys like \code{"susie_predicted"}). For multi-dataset: a list of such
-#'   objects.
+#'   keys like \code{"susie_predicted"}) and, to cross-validate the ensemble
+#'   itself, the \code{$samplePartition} the predictions were made over. For
+#'   multi-dataset: a list of such objects.
 #' @param Y Observed outcome vector or matrix (samples x contexts). For
 #'   multi-dataset: a list of vectors/matrices, one per dataset.
 #' @param twasWeightList Optional named list of weight matrices from
@@ -4645,6 +4646,13 @@ setMethod(
 #'   \item{methodPerformance}{Named numeric vector of per-method R-squared
 #'     computed from out-of-fold CV predictions. Preserved so users can still
 #'     report individual method performance.}
+#'   \item{predictions}{The ensemble's own out-of-fold predictions, cross-fit
+#'     (see Details) and named by sample, or \code{NULL} unless every sample
+#'     is named and placed in a fold of \code{cvResults$samplePartition}.}
+#'   \item{metrics}{The CV metrics of those predictions, as
+#'     \code{\link{twasWeightsCv}} reports each method's: \code{corr},
+#'     \code{rsq}, \code{adj_rsq}, \code{pval}, \code{RMSE} and \code{MAE}.
+#'     \code{NULL} with \code{predictions}.}
 #' }
 #'
 #' @details
@@ -4662,6 +4670,12 @@ setMethod(
 #'
 #' Methods whose CV predictions have zero variance (e.g., when all weights are
 #' zero) are excluded from the optimization and assigned \eqn{\zeta_k = 0}.
+#'
+#' The ensemble is cross-validated over the same folds as its methods, by
+#' cross-fitting: each fold's samples are predicted with coefficients fit on
+#' the other folds' out-of-fold predictions only, so its metrics compare with
+#' the methods' own. The coefficients returned in \code{methodCoef} are the
+#' ones fit on every sample.
 #'
 #' Predictions and Y are aligned by sample names (rownames) when available,
 #' rather than assuming positional order.
@@ -4711,6 +4725,7 @@ ensembleWeights <- function(
         solver,
         alpha
     )
+    crossFit <- .ensembleCrossFit(stacked, solver, alpha)
     list(
         methodCoef = zeta,
         ensembleTwasWeights = .ensembleCombineWeights(
@@ -4725,7 +4740,66 @@ ensembleWeights <- function(
             methodSds,
             nm$baseNames,
             nm$K
-        )
+        ),
+        predictions = crossFit$predictions,
+        metrics = crossFit$metrics
+    )
+}
+
+# The ensemble's own out-of-fold predictions, cross-fit -- each fold's
+# samples predicted with coefficients fit on the other folds' out-of-fold
+# predictions only -- named by sample, and their CV metrics. Both NULL unless
+# every sample has a fold.
+# @noRd
+.ensembleCrossFit <- function(stacked, solver, alpha) {
+    if (is.null(stacked$fold) || n_distinct(stacked$fold) < 2L) {
+        return(list(predictions = NULL, metrics = NULL))
+    }
+    parts <- map(
+        unique(stacked$fold),
+        .ensembleFoldPrediction,
+        stacked = stacked,
+        solver = solver,
+        alpha = alpha
+    )
+    rows <- list_c(map(parts, "rows"))
+    pred <- set_names(
+        list_c(map(parts, "pred"))[order(rows)],
+        stacked$samples
+    )
+    list(predictions = pred, metrics = .cvMetricRow(pred, stacked$yObs))
+}
+
+# Fold `f`'s rows of the stacked predictions, combined with the coefficients
+# the other folds' rows give.
+# @noRd
+.ensembleFoldPrediction <- function(f, stacked, solver, alpha) {
+    held <- stacked$fold == f
+    zeta <- .ensembleTrainZeta(
+        stacked$P[!held, , drop = FALSE],
+        stacked$yObs[!held],
+        solver,
+        alpha
+    )
+    list(
+        rows = which(held),
+        pred = drop(stacked$P[held, , drop = FALSE] %*% zeta)
+    )
+}
+
+# Coefficients over every method from training rows `P`: solved over the
+# methods whose predictions vary there, the rest left at 0. A lone such method
+# takes full weight, as .ensembleSolveZeta() gives it, without its message.
+# @noRd
+.ensembleTrainZeta <- function(P, y, solver, alpha) {
+    valid <- apply(P, 2, sd) > .Machine$double.eps
+    if (sum(valid) <= 1L) {
+        return(as.numeric(valid))
+    }
+    replace(
+        rep(0, ncol(P)),
+        valid,
+        .ensembleSolveValid(P[, valid, drop = FALSE], y, solver, alpha)
     )
 }
 
@@ -4839,7 +4913,8 @@ ensembleWeights <- function(
 }
 
 # Build the stacked prediction matrix P and observed y vector, dropping rows
-# with any NA. Returns list(P, yObs).
+# with any NA. Returns list(P, yObs, fold, samples): each row's fold and
+# sample, both NULL unless every dataset gives them.
 # @noRd
 .ensembleStackPredictions <- function(cvResults, Y, nm, contextIndex) {
     perDataset <- map(
@@ -4851,16 +4926,49 @@ ensembleWeights <- function(
         contextIndex = contextIndex
     )
     pMats <- map(perDataset, "P")
-    P <- exec(rbind, !!!pMats)
-    yObs <- list_c(map(perDataset, "y"))
-    .ensembleDropIncomplete(P, yObs, nm$K)
+    stacked <- list(
+        P = exec(rbind, !!!pMats),
+        yObs = list_c(map(perDataset, "y")),
+        fold = .ensembleAllOrNone(map(perDataset, "fold")),
+        samples = .ensembleAllOrNone(map(perDataset, "samples"))
+    )
+    .ensembleDropIncomplete(stacked, nm$K)
 }
 
-# Per-dataset prediction matrix + aligned outcome. Returns list(P, y).
+# `parts` joined, or NULL when any is NULL.
+# @noRd
+.ensembleAllOrNone <- function(parts) {
+    if (any(map_lgl(parts, is.null))) {
+        return(NULL)
+    }
+    list_c(parts)
+}
+
+# Per-dataset prediction matrix + aligned outcome. Returns list(P, y,
+# samples).
 # @noRd
 .ensembleDatasetMatrix <- function(predsD, yRaw, nm, contextIndex, d) {
     aln <- .ensembleAlignSamples(predsD, yRaw, nm$predNames, contextIndex, d)
-    list(P = .ensembleBuildPd(predsD, nm, aln, contextIndex, d), y = aln$yD)
+    list(
+        P = .ensembleBuildPd(predsD, nm, aln, contextIndex, d),
+        y = aln$yD,
+        samples = aln$samples
+    )
+}
+
+# Each of `samples`' fold in dataset `d`'s partition, keyed by the dataset so
+# the folds of different datasets stay apart; NULL unless every sample has
+# one.
+# @noRd
+.ensembleDatasetFolds <- function(partition, samples, d) {
+    if (is.null(partition) || is.null(samples)) {
+        return(NULL)
+    }
+    fold <- partition$Fold[match(samples, partition$Sample)]
+    if (anyNA(fold)) {
+        return(NULL)
+    }
+    str_c(d, "\r", fold)
 }
 
 # Align prediction rows to the outcome, by sample name when available else
@@ -4876,7 +4984,7 @@ ensembleWeights <- function(
     if (!is.null(predSamples) && !is.null(yNames)) {
         return(.ensembleAlignByName(predSamples, yNames, yRaw, contextIndex, d))
     }
-    .ensembleAlignPositional(yRaw, contextIndex, d)
+    .ensembleAlignPositional(yRaw, contextIndex, d, predSamples)
 }
 
 # Name-based alignment over the intersection of sample names.
@@ -4909,19 +5017,30 @@ ensembleWeights <- function(
     } else {
         as.numeric(yRaw[match(common, yNames)])
     }
-    list(yD = yD, predOrder = match(common, predSamples), nD = length(common))
+    list(
+        yD = yD,
+        predOrder = match(common, predSamples),
+        nD = length(common),
+        samples = common
+    )
 }
 
-# Positional alignment fallback (no sample names on either side).
+# Positional alignment fallback (no sample names on one side). The samples are
+# the predictions' own names, when they have them.
 # @noRd
-.ensembleAlignPositional <- function(yRaw, contextIndex, d) {
+.ensembleAlignPositional <- function(yRaw, contextIndex, d, predSamples) {
     yD <- if (is.matrix(yRaw) || is.data.frame(yRaw)) {
         .ensembleCheckContextIndex(contextIndex, ncol(yRaw), d)
         as.numeric(as.matrix(yRaw)[, contextIndex])
     } else {
         as.numeric(yRaw)
     }
-    list(yD = yD, predOrder = seq_len(length(yD)), nD = length(yD))
+    list(
+        yD = yD,
+        predOrder = seq_len(length(yD)),
+        nD = length(yD),
+        samples = predSamples[seq_len(length(yD))]
+    )
 }
 
 # Guard: contextIndex must not exceed the outcome's column count.
@@ -4980,10 +5099,11 @@ ensembleWeights <- function(
     )
 }
 
-# Drop rows with any NA prediction/outcome; error when too few remain.
+# Drop the rows of `stacked` with any NA prediction/outcome; error when too
+# few remain.
 # @noRd
-.ensembleDropIncomplete <- function(P, yObs, K) {
-    complete <- complete.cases(P, yObs)
+.ensembleDropIncomplete <- function(stacked, K) {
+    complete <- complete.cases(stacked$P, stacked$yObs)
     nDropped <- sum(!complete)
     if (nDropped > 0) {
         msg <- glue(
@@ -5001,7 +5121,12 @@ ensembleWeights <- function(
         )
         abort(msg)
     }
-    list(P = P[complete, , drop = FALSE], yObs = yObs[complete])
+    list(
+        P = stacked$P[complete, , drop = FALSE],
+        yObs = stacked$yObs[complete],
+        fold = stacked$fold[complete],
+        samples = stacked$samples[complete]
+    )
 }
 
 # Solve for the method-combination coefficients zeta (length K), routing through
@@ -5416,12 +5541,20 @@ ensembleWeights <- function(
 # The stacked prediction/observed matrix for ensemble dataset `d`.
 # @noRd
 .ensembleDatasetRow <- function(d, cvResults, Y, nm, contextIndex) {
-    .ensembleDatasetMatrix(
+    m <- .ensembleDatasetMatrix(
         cvResults[[d]]$prediction,
         Y[[d]],
         nm,
         contextIndex,
         d
+    )
+    list_assign(
+        m,
+        fold = .ensembleDatasetFolds(
+            cvResults[[d]]$samplePartition,
+            m$samples,
+            d
+        )
     )
 }
 

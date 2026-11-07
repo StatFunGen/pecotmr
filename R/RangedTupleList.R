@@ -799,6 +799,10 @@ setMethod("trim", "RangedTupleList", function(x, use.names = TRUE, ...) {
 #'       has it dropped.
 #'     \item A \code{CtwasResult} holds one element per region; one saved as a
 #'       table of whole runs is rebuilt.
+#'     \item A \code{ColocBoostResult} keeps each run's \code{colocboost}
+#'       object in \code{fits} and each set's per-outcome NPC in an
+#'       \code{npcOutcome} column; one saved before either gets no fits and
+#'       \code{NA} for each outcome, as neither can be recovered.
 #'     \item A \code{QtlDataset} no longer stores run settings (genotype
 #'       QC cutoffs, \code{scaleResiduals}); one saved with them has them
 #'       dropped, as the pipelines' \code{\link{GenotypeFilterParam}} and

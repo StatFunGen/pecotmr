@@ -653,7 +653,7 @@ test_that("an empty collection coerces to itself, not to a row", {
     )
     # A TWAS collection holding a single (gene, method) does too; one with
     # more methods names none to read.
-    lasso <- pecotmr:::.twasKeepMethods(twasWeightsExample, "lasso")
+    lasso <- .twasKeepMethods(twasWeightsExample, "lasso")
     expect_s4_class(pecotmr:::.asTwRowPayload(lasso), "TwasWeightsRow")
     expect_error(
         pecotmr:::.asTwRowPayload(twasWeightsExample),

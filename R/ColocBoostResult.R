@@ -31,15 +31,21 @@
 #   element      the member variants of one CoS
 #   inner mcols  per-variant: vcp
 #   outer mcols  per-CoS: cosId, analysis, gwasStudy, outcomes (a
-#                CharacterList -- native variable arity), purity, cosNpc,
+#                CharacterList -- native variable arity), npcOutcome (a
+#                NumericList parallel to outcomes), purity, cosNpc,
 #                minNpcOutcome, topVariable, topVariableVcp, focalOutcome,
 #                isColocalized
 #   slots        ldReference (a named list), outcomeInfo, regionVcp,
-#                computingTime
+#                computingTime, fits
 #
 # Uncolocalized (outcome-specific) sets are elements too, flagged
 # isColocalized = FALSE, rather than living in a second container: they have
 # the same shape and the same views apply.
+#
+# The runs' colocboost objects are kept whole in `fits`, for colocboost's own
+# functions (colocboost_plot(), get_robust_colocalization(), ...), which take
+# nothing else. Like regionVcp they describe the region, not one set: a run
+# that found no set still has its fit, and a subset keeps them all.
 # =============================================================================
 
 #' @include AllClasses.R RangedTupleList.R ColocResult.R
@@ -66,6 +72,12 @@ NULL
 #'   carrying the marginal \code{vcp}. Collection-level: it spans the region,
 #'   not the elements, so it cannot live in \code{mcols}.
 #' @slot computingTime A list of per-analysis timings.
+#' @slot fits The \code{colocboost} objects the runs returned, kept whole for
+#'   \pkg{colocboost}'s own functions (see \code{\link{colocboostFit}}): each
+#'   analysis's under its name, and an analysis run once per GWAS study
+#'   (\code{separate_gwas}) as a list named by study. Empty for a result made
+#'   with \code{fitRetention = "none"}. Like \code{regionVcp}, the fits
+#'   describe the region rather than one set, so a subset keeps them all.
 #' @seealso \code{\link{colocboostPipeline}},
 #'   \code{\linkS4class{ColocResult}}
 #' @export
@@ -76,12 +88,14 @@ setClass(
         ldReference = "list",
         outcomeInfo = "data.frame",
         regionVcp = "ANY",
-        computingTime = "list"
+        computingTime = "list",
+        fits = "list"
     ),
     prototype(
         ldReference = list(),
         regionVcp = NULL,
-        computingTime = list()
+        computingTime = list(),
+        fits = list()
     )
 )
 
@@ -95,6 +109,7 @@ methods::setValidity("ColocBoostResult", function(object) {
         "cosId",
         "analysis",
         "outcomes",
+        "npcOutcome",
         "purity",
         "cosNpc",
         "nVariables",
@@ -121,12 +136,14 @@ methods::setValidity("ColocBoostResult", function(object) {
     }
     coll$push(.cbrCheckVcpColumn(object))
     coll$push(.cbrCheckOutcomeInfo(object))
+    coll$push(.cbrCheckNpcOutcome(object))
     # The outcomes, not the sets, are what match against a reference, so
     # their keys live in outcomeInfo rather than in mcols.
     coll$push(.ldRefDictProblems(
         object@ldReference,
         object@outcomeInfo$ldReference
     ))
+    coll$push(.cbrCheckFits(object))
     coll$getMessages()
 }
 
@@ -174,6 +191,125 @@ methods::setValidity("ColocBoostResult", function(object) {
     str_c("outcome(s) not in outcomeInfo: ", resolved)
 }
 
+# A set's npcOutcome holds one value per outcome, in the order of its
+# outcomes: colocBoostOutcomes() pairs them by position.
+# @noRd
+.cbrCheckNpcOutcome <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (!methods::is(md$npcOutcome, "NumericList")) {
+        return("npcOutcome must be a NumericList")
+    }
+    uneven <- which(lengths(md$npcOutcome) != lengths(md$outcomes))
+    if (length(uneven) == 0L) {
+        return(NULL)
+    }
+    str_c(
+        "npcOutcome must hold one value per outcome; set(s) ",
+        str_flatten(uneven, ", "),
+        " do not"
+    )
+}
+
+# The fits must be colocboost objects, in the shape .cbrFits() gives them,
+# and unless the result kept none they must hold the run of every set.
+# @noRd
+.cbrCheckFits <- function(object) {
+    .cbrFitsShapeProblem(object@fits) %||%
+        .cbrFitsMissingRuns(object, object@fits)
+}
+
+# @noRd
+.cbrFitsShapeProblem <- function(fits) {
+    named <- .dictNameProblem(fits, "fits")
+    if (!is.null(named)) {
+        return(named)
+    }
+    bad <- names(fits)[!map_lgl(fits, .cbrIsFitEntry)]
+    if (length(bad) == 0L) {
+        return(NULL)
+    }
+    str_c(
+        "fits entries must be colocboost objects, or lists of them named ",
+        "by GWAS study: ",
+        str_flatten(bad, ", ")
+    )
+}
+
+# One analysis's entry: its run's fit, or its per-study runs' fits.
+# @noRd
+.cbrIsFitEntry <- function(entry) {
+    if (.cbrIsFit(entry)) {
+        return(TRUE)
+    }
+    is.list(entry) &&
+        length(entry) > 0L &&
+        is.null(.dictNameProblem(entry, "fits")) &&
+        all(map_lgl(entry, .cbrIsFit))
+}
+
+# @noRd
+.cbrIsFit <- function(x) {
+    inherits(x, "colocboost")
+}
+
+# @noRd
+.cbrFitsMissingRuns <- function(object, fits) {
+    if (length(fits) == 0L || length(object) == 0L) {
+        return(NULL)
+    }
+    rowRuns <- .cbrRowRuns(mcols(object, use.names = FALSE))
+    missing <- !is_in(.cbrRunKeys(rowRuns), .cbrRunKeys(.cbrFitRuns(fits)))
+    if (!any(missing)) {
+        return(NULL)
+    }
+    str_c(
+        "sets come from runs fits does not hold: ",
+        str_flatten(unique(.cbrRunLabels(rowRuns[missing, ])), "; ")
+    )
+}
+
+# The run each set came from: its analysis and, for an analysis run once per
+# GWAS study, that study (NA otherwise).
+# @noRd
+.cbrRowRuns <- function(md) {
+    tibble(
+        analysis = as.character(md$analysis),
+        gwasStudy = as.character(md$gwasStudy %||% rep(NA, nrow(md)))
+    )
+}
+
+# One row per run `fits` holds, as .cbrRowRuns() gives a set's.
+# @noRd
+.cbrFitRuns <- function(fits) {
+    list_rbind(
+        imap(fits, .cbrAnalysisRuns),
+        ptype = tibble(analysis = character(0), gwasStudy = character(0))
+    )
+}
+
+# @noRd
+.cbrAnalysisRuns <- function(entry, analysis) {
+    studies <- if (.cbrIsFit(entry)) NA_character_ else names(entry)
+    tibble(analysis = analysis, gwasStudy = studies)
+}
+
+# One key per run, for matching runs to each other only.
+# @noRd
+.cbrRunKeys <- function(runs) {
+    str_c(runs$analysis, "\r", coalesce(runs$gwasStudy, ""))
+}
+
+# A run as a message names it: the arguments colocboostFit() selects it by.
+# @noRd
+.cbrRunLabels <- function(runs) {
+    study <- if_else(
+        is.na(runs$gwasStudy),
+        "",
+        str_c(", gwasStudy = \"", runs$gwasStudy, "\"")
+    )
+    str_c("analysis = \"", runs$analysis, "\"", study)
+}
+
 # ---- accessors --------------------------------------------------------------
 
 #' @rdname show-methods
@@ -207,7 +343,9 @@ setMethod("ldReference", "ColocBoostResult", function(x) x@ldReference)
 # its update is its own: the one reference an earlier version recorded was
 # the one every summary-statistic outcome was matched against. A version
 # older still recorded it as `ldSketch`. Each reference is brought up to date
-# as any collection's is (.updateLdRefOrKeep()).
+# as any collection's is (.updateLdRefOrKeep()). A result saved before it
+# kept its runs' fits and its outcomes' NPC gets neither back: no fits, and
+# NA for each outcome.
 #' @rdname updateObject-methods
 #' @export
 setMethod(
@@ -215,12 +353,40 @@ setMethod(
     "ColocBoostResult",
     function(object, ..., verbose = FALSE) {
         methods::callNextMethod(
-            .cbrUpdateLdRefs(object),
+            .cbrUpdateNpcOutcome(.cbrUpdateLdRefs(.cbrUpdateFits(object))),
             ...,
             verbose = verbose
         )
     }
 )
+
+# @noRd
+.cbrUpdateFits <- function(object) {
+    if (!is.null(attr(object, "fits", exact = TRUE))) {
+        return(object)
+    }
+    methods::slot(object, "fits", check = FALSE) <- list()
+    object
+}
+
+# @noRd
+.cbrUpdateNpcOutcome <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (is_in("npcOutcome", colnames(md))) {
+        return(object)
+    }
+    npc <- IRanges::NumericList(map(as.list(md$outcomes), .cbrNoNpc))
+    S4Vectors::`mcols<-`(
+        object,
+        value = cbind(md, S4Vectors::DataFrame(npcOutcome = npc))
+    )
+}
+
+# NA for each of `outcomes`: no NPC was recorded for them.
+# @noRd
+.cbrNoNpc <- function(outcomes) {
+    rep(NA_real_, length(outcomes))
+}
 
 # @noRd
 .cbrUpdateLdRefs <- function(object) {
@@ -260,11 +426,14 @@ setMethod(
 #' @param results A named list of \code{colocboost} objects, one per analysis
 #'   (\code{xqtl_coloc}, \code{joint_gwas}, or one entry per GWAS study for
 #'   \code{separate_gwas}). \code{NULL} entries -- a run that failed or was not
-#'   requested -- are skipped.
+#'   requested -- are skipped. Each is kept whole in the result, for
+#'   \code{\link{colocboostFit}} to return.
 #' @param analysis Character vector, parallel to \code{results}, naming the
 #'   analysis each element came from.
 #' @param gwasStudy Optional character vector, parallel to \code{results},
-#'   naming the GWAS study for the per-study \code{separate_gwas} runs.
+#'   naming the GWAS study for the per-study \code{separate_gwas} runs. Runs
+#'   of one analysis must each name their own study, so that every run can
+#'   be told apart.
 #' @param outcomeInfo Data frame mapping outcome \code{name} to \code{study},
 #'   \code{context}, \code{trait} and \code{dataForm}, and optionally to
 #'   \code{ldReference}, the name of the \code{ldReference} entry the
@@ -327,9 +496,42 @@ ColocBoostResult <- function(
         outcomeInfo = .cbrWithLdKeys(as.data.frame(outcomeInfo)),
         regionVcp = .cbrRegionVcp(results),
         ldReference = .cbrAsLdRefList(ldReference),
-        computingTime = computingTime
+        computingTime = computingTime,
+        fits = .cbrFits(results, analysis, gwasStudy)
     )
     .withMetadata(assembled, metadata)
+}
+
+# The runs' colocboost objects as the `fits` slot holds them: each analysis's
+# under its name, and an analysis run once per GWAS study (separate_gwas) as
+# a list named by study. A NULL run -- one that failed or was not requested
+# -- has none.
+# @noRd
+.cbrFits <- function(results, analysis, gwasStudy) {
+    ran <- which(!map_lgl(results, is.null))
+    if (length(ran) == 0L) {
+        return(list())
+    }
+    byAnalysis <- split(
+        ran,
+        factor(analysis[ran], levels = unique(analysis[ran]))
+    )
+    imap(byAnalysis, .cbrAnalysisFits, results = results, gwasStudy = gwasStudy)
+}
+
+# @noRd
+.cbrAnalysisFits <- function(idx, analysis, results, gwasStudy) {
+    studies <- gwasStudy[idx]
+    if (length(idx) == 1L && is.na(studies)) {
+        return(results[[idx]])
+    }
+    if (anyNA(studies) || anyDuplicated(studies) > 0L) {
+        abort(glue(
+            "`results` holds more than one `{analysis}` run; each needs its ",
+            "own `gwasStudy`."
+        ))
+    }
+    set_names(results[idx], studies)
 }
 
 # The `ldReference` argument as the slot holds it: an empty list for NULL, or
@@ -400,6 +602,7 @@ ColocBoostResult <- function(
     vcpAll <- d$cos_vcp[[id]]
     vcp <- if (is.null(vcpAll)) rep(NA_real_, length(idx)) else vcpAll[idx]
     summaryRow <- .cbrSummaryFor(res, id)
+    outcomes <- as.character(d$cos_outcomes$outcome_name[[id]])
     list(
         variants = tibble(variant_id = vars, vcp = as.numeric(vcp)),
         meta = tibble(
@@ -419,7 +622,8 @@ ColocBoostResult <- function(
             focalOutcome = .cbrFocalOutcome(summaryRow$focal_outcome),
             isColocalized = TRUE
         ),
-        outcomes = as.character(d$cos_outcomes$outcome_name[[id]])
+        outcomes = outcomes,
+        npcOutcome = .cbrCosNpcOutcome(d, id, outcomes)
     )
 }
 
@@ -448,6 +652,7 @@ ColocBoostResult <- function(
 .cbrOneUcosRow <- function(id, d, analysis, gwasStudy) {
     idx <- d$ucos$ucos_index[[id]]
     vars <- as.character(d$ucos$ucos_variables[[id]])
+    outcomes <- as.character(d$ucos_outcomes$outcome_name[[id]])
     list(
         variants = tibble(
             variant_id = vars,
@@ -466,8 +671,40 @@ ColocBoostResult <- function(
             focalOutcome = NA_character_,
             isColocalized = FALSE
         ),
-        outcomes = as.character(d$ucos_outcomes$outcome_name[[id]])
+        outcomes = outcomes,
+        npcOutcome = .cbrUcosNpcOutcome(d, id, outcomes)
     )
+}
+
+# Each of `outcomes`' normalized probability of colocalization in set `id`
+# (colocboost's npc_outcome), NA where colocboost reports none. A set's
+# table names its outcomes in its rownames, ordered by evidence rather than
+# as the set lists them, so the two are matched by name.
+# @noRd
+.cbrCosNpcOutcome <- function(d, id, outcomes) {
+    tbl <- d$cos_outcomes_npc[[id]]
+    .cbrNpcFor(outcomes, rownames(tbl), tbl$npc_outcome)
+}
+
+# The same for an outcome-specific set, whose table has one row per set and
+# names its outcome in a column.
+# @noRd
+.cbrUcosNpcOutcome <- function(d, id, outcomes) {
+    tbl <- d$ucos_outcomes_npc
+    if (is.null(tbl) || !is_in(id, rownames(tbl))) {
+        return(.cbrNoNpc(outcomes))
+    }
+    hit <- tbl[rownames(tbl) == id, , drop = FALSE]
+    .cbrNpcFor(outcomes, as.character(hit$outcome), hit$npc_outcome)
+}
+
+# The `values` of `outcomes`, each found by its name among `keys`.
+# @noRd
+.cbrNpcFor <- function(outcomes, keys, values) {
+    if (is.null(values)) {
+        return(.cbrNoNpc(outcomes))
+    }
+    as.numeric(values)[match(outcomes, keys)]
 }
 
 # The cos_summary row for one set, or an empty tibble when absent.
@@ -571,7 +808,8 @@ ColocBoostResult <- function(
     outcomeInfo,
     regionVcp,
     ldReference,
-    computingTime
+    computingTime,
+    fits
 ) {
     elements <- map(rows, .cbrElementFor)
     grl <- S4Vectors::`mcols<-`(
@@ -584,7 +822,8 @@ ColocBoostResult <- function(
         ldReference = ldReference,
         outcomeInfo = outcomeInfo,
         regionVcp = regionVcp,
-        computingTime = computingTime
+        computingTime = computingTime,
+        fits = fits
     )
 }
 
@@ -611,11 +850,15 @@ ColocBoostResult <- function(
 # @noRd
 .cbrMcolsFor <- function(rows) {
     # A CharacterList column, so a set of any size lives in one row instead of
-    # being flattened to a delimited string a caller has to re-split.
+    # being flattened to a delimited string a caller has to re-split; its
+    # outcomes' NPC sit alongside, one value per outcome.
     if (length(rows) == 0L) {
         return(cbind(
             S4Vectors::DataFrame(.cbrEmptyMeta()),
-            S4Vectors::DataFrame(outcomes = IRanges::CharacterList())
+            S4Vectors::DataFrame(
+                outcomes = IRanges::CharacterList(),
+                npcOutcome = IRanges::NumericList()
+            )
         ))
     }
     cbind(
@@ -624,9 +867,18 @@ ColocBoostResult <- function(
             check.names = FALSE
         ),
         S4Vectors::DataFrame(
-            outcomes = IRanges::CharacterList(map(rows, "outcomes"))
+            outcomes = IRanges::CharacterList(map(rows, "outcomes")),
+            npcOutcome = IRanges::NumericList(map(rows, "npcOutcome"))
         )
     )
+}
+
+# The set-level columns of mcols `md`: all but the two held per outcome.
+# `drop = FALSE`: a single kept column would arrive as a vector and be named
+# after the subscript text.
+# @noRd
+.cbrSetColumns <- function(md) {
+    md[, setdiff(colnames(md), c("outcomes", "npcOutcome")), drop = FALSE]
 }
 
 # @noRd
@@ -667,11 +919,8 @@ setMethod(
     if (is.null(md) || length(x) == 0L) {
         return(tibble())
     }
-    # `drop = FALSE` as in the sibling views: a single kept column would
-    # arrive as a vector and be named after the subscript text.
-    flat <- as.data.frame(
-        md[, setdiff(colnames(md), "outcomes"), drop = FALSE]
-    )
+    # Each outcome's NPC is reported by colocBoostOutcomes(), a row apiece.
+    flat <- as.data.frame(.cbrSetColumns(md))
     mutate(
         as_tibble(flat, .name_repair = "minimal"),
         outcomes = map_chr(as.list(md$outcomes), str_flatten, collapse = "; "),
@@ -715,12 +964,7 @@ setMethod(
     if (length(x) == 0L) {
         return(tibble())
     }
-    md <- as.data.frame(
-        mcols(x, use.names = FALSE)[,
-            setdiff(colnames(mcols(x, use.names = FALSE)), "outcomes"),
-            drop = FALSE
-        ]
-    )
+    md <- as.data.frame(.cbrSetColumns(mcols(x, use.names = FALSE)))
     n <- lengths(x)
     setIdx <- rep(seq_len(length(x)), n)
     flat <- unlist(x, use.names = FALSE)
@@ -740,11 +984,14 @@ setMethod(
 #' @param x A \code{\linkS4class{ColocBoostResult}}.
 #' @param ... Ignored.
 #' @return A \code{DataFrame} with one row per (set, outcome), the
-#'   set-level columns repeated, plus \code{outcome}, \code{study},
-#'   \code{context},
-#'   \code{trait}, \code{dataForm} and \code{ldReference} (the name of the
-#'   \code{\link{ldReference}} entry the outcome's summary statistics were
-#'   matched against).
+#'   set-level columns repeated, plus \code{outcome}; \code{npcOutcome}, the
+#'   outcome's normalized probability of colocalization in the set
+#'   (colocboost's \code{npc_outcome}, which
+#'   \code{colocboost::get_robust_colocalization()} filters on with
+#'   \code{npc_outcome_cutoff}; \code{NA} where colocboost reported none);
+#'   and \code{study}, \code{context}, \code{trait}, \code{dataForm} and
+#'   \code{ldReference} (the name of the \code{\link{ldReference}} entry the
+#'   outcome's summary statistics were matched against).
 #' @examples
 #' # See colocboostPipeline(); a ColocBoostResult carries the mapping it needs.
 #' methods::existsMethod("colocBoostOutcomes", "ColocBoostResult")
@@ -772,13 +1019,14 @@ setMethod(
     md <- mcols(x, use.names = FALSE)
     outcomes <- as.list(md$outcomes)
     reps <- lengths(outcomes)
-    flat <- as.data.frame(md[, setdiff(colnames(md), "outcomes"), drop = FALSE])
+    flat <- as.data.frame(.cbrSetColumns(md))
     out <- mutate(
         as_tibble(
             flat[rep(seq_len(nrow(flat)), reps), , drop = FALSE],
             .name_repair = "minimal"
         ),
-        outcome = unlist(outcomes, use.names = FALSE)
+        outcome = unlist(outcomes, use.names = FALSE),
+        npcOutcome = unlist(md$npcOutcome, use.names = FALSE)
     )
     info <- x@outcomeInfo
     if (nrow(info) == 0L) {
@@ -859,3 +1107,110 @@ setGeneric("regionVcp", function(x, ...) standardGeneric("regionVcp"))
 #' @rdname regionVcp
 #' @export
 setMethod("regionVcp", "ColocBoostResult", function(x) x@regionVcp)
+
+#' @title The ColocBoost Fit Behind a Result
+#' @description The \code{colocboost} object one run of
+#'   \code{\link{colocboostPipeline}} returned, whole, for \pkg{colocboost}'s
+#'   own functions: \code{colocboost::colocboost_plot()},
+#'   \code{colocboost::get_robust_colocalization()},
+#'   \code{colocboost::get_cos()} and the rest. A result keeps one per run,
+#'   including a run that found no confidence set, unless it was made with
+#'   \code{fitRetention = "none"}.
+#' @param x A \code{\linkS4class{ColocBoostResult}}.
+#' @param analysis The run's analysis: \code{"xqtl_coloc"},
+#'   \code{"joint_gwas"} or \code{"separate_gwas"}. \code{NULL} (default)
+#'   matches any.
+#' @param gwasStudy For a \code{separate_gwas} run, the GWAS study it was
+#'   focal on. \code{NULL} (default) matches any.
+#' @param ... Ignored.
+#' @return A \code{colocboost} object. The selection must match exactly one
+#'   run; one matching none, or several, is an error naming the runs the
+#'   result holds.
+#' @examples
+#' data(colocboostResultExample)
+#' fit <- colocboostFit(colocboostResultExample)
+#' class(fit)
+#' fit$cos_details$cos_outcomes_npc
+#' # colocboost's own functions take it as they take their own output.
+#' if (requireNamespace("colocboost", quietly = TRUE)) {
+#'     robust <- colocboost::get_robust_colocalization(fit)
+#'     robust$cos_summary
+#' }
+#' @export
+setGeneric("colocboostFit", function(x, ...) standardGeneric("colocboostFit"))
+
+#' @rdname colocboostFit
+#' @importFrom checkmate assertString
+#' @export
+setMethod(
+    "colocboostFit",
+    "ColocBoostResult",
+    function(x, analysis = NULL, gwasStudy = NULL) {
+        assertString(analysis, null.ok = TRUE)
+        assertString(gwasStudy, null.ok = TRUE)
+        runs <- .cbrFitRuns(x@fits)
+        if (nrow(runs) == 0L) {
+            abort(c(
+                "This ColocBoostResult holds no colocboost fits.",
+                i = str_c(
+                    "colocboostPipeline() keeps them unless ",
+                    "`fitRetention = \"none\"`; a result saved before ",
+                    "results kept them has none."
+                )
+            ))
+        }
+        hit <- which(
+            .cbrFieldMatches(runs$analysis, analysis) &
+                .cbrFieldMatches(runs$gwasStudy, gwasStudy)
+        )
+        if (length(hit) != 1L) {
+            .cbrAbortFitSelection(runs, hit)
+        }
+        .cbrFitAt(x@fits, runs[hit, ])
+    }
+)
+
+# Which of `values` a selector `wanted` matches; NULL matches all.
+# @noRd
+.cbrFieldMatches <- function(values, wanted) {
+    if (is.null(wanted)) {
+        return(rep(TRUE, length(values)))
+    }
+    !is.na(values) & values == wanted
+}
+
+# @noRd
+.cbrAbortFitSelection <- function(runs, hit) {
+    if (length(hit) == 0L) {
+        abort(c(
+            "No colocboost fit matches the selection.",
+            i = str_c(
+                "This result holds: ",
+                str_flatten(.cbrRunLabels(runs), "; "),
+                "."
+            )
+        ))
+    }
+    abort(c(
+        str_c(
+            length(hit),
+            " colocboost fits match the selection; pass `analysis` and, ",
+            "for separate_gwas, `gwasStudy` to pick one."
+        ),
+        i = str_c(
+            "Matching: ",
+            str_flatten(.cbrRunLabels(runs[hit, ]), "; "),
+            "."
+        )
+    ))
+}
+
+# The fit of run `run` (one row of .cbrFitRuns()).
+# @noRd
+.cbrFitAt <- function(fits, run) {
+    entry <- fits[[run$analysis]]
+    if (is.na(run$gwasStudy)) {
+        return(entry)
+    }
+    entry[[run$gwasStudy]]
+}

@@ -32,6 +32,13 @@ carrying the marginal \code{vcp}. Collection-level: it spans the region,
 not the elements, so it cannot live in \code{mcols}.}
 
 \item{\code{computingTime}}{A list of per-analysis timings.}
+
+\item{\code{fits}}{The \code{colocboost} objects the runs returned, kept whole for
+\pkg{colocboost}'s own functions (see \code{\link{colocboostFit}}): each
+analysis's under its name, and an analysis run once per GWAS study
+(\code{separate_gwas}) as a list named by study. Empty for a result made
+with \code{fitRetention = "none"}. Like \code{regionVcp}, the fits
+describe the region rather than one set, so a subset keeps them all.}
 }}
 
 \seealso{

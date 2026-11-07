@@ -80,6 +80,7 @@ test_that("ColocBoostResult: rejects an element with no vcp layer", {
         isColocalized = TRUE
     )
     md$outcomes <- IRanges::CharacterList(list("t1"))
+    md$npcOutcome <- IRanges::NumericList(list(NA_real_))
     mcols(grl) <- md
     expect_error(
         new("ColocBoostResult", grl, outcomeInfo = .cbr_info()),
@@ -263,7 +264,10 @@ test_that("show on an empty ColocBoostResult stops after the header", {
 # fixture built one, leaving the whole ucos_details path unexecuted.
 # ===========================================================================
 
-.cbrWithUcos <- function(ucosIds = "ucos1:y1", outcome = "t1") {
+# `npc`, when given, is the set's outcome NPC, in the one table colocboost
+# reports for all outcome-specific sets: a row per set, its outcome named in
+# a column.
+.cbrWithUcos <- function(ucosIds = "ucos1:y1", outcome = "t1", npc = NULL) {
     res <- .cbr_fake()
     vars <- list("chr1:300:C:T")
     purity <- matrix(
@@ -272,21 +276,35 @@ test_that("show on an empty ColocBoostResult stops after the header", {
         ncol = length(ucosIds),
         dimnames = list(ucosIds, ucosIds)
     )
-    res$ucos_details <- list(
-        ucos = list(
-            ucos_index = set_names(list(3L), ucosIds),
-            ucos_variables = set_names(vars, ucosIds)
-        ),
-        ucos_outcomes = list(
-            outcome_name = set_names(list(outcome), ucosIds)
-        ),
-        ucos_purity = list(min_abs_cor = purity),
-        ucos_top_variables = data.frame(
-            top_index = 3L,
-            top_variables = unlist(vars),
-            row.names = ucosIds,
-            stringsAsFactors = FALSE
+    npcTable <- if (!is.null(npc)) {
+        list(
+            ucos_outcomes_npc = data.frame(
+                outcome = outcome,
+                outcomes_index = 1L,
+                relative_logLR = NA_real_,
+                npc_outcome = npc,
+                row.names = ucosIds
+            )
         )
+    }
+    res$ucos_details <- c(
+        list(
+            ucos = list(
+                ucos_index = set_names(list(3L), ucosIds),
+                ucos_variables = set_names(vars, ucosIds)
+            ),
+            ucos_outcomes = list(
+                outcome_name = set_names(list(outcome), ucosIds)
+            ),
+            ucos_purity = list(min_abs_cor = purity),
+            ucos_top_variables = data.frame(
+                top_index = 3L,
+                top_variables = unlist(vars),
+                row.names = ucosIds,
+                stringsAsFactors = FALSE
+            )
+        ),
+        npcTable
     )
     res
 }
@@ -624,4 +642,272 @@ test_that("ColocBoostResult() keeps the caller's metadata", {
         metadata = list(run = "r1")
     )
     expect_equal(S4Vectors::metadata(x), list(run = "r1"))
+})
+
+# ===========================================================================
+# The runs' colocboost objects, and each outcome's NPC
+#
+# colocboost's own functions (colocboost_plot(), get_robust_colocalization(),
+# get_cos(), ...) take nothing but its object, so a result that dropped it
+# left them unusable.
+# ===========================================================================
+
+# Three runs: the xQTL-only one and two separate GWAS ones.
+.cbrThreeRuns <- function() {
+    list(.cbr_fake(npc = 0.7), .cbr_fake(npc = 0.8), .cbr_fake(npc = 0.9))
+}
+
+.cbrFromRuns <- function(runs) {
+    ColocBoostResult(
+        runs,
+        c("xqtl_coloc", "separate_gwas", "separate_gwas"),
+        gwasStudy = c(NA, "G1", "G2"),
+        outcomeInfo = .cbr_info()
+    )
+}
+
+test_that("each run's colocboost object is kept whole", {
+    runs <- .cbrThreeRuns()
+    x <- .cbrFromRuns(runs)
+    expect_identical(colocboostFit(x, analysis = "xqtl_coloc"), runs[[1L]])
+    expect_identical(colocboostFit(x, gwasStudy = "G2"), runs[[3L]])
+    expect_identical(
+        colocboostFit(x, analysis = "separate_gwas", gwasStudy = "G1"),
+        runs[[2L]]
+    )
+    # By analysis, and by study for the per-study runs.
+    expect_named(x@fits, c("xqtl_coloc", "separate_gwas"))
+    expect_named(x@fits$separate_gwas, c("G1", "G2"))
+})
+
+test_that("colocboostFit() takes a selection that matches one run", {
+    x <- .cbrFromRuns(.cbrThreeRuns())
+    expect_error(colocboostFit(x), "3 colocboost fits match the selection")
+    expect_error(
+        colocboostFit(x, analysis = "separate_gwas"),
+        "analysis = \"separate_gwas\", gwasStudy = \"G2\"",
+        fixed = TRUE
+    )
+    expect_error(
+        colocboostFit(x, analysis = "joint_gwas"),
+        "No colocboost fit matches the selection"
+    )
+    expect_error(colocboostFit(x, analysis = c("a", "b")), "length 1")
+})
+
+test_that("a run that found no set keeps its fit, and a subset keeps all", {
+    found <- .cbr_fake()
+    none <- structure(list(cos_details = NULL), class = "colocboost")
+    x <- ColocBoostResult(
+        list(found, none),
+        c("xqtl_coloc", "joint_gwas"),
+        outcomeInfo = .cbr_info()
+    )
+    expect_equal(nrow(x), 1L)
+    expect_identical(colocboostFit(x, analysis = "joint_gwas"), none)
+    # Like regionVcp, the fits describe the region, not one set.
+    expect_identical(x[integer(0)]@fits, x@fits)
+    expect_identical(x[x$isColocalized]@fits, x@fits)
+    expect_identical(`[[<-`(x, 1L, value = x[[1L]])@fits, x@fits)
+})
+
+test_that("a result with no fits says why", {
+    x <- ColocBoostResult(list(), character(0), outcomeInfo = .cbr_info())
+    expect_identical(x@fits, list())
+    expect_error(colocboostFit(x), "holds no colocboost fits")
+    expect_error(colocboostFit(x), "fitRetention = \"none\"", fixed = TRUE)
+})
+
+# `x` holding `fits` in place of its own.
+.cbrWithFits <- function(x, fits) {
+    methods::slot(x, "fits", check = FALSE) <- fits
+    x
+}
+
+test_that("validity wants colocboost fits, holding every set's run", {
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_error(
+        methods::validObject(
+            .cbrWithFits(x, list(xqtl_coloc = list(stub = TRUE)))
+        ),
+        "must be colocboost objects, or lists of them named by GWAS study"
+    )
+    expect_error(
+        methods::validObject(.cbrWithFits(x, list(joint_gwas = .cbr_fake()))),
+        "sets come from runs fits does not hold: analysis = \"xqtl_coloc\"",
+        fixed = TRUE
+    )
+    expect_error(
+        methods::validObject(.cbrWithFits(x, list(.cbr_fake()))),
+        "fits entries must have unique, non-empty names"
+    )
+    # A result that kept none is valid: fitRetention = "none".
+    expect_true(methods::validObject(.cbrWithFits(x, list())))
+})
+
+test_that("runs of one analysis must each name their own GWAS study", {
+    twoRuns <- list(.cbr_fake(), .cbr_fake())
+    expect_error(
+        ColocBoostResult(
+            twoRuns,
+            c("xqtl_coloc", "xqtl_coloc"),
+            outcomeInfo = .cbr_info()
+        ),
+        "more than one `xqtl_coloc` run; each needs its own `gwasStudy`"
+    )
+    expect_error(
+        ColocBoostResult(
+            twoRuns,
+            "separate_gwas",
+            gwasStudy = c("G1", "G1"),
+            outcomeInfo = .cbr_info()
+        ),
+        "more than one `separate_gwas` run"
+    )
+})
+
+test_that("npcOutcome pairs each outcome with its NPC, matched by name", {
+    # colocboost orders a set's table by evidence, not as the set lists its
+    # outcomes.
+    x <- ColocBoostResult(
+        list(.cbr_fake(outcomeNpc = list(c(t2 = 0.6, t1 = 0.95)))),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_equal(as.list(x$npcOutcome), list(c(0.95, 0.6)))
+    out <- colocBoostOutcomes(x)
+    expect_equal(
+        out$npcOutcome[match(c("t1", "t2"), out$outcome)],
+        c(0.95, 0.6)
+    )
+    # The per-outcome values are not set-level columns.
+    expect_false(is_in("npcOutcome", colnames(colocPairs(x))))
+    expect_false(is_in(
+        "npcOutcome",
+        colnames(S4Vectors::mcols(colocVariants(x)))
+    ))
+    # A run that reports none leaves NA, one per outcome.
+    plain <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_equal(as.list(plain$npcOutcome), list(c(NA_real_, NA_real_)))
+})
+
+test_that("an outcome-specific set reads its NPC from the shared table", {
+    x <- ColocBoostResult(
+        list(.cbrWithUcos(npc = 0.97)),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    expect_equal(x$npcOutcome[[which(!x$isColocalized)]], 0.97)
+    # A table that does not list the set, or no table at all, leaves NA.
+    unlisted <- list(
+        ucos_outcomes_npc = data.frame(
+            outcome = "t1",
+            npc_outcome = 0.5,
+            row.names = "ucos9:y1"
+        )
+    )
+    expect_equal(.cbrUcosNpcOutcome(unlisted, "ucos1:y1", "t1"), NA_real_)
+    expect_equal(.cbrUcosNpcOutcome(list(), "ucos1:y1", "t1"), NA_real_)
+})
+
+test_that("validity wants one npcOutcome per outcome", {
+    x <- ColocBoostResult(
+        list(.cbr_fake()),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    md <- S4Vectors::mcols(x, use.names = FALSE)
+    uneven <- S4Vectors::`mcols<-`(
+        x,
+        value = cbind(
+            .cbrSetColumns(md),
+            S4Vectors::DataFrame(
+                outcomes = md$outcomes,
+                npcOutcome = IRanges::NumericList(list(0.5))
+            )
+        )
+    )
+    expect_error(
+        methods::validObject(uneven),
+        "npcOutcome must hold one value per outcome; set(s) 1 do not",
+        fixed = TRUE
+    )
+    untyped <- S4Vectors::`mcols<-`(
+        x,
+        value = cbind(
+            .cbrSetColumns(md),
+            S4Vectors::DataFrame(
+                outcomes = md$outcomes,
+                npcOutcome = IRanges::CharacterList(list(c("a", "b")))
+            )
+        )
+    )
+    expect_error(methods::validObject(untyped), "must be a NumericList")
+})
+
+# `x` as saved before results kept their runs' fits and outcomes' NPC.
+.cbrSavedBeforeFits <- function(x) {
+    md <- attr(x, "elementMetadata")
+    old <- x
+    attr(old, "fits") <- NULL
+    attr(old, "elementMetadata") <- md[,
+        setdiff(colnames(md), "npcOutcome"),
+        drop = FALSE
+    ]
+    old
+}
+
+test_that("updateObject gives an old result no fits and NA outcome NPC", {
+    x <- ColocBoostResult(
+        list(.cbr_fake(outcomeNpc = list(c(t1 = 0.9, t2 = 0.8)))),
+        "xqtl_coloc",
+        outcomeInfo = .cbr_info()
+    )
+    old <- .cbrSavedBeforeFits(x)
+    expect_null(attr(old, "fits"))
+    new <- updateObject(old)
+    expect_true(methods::validObject(new, complete = TRUE))
+    expect_identical(new@fits, list())
+    expect_equal(as.list(new$npcOutcome), list(c(NA_real_, NA_real_)))
+    expect_identical(updateObject(new), new)
+})
+
+test_that("colocboost's own functions take the fit a result keeps", {
+    skip_if_not_installed("colocboost")
+    set.seed(1)
+    n <- 400L
+    p <- 60L
+    X <- MASS::mvrnorm(n, rep(0, p), 0.9^abs(outer(1:p, 1:p, "-")))
+    colnames(X) <- str_c("chr1:", seq_len(p) * 100L, ":A:G")
+    b <- matrix(0, p, 3L)
+    b[10L, 1:2] <- 0.5
+    b[45L, 3L] <- 0.6
+    Y <- X %*% b + matrix(rnorm(n * 3L), n, 3L)
+    fit <- suppressWarnings(suppressMessages(
+        colocboost::colocboost(X = X, Y = Y, output_level = 2L)
+    ))
+    info <- mutate(
+        .cbr_info(c("Y1", "Y2", "Y3")),
+        context = c("a", "b", "c")
+    )
+    x <- ColocBoostResult(list(fit), "xqtl_coloc", outcomeInfo = info)
+    kept <- colocboostFit(x)
+    expect_identical(kept, fit)
+    robust <- suppressMessages(colocboost::get_robust_colocalization(kept))
+    expect_s3_class(robust, "colocboost")
+    # npcOutcome is colocboost's npc_outcome, outcome by outcome.
+    set1 <- which(x$isColocalized)[[1L]]
+    npc <- fit$cos_details$cos_outcomes_npc[[x$cosId[[set1]]]]
+    expect_equal(
+        x$npcOutcome[[set1]],
+        npc$npc_outcome[match(x$outcomes[[set1]], rownames(npc))]
+    )
 })

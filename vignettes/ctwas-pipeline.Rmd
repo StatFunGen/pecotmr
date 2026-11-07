@@ -105,7 +105,7 @@ data(ctwasWeightsExample)
 res <- ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = "susie",
+    weightSelectionParam = WeightSelectionParam(methods = "susie"),
     ctwasPriorParam = CtwasPriorParam(
         thin = 1,
         niterPrefit = 3,
@@ -190,7 +190,7 @@ weight's own method, such as an ensemble, names no fine-mapping fit.
 ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = "susie",
+    weightSelectionParam = WeightSelectionParam(methods = "susie"),
     fineMappingResult = fmr,
     fineMappingMethod = "susie",
     variantPruningParam = VariantPruningParam(
@@ -278,7 +278,7 @@ re-enter the chain without recomputing what came before.
 inputs <- assembleCtwasInputs(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = "susie"
+    weightSelectionParam = WeightSelectionParam(methods = "susie")
 )
 est <- estCtwasGroupPriors(
     inputs,
@@ -361,7 +361,9 @@ merged <- mergeCtwasBoundaryRegions(
 ctwasPipeline(
     gwasSumStats = gwasByRegion,
     twasWeights = list(ctwasWeightsExample),
-    method = NULL, # NULL: the TwasWeights' "ensemble" weights
+    # Each gene's best method by CV r-squared, as causalInferencePipeline()
+    # chooses it
+    weightSelectionParam = WeightSelectionParam(methods = "best"),
     maxNumSingleEffects = 5,
     BPPARAM = BiocParallel::SerialParam(),
     keepSnps = FALSE,
@@ -377,10 +379,17 @@ ctwasPipeline(
 )
 ```
 
-With `method = NULL` a run uses the TwasWeights' pre-combined `"ensemble"`
-weights. Weights without an ensemble, and a `QtlFineMappingResult` used as
-the weight source, leave the choice open, so the pipeline asks for `method`.
-Each run reads one method; compare methods by running each in turn.
+`weightSelectionParam` chooses each gene's weights as it does for
+`causalInferencePipeline()`, so a `twasZ` made with the same choice has a Z
+for every gene. A cTWAS run models one weight per gene:
+
+- `"best"` (the default) is one run, each gene on its own best method by
+    cross-validated r-squared, labelled `method = "best"`. A gene whose
+    methods carry no r-squared to pick one by is refused unless it has
+    just one.
+- `"all"`, or several named methods, runs cTWAS once per method, one after
+    another, the results labelled by method in one `CtwasResult`.
+- A single named method is one run, labelled by it.
 
 ## Next steps
 

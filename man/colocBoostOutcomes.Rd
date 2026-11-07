@@ -16,11 +16,14 @@ colocBoostOutcomes(x, ...)
 }
 \value{
 A \code{DataFrame} with one row per (set, outcome), the
-  set-level columns repeated, plus \code{outcome}, \code{study},
-  \code{context},
-  \code{trait}, \code{dataForm} and \code{ldReference} (the name of the
-  \code{\link{ldReference}} entry the outcome's summary statistics were
-  matched against).
+  set-level columns repeated, plus \code{outcome}; \code{npcOutcome}, the
+  outcome's normalized probability of colocalization in the set
+  (colocboost's \code{npc_outcome}, which
+  \code{colocboost::get_robust_colocalization()} filters on with
+  \code{npc_outcome_cutoff}; \code{NA} where colocboost reported none);
+  and \code{study}, \code{context}, \code{trait}, \code{dataForm} and
+  \code{ldReference} (the name of the \code{\link{ldReference}} entry the
+  outcome's summary statistics were matched against).
 }
 \description{
 One row per (confidence set, colocalized outcome), joined to
