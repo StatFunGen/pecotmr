@@ -62,5 +62,8 @@ supplied.
 \examples{
 Bhat <- matrix(rnorm(15), 5, 3)
 Shat <- matrix(abs(rnorm(15)) + 0.1, 5, 3)
-buildMrmashPriorMatrices(Bhat = Bhat, Shat = Shat)
+priors <- buildMrmashPriorMatrices(Bhat = Bhat, Shat = Shat)
+length(priors$S0)
+head(names(priors$S0))
+priors$priorGrid
 }

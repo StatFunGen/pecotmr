@@ -113,7 +113,9 @@ gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
   ldReference = ldStem, which = blocks)
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
-assembleCtwasInputs(gwasSumStats = gwasByRegion,
+inputs <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
   twasWeights = list(ctwasWeightsExample),
   weightSelectionParam = WeightSelectionParam(methods = "susie"))
+names(inputs)
+inputs$z_gene
 }

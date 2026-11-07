@@ -2236,10 +2236,30 @@ test_that("a saved payload holds each region's LD once, and no source", {
     )
     ld <- pecotmr:::.ctwasMultiBlockLdLoader(panels)
     info <- pecotmr:::.ctwasMultiBlockSnpInfoLoader(panels)
-    expect_identical(attr(ld, "ldPanelsByRegion"), panels)
+    expect_identical(as.list(attr(ld, "ldPanelsByRegion")), panels)
     expect_identical(names(attr(info, "ldPanelsByRegion")$tokenA), "snpInfo")
     expect_null(attr(ld, "srcref"))
     expect_null(attr(info, "srcref"))
+})
+
+test_that("a printed loader shows its panel cache's tokens, not its LD", {
+    # The cache travels on the loader, so printing a payload printed every
+    # region's LD matrix and snpInfo table. Each loader is measured against
+    # its bare function, whose own print a coverage run lengthens.
+    panels <- list(
+        tokenA = list(R = diag(40), snpInfo = data.frame(id = seq_len(40)))
+    )
+    ld <- capture.output(print(pecotmr:::.ctwasMultiBlockLdLoader(panels)))
+    info <- capture.output(
+        print(pecotmr:::.ctwasMultiBlockSnpInfoLoader(panels))
+    )
+    ldBare <- capture.output(print(removeSource(pecotmr:::.ctwasLoadRegionLd)))
+    infoBare <- capture.output(
+        print(removeSource(pecotmr:::.ctwasLoadRegionSnpInfo))
+    )
+    expect_lt(length(ld) - length(ldBare), 5L)
+    expect_lt(length(info) - length(infoBare), 5L)
+    expect_true(any(grepl("tokenA", ld)))
 })
 
 # ===========================================================================
@@ -4851,6 +4871,17 @@ test_that("the panel cache is NULL for loaders this package did not build", {
     expect_null(
         pecotmr:::.ctwasCachedPanels(list(LD_loader_fun = function(x) x))
     )
+})
+
+test_that("a payload saved with a plain-list panel cache still reads", {
+    # Loaders built before the cache became a SimpleList carry a plain list.
+    panels <- list(tokenA = list(R = diag(2)))
+    loader <- `attr<-`(pecotmr:::.ctwasLoadRegionLd, "ldPanelsByRegion", panels)
+    expect_identical(
+        pecotmr:::.ctwasCachedPanels(list(LD_loader_fun = loader)),
+        panels
+    )
+    expect_identical(loader("tokenA"), diag(2))
 })
 
 

@@ -39,5 +39,7 @@ prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
   components = "canonical")
 model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
   vhat = vhat)
-updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
+subModel <- updateMashModelCov(model, allSamples = conds,
+  samples = conds[1:3])
+dim(subModel$fitted_g$Ulist[[1]])
 }

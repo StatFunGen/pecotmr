@@ -52,5 +52,6 @@ Extract the SuSiE fit object from a fine-mapping entry or
 }
 \examples{
 data(qtlFineMappingExample)
-susieFit(qtlFineMappingExample)
+fit <- susieFit(qtlFineMappingExample)
+fit$sets$cs
 }

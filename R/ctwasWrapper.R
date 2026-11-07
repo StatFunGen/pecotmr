@@ -223,7 +223,8 @@ ctwasCombinedPips <- function(x, mapping = NULL) {
 #' @importFrom purrr map compact
 #' @examples
 #' data(ctwasEstExample)
-#' screenCtwasRegions(ctwasEstExample)
+#' screened <- screenCtwasRegions(ctwasEstExample)
+#' names(screened$screened_region_data)
 #' @export
 screenCtwasRegions <- function(
     estResult,

@@ -99,7 +99,9 @@ cond <- c("brain", "blood", "muscle")
 zmat <- matrix(rnorm(30 * 3), 30, 3,
   dimnames = list(colnames(X), cond))
 stat <- list(z = zmat, n = nrow(X), variantNames = colnames(X))
-mrmashRssWeights(stat, LdMatrix(cor(X)),
+w <- mrmashRssWeights(stat, LdMatrix(cor(X)),
   dataDrivenPriorMatrices = multiTraitData$priorMatrices,
-  canonicalPriorMatrices = TRUE)
+  canonicalPriorMatrices = TRUE,
+  methodArgs = MrmashRssOptions(verbose = FALSE))
+head(w)
 }

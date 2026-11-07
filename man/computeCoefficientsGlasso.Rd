@@ -29,5 +29,7 @@ Fit a group-lasso (one group per response) to obtain initial estimates of the
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
-computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE, Xnew = NULL)
+coefs <- computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE,
+  Xnew = NULL)
+head(coefs$Bhat)
 }

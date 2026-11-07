@@ -1544,7 +1544,9 @@ mashPosteriorContrast <- function(
 #'   components = "canonical")
 #' model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
 #'   vhat = vhat)
-#' updateMashModelCov(model, allSamples = conds, samples = conds[1:3])
+#' subModel <- updateMashModelCov(model, allSamples = conds,
+#'   samples = conds[1:3])
+#' dim(subModel$fitted_g$Ulist[[1]])
 #' @importFrom checkmate assertCharacter
 #' @export
 updateMashModelCov <- function(mashModel, allSamples, samples) {

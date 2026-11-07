@@ -1,5 +1,8 @@
 url: https://statfungen.github.io/pecotmr
 
+# No llms.txt or .md copy of every page.
+llm-docs: false
+
 template:
  bootstrap: 5
  light-switch: true

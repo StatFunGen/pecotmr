@@ -221,7 +221,9 @@ setGeneric(
 #' @return A numeric matrix of LD scores (SNPs x annotations+1).
 #' @examples
 #' data(ldEigenExample)
-#' computeLdScores(ldEigenExample)
+#' scores <- computeLdScores(ldEigenExample)
+#' dim(scores)
+#' head(scores)
 #' @export
 setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
     standardGeneric("computeLdScores")
@@ -910,7 +912,9 @@ setGeneric("ldMatrix", function(x) standardGeneric("ldMatrix"))
 #' @return A numeric matrix, a list of matrices, or \code{NULL}.
 #' @examples
 #' data(qtlDatasetExample)
-#' genotypes(qtlDatasetExample)
+#' geno <- genotypes(qtlDatasetExample)
+#' dim(geno)
+#' geno[1:5, 1:3]
 #' @export
 setGeneric("genotypes", function(x, ...) standardGeneric("genotypes"))
 
@@ -936,7 +940,9 @@ setGeneric("genotypes", function(x, ...) standardGeneric("genotypes"))
 #' @return Character vector of variant IDs.
 #' @examples
 #' data(qtlFineMappingExample)
-#' variantIds(qtlFineMappingExample)
+#' ids <- variantIds(qtlFineMappingExample)
+#' length(ids)
+#' head(ids)
 #' @export
 setGeneric("variantIds", function(x, ...) standardGeneric("variantIds"))
 
@@ -1052,7 +1058,8 @@ setGeneric("adjustPips", function(x, keepVariants, ...) {
 #' @return A named numeric vector of PIPs.
 #' @examples
 #' data(qtlFineMappingExample)
-#' pip(qtlFineMappingExample)
+#' pips <- pip(qtlFineMappingExample)
+#' head(sort(pips, decreasing = TRUE))
 #' @export
 setGeneric("pip", function(x, ...) standardGeneric("pip"))
 
@@ -1077,7 +1084,8 @@ setGeneric("pip", function(x, ...) standardGeneric("pip"))
 #' @return A list (the SuSiE fit object).
 #' @examples
 #' data(qtlFineMappingExample)
-#' susieFit(qtlFineMappingExample)
+#' fit <- susieFit(qtlFineMappingExample)
+#' fit$sets$cs
 #' @export
 setGeneric("susieFit", function(x, ...) standardGeneric("susieFit"))
 
@@ -1803,7 +1811,9 @@ setGeneric("traitPosition", function(x, ...) {
 #' @return A numeric matrix (samples x variants).
 #' @examples
 #' data(qtlDatasetExample)
-#' residualizedGenotypes(qtlDatasetExample, context = "brain")
+#' resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
+#' dim(resid)
+#' round(resid[1:5, 1:3], 3)
 #' @export
 setGeneric("residualizedGenotypes", function(x, ...) {
     standardGeneric("residualizedGenotypes")
@@ -1927,7 +1937,10 @@ setGeneric("pgenPtr", function(x) standardGeneric("pgenPtr"))
 #'   whose eigenvalue is exactly zero, which it does not list.
 #' @examples
 #' data(ldEigenExample)
-#' eigenList(ldEigenExample)
+#' eig <- eigenList(ldEigenExample)
+#' length(eig)
+#' names(eig[[1]])
+#' head(eig[[1]]$values)
 #' @export
 setGeneric("eigenList", function(x) standardGeneric("eigenList"))
 
@@ -1964,7 +1977,10 @@ setGeneric("inSample", function(x) standardGeneric("inSample"))
 #'   \code{snpIdx}; empty for a scores-only \code{LdScore}.
 #' @examples
 #' data(ldScoreExample)
-#' ldMatrixList(ldScoreExample)
+#' ld <- ldMatrixList(ldScoreExample)
+#' length(ld)
+#' dim(ld[[1]]$R)
+#' round(ld[[1]]$R[1:3, 1:3], 3)
 #' @export
 setGeneric("ldMatrixList", function(x) standardGeneric("ldMatrixList"))
 

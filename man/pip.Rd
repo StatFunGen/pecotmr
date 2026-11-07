@@ -50,5 +50,6 @@ Extract posterior inclusion probabilities from a
 }
 \examples{
 data(qtlFineMappingExample)
-pip(qtlFineMappingExample)
+pips <- pip(qtlFineMappingExample)
+head(sort(pips, decreasing = TRUE))
 }

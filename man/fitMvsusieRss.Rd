@@ -61,5 +61,6 @@ stat <- list(
   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
   n = rep(nrow(X), ncol(X)))
 LD <- cor(X)
-fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
+fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
+head(sort(fit$pip, decreasing = TRUE))
 }

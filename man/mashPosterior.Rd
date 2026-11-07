@@ -81,7 +81,10 @@ prior <- mashPriorCovariances(ssl, alpha = 0, vhat = vhat,
   components = "canonical")
 model <- mashModelFit(ssl, alpha = 0, priorCovariances = prior,
   vhat = vhat)
-mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0, vhat = vhat)
+post <- mashPosterior(model, mk("strong.b", "strong.s"), alpha = 0,
+  vhat = vhat)
+names(post)
+round(post$PosteriorMean[1:3, 1:3], 3)
 }
 \seealso{
 \code{\link{mashModelFit}}, \code{\link{fitMashContrast}}

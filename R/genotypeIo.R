@@ -1694,8 +1694,10 @@ matchVariantsToKeep <- function(variantInfo, keepVariantsPath) {
 #' @examples
 #' stem <- sub("[.]bed$", "",
 #'   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-#' loadGenotypeRegion(genotype = stem,
+#' geno <- loadGenotypeRegion(genotype = stem,
 #'   which = GenomicRanges::GRanges("chr22:1-100000000"))
+#' dim(geno)
+#' geno[1:5, 1:4]
 #' @export
 loadGenotypeRegion <- function(
     genotype,
