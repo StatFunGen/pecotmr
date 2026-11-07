@@ -36,5 +36,6 @@ Step 3 of the three-step \code{\link{ctwasPipeline}}: runs
 }
 \examples{
 data(ctwasEstExample)
-screenCtwasRegions(ctwasEstExample)
+screened <- screenCtwasRegions(ctwasEstExample)
+names(screened$screened_region_data)
 }

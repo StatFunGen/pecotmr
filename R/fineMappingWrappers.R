@@ -2824,8 +2824,9 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #' data(multiTraitData)
 #' X <- multiTraitData$X[, 1:60]
 #' Y <- multiTraitData$Y
-#' fitMvsusie(X, Y,
+#' fit <- fitMvsusie(X, Y,
 #'   prior_variance = buildMvsusieMixturePrior(conditionNames = colnames(Y)))
+#' head(sort(fit$pip, decreasing = TRUE))
 #' }
 #' @importFrom checkmate assertNumber
 #' @export
@@ -2889,7 +2890,8 @@ fitMvsusie <- function(
 #'   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
 #'   n = rep(nrow(X), ncol(X)))
 #' LD <- cor(X)
-#' fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
+#' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
+#' head(sort(fit$pip, decreasing = TRUE))
 #' @importFrom checkmate assertNumber
 #' @export
 fitMvsusieRss <- function(
@@ -3103,7 +3105,8 @@ buildMvsusieMixturePrior <- function(
 #' Y <- matrix(rep(base, each = n), n, nPos) +
 #'   X[, 1] %o% (0.5 * cos(seq(0, pi, length.out = nPos)))
 #' pos <- seq_len(nPos)
-#' fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(maxit = 5))
+#' fit <- fitFsusie(X, Y, pos = pos, methodArgs = FsusieOptions(maxit = 5))
+#' fit$cs
 #' @export
 fitFsusie <- function(
     X,

@@ -69,5 +69,7 @@ Extract variant ID vector from an object that carries one (e.g.,
 }
 \examples{
 data(qtlFineMappingExample)
-variantIds(qtlFineMappingExample)
+ids <- variantIds(qtlFineMappingExample)
+length(ids)
+head(ids)
 }

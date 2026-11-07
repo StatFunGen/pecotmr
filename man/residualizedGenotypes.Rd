@@ -39,5 +39,7 @@ Residualize the genotype matrix against the per-context
 }
 \examples{
 data(qtlDatasetExample)
-residualizedGenotypes(qtlDatasetExample, context = "brain")
+resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
+dim(resid)
+round(resid[1:5, 1:3], 3)
 }

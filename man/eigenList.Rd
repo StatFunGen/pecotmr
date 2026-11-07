@@ -27,5 +27,8 @@ Return the per-block eigendecompositions of an
 }
 \examples{
 data(ldEigenExample)
-eigenList(ldEigenExample)
+eig <- eigenList(ldEigenExample)
+length(eig)
+names(eig[[1]])
+head(eig[[1]]$values)
 }

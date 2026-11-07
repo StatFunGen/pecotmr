@@ -1007,9 +1007,11 @@ mrmashWeights <- function(
 #' zmat <- matrix(rnorm(30 * 3), 30, 3,
 #'   dimnames = list(colnames(X), cond))
 #' stat <- list(z = zmat, n = nrow(X), variantNames = colnames(X))
-#' mrmashRssWeights(stat, LdMatrix(cor(X)),
+#' w <- mrmashRssWeights(stat, LdMatrix(cor(X)),
 #'   dataDrivenPriorMatrices = multiTraitData$priorMatrices,
-#'   canonicalPriorMatrices = TRUE)
+#'   canonicalPriorMatrices = TRUE,
+#'   methodArgs = MrmashRssOptions(verbose = FALSE))
+#' head(w)
 #' @export
 #' @importFrom checkmate assertFlag assertList
 mrmashRssWeights <- function(
@@ -7070,7 +7072,9 @@ dprVbWeights <- function(
 #' X <- matrix(rnorm(n * p), n, p)
 #' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
 #' y <- X[, 1] * 0.5 + rnorm(n)
-#' dprGibbsWeights(X, y, sStep = 500)
+#' # show_progress = FALSE turns off RcppDPR's progress bar.
+#' dprGibbsWeights(X, y, sStep = 500,
+#'   methodArgs = DprOptions(show_progress = FALSE))
 #' @importFrom checkmate assertCount assertFlag
 #' @export
 dprGibbsWeights <- function(
@@ -7106,7 +7110,8 @@ dprGibbsWeights <- function(
 #' X <- matrix(rnorm(n * p), n, p)
 #' colnames(X) <- sprintf("chr1:%d:A:G", 100L * (1:p))
 #' y <- X[, 1] * 0.5 + rnorm(n)
-#' dprAdaptiveGibbsWeights(X, y)
+#' dprAdaptiveGibbsWeights(X, y,
+#'   methodArgs = DprOptions(show_progress = FALSE))
 #' @importFrom checkmate assertFlag
 #' @export
 dprAdaptiveGibbsWeights <- function(
@@ -7627,7 +7632,9 @@ mrmashWrapper <- function(
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' Y <- matrix(rnorm(nrow(X) * 3), nrow(X), 3)
-#' computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE, Xnew = NULL)
+#' coefs <- computeCoefficientsGlasso(X = X, Y = Y, standardize = TRUE,
+#'   Xnew = NULL)
+#' head(coefs$Bhat)
 #' @importFrom checkmate assertFlag
 #' @export
 computeCoefficientsGlasso <- function(X, Y, standardize, Xnew = NULL) {
@@ -8013,7 +8020,10 @@ MrmashPriorParam <- function(
 #' @examples
 #' Bhat <- matrix(rnorm(15), 5, 3)
 #' Shat <- matrix(abs(rnorm(15)) + 0.1, 5, 3)
-#' buildMrmashPriorMatrices(Bhat = Bhat, Shat = Shat)
+#' priors <- buildMrmashPriorMatrices(Bhat = Bhat, Shat = Shat)
+#' length(priors$S0)
+#' head(names(priors$S0))
+#' priors$priorGrid
 #' @export
 buildMrmashPriorMatrices <- function(
     Bhat,

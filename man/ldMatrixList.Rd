@@ -25,5 +25,8 @@ Return the per-block LD correlation matrices g-LDSC forms its
 }
 \examples{
 data(ldScoreExample)
-ldMatrixList(ldScoreExample)
+ld <- ldMatrixList(ldScoreExample)
+length(ld)
+dim(ld[[1]]$R)
+round(ld[[1]]$R[1:3, 1:3], 3)
 }

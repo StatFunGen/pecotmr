@@ -56,7 +56,8 @@ library(susieR)
 data(multiTraitData)
 X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y
-fitMvsusie(X, Y,
+fit <- fitMvsusie(X, Y,
   prior_variance = buildMvsusieMixturePrior(conditionNames = colnames(Y)))
+head(sort(fit$pip, decreasing = TRUE))
 }
 }

@@ -27,5 +27,7 @@ Extract a genotype matrix from an object that carries genotype
 }
 \examples{
 data(qtlDatasetExample)
-genotypes(qtlDatasetExample)
+geno <- genotypes(qtlDatasetExample)
+dim(geno)
+geno[1:5, 1:3]
 }

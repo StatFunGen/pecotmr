@@ -101,12 +101,15 @@ p <- 8
 X <- matrix(rnorm(n * p), n, p)
 colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:p))
 y <- X[, 1] * 0.5 + rnorm(n)
-dprGibbsWeights(X, y, sStep = 500)
+# show_progress = FALSE turns off RcppDPR's progress bar.
+dprGibbsWeights(X, y, sStep = 500,
+  methodArgs = DprOptions(show_progress = FALSE))
 set.seed(1)
 n <- 50
 p <- 8
 X <- matrix(rnorm(n * p), n, p)
 colnames(X) <- sprintf("chr1:\%d:A:G", 100L * (1:p))
 y <- X[, 1] * 0.5 + rnorm(n)
-dprAdaptiveGibbsWeights(X, y)
+dprAdaptiveGibbsWeights(X, y,
+  methodArgs = DprOptions(show_progress = FALSE))
 }

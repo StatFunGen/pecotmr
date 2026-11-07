@@ -30,5 +30,7 @@ Compute LD scores from an LD reference, optionally stratified by
 }
 \examples{
 data(ldEigenExample)
-computeLdScores(ldEigenExample)
+scores <- computeLdScores(ldEigenExample)
+dim(scores)
+head(scores)
 }

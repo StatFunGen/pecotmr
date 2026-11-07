@@ -66,5 +66,6 @@ est <- estCtwasGroupPriors(inp,
     )
   ))
 screened <- screenCtwasRegions(est)
-finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
+finemapped <- finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
+head(finemapped$finemap_res)
 }

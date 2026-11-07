@@ -67,5 +67,6 @@ Step 4 of the cTWAS pipeline, on by default in
 }
 \examples{
 data(ctwasFinemapExample)
-mergeCtwasBoundaryRegions(ctwasFinemapExample)
+merged <- mergeCtwasBoundaryRegions(ctwasFinemapExample)
+head(merged$finemap_res)
 }

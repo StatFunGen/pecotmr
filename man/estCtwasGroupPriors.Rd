@@ -48,7 +48,7 @@ Step 2 of the three-step \code{\link{ctwasPipeline}}: assembles
 }
 \examples{
 data(ctwasInputsExample)
-estCtwasGroupPriors(ctwasInputsExample,
+est <- estCtwasGroupPriors(ctwasInputsExample,
   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),
   methodArgs = CtwasOptions(
@@ -57,4 +57,5 @@ estCtwasGroupPriors(ctwasInputsExample,
       min_group_size = 1, min_p_single_effect = 0
     )
   ))
+est$param[c("group_prior", "group_prior_var")]
 }

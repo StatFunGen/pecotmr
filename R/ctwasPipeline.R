@@ -625,9 +625,11 @@ ctwasPipeline <- function(
 #'   ldReference = ldStem, which = blocks)
 #' gwasByRegion <- summaryStatsQc(gss,
 #'   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
-#' assembleCtwasInputs(gwasSumStats = gwasByRegion,
+#' inputs <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
 #'   twasWeights = list(ctwasWeightsExample),
 #'   weightSelectionParam = WeightSelectionParam(methods = "susie"))
+#' names(inputs)
+#' inputs$z_gene
 #' @export
 assembleCtwasInputs <- function(
     gwasSumStats,
@@ -1232,7 +1234,7 @@ assembleCtwasInputs <- function(
 #'   \code{boundary_genes}, \code{z_gene}, and \code{param}.
 #' @examples
 #' data(ctwasInputsExample)
-#' estCtwasGroupPriors(ctwasInputsExample,
+#' est <- estCtwasGroupPriors(ctwasInputsExample,
 #'   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
 #'     fallbackToPrefit = TRUE),
 #'   methodArgs = CtwasOptions(
@@ -1241,6 +1243,7 @@ assembleCtwasInputs <- function(
 #'       min_group_size = 1, min_p_single_effect = 0
 #'     )
 #'   ))
+#' est$param[c("group_prior", "group_prior_var")]
 #' @export
 estCtwasGroupPriors <- function(
     inputs,
@@ -1419,7 +1422,8 @@ estCtwasGroupPriors <- function(
 #'     )
 #'   ))
 #' screened <- screenCtwasRegions(est)
-#' finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
+#' finemapped <- finemapCtwasRegions(screened, maxNumSingleEffects = 5L)
+#' head(finemapped$finemap_res)
 #' @export
 finemapCtwasRegions <- function(
     screenResult,
@@ -1514,7 +1518,8 @@ finemapCtwasRegions <- function(
 #'   inputs as the "updated" values, so the result is effectively unchanged.
 #' @examples
 #' data(ctwasFinemapExample)
-#' mergeCtwasBoundaryRegions(ctwasFinemapExample)
+#' merged <- mergeCtwasBoundaryRegions(ctwasFinemapExample)
+#' head(merged$finemap_res)
 #' @export
 mergeCtwasBoundaryRegions <- function(
     finemapResult,
@@ -4124,15 +4129,21 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# The panel cache a payload's loader carries, or NULL when the payload
-# carries loaders this package did not create.
+# The panel cache a payload's loader carries, as a plain list, or NULL when
+# the payload carries loaders this package did not create. A payload saved
+# before the cache became a SimpleList holds a plain list, which as.list()
+# returns as it is.
 # @noRd
 .ctwasCachedPanels <- function(payload) {
     loader <- payload$LD_loader_fun
     if (!is.function(loader)) {
         return(NULL)
     }
-    attr(loader, "ldPanelsByRegion")
+    panels <- attr(loader, "ldPanelsByRegion")
+    if (is.null(panels)) {
+        return(NULL)
+    }
+    as.list(panels)
 }
 
 # Multi-block LD loader for ctwas. ctwas invokes
@@ -4144,15 +4155,18 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # cache travels on the function object itself, as its `ldPanelsByRegion`
 # attribute: .ctwasLoadRegionLd() reads it back through sys.function(), and
 # .ctwasCachedPanels() reads the same attribute, so the cache has one home.
-# The function goes without its source references: a payload is saved, and
-# a function loaded with them would carry its whole source file along.
+# The cache is a SimpleList, which prints as its length and tokens: printed
+# as a plain list, it put every region's LD on the screen whenever a payload
+# was printed. The function goes without its source references: a payload
+# is saved, and a function loaded with them would carry its whole source
+# file along.
 # @noRd
 #' @importFrom utils removeSource
 .ctwasMultiBlockLdLoader <- function(ldPanelsByRegion) {
     `attr<-`(
         removeSource(.ctwasLoadRegionLd),
         "ldPanelsByRegion",
-        ldPanelsByRegion
+        SimpleList(ldPanelsByRegion)
     )
 }
 
@@ -4174,7 +4188,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     `attr<-`(
         removeSource(.ctwasLoadRegionSnpInfo),
         "ldPanelsByRegion",
-        map(ldPanelsByRegion, .ctwasSnpInfoPanel)
+        SimpleList(map(ldPanelsByRegion, .ctwasSnpInfoPanel))
     )
 }
 
