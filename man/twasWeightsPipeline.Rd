@@ -26,6 +26,7 @@ twasWeightsPipeline(data, ...)
   crossValidationParam = CrossValidationParam(),
   ensembleParam = EnsembleParam(),
   estimatePi = TRUE,
+  h2 = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
@@ -46,6 +47,7 @@ twasWeightsPipeline(data, ...)
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
+  h2 = NULL,
   fitRetention = c("slim", "none", "full"),
   verbose = 1L,
   panelFilterParam = PanelFilterParam(),
@@ -68,6 +70,7 @@ twasWeightsPipeline(data, ...)
   twasWeights = NULL,
   mashPrior = NULL,
   estimatePi = TRUE,
+  h2 = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
@@ -229,6 +232,24 @@ ensemble row.}
 \item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
 before BGLR / qgg spike-and-slab methods that consume it.}
 
+\item{h2}{The heritability given, trait by trait, to the methods that can
+start from one: the Bayesian alphabet (\code{bayesA} to \code{bayesR},
+as their \code{h2}) and, on summary statistics, LDpred2
+(\code{ldpred2Auto}'s \code{h2Init}, and the centre of
+\code{ldpred2Grid}'s grid). \code{NULL} (the default) gives none, so
+each keeps its own default. An estimator estimates each trait's first,
+once, on the variants, samples and LD its methods fit: \code{"lava"},
+\code{"hdlL"} or \code{"fastHer"}, or on individual-level data
+\code{"greml"} too (see \code{\link{estimateH2}}). On summary statistics
+the reference is taken to share no samples with the study, and LDpred2
+runs the estimator itself. An \code{\linkS4class{H2Estimate}}, as
+\code{\link{estimateH2}} returns, gives each selected (study, context,
+trait) its row's estimate, and must hold exactly one row for each;
+LDpred2-grid's grid is then that value times 0.3, 0.7, 1 and 1.4, at
+most 1. A value is used floored at 0.001 and capped at 0.99, and a trait
+with no estimate keeps each method's default, with a warning. A method's
+own setting in \code{methods} wins.}
+
 \item{usePCA}{Logical (length 1). Individual-level data only: a
 \code{QtlDataset}, or the \code{QtlDataset} components of a
 \code{MultiStudyQtlDataset}. When
@@ -344,8 +365,8 @@ Method-restriction rules (enforced):
         (require at least two traits OR at least two contexts).
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
-  \item \code{dprVb} and \code{dprAdaptiveGibbs} run only on
-        individual-level data, so they are rejected on
+  \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run
+        only on individual-level data, so they are rejected on
         \code{QtlSumStats} input.
   \item The Bayesian alphabet (\code{bayesA}, \code{bayesB},
         \code{bayesC}, \code{bayesL}, \code{bayesN}, \code{bayesR})

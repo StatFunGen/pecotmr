@@ -289,3 +289,22 @@ test_that("bigsnpr's LD file lives only as long as the call", {
     ldpred2GridWeights(d$stat, d$ldMatrix, p = c(0.1, 1), h2 = 0.2)
     expect_setequal(list.files(tempdir(), pattern = "[.]sbk$"), before)
 })
+
+test_that("LDpred2's heritability can come from any per-trait estimator", {
+    d <- .rrwPanelStatLd()
+    inp <- pecotmr:::.rssPerVariantInput(d$stat, d$panel, "test")
+    hdl <- pecotmr:::.cisH2HdlL(
+        pecotmr:::.corToZ(inp$bhat, inp$n),
+        inp$n,
+        inp$ld
+    )$h2
+    expect_equal(
+        pecotmr:::.ldpred2H2("hdlL", inp, "test"),
+        if (is.na(hdl)) 1e-3 else max(hdl, 1e-3)
+    )
+    expect_equal(
+        pecotmr:::.ldpred2GridH2("lava", inp, "test"),
+        pecotmr:::.ldpred2GridH2(NULL, inp, "test")
+    )
+    expect_error(pecotmr:::.ldpred2H2("greml", inp, "test"), "must be one of")
+})

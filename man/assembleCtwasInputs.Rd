@@ -10,7 +10,7 @@ assembleCtwasInputs(
   twasZ = NULL,
   fineMappingResult = NULL,
   fineMappingMethod = NULL,
-  method = NULL,
+  weightSelectionParam = WeightSelectionParam(),
   variantPruningParam = VariantPruningParam()
 )
 }
@@ -39,11 +39,14 @@ variants, so its weights are not renormalized over the variants kept.}
 
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, each weighted
-gene's Z -- the row of its \code{(qtlStudy, context, trait, method)}
-for the GWAS study of \code{gwasSumStats} -- is used as the
+gene's Z -- the TWAS row of its \code{(qtlStudy, context, trait,
+method)} for the GWAS study of \code{gwasSumStats} -- is used as the
 \code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
-Every weighted gene needs exactly one; rows for other genes, methods or
-GWAS studies are ignored.}
+Every weighted gene needs exactly one, so \code{twasZ} must hold the
+method each gene is run with: chosen with the same
+\code{weightSelectionParam}, or a superset such as \code{methods =
+"all"}. Rows for other genes, methods or GWAS studies, and MR rows, are
+ignored.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
 own fine-mapping, whose per-variant PIP and credible-set membership the
@@ -60,12 +63,11 @@ magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
 weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
 names no fine-mapping fit. Default \code{NULL}.}
 
-\item{method}{Character (length 1): which TWAS method's weights to feed
-into ctwas for each (study, context, trait) gene, one method per run.
-\code{NULL} (default) uses the pre-combined \code{"ensemble"} weights of
-\code{TwasWeights}. Weights with no ensemble, and fine-mapping results as
-the weight source, have no default: name the method (e.g.
-\code{"mrash"}, or a fine-mapping method such as \code{"susie"}).}
+\item{weightSelectionParam}{Which method's weights each gene is modelled
+with, built with \code{\link{WeightSelectionParam}}, as in
+\code{\link{ctwasPipeline}}. These are one cTWAS run's inputs, so the
+choice must make one run: \code{"best"}, or a single method;
+\code{ctwasPipeline} runs one per method for several.}
 
 \item{variantPruningParam}{Which variants survive into each gene's weight
 matrix, built with \code{\link{VariantPruningParam}}:
@@ -78,8 +80,9 @@ matrix, built with \code{\link{VariantPruningParam}}:
 A list with elements \code{z_snp}, \code{z_gene} (NULL when no
   \code{twasZ}), \code{weights}, \code{region_info}, \code{snp_map},
   \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun},
-  \code{resolvedMethod}, and \code{gwas_n}, the GWAS's median sample size
-  (\code{NA} when it records none).
+  \code{resolvedMethod}, the run's label (\code{"best"}, or its one
+  method), and \code{gwas_n}, the GWAS's median sample size (\code{NA}
+  when it records none).
 }
 \description{
 Builds the per-block ctwas-shape input set (\code{z_snp},
@@ -111,5 +114,6 @@ gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 assembleCtwasInputs(gwasSumStats = gwasByRegion,
-  twasWeights = list(ctwasWeightsExample), method = "susie")
+  twasWeights = list(ctwasWeightsExample),
+  weightSelectionParam = WeightSelectionParam(methods = "susie"))
 }

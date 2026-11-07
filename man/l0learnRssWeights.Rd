@@ -9,7 +9,7 @@ l0learnRssWeights(
   ldReference,
   penalty = c("L0", "L0L1", "L0L2"),
   s = c(0.2, 0.5, 0.9, 1),
-  lambda0 = exp(seq(log(0.001), log(1), length.out = 10)),
+  lambda0 = NULL,
   lambda = NULL,
   lambda2 = 0,
   selection = c("heldOut", "ldQuadratic", "minFbeta"),
@@ -37,11 +37,18 @@ Default \code{"L0"}.}
 \item{s}{Numeric vector of LD shrinkage parameters. Default: \code{c(0.2,
 0.5, 0.9, 1.0)}.}
 
-\item{lambda0}{Numeric vector of L0 penalty values to search over. Default:
-\code{exp(seq(log(0.001), log(1), length.out = 10))}.}
+\item{lambda0}{Numeric vector of L0 penalty values to search over, solved
+as one warm-started path from the largest down. \code{NULL} (default) is
+the solver's own path for each shrinkage level and L1 value: L0Learn's
+adaptive one, from the smallest value at which every coefficient is zero,
+each step letting the next variant enter, until 100 are non-zero or 100
+values are taken, solved at the geometric midpoints of its values (see
+\code{\link{penalizedRss}}). Held-out refits solve at the values the
+full data took.}
 
-\item{lambda}{Numeric vector of L1 penalty values (for L0L1). Default:
-\code{c(0)} (no L1 unless L0L1 is used).}
+\item{lambda}{Numeric vector of L1 penalty values (for L0L1), each with its
+own lambda0 path. Default: ten values from 1e-4 to 0.1 on a log scale for
+L0L1, and \code{0} (no L1) otherwise.}
 
 \item{lambda2}{L2 penalty weight (for L0L2). Default 0.}
 

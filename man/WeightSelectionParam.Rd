@@ -7,6 +7,7 @@
 \title{TWAS Weight-Selection Settings}
 \usage{
 WeightSelectionParam(
+  methods = "best",
   cutoff = 0,
   pvalCutoff = Inf,
   metric = "rsq",
@@ -14,12 +15,23 @@ WeightSelectionParam(
 )
 }
 \arguments{
-\item{cutoff}{Numeric. Minimum cross-validated r-squared a method must
-reach to be eligible. Default \code{0} (no r-squared gate).}
+\item{methods}{\code{"best"} (default), \code{"all"}, or the names of the
+methods to use. \code{"best"} takes each gene's method with the highest
+\code{metric} among those clearing the cutoffs whose weights are not all
+zero. A gene whose methods carry no \code{metric} keeps them all, as
+under \code{"all"}, there being nothing to rank them by; so does every
+gene of a source with only one method per gene, which then simply uses
+it. The choice depends on the weights alone, never on a GWAS study, so
+the two pipelines pick the same method for a gene.}
 
-\item{pvalCutoff}{Numeric. A method is eligible only when its
-\code{cvResult} p-value metric is below this. Default \code{Inf} (no
-gate). A finite value activates selection even when \code{cutoff = 0}.}
+\item{cutoff}{Numeric. Minimum cross-validated r-squared a method must
+reach to be used, whatever \code{methods} is. Default \code{0} (no
+r-squared gate).}
+
+\item{pvalCutoff}{Numeric. A method is used only when its
+\code{cvResult} p-value metric is below this, whatever \code{methods}
+is. Default \code{Inf} (no gate). Where a gate is set, a method without
+the metric fails it, unless no method of its gene has the r-squared.}
 
 \item{metric}{Character. Which \code{cvResult} metric is the r-squared
 used for the cutoff and for ranking; typically \code{"rsq"} or
@@ -33,12 +45,15 @@ is used. Default \code{c("adj_rsq_pval", "pval")}.}
 A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.
 }
 \description{
-How \code{\link{causalInferencePipeline}} picks which TWAS
-  method's weights to use for each \code{(study, context, trait,
-  gwasStudy)} tuple, from the cross-validation metrics on the
-  \code{cvResult}. Selection runs when \code{cutoff > 0} or
-  \code{pvalCutoff} is finite; otherwise every method is carried through.
+Which TWAS methods' weights
+  \code{\link{causalInferencePipeline}} and \code{\link{ctwasPipeline}}
+  use for each gene (each
+  \code{(study, context, trait)}), from the cross-validation metrics on
+  the weights' \code{cvResult}.
 }
 \examples{
 WeightSelectionParam(cutoff = 0.01, metric = "adj_rsq")
+# Every method, or just the two named.
+WeightSelectionParam(methods = "all")
+WeightSelectionParam(methods = c("lasso", "mrash"))
 }

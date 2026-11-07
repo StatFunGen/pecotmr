@@ -1756,6 +1756,52 @@ test_that("ensembleWeights omits ensemble_performance (in-sample R^2)", {
     expect_false("ensemble_performance" %in% names(res))
 })
 
+test_that("ensembleWeights cross-validates the ensemble by cross-fitting", {
+    cv <- makeCvResult(n = 200, K = 3, seed = 5)
+    samples <- rownames(cv$prediction[[1L]])
+    y <- set_names(cv$.y, samples)
+    res <- ensembleWeights(cv, Y = y)
+    expect_named(
+        res$metrics,
+        c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE")
+    )
+    expect_named(res$predictions, samples)
+    # Fold 1 is predicted with coefficients fit on the other folds alone...
+    P <- exec(cbind, !!!map(cv$prediction, as.numeric))
+    held <- cv$samplePartition$Fold[match(
+        samples,
+        cv$samplePartition$Sample
+    )] ==
+        1L
+    zeta <- .solveEnsembleQuadprog(P[!held, ], y[!held], 3L)
+    expect_equal(unname(res$predictions[held]), drop(P[held, ] %*% zeta))
+    # ... so it is not the full-data fit scored on its own samples.
+    expect_false(isTRUE(all.equal(
+        unname(res$predictions),
+        drop(P %*% res$methodCoef)
+    )))
+    expect_equal(res$metrics[["rsq"]], cor(res$predictions, y)^2)
+    # An unnamed Y is placed by the predictions' own sample names.
+    expect_equal(ensembleWeights(cv, Y = cv$.y)$predictions, res$predictions)
+})
+
+test_that("a cross-fit fold with one varying method gives it full weight", {
+    # As the full-data fit does, without repeating its message per fold.
+    P <- cbind(a = c(1, 2, 3, 4), b = rep(0, 4L))
+    expect_equal(.ensembleTrainZeta(P, c(1, 2, 3, 4), "quadprog", 1), c(1, 0))
+})
+
+test_that("ensembleWeights reports no ensemble CV without the folds", {
+    cv <- makeCvResult(n = 100, K = 3, seed = 6)
+    y <- set_names(cv$.y, rownames(cv$prediction[[1L]]))
+    unfolded <- ensembleWeights(list(prediction = cv$prediction), Y = y)
+    expect_null(unfolded$predictions)
+    expect_null(unfolded$metrics)
+    # Nor when a sample has no fold.
+    partial <- list_assign(cv, samplePartition = cv$samplePartition[-1L, ])
+    expect_null(ensembleWeights(partial, Y = y)$predictions)
+})
+
 test_that("ensembleWeights: per-method R^2 values lie between 0 and 1", {
     cv <- makeCvResult(n = 200, K = 4, seed = 21)
     res <- ensembleWeights(cv, Y = cv$.y)
@@ -5893,4 +5939,125 @@ test_that(".twasRecordDataTypes leaves alone what the data does not answer", {
         pecotmr:::.twasRowDataType(row, "expression"),
         list(lasso = "expression", enet = "expression")
     )
+})
+
+# ---- h2: the heritability a run's methods start from ----
+test_that("twasWeightsPipeline(QtlSumStats) gives each row's trait its h2", {
+    ss <- .tp_makeQtlSumStats()
+    seen <- list()
+    local_mocked_bindings(
+        .handleDosage = .tp_mockExtractor(),
+        bayesRRssWeights = function(stat, ldReference, h2 = NULL, ...) {
+            seen <<- c(seen, list(h2))
+            rep(0, length(stat$variantNames))
+        },
+        .package = "pecotmr"
+    )
+    run <- function(methods = "bayesR", h2 = NULL) {
+        seen <<- list()
+        suppressMessages(suppressWarnings(
+            twasWeightsPipeline(ss, methods = methods, h2 = h2, verbose = 0)
+        ))
+        seen
+    }
+    # None: the method keeps its engines' own.
+    expect_null(run()[[1L]])
+    # An estimator estimates the row's first, settled for the engines.
+    estimated <- run(h2 = "lava")[[1L]]
+    expect_true(is.numeric(estimated) && estimated >= 0.001)
+    expect_lte(estimated, 0.99)
+    # An H2Estimate gives the row its value; a method's own setting wins.
+    est <- suppressWarnings(estimateH2(ss))
+    S4Vectors::mcols(est)$h2 <- 0.42
+    expect_equal(run(h2 = est)[[1L]], 0.42)
+    expect_equal(run(list(bayesR = list(h2 = 0.3)), est)[[1L]], 0.3)
+    expect_error(run(h2 = "greml"), "must be one of")
+    # It must cover every selected tuple.
+    two <- .tp_makeQtlSumStats(n_entries = 2L)
+    one <- suppressWarnings(estimateH2(two, contexts = "c1"))
+    expect_error(
+        suppressMessages(twasWeightsPipeline(
+            two,
+            methods = "bayesR",
+            h2 = one,
+            verbose = 0
+        )),
+        "holds no row for 1 selected"
+    )
+})
+
+test_that("twasWeightsPipeline(QtlDataset) estimates h2 as estimateH2 does", {
+    qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+    seen <- list()
+    local_mocked_bindings(
+        .handleDosage = .tp_mockExtractor(),
+        bayesNWeights = function(X, y, h2 = NULL, ...) {
+            seen <<- c(seen, list(h2))
+            rep(0, ncol(X))
+        },
+        .package = "pecotmr"
+    )
+    run <- function(h2) {
+        seen <<- list()
+        suppressMessages(twasWeightsPipeline(
+            qd,
+            methods = "bayesN",
+            h2 = h2,
+            cisWindow = 1000L,
+            estimatePi = FALSE,
+            verbose = 0,
+            crossValidationParam = CrossValidationParam(folds = 0)
+        ))
+        seen[[1L]]
+    }
+    est <- suppressWarnings(estimateH2(qd, cisWindow = 1000L))
+    want <- heritabilityEstimate(est)
+    got <- suppressWarnings(run("lava"))
+    if (is.na(want)) {
+        expect_null(got)
+    } else {
+        expect_equal(got, min(max(want, 0.001), 0.99))
+    }
+    S4Vectors::mcols(est)$h2 <- 0.25
+    expect_equal(run(est), 0.25)
+})
+
+test_that("a run's h2 reaches each method as that method takes it", {
+    withH2 <- pecotmr:::.twasWithH2
+    estimated <- list(method = "hdlL", value = 0.4)
+    supplied <- list(method = NULL, value = 0.4)
+    expect_equal(withH2(list(), "bayesR", estimated, "sumstat")$h2, 0.4)
+    # LDpred2 runs the estimator itself, on its own terms...
+    expect_equal(
+        withH2(list(), "ldpred2Auto", estimated, "sumstat")$h2Init,
+        "hdlL"
+    )
+    expect_equal(withH2(list(), "ldpred2Grid", estimated, "sumstat")$h2, "hdlL")
+    # ...or takes the value, the grid centred on it and capped at 1.
+    expect_equal(withH2(list(), "ldpred2Auto", supplied, "sumstat")$h2Init, 0.4)
+    expect_equal(
+        withH2(list(), "ldpred2Grid", list(value = 0.8), "sumstat")$h2,
+        c(0.24, 0.56, 0.8, 1)
+    )
+    # A method that takes none, or sets its own, is left alone.
+    expect_identical(withH2(list(), "lasso", supplied, "sumstat"), list())
+    own <- list(backend = "hibayes", vg = 0.1)
+    expect_identical(withH2(own, "bayesR", supplied, "individual"), own)
+    expect_identical(
+        withH2(list(h2 = 0.3), "bayesC", supplied, "sumstat"),
+        list(h2 = 0.3)
+    )
+    expect_identical(withH2(list(), "bayesR", NULL, "sumstat"), list())
+})
+
+test_that("a collection holding summary statistics refuses h2 = \"greml\"", {
+    msqd <- MultiStudyQtlDataset(
+        qtlDatasets = list(study1 = .tp_makeQtlDataset()),
+        sumStats = .tp_makeQtlSumStats()
+    )
+    expect_error(
+        pecotmr:::.msAssertH2("greml", msqd, "test"),
+        "needs individual-level data"
+    )
+    expect_null(pecotmr:::.msAssertH2("lava", msqd, "test"))
 })

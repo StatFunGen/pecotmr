@@ -54,7 +54,8 @@ gss <- loadGwasSumStatsFromManifest(manifest = mani, genome = "hg38",
 gwasByRegion <- summaryStatsQc(gss,
   panelFilterParam = PanelFilterParam(mafCutoff = 0.0025))
 inp <- assembleCtwasInputs(gwasSumStats = gwasByRegion,
-  twasWeights = list(ctwasWeightsExample), method = "susie")
+  twasWeights = list(ctwasWeightsExample),
+  weightSelectionParam = WeightSelectionParam(methods = "susie"))
 est <- estCtwasGroupPriors(inp,
   ctwasPriorParam = CtwasPriorParam(thin = 1, niterPrefit = 3, niter = 10,
     fallbackToPrefit = TRUE),

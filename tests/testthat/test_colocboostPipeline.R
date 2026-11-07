@@ -172,6 +172,12 @@ context("colocboostPipeline (S4 dispatch)")
 # are exercised directly.
 # ===========================================================================
 
+# A stub colocboost result: classed as the real one is, since the result
+# keeps each run's object and checks that it is one.
+.cbp_stub <- function(...) {
+    structure(list(...), class = "colocboost")
+}
+
 .cbp_mockExtractor <- function(seed = 11, n_samples = 30L) {
     function(handle, snpIdx, sampleIdx = NULL) {
         set.seed(seed)
@@ -416,7 +422,7 @@ test_that("colocboostPipeline(QtlDataset): xQTL-only run, mocked engine", {
     local_mocked_bindings(
         colocboost = function(...) {
             capturedArgs <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )
@@ -428,12 +434,45 @@ test_that("colocboostPipeline(QtlDataset): xQTL-only run, mocked engine", {
             separateGwas = FALSE
         )
     )
-    # The pipeline now returns a ColocBoostResult, so "the xQTL-only analysis
-    # ran" is read off the recorded timing rather than off a retained raw
-    # object -- the timing is written whether or not the run produced sets.
+    # "The xQTL-only analysis ran" reads off the recorded timing and the
+    # kept colocboost object, both there whether or not the run found sets.
     expect_s4_class(out, "ColocBoostResult")
     expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
+    expect_identical(colocboostFit(out), .cbp_stub(stub = TRUE))
     expect_true("X" %in% names(capturedArgs))
+})
+
+test_that("fitRetention = \"none\" drops the runs' colocboost objects", {
+    qd <- .cbp_makeQtlDataset()
+    local_mocked_bindings(
+        .handleDosage = .cbp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        colocboost = function(...) .cbp_stub(stub = TRUE),
+        .package = "colocboost"
+    )
+    out <- suppressMessages(
+        colocboostPipeline(qd, xqtlColoc = TRUE, fitRetention = "none")
+    )
+    expect_true(is_in("xqtl_coloc", computingTime(out)$analysis))
+    expect_identical(out@fits, list())
+    expect_error(colocboostFit(out), "holds no colocboost fits")
+})
+
+test_that("fitRetention takes full or none, before any run", {
+    refuse <- function(qtlData) {
+        expect_error(
+            colocboostPipeline(qtlData, fitRetention = "slim"),
+            "`fitRetention` must be one of \"full\" or \"none\""
+        )
+    }
+    refuse(.cbp_makeQtlDataset())
+    refuse(.cbp_makeQtlSumStats())
+    refuse(MultiStudyQtlDataset(
+        qtlDatasets = list(study1 = .cbp_makeQtlDataset()),
+        sumStats = .cbp_makeQtlSumStats()
+    ))
 })
 
 test_that("colocboostPipeline(QtlDataset): no QTL bundle, no GWAS -> empty", {
@@ -512,7 +551,7 @@ test_that("jointGwas colocboost merges QTL and GWAS sumstats, runs once", {
     local_mocked_bindings(
         colocboost = function(...) {
             capturedArgs <<- list(...)
-            list(jointly_run = TRUE)
+            .cbp_stub(jointly_run = TRUE)
         },
         .package = "colocboost"
     )
@@ -539,7 +578,7 @@ test_that("colocboostPipeline: separateGwas runs once per GWAS study", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen[[length(seen) + 1L]] <<- list(...)
-            list(round = length(seen))
+            .cbp_stub(round = length(seen))
         },
         .package = "colocboost"
     )
@@ -640,7 +679,7 @@ test_that("a GWAS on a different LD reference runs, and both are recorded", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen[[length(seen) + 1L]] <<- list(...)
-            list(jointly_run = TRUE)
+            .cbp_stub(jointly_run = TRUE)
         },
         .package = "colocboost"
     )
@@ -675,7 +714,7 @@ test_that("a panel and an LdMatrix on opposite sides reach colocboost as LD", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen[[length(seen) + 1L]] <<- list(...)
-            list(jointly_run = TRUE)
+            .cbp_stub(jointly_run = TRUE)
         },
         .package = "colocboost"
     )
@@ -854,7 +893,7 @@ test_that("colocboostPipeline(MultiStudy): context selection skips a study", {
         .package = "pecotmr"
     )
     local_mocked_bindings(
-        colocboost = function(...) list(stub = TRUE),
+        colocboost = function(...) .cbp_stub(stub = TRUE),
         .package = "colocboost"
     )
     expect_warning(
@@ -883,7 +922,7 @@ test_that("colocboostPipeline(MultiStudyQtlDataset) joins studies + sumstats", {
     local_mocked_bindings(
         colocboost = function(...) {
             capturedArgs <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )
@@ -929,7 +968,7 @@ test_that(".cbIndividualBundle: multi-context outcomes get context prefixes", {
     local_mocked_bindings(
         colocboost = function(...) {
             capturedArgs <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )
@@ -1153,7 +1192,7 @@ test_that("colocboostPipeline(MultiStudy): a study with no bundle is skipped", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen[[length(seen) + 1L]] <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )
@@ -1602,7 +1641,7 @@ test_that(".cbRunVariants: xqtlColoc runs on a QTL-only sumstat bundle", {
     local_mocked_bindings(
         .cbRunXqtlOnly = function(...) {
             called <<- c(called, "xqtl")
-            list(result = list(stub = TRUE), time = 1)
+            list(result = .cbp_stub(stub = TRUE), time = 1)
         },
         .cbOutcomeInfo = function(...) pecotmr:::.cbEmptyOutcomeInfo(),
         .package = "pecotmr"
@@ -1690,7 +1729,7 @@ test_that("ColocboostOptions() options reach the engine by name", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )
@@ -1946,7 +1985,7 @@ test_that("the joint run is non-focal; focalOutcome reaches xQTL-only", {
     local_mocked_bindings(
         colocboost = function(...) {
             seen[[length(seen) + 1L]] <<- list(...)
-            list(stub = TRUE)
+            .cbp_stub(stub = TRUE)
         },
         .package = "colocboost"
     )

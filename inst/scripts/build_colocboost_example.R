@@ -72,7 +72,9 @@ validObject(colocboostResultExample)
 
 stopifnot(
     nrow(colocboostResultExample) == 1L,
-    length(colocboostResultExample$outcomes[[1L]]) == 2L
+    length(colocboostResultExample$outcomes[[1L]]) == 2L,
+    # The run's colocboost object is kept whole, for colocboostFit().
+    identical(colocboostFit(colocboostResultExample), cb)
 )
 
 save(

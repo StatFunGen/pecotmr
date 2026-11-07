@@ -32,8 +32,9 @@ intermediates, so the two retaining levels behave alike here.}
 Numeric vector of variant weights.
 }
 \description{
-Extracts coefficients from an existing SuSiE-RSS fit or fits
-\code{susieR::susie_rss()} from summary statistics and LD.
+Extracts coefficients from an existing SuSiE-RSS fit
+(\code{susieR::susie_rss()}), as \code{\link{fineMappingPipeline}} makes
+it from summary statistics and LD; it fits nothing itself.
 }
 \examples{
 data(eqtlRegionExample)

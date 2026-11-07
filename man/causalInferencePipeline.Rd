@@ -30,39 +30,33 @@ context, trait, method) weights. When supplied, drives the TWAS-Z
 computation.}
 
 \item{fineMappingResult}{Optional \code{\link{QtlFineMappingResult}}. When
-supplied, drives the MR computation and (when \code{twasWeights = NULL})
-the TWAS-Z weights via the SuSiE-style coefficients on each entry's
-\code{topLoci}. MR reads the fine-mapping row of the same
-\code{(study, context, trait, method)} as the TWAS row, so it runs only
-for TWAS methods that are also fine-mapping methods (such as
-\code{susie}); the MR columns of every other method's rows are
-\code{NA}.}
+supplied, drives the MR computation, for every row it holds, and (when
+\code{twasWeights = NULL}) the TWAS-Z weights via the SuSiE-style
+coefficients on each entry's \code{topLoci}.}
 
-\item{weightSelectionParam}{How one TWAS method's weights are picked per
-\code{(study, context, trait, gwasStudy)} tuple, built with
-\code{\link{WeightSelectionParam}}: \code{cutoff} (minimum
-cross-validated r-squared, default \code{0}), \code{pvalCutoff} (the
-CV-p-value gate, default \code{Inf}), and \code{metric} /
-\code{pvalMetric} naming which \code{cvResult} metrics those two read.
-Selection runs when \code{cutoff > 0} or \code{pvalCutoff} is finite;
-it keeps the highest-\code{metric} method among those clearing both
-gates that also produced a finite TWAS Z. Otherwise every method is
-carried through. Ports the legacy \code{twas_pipeline}
-\code{pick_best_model} / \code{update_twas_method}. The metrics describe
-each fit on all of its variants, so selection warns about a row narrowed
-since its fit (condition class \code{pecotmrFitCoverage}).}
+\item{weightSelectionParam}{Which TWAS methods' weights are scored for each
+gene, built with \code{\link{WeightSelectionParam}}: by default each
+gene's best method by cross-validated r-squared, or \code{"all"}, or the
+methods named; and the \code{cutoff} / \code{pvalCutoff} gates every
+choice is bounded by. The choice reads the weights' \code{cvResult}
+(\code{twasWeights}, else \code{fineMappingResult}), never a GWAS study.
+Ports the legacy \code{twas_pipeline} \code{pick_best_model}. The
+metrics describe each fit on all of its variants, so a choice that reads
+them warns about a row narrowed since its fit (condition class
+\code{pecotmrFitCoverage}).}
 
 \item{mrParam}{How Mendelian randomization is run, built with
 \code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
 default, or \code{"csAware"}), the PIP threshold that method reads
-(\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}, the
-TWAS-p-value gate below which MR runs at all (default \code{1}, no
-gate; otherwise the MR columns are \code{NA}).}
+(\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}: a gene's
+MR against a GWAS study is estimated only when one of the gene's TWAS
+p-values for that study is below it (default \code{1}, no gate). A gene
+with no TWAS row for the study is not gated.}
 
 \item{combineMethods}{Optional character vector forwarded to
-\code{\link{combinePValues}} for cross-method combination per
-\code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL} (default)
-skips combination.}
+\code{\link{combinePValues}} for cross-method combination of the TWAS
+rows of each \code{(qtlStudy, context, trait, gwasStudy)} group.
+\code{NULL} (default) skips combination.}
 
 \item{alleleFlip}{Logical, default \code{TRUE}. When TRUE, match QTL variants
 to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
@@ -91,6 +85,13 @@ Per-region pipeline that pairs QTL-derived weight vectors
     \item both: TWAS Z computed from \code{twasWeights};
           MR computed from \code{fineMappingResult}.
   }
+
+  MR is computed only from \code{fineMappingResult}: for every gene and
+  fine-mapping method it holds, against every GWAS study it overlaps,
+  whichever TWAS methods were chosen and whether or not
+  \code{twasWeights} holds the gene at all. A fine-mapping method among
+  the TWAS weights (such as \code{susie}) is a TWAS method like any other,
+  and MR never reads it.
 }
 \section{LD reference compatibility check}{
  Per pair of rows scored
@@ -113,19 +114,28 @@ Per-region pipeline that pairs QTL-derived weight vectors
 
 \section{Output shape}{
 
-A long-format \code{GRanges} with one row per
-\code{(qtlStudy, context, trait, method, gwasStudy)} tuple,
-positioned at the variant span of the QTL weight set, with mcols:
+A long-format \code{GRanges} of two kinds of row, told apart by
+\code{analysis}: a TWAS row per chosen \code{(qtlStudy, context, trait,
+method)} weight set and GWAS study, positioned at the span of its
+variants the GWAS holds, and an MR row per fine-mapping row and GWAS
+study, positioned at the span of the fine-mapping row's variants. mcols:
 \describe{
   \item{\code{qtlStudy}, \code{context}, \code{trait},
-        \code{method}, \code{gwasStudy}}{Identity columns.}
-  \item{\code{twasZ}, \code{twasPval}}{Per-tuple TWAS Z and p-value.}
-  \item{\code{waldRatio}, \code{waldRatioSe}, \code{mrPval}}{Per-tuple
+        \code{method}, \code{gwasStudy}}{Identity columns. On an MR row,
+        \code{method} is the fine-mapping method.}
+  \item{\code{analysis}}{\code{"twas"} or \code{"mr"}.}
+  \item{\code{twasZ}, \code{twasPval}}{TWAS Z and p-value; \code{NA} on
+        MR rows.}
+  \item{\code{waldRatio}, \code{waldRatioSe}, \code{mrPval}}{The
         IVW-aggregated Wald-ratio MR estimate, standard error, and
-        p-value. Present only when MR was computed; \code{NA}
-        otherwise.}
+        p-value; \code{NA} on TWAS rows, and on an MR row whose estimate
+        \code{mrParam}'s \code{pvalCutoff} withheld or that had no
+        instrument.}
   \item{\code{nIV}}{Number of instrumental variables used in the
         MR aggregation.}
+  \item{\code{Q}, \code{I2}, \code{nCs}}{The credible-set heterogeneity
+        and the number of credible sets, from \code{method = "csAware"}
+        MR; \code{NA} otherwise.}
 }
 }
 

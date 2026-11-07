@@ -2156,6 +2156,24 @@ test_that("writeGwasVcf joins a GWAS fit's blocks into one sample", {
     )
 })
 
+test_that("writeGwasVcf writes V to ten significant digits", {
+    skip_if_not_installed("VariantAnnotation")
+    out <- tempfile(fileext = ".vcf")
+    fmr <- GwasFineMappingResult(
+        studyName = "g1",
+        method = "susie",
+        entry = list(.rw_blockFit(0L, c(1 / 3, 2 / 3), 1L)),
+        blockId = "chr1_1_5000",
+        region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1L, 5000L))
+    )
+    writeGwasVcf(fmr, out)
+    expect_match(
+        .rw_sampleLines(out),
+        "V=0.3333333333;0.6666666667,",
+        fixed = TRUE
+    )
+})
+
 test_that("writeGwasVcf splitByBlock writes one file per LD block", {
     skip_if_not_installed("VariantAnnotation")
     out <- tempfile(fileext = ".vcf")

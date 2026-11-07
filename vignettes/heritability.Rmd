@@ -458,6 +458,47 @@ with LD from outside the study, its estimate is `NA`, with a warning. Its
 standard error assumes an infinitesimal architecture and is too small with few
 causal variants.
 
+### From individual-level data
+
+Given a `QtlDataset`, `estimateH2()` estimates each trait's heritability on
+its own genotypes, over the window, samples, filters and residualized
+genotypes and phenotype that `twasWeightsPipeline()` fits it on. The three
+methods above read each variant's marginal statistic in-sample, the genotypes
+being their own LD, so LAVA's estimate is the adjusted R^2 of the trait on the
+genotypes' components. `"greml"` adds GREML, the restricted maximum likelihood
+of the genetic and residual variances on the window's relationship matrix
+(`qgg::greml`), as FUSION estimates a gene's.
+
+```{r cis-h2-individual}
+data(qtlDatasetExample)
+estimateH2(qtlDatasetExample, cisWindow = 1e6)
+```
+
+```{r cis-h2-greml, eval = requireNamespace("qgg", quietly = TRUE)}
+estimateH2(qtlDatasetExample, method = "greml", cisWindow = 1e6)
+```
+
+### Starting other methods from it
+
+The Bayesian alphabet's TWAS weights (`bayesA` to `bayesR`), LDpred2 and
+SuSiE-RSS fine-mapping can start from a trait's heritability. The alphabet's
+engines set their starting variances and the scales of their priors from a
+guess of 0.5, which a cis window's heritability is usually far below, and
+SuSiE-RSS holds its residual variance at 1 on z statistics, where the true one
+is 1 minus the heritability. Pass `h2` to `twasWeightsPipeline()` or
+`fineMappingPipeline()`: an estimator's name estimates each trait's first, on
+the variants and LD its methods fit, and the `H2Estimate` that `estimateH2()`
+returns gives each trait the value estimated earlier.
+
+```{r h2-first, eval=FALSE}
+twasWeightsPipeline(qtlDatasetExample, methods = "bayesR", h2 = "greml")
+fineMappingPipeline(
+    qtlSumStatsExample,
+    methods = "susie",
+    h2 = estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+)
+```
+
 ## Next steps
 
 - [Molecular QTL enrichment](xqtl-enrichment.html) — the complementary

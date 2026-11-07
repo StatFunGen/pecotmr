@@ -334,6 +334,24 @@
 #'   matrices. The per-variant \code{topLoci} table is fully populated
 #'   either way --- its per-credible-set columns are governed by
 #'   \code{credibleSetParam}'s \code{perCsColumns}, not by this.
+#' @param h2 For \code{QtlSumStats} input (and a
+#'   \code{MultiStudyQtlDataset}'s summary statistics), each trait's
+#'   heritability in its window, which sets the residual variance of its
+#'   SuSiE-RSS fits to \eqn{1 - h^2} on the z scale instead of 1.
+#'   \code{susie_rss} holds that variance fixed by default, and with a cis
+#'   heritability of 0.3 the true one is 0.7. \code{NULL} (the default)
+#'   leaves it at 1. An estimator estimates each trait's first, on the
+#'   variants and LD its fits read: \code{"lava"}, \code{"hdlL"} or
+#'   \code{"fastHer"} (see \code{\link{estimateH2}}), the reference taken to
+#'   share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
+#'   \code{estimateH2()} returns, gives each selected (study, context, trait)
+#'   its row's estimate, and must hold exactly one row for each. A value is
+#'   used floored at 0.001 and capped at 0.99, and a trait with no estimate
+#'   keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
+#'   chained from \code{susieInf} or not; \code{susieInf} re-estimates its
+#'   residual variance every sweep, and \code{ser} and \code{mvsusie} take
+#'   none from it. A \code{residual_variance} set through \code{methods}
+#'   wins.
 #' @param susieRssParam Summary-statistics solver settings for
 #'   \code{QtlSumStats} / \code{GwasSumStats} input, built with
 #'   \code{\link{SusieRssParam}}: \itemize{
@@ -1285,34 +1303,52 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     common,
     initializeWithSusieInf,
     methodArgs,
-    susieRssParam
+    susieRssParam,
+    h2Spec = NULL
 ) {
     c(
         common,
         list(
             initializeWithSusieInf = initializeWithSusieInf,
             methodArgs = methodArgs,
-            susieRssParam = susieRssParam
+            susieRssParam = susieRssParam,
+            h2Spec = h2Spec
         )
     )
 }
 
 # .fmFitRssBlock with the per-run knobs supplied from `cfg`; callers pass only
-# the block-specific arguments. The RSS analog of .fmFitXBlockP.
+# the block-specific arguments. The RSS analog of .fmFitXBlockP. `h2Key` names
+# a QtlSumStats row's (study, context, trait), whose heritability under the
+# run's `h2` sets the residual variance of its fits (.fmWithResidualVariance()).
 # @noRd
-.fmFitRssBlockP <- function(z, zn, toRun, label, af, cfg, region = NULL) {
+.fmFitRssBlockP <- function(
+    z,
+    zn,
+    toRun,
+    label,
+    af,
+    cfg,
+    region = NULL,
+    h2Key = NULL
+) {
+    ld <- .fmRssLd(
+        cfg$ldReference,
+        zn$variantIds,
+        toRun,
+        cfg$initializeWithSusieInf
+    )
     .fmFitRssBlock(
         z,
-        .fmRssLd(
-            cfg$ldReference,
-            zn$variantIds,
-            toRun,
-            cfg$initializeWithSusieInf
-        ),
+        ld,
         zn$n,
         toRun,
         cfg$initializeWithSusieInf,
-        cfg$methodArgs,
+        .fmWithResidualVariance(
+            cfg$methodArgs,
+            .fmRssH2(cfg, h2Key, zn, ld, toRun, label),
+            toRun
+        ),
         cfg$verbose,
         label = label,
         af = af,
@@ -1342,6 +1378,68 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     list(R = if (needsR) crossprod(X) / (nrow(X) - 1), X = X)
 }
 
+# The SuSiE-RSS fits whose residual variance susie_rss holds fixed on z
+# statistics, so that a trait's heritability can set it: susie, and susieAsh.
+# susieInf re-estimates its own every sweep, so a value given it is ignored.
+# @noRd
+.fmH2Tokens <- function() {
+    c("susie", "susieAsh")
+}
+
+# The heritability the run's `h2` gives one QtlSumStats row's trait (`h2Key`),
+# when one of `toRun` takes it: estimated on the row's z and the LD its fits
+# read (`ld`, .fmRssLd()), or its H2Estimate row's.
+# @noRd
+.fmRssH2 <- function(cfg, h2Key, zn, ld, toRun, label) {
+    if (is.null(h2Key) || !any(is_in(toRun, .fmH2Tokens()))) {
+        return(NULL)
+    }
+    rowLabel <- glue("fineMappingPipeline(QtlSumStats) {label}")
+    source <- if (is.null(ld$X)) list(R = ld$R) else list(ldFactor = ld$X)
+    .h2ForTrait(
+        cfg$h2Spec,
+        h2Key,
+        rowLabel,
+        .h2SumStatsFit,
+        list(
+            z = zn$z,
+            n = zn$nVar,
+            ld = c(source, list(nSamples = .ldRefNoiseN(cfg$ldReference))),
+            label = rowLabel
+        )
+    )
+}
+
+# The fits' arguments with the residual variance a trait's heritability `h2`
+# implies on the z scale, 1 - h2, for those of `toRun` that hold it fixed
+# (.fmH2Tokens()); a `residual_variance` the caller set wins.
+# @noRd
+.fmWithResidualVariance <- function(methodArgs, h2, toRun) {
+    tokens <- intersect(toRun, .fmH2Tokens())
+    if (is.null(h2) || length(tokens) == 0L) {
+        return(methodArgs)
+    }
+    updated <- set_names(
+        map(
+            tokens,
+            .fmTokenResidualVariance,
+            methodArgs = methodArgs,
+            value = 1 - h2
+        ),
+        tokens
+    )
+    list_assign(methodArgs %||% list(), !!!updated)
+}
+
+# @noRd
+.fmTokenResidualVariance <- function(tk, methodArgs, value) {
+    args <- methodArgs[[tk]] %||% list()
+    list_assign(
+        args,
+        residual_variance = args[["residual_variance"]] %||% value
+    )
+}
+
 # Fit the still-to-run RSS tokens for one QtlSumStats entry and return one
 # row-record per fitted token.
 # @noRd
@@ -1363,7 +1461,8 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         glue("(study='{st}', context='{ctx}', trait='{tr}')"),
         .fmAfByVar(entry, zn$variantIds),
         cfg,
-        region = .rowRegionAt(cfg$data, i)
+        region = .rowRegionAt(cfg$data, i),
+        h2Key = .h2TupleKey(st, ctx, tr)
     )
     map(names(ents), .fmQtlRowFor, st = st, ctx = ctx, tr = tr, ents = ents)
 }
@@ -3521,10 +3620,22 @@ setMethod(
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
         susieRssParam = cfg$susieRssParam,
+        h2 = cfg$h2,
         fitRetention = cfg$fitRetention,
         mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
     )
+}
+
+# A fine-mapping run's `h2` as an estimator: one that runs on summary
+# statistics, the only fits it reaches. Checked at entry, before any study
+# runs.
+# @noRd
+.fmAssertH2Method <- function(h2) {
+    if (is.character(h2)) {
+        arg_match0(h2, .h2SumStatsMethods(), arg_nm = "h2")
+    }
+    invisible(NULL)
 }
 
 # The joint-specification phase for the MultiStudyQtlDataset path: dispatch
@@ -3662,6 +3773,7 @@ setMethod(
     residualizationParam = ResidualizationParam(),
     signalScreenParam = SignalScreenParam(),
     susieRssParam = SusieRssParam(),
+    h2 = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     seed = NULL,
@@ -3673,6 +3785,7 @@ setMethod(
     # Resolved once here so a bad choice fails before any study runs; the
     # record carries the bundle itself, as each component resolves its own.
     .fmResolvePhenotypeFilter(phenotypeFilterParam)
+    .fmAssertH2Method(h2)
     build <- .inputsBuild(
         list(data, region, fineMappingResult),
         "fineMappingPipeline(MultiStudyQtlDataset)"
@@ -3705,6 +3818,7 @@ setMethod(
         genotypeFilterParam = genotypeFilterParam,
         panelFilterParam = panelFilterParam,
         susieRssParam = susieRssParam,
+        h2 = h2,
         usePCA = usePCA,
         nPCs = nPCs,
         fitRetention = fitRetention,
@@ -3881,9 +3995,11 @@ setMethod(
 #   pipeline does pass it: the prior's V can be NULL, compact() then drops it
 #   from the base, and a user value is the only source left. Refusing it would
 #   close the only path -- the QggOptions(nit=) mistake.
-# - mvsusie_rss: `L` does not reach it, but `coverage` does: the pipeline
-#   threads csCoverage() into fitMvsusieRss()'s own `coverage` formal, so this
-#   engine takes that one entry of csHome and not the rest.
+# - mvsusie_rss: `coverage` reaches it through fitMvsusieRss()'s own
+#   `coverage` formal, which the pipeline fills from csCoverage(), and the
+#   seeded `L` / `L_greedy` reach it with the method's other arguments
+#   (.fmMergeUserArgs()), so every entry of csHome is refused, as for the
+#   other SuSiE engines.
 # - fsusie: only what the pipeline ACTUALLY supplies. `prior`, `max_scale` and
 #   `max_SNP_EM` used to be listed because this row described the retired
 #   fsusieWrapper(), which passed them; the pipeline calls fitFsusie() and
@@ -4263,7 +4379,8 @@ NULL
 }
 
 # The settings the joint phase and the RSS row builders share, named once
-# so the two records built from them cannot disagree.
+# so the two records built from them cannot disagree, and the run's `h2`,
+# settled here, at entry (.fmQssH2Spec()).
 # @noRd
 .fmQssConfigs <- function(
     data,
@@ -4275,7 +4392,8 @@ NULL
     contexts,
     traitId,
     mrmashPrior,
-    dataDrivenPriorWeightsCutoff
+    dataDrivenPriorWeightsCutoff,
+    h2 = NULL
 ) {
     common <- .fmSsCommonCfg(
         data = data,
@@ -4293,6 +4411,10 @@ NULL
             traitId = traitId,
             mrmashPrior = mrmashPrior,
             dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        ),
+        h2Spec = .fmQssH2Spec(
+            h2,
+            list(data = data, contexts = contexts, traitId = traitId)
         )
     )
 }
@@ -4337,7 +4459,8 @@ NULL
     verbose,
     fitRetention,
     susieRssParam,
-    panelFilterParam
+    panelFilterParam,
+    h2 = NULL
 ) {
     inputs <- .fmQssInputs(data, contexts, traitId, cisWindow)
     cfgs <- .fmQssConfigs(
@@ -4350,7 +4473,8 @@ NULL
         contexts = inputs$contexts,
         traitId = inputs$traitId,
         mrmashPrior = mrmashPrior,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        h2 = h2
     )
     rt <- .fmQssResolveTokens(
         jointSpecification,
@@ -4371,12 +4495,40 @@ NULL
     .fmRecordProvenance(out, data, "sumstat", TRUE)
 }
 
+# A QtlSumStats run's `h2`, settled at entry against its selected rows
+# (.h2PipelineSpec()); an estimator that reads the LD reference's sample
+# size needs each row's reference to record one.
+# @noRd
+.fmQssH2Spec <- function(h2, inputs) {
+    if (is.null(h2)) {
+        return(NULL)
+    }
+    data <- inputs$data
+    rows <- which(.sumStatsRowsSelected(data, inputs$contexts, inputs$traitId))
+    label <- "fineMappingPipeline(QtlSumStats)"
+    spec <- .h2PipelineSpec(
+        h2,
+        .h2SumStatsMethods(),
+        .h2RowTuples(data, rows),
+        label
+    )
+    walk(
+        rows,
+        .h2AssertRowReference,
+        data = data,
+        method = spec$method,
+        label = label
+    )
+    spec
+}
+
 # Everything after the joint phase has had its say: select the rows the
 # univariate tokens run on, resolve the LD-finiteness setting against the
 # sketch, and fit. `rt` is .fmQssResolveTokens()'s record -- it carries the
 # remaining tokens, their options, and whatever the joint phase produced; when
 # the joint phase consumed every method (`rt$done`) its result is returned
-# as is. `cfgs` is .fmQssConfigs()'s (common, joint) pair.
+# as is. `cfgs` is .fmQssConfigs()'s record: (common, joint) and the run's
+# settled `h2`.
 # @noRd
 .fmQssAfterJoint <- function(
     data,
@@ -4395,7 +4547,8 @@ NULL
         cfgs$common,
         initializeWithSusieInf = initializeWithSusieInf,
         methodArgs = rt$methodArgs,
-        susieRssParam = susieRssParam
+        susieRssParam = susieRssParam,
+        h2Spec = cfgs$h2Spec
     )
     .fmQssRunRows(
         data,
@@ -4468,6 +4621,7 @@ setMethod(
         verbose = 1,
         fitRetention = c("slim", "full"),
         susieRssParam = SusieRssParam(),
+        h2 = NULL,
         panelFilterParam = PanelFilterParam(),
         crossValidationParam = CrossValidationParam(),
         residualizationParam = ResidualizationParam()
@@ -4489,7 +4643,8 @@ setMethod(
             verbose = verbose,
             fitRetention = fitRetention,
             susieRssParam = susieRssParam,
-            panelFilterParam = panelFilterParam
+            panelFilterParam = panelFilterParam,
+            h2 = h2
         )
         .withGenome(res, build)
     }
@@ -4563,6 +4718,7 @@ setMethod(
     .fmWarnChromosomeRows(data)
     norm <- .fmNormalizeMethods(
         methods,
+        "GwasSumStats",
         maxNumSingleEffects = credibleSetParam$maxNumSingleEffects %||% 10L,
         maxNumSingleEffectsGreedy = credibleSetParam$maxNumSingleEffectsGreedy
     )

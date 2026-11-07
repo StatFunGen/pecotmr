@@ -60,10 +60,12 @@ A numeric vector of SNP coefficient weights. Unless
 \description{
 Fits ridge regression on the RSS objective, \code{\link{enetRssWeights}}
 at \code{alpha = 0}: the penalty is \eqn{\lambda \beta^T \beta}, and the
-default lambda path runs from 0.1 to 100. Searches over a shrinkage grid
-\code{s} as well, whose own ridge term \eqn{s \beta^T \beta} adds to it;
-model selection uses held-out summary statistics by default (see
-\code{\link{lassosumRssWeights}}).
+default lambda path is sized as glmnet sizes a ridge's, as if
+\code{alpha} were 0.001: 20 values on a log scale from
+\eqn{1000 \max_j |z_j|} down to \eqn{\max_j |z_j|}. Searches over a
+shrinkage grid \code{s} as well, whose own ridge term
+\eqn{s \beta^T \beta} adds to it; model selection uses held-out summary
+statistics by default (see \code{\link{lassosumRssWeights}}).
 }
 \details{
 Every fit is exact: the ridge has the closed form

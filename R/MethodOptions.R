@@ -364,7 +364,10 @@ setClass("MethodOptions", contains = "SimpleList")
         "MethodOptions",
         SimpleList(.configMerge(defaults, extra, label))
     )
+    # `constructor` is the label: every exported constructor labels its record
+    # with its own name, which is what lets writeConfigToYaml() name a record.
     metadata(res) <- list(
+        constructor = label,
         engine = engine %||% label,
         callee = if (is.character(callee)) callee else NA_character_,
         filtered = filtered,

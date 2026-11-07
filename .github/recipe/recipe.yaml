@@ -88,6 +88,7 @@ requirements:
     - r-robustbase
     - r-rsqlite
     - r-softimpute
+    - r-sparsevb
     - r-stringr
     - r-susier
     - r-tibble
@@ -164,6 +165,7 @@ requirements:
     - r-robustbase
     - r-rsqlite
     - r-softimpute
+    - r-sparsevb
     - r-stringr
     - r-susier
     - r-tibble

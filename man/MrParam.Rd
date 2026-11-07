@@ -25,9 +25,10 @@ instrument. Default \code{0.5}. Used only by \code{"ivwPerVariant"}.}
 \item{cpipCutoff}{Numeric. Cumulative-PIP cutoff for retaining a credible
 set. Default \code{0.5}. Used only by \code{"csAware"}.}
 
-\item{pvalCutoff}{Numeric. MR runs for a \code{(qtl tuple, gwas)} pair
-only when its \code{twasPval} is below this; otherwise the MR columns
-are \code{NA}. Default \code{1} (no gate).}
+\item{pvalCutoff}{Numeric. A gene's MR against a GWAS study is estimated
+only when one of the gene's TWAS p-values for that study is below this;
+otherwise its MR row's estimate is \code{NA}. A gene with no TWAS row for
+the study is not gated. Default \code{1} (no gate).}
 }
 \value{
 A \code{MrParam} object, a \code{\link{MethodParam}}.

@@ -947,10 +947,11 @@ setMethod(
         .jointTwasSuppliedArgs(args$methodArgs, keys)
     # FM-fit injection: an FM-derived token extracts its weights from the
     # precomputed fine-mapping fit rather than refitting.
-    withFit <- .jointTwasInjectFit(
-        supplied %||% list(),
+    withFit <- .twasWithH2(
+        .jointTwasInjectFit(supplied %||% list(), token, fittedModels),
         token,
-        fittedModels
+        args$h2,
+        "individual"
     )
     if (!isTRUE(cfg$estimatePi) || !is_in(token, c("bayesC", "bayesB"))) {
         return(withFit)
@@ -2392,7 +2393,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     block = NULL
 ) {
     grp <- .jointGroupProvenance(g, data, args)
-    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block)
+    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block, tokens)
     perTokenEntries <- compact(set_names(
         map(
             tokens,
@@ -2450,12 +2451,39 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # and the requested window is only ever known to the caller. Both are read back
 # as args$af / args$region where the entries are post-processed.
 # @noRd
-.jointGroupFitArgs <- function(g, pipeline, args, block) {
+.jointGroupFitArgs <- function(g, pipeline, args, block, tokens) {
     af <- .jointAfForGroup(g, block)
     list_assign(
         .twasGroupArgs(g, pipeline, args),
         af = af,
-        region = args$region
+        region = args$region,
+        h2 = .jointGroupH2(g, pipeline, tokens)
+    )
+}
+
+# What a TWAS run's `h2` gives an individual-level group's one trait
+# (.twasRowH2()), made once, before the group's methods are fitted, on the
+# genotypes and phenotype they fit.
+# @noRd
+.jointGroupH2 <- function(g, pipeline, tokens) {
+    if (!is(pipeline, "TwasJointPipeline") || !is(g, "IndividualJointGroup")) {
+        return(NULL)
+    }
+    cond <- .jgConditions(g)
+    spec <- .jpConfig(pipeline)$h2
+    if (is.null(spec) || nrow(cond) != 1L) {
+        return(NULL)
+    }
+    .twasRowH2(
+        spec,
+        .h2TupleKey(cond$study, cond$context, cond$trait),
+        glue(
+            "twasWeightsPipeline(QtlDataset): study='{cond$study}', ",
+            "context='{cond$context}', trait='{cond$trait}'"
+        ),
+        .h2IndividualFit,
+        list(X = .jgX(g), y = .jgY(g)[, 1L]),
+        tokens
     )
 }
 
@@ -2586,12 +2614,14 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             cv$metrics[["rsq"]]
         } else {
             NA_real_
-        }
+        },
+        partition = cv$samplePartition
     )
 }
 
-# Per-condition CV predictions + weights + R^2 across the group's methods.
-# Returns list(preds, wts, rsq), skipping methods with no CV / weights.
+# Per-condition CV predictions + weights + R^2 across the group's methods, and
+# the fold partition their predictions share. Returns list(preds, wts, rsq,
+# partition), skipping methods with no CV / weights.
 # @noRd
 .twasEnsembleCollect <- function(r, perTokenEntries, tokens) {
     parts <- compact(map(
@@ -2613,7 +2643,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             map(parts, "weights"),
             str_c(contributing, "_weights")
         ),
-        rsq = set_names(map_dbl(parts, "rsq"), contributing)
+        rsq = set_names(map_dbl(parts, "rsq"), contributing),
+        partition = parts[[1L]]$partition
     )
 }
 
@@ -2639,7 +2670,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ens <- try_fetch(
         ensembleWeights(
             cvResults = list(
-                prediction = coll$preds[str_c(passing, "_predicted")]
+                prediction = coll$preds[str_c(passing, "_predicted")],
+                samplePartition = coll$partition
             ),
             Y = Y[, r],
             twasWeightList = coll$wts[str_c(passing, "_weights")],
@@ -2652,16 +2684,33 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (is.null(ens) || is.null(ens$ensembleTwasWeights)) {
         return(NULL)
     }
+    .twasEnsembleRow(
+        ens,
+        coll$partition,
+        variantIds(perTokenEntries[[passing[1L]]][[r]]),
+        stdz
+    )
+}
+
+# The ensemble's row: its combined weights, and a cvResult recording its
+# cross-fit out-of-fold predictions and metrics over its methods' folds, as
+# each method's does, beside the stacking coefficients and the methods' own
+# R^2. `fallbackIds` names the weights when the ensemble's do not.
+# @noRd
+.twasEnsembleRow <- function(ens, partition, fallbackIds, stdz) {
     ew <- ens$ensembleTwasWeights
     vids <- (if (!is.null(names(ew))) names(ew) else rownames(ew)) %||%
-        variantIds(perTokenEntries[[passing[1L]]][[r]])
+        fallbackIds
     TwasWeightsRow(
         variantIds = vids,
         weights = as.numeric(ew),
-        cvResult = list(
+        cvResult = compact(list(
+            samplePartition = partition,
+            predictions = ens$predictions,
+            metrics = ens$metrics,
             methodCoef = ens$methodCoef,
             methodPerformance = ens$methodPerformance
-        ),
+        )),
         weightStandardized = stdz
     )
 }

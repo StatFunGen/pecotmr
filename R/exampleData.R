@@ -473,7 +473,8 @@ NULL
 #' @format A \code{ColocBoostResult} with one row: analysis
 #'   \code{xqtl_coloc}, outcomes \code{eQTL_GENESIM1} and
 #'   \code{psiQTL_GENESIM1}, one variant at \code{chr22:16496500:A:G} with
-#'   a variant colocalization probability of ~1.
+#'   a variant colocalization probability of ~1. It keeps the run's
+#'   \code{colocboost} object, which \code{\link{colocboostFit}} returns.
 #'
 #' @keywords data
 #'

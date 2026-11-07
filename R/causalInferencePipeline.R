@@ -19,6 +19,13 @@ NULL
 #'           MR computed from \code{fineMappingResult}.
 #'   }
 #'
+#'   MR is computed only from \code{fineMappingResult}: for every gene and
+#'   fine-mapping method it holds, against every GWAS study it overlaps,
+#'   whichever TWAS methods were chosen and whether or not
+#'   \code{twasWeights} holds the gene at all. A fine-mapping method among
+#'   the TWAS weights (such as \code{susie}) is a TWAS method like any other,
+#'   and MR never reads it.
+#'
 #' @section LD reference compatibility check: Per pair of rows scored
 #'   together: a QTL input row (TwasWeights or QtlFineMappingResult) that
 #'   carries an \code{ldReference} must be the same LD reference as the
@@ -37,19 +44,28 @@ NULL
 #'   individual-level data) skips the validation.
 #'
 #' @section Output shape:
-#' A long-format \code{GRanges} with one row per
-#' \code{(qtlStudy, context, trait, method, gwasStudy)} tuple,
-#' positioned at the variant span of the QTL weight set, with mcols:
+#' A long-format \code{GRanges} of two kinds of row, told apart by
+#' \code{analysis}: a TWAS row per chosen \code{(qtlStudy, context, trait,
+#' method)} weight set and GWAS study, positioned at the span of its
+#' variants the GWAS holds, and an MR row per fine-mapping row and GWAS
+#' study, positioned at the span of the fine-mapping row's variants. mcols:
 #' \describe{
 #'   \item{\code{qtlStudy}, \code{context}, \code{trait},
-#'         \code{method}, \code{gwasStudy}}{Identity columns.}
-#'   \item{\code{twasZ}, \code{twasPval}}{Per-tuple TWAS Z and p-value.}
-#'   \item{\code{waldRatio}, \code{waldRatioSe}, \code{mrPval}}{Per-tuple
+#'         \code{method}, \code{gwasStudy}}{Identity columns. On an MR row,
+#'         \code{method} is the fine-mapping method.}
+#'   \item{\code{analysis}}{\code{"twas"} or \code{"mr"}.}
+#'   \item{\code{twasZ}, \code{twasPval}}{TWAS Z and p-value; \code{NA} on
+#'         MR rows.}
+#'   \item{\code{waldRatio}, \code{waldRatioSe}, \code{mrPval}}{The
 #'         IVW-aggregated Wald-ratio MR estimate, standard error, and
-#'         p-value. Present only when MR was computed; \code{NA}
-#'         otherwise.}
+#'         p-value; \code{NA} on TWAS rows, and on an MR row whose estimate
+#'         \code{mrParam}'s \code{pvalCutoff} withheld or that had no
+#'         instrument.}
 #'   \item{\code{nIV}}{Number of instrumental variables used in the
 #'         MR aggregation.}
+#'   \item{\code{Q}, \code{I2}, \code{nCs}}{The credible-set heterogeneity
+#'         and the number of credible sets, from \code{method = "csAware"}
+#'         MR; \code{NA} otherwise.}
 #' }
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} object. Must be QC'd
@@ -65,36 +81,30 @@ NULL
 #'   context, trait, method) weights. When supplied, drives the TWAS-Z
 #'   computation.
 #' @param fineMappingResult Optional \code{\link{QtlFineMappingResult}}. When
-#'   supplied, drives the MR computation and (when \code{twasWeights = NULL})
-#'   the TWAS-Z weights via the SuSiE-style coefficients on each entry's
-#'   \code{topLoci}. MR reads the fine-mapping row of the same
-#'   \code{(study, context, trait, method)} as the TWAS row, so it runs only
-#'   for TWAS methods that are also fine-mapping methods (such as
-#'   \code{susie}); the MR columns of every other method's rows are
-#'   \code{NA}.
-#' @param weightSelectionParam How one TWAS method's weights are picked per
-#'   \code{(study, context, trait, gwasStudy)} tuple, built with
-#'   \code{\link{WeightSelectionParam}}: \code{cutoff} (minimum
-#'   cross-validated r-squared, default \code{0}), \code{pvalCutoff} (the
-#'   CV-p-value gate, default \code{Inf}), and \code{metric} /
-#'   \code{pvalMetric} naming which \code{cvResult} metrics those two read.
-#'   Selection runs when \code{cutoff > 0} or \code{pvalCutoff} is finite;
-#'   it keeps the highest-\code{metric} method among those clearing both
-#'   gates that also produced a finite TWAS Z. Otherwise every method is
-#'   carried through. Ports the legacy \code{twas_pipeline}
-#'   \code{pick_best_model} / \code{update_twas_method}. The metrics describe
-#'   each fit on all of its variants, so selection warns about a row narrowed
-#'   since its fit (condition class \code{pecotmrFitCoverage}).
+#'   supplied, drives the MR computation, for every row it holds, and (when
+#'   \code{twasWeights = NULL}) the TWAS-Z weights via the SuSiE-style
+#'   coefficients on each entry's \code{topLoci}.
+#' @param weightSelectionParam Which TWAS methods' weights are scored for each
+#'   gene, built with \code{\link{WeightSelectionParam}}: by default each
+#'   gene's best method by cross-validated r-squared, or \code{"all"}, or the
+#'   methods named; and the \code{cutoff} / \code{pvalCutoff} gates every
+#'   choice is bounded by. The choice reads the weights' \code{cvResult}
+#'   (\code{twasWeights}, else \code{fineMappingResult}), never a GWAS study.
+#'   Ports the legacy \code{twas_pipeline} \code{pick_best_model}. The
+#'   metrics describe each fit on all of its variants, so a choice that reads
+#'   them warns about a row narrowed since its fit (condition class
+#'   \code{pecotmrFitCoverage}).
 #' @param mrParam How Mendelian randomization is run, built with
 #'   \code{\link{MrParam}}: \code{method} (\code{"ivwPerVariant"}, the
 #'   default, or \code{"csAware"}), the PIP threshold that method reads
-#'   (\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}, the
-#'   TWAS-p-value gate below which MR runs at all (default \code{1}, no
-#'   gate; otherwise the MR columns are \code{NA}).
+#'   (\code{pipCutoff} or \code{cpipCutoff}), and \code{pvalCutoff}: a gene's
+#'   MR against a GWAS study is estimated only when one of the gene's TWAS
+#'   p-values for that study is below it (default \code{1}, no gate). A gene
+#'   with no TWAS row for the study is not gated.
 #' @param combineMethods Optional character vector forwarded to
-#'   \code{\link{combinePValues}} for cross-method combination per
-#'   \code{(qtlStudy, context, trait, gwasStudy)} group. \code{NULL} (default)
-#'   skips combination.
+#'   \code{\link{combinePValues}} for cross-method combination of the TWAS
+#'   rows of each \code{(qtlStudy, context, trait, gwasStudy)} group.
+#'   \code{NULL} (default) skips combination.
 #' @param alleleFlip Logical, default \code{TRUE}. When TRUE, match QTL variants
 #'   to the GWAS by (chrom, pos) with ref/alt swaps recognized and the exposure
 #'   effect / weight sign-flipped accordingly; when FALSE, match on exact
@@ -140,8 +150,9 @@ causalInferencePipeline <- function(
     .withGenome(res, build)
 }
 
-# Orchestrate the causal-inference pipeline: validate, resolve the QTL work
-# list, apply optional CV selection, score every (qtl, gwas) pair, finalize.
+# Orchestrate the causal-inference pipeline: validate; choose each gene's TWAS
+# weights (twasWeights, else the fine-mapping result); score them against
+# every GWAS study they overlap; run MR for every fine-mapping row; finalize.
 # @noRd
 .cipRun <- function(
     gwasSumStats,
@@ -154,35 +165,39 @@ causalInferencePipeline <- function(
 ) {
     .cipValidateInputs(gwasSumStats, twasWeights, fineMappingResult)
     .cipCheckLdRefs(gwasSumStats, twasWeights, fineMappingResult)
-    allRows <- .cipResolveWorkList(twasWeights, fineMappingResult)
-    sel <- .cipCvSelection(
-        qtlRows = allRows,
-        twasWeights = twasWeights,
-        weightSelectionParam = weightSelectionParam
-    )
-    qtlRows <- sel$qtlRows
-    tuples <- compact(map(
-        seq_len(nrow(qtlRows)),
-        .cipTupleInputs,
-        qtlRows = qtlRows,
-        twasWeights = twasWeights,
-        fineMappingResult = fineMappingResult
+    weightSource <- twasWeights %||% fineMappingResult
+    cells <- .cipChosenCells(weightSource, weightSelectionParam)
+    twasTuples <- compact(map(
+        seq_len(nrow(cells)),
+        .cipTwasTuple,
+        cells = cells,
+        weightSource = weightSource
     ))
-    .cipCheckBlockReach(tuples, gwasSumStats)
-    outRows <- list_flatten(map(
-        tuples,
-        .cipScoreQtlTuple,
+    mrTuples <- .cipMrTuples(fineMappingResult)
+    .cipCheckBlockReach(c(twasTuples, mrTuples), gwasSumStats)
+    gwasIndex <- .rowSpans(gwasSumStats)
+    twasRows <- list_flatten(map(
+        twasTuples,
+        .cipScoreTwasTuple,
         gwasSumStats = gwasSumStats,
-        gwasIndex = .rowSpans(gwasSumStats),
+        gwasIndex = gwasIndex,
+        alleleFlip = alleleFlip
+    ))
+    mrRows <- list_flatten(map(
+        mrTuples,
+        .cipScoreMrTuple,
+        gwasSumStats = gwasSumStats,
+        gwasIndex = gwasIndex,
+        twasPvals = .cipTwasPvals(twasRows),
         alleleFlip = alleleFlip,
         mrParam = mrParam
     ))
-    if (length(outRows) == 0L) {
+    if (length(twasRows) + length(mrRows) == 0L) {
         abort(
             "causalInferencePipeline: no (qtl, gwas) tuples produced a result."
         )
     }
-    .cipFinalize(outRows, sel, combineMethods)
+    .cipFinalize(c(twasRows, mrRows), combineMethods)
 }
 
 # Validate the object classes + QC state of the pipeline inputs.
@@ -257,128 +272,101 @@ causalInferencePipeline <- function(
     )
 }
 
-# Build the (qtlStudy, context, trait, method) work list + the per-row
-# useFmrForWeights flag (error when empty).
+# The (gene, method) weight sets of `weightSource` the run scores: every one it
+# holds, narrowed by `weightSelectionParam` (.selectWeightCells()). An error
+# when the source holds none, or the choice leaves none.
 # @noRd
-.cipResolveWorkList <- function(twasWeights, fineMappingResult) {
-    qtlRows <- .cipBuildQtlWorkList(twasWeights, fineMappingResult)
-    if (nrow(qtlRows) == 0L) {
-        msg <- glue(
+.cipChosenCells <- function(weightSource, weightSelectionParam) {
+    cells <- .weightCells(weightSource, weightSelectionParam)
+    if (nrow(cells) == 0L) {
+        abort(glue(
             "causalInferencePipeline: no QTL tuples to score (the supplied ",
             "twasWeights / fineMappingResult collections are empty)."
-        )
-        abort(msg)
-    }
-    mutate(qtlRows, useFmrForWeights = is.null(twasWeights))
-}
-
-# CV R-squared keyed by the (study, context, trait, method) tuple. The
-# separator is \\r because it cannot occur in any of the four identifiers.
-# @noRd
-.cipRsqLookup <- function(metricTab) {
-    set_names(
-        metricTab$rsq,
-        str_c(
-            metricTab$qtlStudy,
-            metricTab$context,
-            metricTab$trait,
-            metricTab$method,
-            sep = "\r"
-        )
-    )
-}
-
-# Optional CV weight selection (legacy pick_best_model + update_twas_method):
-# filter to eligible methods now, deferring the final best-method pick to after
-# the TWAS Z. Returns list(qtlRows, rsqLookup, selectionActive).
-# @noRd
-.cipCvSelection <- function(
-    qtlRows,
-    twasWeights,
-    weightSelectionParam
-) {
-    # The bundle's terminal. .cipMethodMetrics / .cipEligibleRowsIn below
-    # take plain scalars, so it is unrolled once, here.
-    rsqCutoff <- weightSelectionParam$cutoff
-    rsqPvalCutoff <- weightSelectionParam$pvalCutoff
-    rsqOption <- weightSelectionParam$metric
-    rsqPvalOption <- weightSelectionParam$pvalMetric
-    selectionActive <- !is.null(twasWeights) &&
-        (rsqCutoff > 0 || is.finite(rsqPvalCutoff))
-    if (!selectionActive) {
-        return(list(
-            qtlRows = qtlRows,
-            rsqLookup = NULL,
-            selectionActive = FALSE
         ))
     }
-    # The metrics describe each fit on all of its variants.
-    .fitCoverageCheckedRows(twasWeights, "causalInferencePipeline()")
-    metricTab <- .cipMethodMetrics(
-        qtlRows,
-        twasWeights,
-        rsqOption,
-        rsqPvalOption
+    .selectionCoverageCheck(
+        list(weightSource),
+        weightSelectionParam,
+        "causalInferencePipeline()"
     )
-    rsqLookup <- .cipRsqLookup(metricTab)
-    qtlRows <- .cipFilterEligibleMethods(
-        qtlRows,
-        metricTab,
-        rsqCutoff,
-        rsqPvalCutoff
+    chosen <- .selectWeightCells(
+        cells,
+        weightSelectionParam,
+        "causalInferencePipeline"
     )
-    if (nrow(qtlRows) == 0L) {
-        msg <- glue(
+    if (nrow(chosen) == 0L) {
+        abort(glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
-            "WeightSelectionParam(cutoff = {rsqCutoff}, ",
-            "pvalCutoff = {rsqPvalCutoff}) ",
+            "WeightSelectionParam(cutoff = {weightSelectionParam$cutoff}, ",
+            "pvalCutoff = {weightSelectionParam$pvalCutoff}) ",
             "(no method cleared the CV cutoffs)."
-        )
-        abort(msg)
+        ))
     }
-    list(qtlRows = qtlRows, rsqLookup = rsqLookup, selectionActive = TRUE)
+    chosen
 }
 
-# One QTL tuple's inputs: its identity, weights and fine-mapping entry, and
-# the variants it reads the GWAS at. NULL when the tuple has no usable
-# weights. The variants are its weight variants plus its fine-mapping ones,
-# which MR reads too.
+# Chosen cell `i`'s TWAS inputs: its identity, its weights, and the variants
+# the GWAS is read at. NULL when it has no usable weights.
 # @noRd
-.cipTupleInputs <- function(qi, qtlRows, twasWeights, fineMappingResult) {
-    tuple <- list(
-        qStudy = qtlRows$qtlStudy[[qi]],
-        qContext = qtlRows$context[[qi]],
-        qTrait = qtlRows$trait[[qi]],
-        qMethod = qtlRows$method[[qi]]
-    )
-    weightsInfo <- .cipExtractWeights(
-        twasWeights = twasWeights,
-        fineMappingResult = fineMappingResult,
-        studyName = tuple$qStudy,
-        context = tuple$qContext,
-        trait = tuple$qTrait,
-        method = tuple$qMethod,
-        useFmr = qtlRows$useFmrForWeights[[qi]]
-    )
+.cipTwasTuple <- function(i, cells, weightSource) {
+    tuple <- .cipCellTuple(cells, i)
+    weightsInfo <- .cipExtractWeights(weightSource, tuple)
     if (is.null(weightsInfo)) {
         return(NULL)
-    }
-    fmrEntry <- .cipResolveFmrEntry(
-        fineMappingResult,
-        tuple$qStudy,
-        tuple$qContext,
-        tuple$qTrait,
-        tuple$qMethod
-    )
-    fmrIds <- if (!is.null(fmrEntry)) {
-        .grVariantIds(unlist(fmrEntry, use.names = FALSE))
     }
     list(
         tuple = tuple,
         weightsInfo = weightsInfo,
+        variants = .variantIdsToGRanges(
+            unique(weightsInfo$variantIds),
+            what = "causalInferencePipeline variant id"
+        )
+    )
+}
+
+# Row `i` of a (study, context, trait, method) table as a tuple identity.
+# @noRd
+.cipCellTuple <- function(cells, i) {
+    list(
+        qStudy = cells$study[[i]],
+        qContext = cells$context[[i]],
+        qTrait = cells$trait[[i]],
+        qMethod = cells$method[[i]]
+    )
+}
+
+# One MR input per fine-mapping row -- each (study, context, trait, method) it
+# holds, a multi-block one as one -- with the variants it reads the GWAS at.
+# None without a fine-mapping result.
+# @noRd
+.cipMrTuples <- function(fineMappingResult) {
+    if (is.null(fineMappingResult)) {
+        return(list())
+    }
+    keys <- .weightCellIds(fineMappingResult)
+    map(
+        seq_len(nrow(keys)),
+        .cipMrTuple,
+        keys = keys,
+        fineMappingResult = fineMappingResult
+    )
+}
+
+# @noRd
+.cipMrTuple <- function(i, keys, fineMappingResult) {
+    tuple <- .cipCellTuple(keys, i)
+    fmrEntry <- fineMappingResult(
+        fineMappingResult,
+        studyName = tuple$qStudy,
+        context = tuple$qContext,
+        trait = tuple$qTrait,
+        method = tuple$qMethod
+    )
+    list(
+        tuple = tuple,
         fmrEntry = fmrEntry,
         variants = .variantIdsToGRanges(
-            unique(c(weightsInfo$variantIds, fmrIds)),
+            unique(.grVariantIds(unlist(fmrEntry, use.names = FALSE))),
             what = "causalInferencePipeline variant id"
         )
     )
@@ -410,104 +398,146 @@ causalInferencePipeline <- function(
     )
 }
 
-# Score one QTL tuple against every GWAS study it overlaps -> a list of
-# result records (empty when it overlaps no GWAS row). Each study is scored
-# once, over just the rows the tuple's window -- the span of its variants --
-# overlaps: a study split by chromosome or LD block has many rows, and
-# pairing the tuple with every one of them scored it once per row.
-# `gwasIndex` is .rowSpans(gwasSumStats), built once for the run.
+# The rows of each GWAS study that `window` overlaps, split by study. A study
+# split by chromosome or LD block has many rows, and a tuple is scored once
+# per study, over just the rows its window -- the span of its variants --
+# overlaps. `gwasIndex` is .rowSpans(gwasSumStats), built once for the run.
 # @noRd
-.cipScoreQtlTuple <- function(
-    input,
-    gwasSumStats,
-    gwasIndex,
-    alleleFlip,
-    mrParam
-) {
-    window <- range(input$variants)
+.cipStudyRows <- function(gwasIndex, gwasSumStats, window) {
     rows <- unique(gwasIndex$rows[.overlapsOnShared(gwasIndex$spans, window)])
     studies <- as.character(gwasSumStats$study)[rows]
-    compact(imap(
-        split(rows, factor(studies, levels = unique(studies))),
-        .cipScoreGwasPair,
-        tuple = input$tuple,
-        weightsInfo = input$weightsInfo,
-        fmrEntry = input$fmrEntry,
-        gwasSumStats = gwasSumStats,
-        window = window,
-        alleleFlip = alleleFlip,
-        mrParam = mrParam
-    ))
+    split(rows, factor(studies, levels = unique(studies)))
 }
 
-# The tuple's single-row collection from `fineMappingResult` (NULL when it
-# lacks the tuple).
+# A GWAS study's statistics inside `window`, over its rows `rows`.
 # @noRd
-.cipResolveFmrEntry <- function(
-    fineMappingResult,
-    qStudy,
-    qContext,
-    qTrait,
-    qMethod
-) {
-    hasTuple <- !is.null(fineMappingResult) &&
-        .cipFmrHasTuple(fineMappingResult, qStudy, qContext, qTrait, qMethod)
-    if (!hasTuple) {
-        return(NULL)
-    }
-    fineMappingResult(
-        fineMappingResult,
-        studyName = qStudy,
-        context = qContext,
-        trait = qTrait,
-        method = qMethod
-    )
-}
-
-# Score one (qtl tuple, gwas study) pair -> a result record, or NULL when the
-# TWAS Z cannot be computed (too little overlap). `rows` are the study's rows
-# the tuple's window overlaps; only their statistics inside the window are
-# read, so a gene whose weights cross an LD-block boundary is scored once,
-# over every block it reaches.
-# @noRd
-.cipScoreGwasPair <- function(
-    rows,
-    gStudy,
-    tuple,
-    weightsInfo,
-    fmrEntry,
-    gwasSumStats,
-    window,
-    alleleFlip,
-    mrParam
-) {
-    gwasLd <- .cipRowsLdRef(gwasSumStats, rows, gStudy)
-    gdf <- .entryToSumstatDf(
+.cipGwasDf <- function(gwasSumStats, rows, window, gStudy) {
+    .entryToSumstatDf(
         .ssStitchElements(gwasSumStats, rows, window),
         require = c("SNP", "Z"),
         derive = "none",
         keepChrPrefix = TRUE,
         label = glue("GwasSumStats[{gStudy}]")
     )
+}
+
+# Score one TWAS tuple against every GWAS study it overlaps -> a list of TWAS
+# records (empty when it overlaps no GWAS row).
+# @noRd
+.cipScoreTwasTuple <- function(input, gwasSumStats, gwasIndex, alleleFlip) {
+    window <- range(input$variants)
+    compact(imap(
+        .cipStudyRows(gwasIndex, gwasSumStats, window),
+        .cipScoreTwasPair,
+        input = input,
+        gwasSumStats = gwasSumStats,
+        window = window,
+        alleleFlip = alleleFlip
+    ))
+}
+
+# Score one (TWAS tuple, GWAS study) pair -> a TWAS record, or NULL when the
+# TWAS Z cannot be computed (too little overlap). Only the study's statistics
+# inside the window are read, so a gene whose weights cross an LD-block
+# boundary is scored once, over every block it reaches.
+# @noRd
+.cipScoreTwasPair <- function(
+    rows,
+    gStudy,
+    input,
+    gwasSumStats,
+    window,
+    alleleFlip
+) {
+    gwasLd <- .cipRowsLdRef(gwasSumStats, rows, gStudy)
     twasOut <- .cipComputeTwasZ(
-        weights = weightsInfo$weights,
-        variantIds = weightsInfo$variantIds,
-        gwasDf = gdf,
+        weights = input$weightsInfo$weights,
+        variantIds = input$weightsInfo$variantIds,
+        gwasDf = .cipGwasDf(gwasSumStats, rows, window, gStudy),
         gwasLd = gwasLd,
         alleleFlip = alleleFlip,
-        label = .cipPairLabel(tuple, gStudy)
+        label = .cipPairLabel(input$tuple, gStudy)
     )
     if (is.null(twasOut)) {
         return(NULL)
     }
-    mrOut <- .cipRunMr(
-        fmrEntry,
-        gdf,
-        twasOut,
+    .cipRecord(input$tuple, gStudy, "twas", twasOut, .cipEmptyMr(), twasOut)
+}
+
+# Run MR for one fine-mapping row against every GWAS study it overlaps -> one
+# MR record per study, whatever its estimate came to. `twasPvals` holds the
+# run's TWAS p-values by gene and study (.cipTwasPvals()), which mrParam's
+# pvalCutoff reads.
+# @noRd
+.cipScoreMrTuple <- function(
+    input,
+    gwasSumStats,
+    gwasIndex,
+    twasPvals,
+    alleleFlip,
+    mrParam
+) {
+    window <- range(input$variants)
+    imap(
+        .cipStudyRows(gwasIndex, gwasSumStats, window),
+        .cipScoreMrPair,
+        input = input,
+        gwasSumStats = gwasSumStats,
+        window = window,
+        twasPvals = twasPvals,
         alleleFlip = alleleFlip,
         mrParam = mrParam
     )
-    .cipResultRow(tuple, gStudy, twasOut, mrOut)
+}
+
+# @noRd
+.cipScoreMrPair <- function(
+    rows,
+    gStudy,
+    input,
+    gwasSumStats,
+    window,
+    twasPvals,
+    alleleFlip,
+    mrParam
+) {
+    mrOut <- .cipRunMr(
+        input$fmrEntry,
+        .cipGwasDf(gwasSumStats, rows, window, gStudy),
+        twasPvals[[.cipGeneKey(input$tuple, gStudy)]],
+        alleleFlip = alleleFlip,
+        mrParam = mrParam
+    )
+    .cipRecord(
+        input$tuple,
+        gStudy,
+        "mr",
+        .cipEmptyTwas(),
+        mrOut,
+        .cipWindowSpan(window)
+    )
+}
+
+# A gene's key against GWAS study `gStudy`, as .cipTwasPvals() keys them.
+# @noRd
+.cipGeneKey <- function(tuple, gStudy) {
+    str_c(tuple$qStudy, tuple$qContext, tuple$qTrait, gStudy, sep = "\r")
+}
+
+# The TWAS p-values of `records`, by gene and GWAS study (.cipGeneKey()).
+# @noRd
+.cipTwasPvals <- function(records) {
+    if (length(records) == 0L) {
+        return(list())
+    }
+    keys <- str_c(
+        map_chr(records, "qtlStudy"),
+        map_chr(records, "context"),
+        map_chr(records, "trait"),
+        map_chr(records, "gwasStudy"),
+        sep = "\r"
+    )
+    split(map_dbl(records, "twasPval"), keys)
 }
 
 # Identify a (QTL tuple, GWAS study) pair in diagnostics.
@@ -520,24 +550,21 @@ causalInferencePipeline <- function(
     )
 }
 
-# Run MR for a pair, gated on the TWAS p-value (mrPvalCutoff >= 1 disables the
-# gate) and the presence of a fine-mapping entry.
+# Run MR for a fine-mapping row against a GWAS study -> its estimate, or the
+# all-NA one when mrParam's pvalCutoff withholds it: when none of the gene's
+# TWAS p-values for the study (`genePvals`) is below the cutoff. A gene with
+# no TWAS row for the study is not gated; a cutoff of 1 or more gates none.
 # @noRd
-.cipRunMr <- function(
-    fmrEntry,
-    gdf,
-    twasOut,
-    alleleFlip,
-    mrParam
-) {
+.cipRunMr <- function(fmrEntry, gdf, genePvals, alleleFlip, mrParam) {
     # The bundle's terminal; the MR engines below take plain scalars.
     mrMethod <- mrParam$method
     mrPipCutoff <- mrParam$pipCutoff
     mrCpipCutoff <- mrParam$cpipCutoff
     mrPvalCutoff <- mrParam$pvalCutoff
-    mrGateOpen <- mrPvalCutoff >= 1 ||
-        (!is.na(twasOut$pval) && twasOut$pval < mrPvalCutoff)
-    if (is.null(fmrEntry) || !mrGateOpen) {
+    gateOpen <- mrPvalCutoff >= 1 ||
+        length(genePvals) == 0L ||
+        any(!is.na(genePvals) & genePvals < mrPvalCutoff)
+    if (!gateOpen) {
         return(.cipEmptyMr())
     }
     if (mrMethod == "csAware") {
@@ -557,7 +584,8 @@ causalInferencePipeline <- function(
     }
 }
 
-# The all-NA MR result used when MR is skipped for a pair.
+# The all-NA MR result: a TWAS row's, and an MR row's when its estimate is
+# withheld.
 # @noRd
 .cipEmptyMr <- function() {
     list(
@@ -571,15 +599,34 @@ causalInferencePipeline <- function(
     )
 }
 
-# Assemble one result record from a tuple + its TWAS / MR outputs.
+# The all-NA TWAS result an MR row carries.
 # @noRd
-.cipResultRow <- function(tuple, gStudy, twasOut, mrOut) {
+.cipEmptyTwas <- function() {
+    list(Z = NA_real_, pval = NA_real_)
+}
+
+# Where an MR row sits: the span of its fine-mapping row's variants.
+# @noRd
+.cipWindowSpan <- function(window) {
+    list(
+        chrom = as.character(seqnames(window))[[1L]],
+        startPos = start(window)[[1L]],
+        endPos = end(window)[[1L]]
+    )
+}
+
+# One result record: a tuple's identity against GWAS study `gStudy`, which
+# `analysis` it is, its TWAS and MR outputs (each all-NA on the other kind of
+# row), and the span `at` (chrom, startPos, endPos) it is placed at.
+# @noRd
+.cipRecord <- function(tuple, gStudy, analysis, twasOut, mrOut, at) {
     list(
         qtlStudy = tuple$qStudy,
         context = tuple$qContext,
         trait = tuple$qTrait,
         method = tuple$qMethod,
         gwasStudy = gStudy,
+        analysis = analysis,
         twasZ = twasOut$Z,
         twasPval = twasOut$pval,
         waldRatio = mrOut$waldRatio,
@@ -589,33 +636,21 @@ causalInferencePipeline <- function(
         Q = mrOut$Q %||% NA_real_,
         I2 = mrOut$I2 %||% NA_real_,
         nCs = mrOut$nCs %||% NA_integer_,
-        chrom = twasOut$chrom,
-        startPos = twasOut$startPos,
-        endPos = twasOut$endPos
+        chrom = at$chrom,
+        startPos = at$startPos,
+        endPos = at$endPos
     )
 }
 
-# Assemble the result data.frame, apply the final best-method pick, convert to
-# GRanges, and (optionally) combine across methods.
+# The records as the result GRanges, with the TWAS rows' p-values combined
+# across methods when asked.
 # @noRd
-.cipFinalize <- function(outRows, sel, combineMethods) {
-    allRows <- .cipRowsToDf(outRows)
-    # Final best-method pick + NA/Inf re-selection (legacy update_twas_method):
-    # per (qtlStudy, context, trait, gwasStudy) keep the highest-rsqOption
-    # eligible method whose TWAS Z is finite, falling back to the top-rsq method
-    # when none is finite. SS-TWAS groups (no usable rsq) keep all methods.
-    resultDf <- if (sel$selectionActive) {
-        .cipSelectBestMethod(allRows, sel$rsqLookup)
-    } else {
-        allRows
+.cipFinalize <- function(records, combineMethods) {
+    perMethod <- .cipDfToGranges(.cipRowsToDf(records))
+    if (is.null(combineMethods)) {
+        return(perMethod)
     }
-    perMethod <- .cipDfToGranges(resultDf)
-    out <- if (is.null(combineMethods)) {
-        perMethod
-    } else {
-        .cipCombineAcrossMethods(perMethod, methods = combineMethods)
-    }
-    out
+    .cipCombineAcrossMethods(perMethod, methods = combineMethods)
 }
 
 # =============================================================================
@@ -634,200 +669,229 @@ causalInferencePipeline <- function(
     )
 }
 
-# Build the (qtlStudy, context, trait, method) work list from
-# whichever input was supplied. When both are supplied, prefer the
-# TwasWeights tuples and only retain those that also appear in the FMR
-# (so MR has something to attach).
-.cipBuildQtlWorkList <- function(twasWeights, fineMappingResult) {
-    if (!is.null(twasWeights)) {
-        # One tuple per entry: a TwasWeights row holds a gene's methods.
-        cells <- .twasCells(twasWeights)
-        df <- tibble(
-            qtlStudy = cells$study,
+# =============================================================================
+# Method choice, shared with ctwasPipeline (WeightSelectionParam)
+# =============================================================================
+
+# One row per (gene, method) weight set of `source`: a TwasWeights' cells
+# (with the `row` each sits in), or a fine-mapping result's distinct
+# (study, context, trait, method) rows, a multi-block one once.
+# @noRd
+.weightCellIds <- function(source) {
+    if (methods::is(source, "TwasWeights")) {
+        cells <- .twasCells(source)
+        return(tibble(
+            study = cells$study,
             context = cells$context,
             trait = cells$trait,
-            method = cells$method
-        )
-    } else {
-        df <- tibble(
-            qtlStudy = as.character(fineMappingResult$study),
-            context = as.character(fineMappingResult$context),
-            trait = as.character(fineMappingResult$trait),
-            method = as.character(fineMappingResult$method)
-        )
+            method = cells$method,
+            row = cells$row
+        ))
     }
-    df
+    distinct(.weightRowIds(source))
 }
 
-# Resolve one CV metric (rsqOption / rsqPvalOption) for a single tuple from the
-# TwasWeights cvResult, which the individual-level CV path stores as a list
-# with a named $metrics vector (corr, rsq, adj_rsq, pval, RMSE, MAE); a bare
-# metrics vector / data frame is tolerated too. `which` is a vector of candidate
-# metric names; the first present is used. Returns NA when no usable metric.
-# Read from the row, not through cvResult(x, ...): .cipCvSelection() has
-# already warned once about narrowed rows, which the accessor would repeat
-# for every row and metric.
+# Each row of fine-mapping result `x` as its (study, context, trait, method).
+# @noRd
+.weightRowIds <- function(x) {
+    tibble(
+        study = as.character(x$study),
+        context = as.character(x$context),
+        trait = as.character(x$trait),
+        method = as.character(x$method)
+    )
+}
+
+# One key per weight set of a (study, context, trait, method) table, to match
+# weight sets with each other only.
+# @noRd
+.cellKey <- function(cells) {
+    str_c(cells$study, cells$context, cells$trait, cells$method, sep = "\r")
+}
+
+# `source`'s weight sets (.weightCellIds()) with what WeightSelectionParam
+# reads: each one's CV `rsq` (its `metric`) and `pval` (its `pvalMetric`), and
+# whether its weights are all `zero`. They are read only when the choice needs
+# them -- "best", or a cutoff (.selectionReadsCv()).
+# @noRd
+.weightCells <- function(source, weightSelectionParam) {
+    cells <- .weightCellIds(source)
+    if (nrow(cells) == 0L || !.selectionReadsCv(weightSelectionParam)) {
+        return(mutate(cells, rsq = NA_real_, pval = NA_real_, zero = FALSE))
+    }
+    parts <- map(
+        seq_len(nrow(cells)),
+        .weightCellPart,
+        cells = cells,
+        source = source
+    )
+    mutate(
+        cells,
+        rsq = map_dbl(
+            parts,
+            .weightCvValue,
+            which = weightSelectionParam$metric
+        ),
+        pval = map_dbl(
+            parts,
+            .weightCvValue,
+            which = weightSelectionParam$pvalMetric
+        ),
+        zero = map_lgl(parts, .weightsAllZero)
+    )
+}
+
+# Whether `weightSelectionParam`'s choice reads the CV metrics: "best" ranks
+# by them, and a cutoff gates on them.
+# @noRd
+.selectionReadsCv <- function(weightSelectionParam) {
+    identical(weightSelectionParam$methods, "best") ||
+        weightSelectionParam$cutoff > 0 ||
+        is.finite(weightSelectionParam$pvalCutoff)
+}
+
+# The CV metrics describe each fit on all of its variants, so a choice that
+# reads them warns once about the rows of `sources` narrowed since their fits.
+# @noRd
+.selectionCoverageCheck <- function(sources, weightSelectionParam, caller) {
+    if (.selectionReadsCv(weightSelectionParam)) {
+        .fitCoverageCheckedAll(sources, caller)
+    }
+    invisible(NULL)
+}
+
+# Cell `i`'s payload: a TwasWeightsRow, or a FineMappingRow.
+# @noRd
+.weightCellPart <- function(i, cells, source) {
+    if (methods::is(source, "TwasWeights")) {
+        return(.twrCellParts(source, cells$row[[i]], cells$method[[i]]))
+    }
+    .fmrSelectEntry(
+        source,
+        studyName = cells$study[[i]],
+        context = cells$context[[i]],
+        trait = cells$trait[[i]],
+        method = cells$method[[i]]
+    )
+}
+
+# The first of the CV metrics `which` that payload `part` records, NA when it
+# records none. A cvResult holds its metrics as a named vector or a one-row
+# matrix; one without a `metrics` entry is read as the metrics themselves.
 # @noRd
 #' @importFrom rlang try_fetch
-.cipCvMetric <- function(
-    twasWeights,
-    studyName,
-    context,
-    trait,
-    method,
-    which
-) {
-    perf <- try_fetch(
-        cvResult(
-            .twrSelectRowParts(twasWeights, studyName, context, trait, method)
-        ),
-        error = function(cnd) NULL
+.weightCvValue <- function(part, which) {
+    cv <- try_fetch(cvResult(part), error = function(cnd) NULL)
+    metrics <- .cvMetricsVector(
+        if (is.list(cv) && !is.null(cv[["metrics"]])) cv[["metrics"]] else cv
     )
-    if (is.null(perf)) {
+    hit <- intersect(which, names(metrics))
+    if (length(hit) == 0L) {
         return(NA_real_)
     }
-    metrics <- if (is.list(perf) && !is.null(perf[["metrics"]])) {
-        perf[["metrics"]]
+    value <- suppressWarnings(as.numeric(metrics[[hit[[1L]]]]))
+    if (length(value) == 0L) NA_real_ else value[[1L]]
+}
+
+# A metrics record as a named vector: a matrix's first row.
+# @noRd
+.cvMetricsVector <- function(metrics) {
+    if (is.matrix(metrics) && nrow(metrics) > 0L) {
+        return(metrics[1L, , drop = TRUE])
+    }
+    metrics
+}
+
+# Whether payload `part`'s weights are all zero, or absent.
+# @noRd
+.weightsAllZero <- function(part) {
+    w <- if (methods::is(part, "TwasWeightsRow")) {
+        .twrRowResolveWeights(part)$weights
     } else {
-        perf
+        .fmrRowResolveWeights(part)$weights
     }
-    nm <- intersect(which, names(metrics))
-    if (length(nm) == 0L) {
-        return(NA_real_)
+    length(w) == 0L || all(w == 0, na.rm = TRUE)
+}
+
+# The cells of `cells` (.weightCells()) `weightSelectionParam` keeps. Its
+# cutoffs bound every choice; then "best" keeps each gene's best method
+# (.bestCellIn()), "all" every method, and named methods those. A name the
+# cells do not hold is an error, as a misspelling would otherwise score
+# nothing.
+# @noRd
+.selectWeightCells <- function(cells, weightSelectionParam, caller) {
+    methods <- weightSelectionParam$methods
+    eligible <- .cellsByGene(
+        cells,
+        .cellsPassingIn,
+        cutoff = weightSelectionParam$cutoff,
+        pvalCutoff = weightSelectionParam$pvalCutoff
+    )
+    if (identical(methods, "all")) {
+        return(eligible)
     }
-    val <- suppressWarnings(as.numeric(metrics[[nm[[1L]]]]))
-    if (length(val) == 0L) NA_real_ else val[[1L]]
-}
-
-# Tabulate the rsqOption (rsq) and rsqPvalOption (pval) CV metrics for every
-# tuple in the work-list. Returns the identity columns plus `rsq`, `pval`.
-# @noRd
-.cipMethodMetrics <- function(qtlRows, twasWeights, rsqOption, rsqPvalOption) {
-    n <- nrow(qtlRows)
-    rsq <- map_dbl(
-        seq_len(n),
-        .cipRowCvMetric,
-        twasWeights = twasWeights,
-        qtlRows = qtlRows,
-        which = rsqOption
-    )
-    pval <- map_dbl(
-        seq_len(n),
-        .cipRowCvMetric,
-        twasWeights = twasWeights,
-        qtlRows = qtlRows,
-        which = rsqPvalOption
-    )
-    tibble(
-        qtlStudy = qtlRows$qtlStudy,
-        context = qtlRows$context,
-        trait = qtlRows$trait,
-        method = qtlRows$method,
-        rsq = rsq,
-        pval = pval
-    )
-}
-
-# Eligibility filter (legacy pick_best_model gate): per (study, context, trait)
-# keep methods whose rsq >= rsqCutoff and (when the gate is finite) whose CV
-# p-value < rsqPvalCutoff. A group whose methods carry no usable rsq (all NA) is
-# the SS-TWAS path and keeps all its methods. Groups where no method clears the
-# cutoffs contribute nothing. Returns the filtered work-list (same columns).
-# @noRd
-.cipFilterEligibleMethods <- function(
-    qtlRows,
-    metricTab,
-    rsqCutoff,
-    rsqPvalCutoff
-) {
-    grp <- str_c(
-        metricTab$qtlStudy,
-        metricTab$context,
-        metricTab$trait,
-        sep = "\r"
-    )
-    kept <- .cipConcatInt(map(
-        unique(grp),
-        .cipEligibleRowsIn,
-        grp = grp,
-        metricTab = metricTab,
-        rsqCutoff = rsqCutoff,
-        rsqPvalCutoff = rsqPvalCutoff
-    ))
-    filter(qtlRows, .cipRowMask(kept, nrow(qtlRows)))
-}
-
-# @noRd
-.cipConcatInt <- function(pieces) {
-    if (length(pieces) == 0L) {
-        return(integer(0))
+    if (identical(methods, "best")) {
+        return(.cellsByGene(eligible, .bestCellIn))
     }
-    list_c(pieces)
+    .assertCellMethods(methods, cells$method, caller)
+    eligible[is_in(eligible$method, methods), ]
 }
 
-# A logical mask of length `n` that is TRUE at `at`.
+# `cells` narrowed gene by gene: `keep(idx, cells, ...)` gives the rows of a
+# gene's rows `idx` to keep. Row order is kept.
 # @noRd
-.cipRowMask <- function(at, n) {
-    replace(logical(n), at, TRUE)
+.cellsByGene <- function(cells, keep, ...) {
+    if (nrow(cells) == 0L) {
+        return(cells)
+    }
+    gene <- str_c(cells$study, cells$context, cells$trait, sep = "\r")
+    byGene <- split(seq_len(nrow(cells)), factor(gene, levels = unique(gene)))
+    kept <- list_c(map(byGene, keep, cells = cells, ...), ptype = integer())
+    cells[sort(kept), ]
 }
 
-# The rows of group `g` that clear the R^2 (and optional p-value) gate. A
-# group with no usable R^2 at all is SS-TWAS, which keeps every row.
+# The rows `idx` of one gene that clear the r-squared and p-value gates. A
+# gate is set only by a cutoff above 0, or a finite p-value cutoff; and a gene
+# none of whose methods has an r-squared keeps every row, there being nothing
+# to gate it by (summary-statistic weights).
 # @noRd
-.cipEligibleRowsIn <- function(g, grp, metricTab, rsqCutoff, rsqPvalCutoff) {
-    idx <- which(grp == g)
-    rsq <- metricTab$rsq[idx]
+.cellsPassingIn <- function(idx, cells, cutoff, pvalCutoff) {
+    rsq <- cells$rsq[idx]
     if (all(is.na(rsq))) {
         return(idx)
     }
-    byRsq <- !is.na(rsq) & rsq >= rsqCutoff
-    elig <- if (!is.finite(rsqPvalCutoff)) {
-        byRsq
-    } else {
-        byRsq &
-            !is.na(metricTab$pval[idx]) &
-            metricTab$pval[idx] < rsqPvalCutoff
-    }
-    idx[elig]
+    pval <- cells$pval[idx]
+    byRsq <- cutoff <= 0 | (!is.na(rsq) & rsq >= cutoff)
+    byPval <- !is.finite(pvalCutoff) | (!is.na(pval) & pval < pvalCutoff)
+    idx[byRsq & byPval]
 }
 
-# Final best-method pick + NA/Inf re-selection (legacy update_twas_method): per
-# (qtlStudy, context, trait, gwasStudy) rank the (already-eligible) methods by
-# rsqLookup descending and keep the first whose twasZ is finite; if none is
-# finite, keep the top-rsq method. A group with no usable rsq (SS-TWAS) keeps
-# all its rows. `rsqLookup` is keyed by study\rcontext\rtrait\rmethod.
+# Gene `idx`'s best row: the highest-r-squared method whose weights are not
+# all zero, else the highest-r-squared one. Ties go to the first. A gene with
+# no r-squared keeps every row, there being nothing to rank them by.
 # @noRd
-.cipSelectBestMethod <- function(df, rsqLookup) {
-    if (nrow(df) == 0L) {
-        return(df)
-    }
-    key <- str_c(df$qtlStudy, df$context, df$trait, df$method, sep = "\r")
-    rsq <- unname(rsqLookup[key])
-    grp <- str_c(df$qtlStudy, df$context, df$trait, df$gwasStudy, sep = "\r")
-    kept <- .cipConcatInt(map(
-        unique(grp),
-        .cipBestRowsIn,
-        grp = grp,
-        df = df,
-        rsq = rsq
-    ))
-    filter(df, .cipRowMask(kept, nrow(df)))
-}
-
-# The row group `g` contributes: the highest-R^2 method whose twasZ is finite,
-# else the highest-R^2 one. A group with no usable R^2 is SS-TWAS and keeps
-# every row.
-# @noRd
-.cipBestRowsIn <- function(g, grp, df, rsq) {
-    idx <- which(grp == g)
-    r <- rsq[idx]
-    if (all(is.na(r))) {
+.bestCellIn <- function(idx, cells) {
+    rsq <- cells$rsq[idx]
+    if (all(is.na(rsq))) {
         return(idx)
     }
-    ord <- idx[order(r, decreasing = TRUE)] # NA sorts last
-    z <- suppressWarnings(as.numeric(df$twasZ[ord]))
-    fin <- which(is.finite(z))
-    if (length(fin) > 0L) ord[[fin[[1L]]]] else ord[[1L]]
+    ranked <- idx[order(rsq, decreasing = TRUE)]
+    withWeights <- ranked[!cells$zero[ranked]]
+    if (length(withWeights) > 0L) withWeights[[1L]] else ranked[[1L]]
+}
+
+# Named methods must be ones the weights hold.
+# @noRd
+.assertCellMethods <- function(methods, available, caller) {
+    unknown <- setdiff(methods, available)
+    if (length(unknown) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{caller}: WeightSelectionParam(methods =) names ",
+        "{str_flatten(unknown, ', ')}, which the weights do not hold ",
+        "(they hold {str_flatten(unique(available), ', ')})."
+    ))
 }
 
 .cipFmrHasTuple <- function(fmr, studyName, context, trait, method) {
@@ -843,50 +907,50 @@ causalInferencePipeline <- function(
         0L
 }
 
-# Fetch the per-tuple weight-source entry (a TwasWeightsRow from
-# `twasWeights`, or the tuple's row of `fineMappingResult`) and resolve it
-# to an aligned (variantIds, weights) pair via the shared `resolveWeights` --
-# the SuSiE-style posterior effect for the FMR path. Returns NULL when the tuple
-# is absent or has no usable weights.
-.cipExtractWeights <- function(
-    twasWeights,
-    fineMappingResult,
-    studyName,
-    context,
-    trait,
-    method,
-    useFmr
-) {
-    ent <- if (!useFmr) {
-        .cipWeightsFromTwas(twasWeights, studyName, context, trait, method)
+# Fetch the per-tuple weight-source entry (a TwasWeightsRow from a
+# TwasWeights, or the tuple's row of a fine-mapping result) and resolve it to
+# an aligned (variantIds, weights) pair via the shared `resolveWeights` -- the
+# SuSiE-style posterior effect for a fine-mapping result. Returns NULL when
+# the tuple is absent or has no usable weights.
+.cipExtractWeights <- function(weightSource, tuple) {
+    from <- if (methods::is(weightSource, "TwasWeights")) {
+        .cipWeightsFromTwas
     } else {
-        .cipWeightsFromFmr(fineMappingResult, studyName, context, trait, method)
+        .cipWeightsFromFmr
     }
+    ent <- from(
+        weightSource,
+        tuple$qStudy,
+        tuple$qContext,
+        tuple$qTrait,
+        tuple$qMethod
+    )
     if (is.null(ent)) {
         return(NULL)
     }
     wr <- resolveWeights(ent)
     single <- .singleWeightColumn(wr$weights)
+    which <- glue(
+        "(study={tuple$qStudy}, context={tuple$qContext}, ",
+        "trait={tuple$qTrait}, method={tuple$qMethod})"
+    )
     if (is.null(single)) {
         warn(glue(
-            "causalInferencePipeline: the weights of (study={studyName}, ",
-            "context={context}, trait={trait}, method={method}) are a matrix ",
+            "causalInferencePipeline: the weights of {which} are a matrix ",
             "with {ncol(wr$weights)} columns, and a tuple is scored with one ",
             "weight vector; skipping."
         ))
         return(NULL)
     }
-    wr$weights <- single
     if (length(wr$variantIds) == 0L) {
         warn(glue(
-            "causalInferencePipeline: no weights resolved for ",
-            "(study={studyName}, context={context}, trait={trait}, ",
-            "method={method}); skipping. The row carries variants but no ",
-            "usable weight, or the two are not the same length."
+            "causalInferencePipeline: no weights resolved for {which}; ",
+            "skipping. The row carries variants but no usable weight, or the ",
+            "two are not the same length."
         ))
         return(NULL)
     }
-    wr
+    list_assign(wr, weights = single)
 }
 
 # TwasWeights entry for a tuple (NULL when absent).
@@ -1471,6 +1535,7 @@ causalInferencePipeline <- function(
             "trait",
             "method",
             "gwasStudy",
+            "analysis",
             "twasZ",
             "twasPval",
             "waldRatio",
@@ -1486,7 +1551,7 @@ causalInferencePipeline <- function(
 }
 
 # Combine TWAS p-values across method for each (qtlStudy, context,
-# trait, gwasStudy) group. Appends one row per group with a
+# trait, gwasStudy) group of TWAS rows. Appends one row per group with a
 # combined p-value and methodName = "combined.<methodToken>". Uses
 # combinePValues() with the cross-method correlation set to the identity
 # (we have no cross-method covariance available downstream).
@@ -1498,9 +1563,10 @@ causalInferencePipeline <- function(
     list_c(pieces)
 }
 
-# One combined row: the group's first row, carrying the combined p-value for
-# method `m` in place of its own. The per-method statistics do not carry
-# over, so they are blanked rather than inherited.
+# One combined row: the group's first TWAS row, carrying the combined p-value
+# for method `m` in place of its own, and placed where that row is (`.at`).
+# Its own Z does not carry over, so it is blanked rather than inherited; a
+# TWAS row has no MR to carry.
 # @noRd
 .cipCombinedRow <- function(m, mc, rows, cp) {
     mutate(
@@ -1508,10 +1574,7 @@ causalInferencePipeline <- function(
         method = str_c("combined.", m),
         twasZ = NA_real_,
         twasPval = as.numeric(cp$results[[m]]$pval),
-        waldRatio = NA_real_,
-        waldRatioSe = NA_real_,
-        mrPval = NA_real_,
-        nIV = NA_integer_
+        .at = rows[[1L]]
     )
 }
 
@@ -1532,8 +1595,9 @@ causalInferencePipeline <- function(
 
 .cipCombineAcrossMethods <- function(gr, methods) {
     mc <- as_tibble(as.data.frame(S4Vectors::mcols(gr)))
+    twas <- which(mc$analysis == "twas")
     key <- str_c(mc$qtlStudy, mc$context, mc$trait, mc$gwasStudy, sep = "||")
-    groups <- split(seq_len(nrow(mc)), key)
+    groups <- split(twas, key[twas])
     extras <- .cipConcat(map(
         groups,
         .cipCombinedRowsFor,
@@ -1545,8 +1609,8 @@ causalInferencePipeline <- function(
     }
     newMcs <- bind_rows(extras)
     newGr <- S4Vectors::`mcols<-`(
-        gr[rep(1L, nrow(newMcs))],
-        value = S4Vectors::DataFrame(newMcs)
+        gr[newMcs$.at],
+        value = S4Vectors::DataFrame(select(newMcs, -".at"))
     )
     c(gr, newGr)
 }
@@ -1838,20 +1902,6 @@ twasZ <- function(
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
-# The CV `which` metric for work-list row `i` of a (study, context, trait,
-# method) table. Shared by the rsq and pval columns (differ only by `which`).
-# @noRd
-.cipRowCvMetric <- function(i, twasWeights, qtlRows, which) {
-    .cipCvMetric(
-        twasWeights,
-        qtlRows$qtlStudy[[i]],
-        qtlRows$context[[i]],
-        qtlRows$trait[[i]],
-        qtlRows$method[[i]],
-        which = which
-    )
-}
-
 # One method's single-tuple record (K == 1: it just takes the lone p-value).
 # @noRd
 .cipSingleMethodPval <- function(m, pVec) {
@@ -1865,6 +1915,7 @@ setClass(
     "WeightSelectionParam",
     contains = "MethodParam",
     slots = c(
+        methods = "character",
         cutoff = "numeric",
         pvalCutoff = "numeric",
         metric = "character",
@@ -1872,17 +1923,52 @@ setClass(
     )
 )
 
+# "best" and "all" each stand alone; anything else names methods.
+setValidity("WeightSelectionParam", function(object) {
+    coll <- makeAssertCollection()
+    assertCharacter(
+        object@methods,
+        min.len = 1L,
+        min.chars = 1L,
+        any.missing = FALSE,
+        unique = TRUE,
+        .var.name = "methods",
+        add = coll
+    )
+    if (
+        length(object@methods) > 1L &&
+            any(is_in(object@methods, c("best", "all")))
+    ) {
+        coll$push(str_c(
+            "methods: \"best\" and \"all\" stand alone; to report several ",
+            "methods, name them"
+        ))
+    }
+    problems <- coll$getMessages()
+    if (length(problems) == 0L) TRUE else problems
+})
+
 #' @title TWAS Weight-Selection Settings
-#' @description How \code{\link{causalInferencePipeline}} picks which TWAS
-#'   method's weights to use for each \code{(study, context, trait,
-#'   gwasStudy)} tuple, from the cross-validation metrics on the
-#'   \code{cvResult}. Selection runs when \code{cutoff > 0} or
-#'   \code{pvalCutoff} is finite; otherwise every method is carried through.
+#' @description Which TWAS methods' weights
+#'   \code{\link{causalInferencePipeline}} and \code{\link{ctwasPipeline}}
+#'   use for each gene (each
+#'   \code{(study, context, trait)}), from the cross-validation metrics on
+#'   the weights' \code{cvResult}.
+#' @param methods \code{"best"} (default), \code{"all"}, or the names of the
+#'   methods to use. \code{"best"} takes each gene's method with the highest
+#'   \code{metric} among those clearing the cutoffs whose weights are not all
+#'   zero. A gene whose methods carry no \code{metric} keeps them all, as
+#'   under \code{"all"}, there being nothing to rank them by; so does every
+#'   gene of a source with only one method per gene, which then simply uses
+#'   it. The choice depends on the weights alone, never on a GWAS study, so
+#'   the two pipelines pick the same method for a gene.
 #' @param cutoff Numeric. Minimum cross-validated r-squared a method must
-#'   reach to be eligible. Default \code{0} (no r-squared gate).
-#' @param pvalCutoff Numeric. A method is eligible only when its
-#'   \code{cvResult} p-value metric is below this. Default \code{Inf} (no
-#'   gate). A finite value activates selection even when \code{cutoff = 0}.
+#'   reach to be used, whatever \code{methods} is. Default \code{0} (no
+#'   r-squared gate).
+#' @param pvalCutoff Numeric. A method is used only when its
+#'   \code{cvResult} p-value metric is below this, whatever \code{methods}
+#'   is. Default \code{Inf} (no gate). Where a gate is set, a method without
+#'   the metric fails it, unless no method of its gene has the r-squared.
 #' @param metric Character. Which \code{cvResult} metric is the r-squared
 #'   used for the cutoff and for ranking; typically \code{"rsq"} or
 #'   \code{"adj_rsq"}. Default \code{"rsq"}.
@@ -1892,8 +1978,13 @@ setClass(
 #' @return A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' WeightSelectionParam(cutoff = 0.01, metric = "adj_rsq")
+#' # Every method, or just the two named.
+#' WeightSelectionParam(methods = "all")
+#' WeightSelectionParam(methods = c("lasso", "mrash"))
+#' @importFrom checkmate assertCharacter makeAssertCollection
 #' @export
 WeightSelectionParam <- function(
+    methods = "best",
     cutoff = 0,
     pvalCutoff = Inf,
     metric = "rsq",
@@ -1901,6 +1992,7 @@ WeightSelectionParam <- function(
 ) {
     new(
         "WeightSelectionParam",
+        methods = methods,
         cutoff = cutoff,
         pvalCutoff = pvalCutoff,
         metric = metric,
@@ -1933,9 +2025,10 @@ setClass(
 #'   instrument. Default \code{0.5}. Used only by \code{"ivwPerVariant"}.
 #' @param cpipCutoff Numeric. Cumulative-PIP cutoff for retaining a credible
 #'   set. Default \code{0.5}. Used only by \code{"csAware"}.
-#' @param pvalCutoff Numeric. MR runs for a \code{(qtl tuple, gwas)} pair
-#'   only when its \code{twasPval} is below this; otherwise the MR columns
-#'   are \code{NA}. Default \code{1} (no gate).
+#' @param pvalCutoff Numeric. A gene's MR against a GWAS study is estimated
+#'   only when one of the gene's TWAS p-values for that study is below this;
+#'   otherwise its MR row's estimate is \code{NA}. A gene with no TWAS row for
+#'   the study is not gated. Default \code{1} (no gate).
 #' @return A \code{MrParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' MrParam(method = "csAware", cpipCutoff = 0.8)

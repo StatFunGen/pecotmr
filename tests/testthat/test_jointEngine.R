@@ -1110,8 +1110,9 @@ test_that(".runJointCell: composed sumstats -> per-tuple rows", {
     )
 }
 # One method's per-condition entries; CV predictions correlate with Y by predCor
-# so the R^2 the layer reads is controllable.
-.je_ensEntries <- function(group, predCor) {
+# so the R^2 the layer reads is controllable. `partition`, when given, is the
+# folds the predictions were made over.
+.je_ensEntries <- function(group, predCor, partition = NULL) {
     Y <- .jgY(group)
     vars <- colnames(.jgX(group))
     map(seq_len(ncol(Y)), function(r) {
@@ -1122,7 +1123,7 @@ test_that(".runJointCell: composed sumstats -> per-tuple rows", {
             variantIds = vars,
             weights = rnorm(length(vars)),
             cvResult = list(
-                samplePartition = NULL,
+                samplePartition = partition,
                 predictions = pr,
                 metrics = c(
                     corr = sqrt(rsq),
@@ -1164,6 +1165,58 @@ test_that(".twasEnsembleLayer: 2+ passing methods -> per-condition ensembles", {
     coef <- cvResult(ens[[1L]])$methodCoef
     expect_true(all(coef >= -1e-8))
     expect_equal(sum(coef), 1, tolerance = 1e-6)
+})
+
+test_that(".twasEnsembleLayer records the ensemble's own CV, as a method's", {
+    set.seed(4)
+    g <- .je_ensGroup()
+    folds <- data.frame(
+        Sample = rownames(.jgY(g)),
+        Fold = rep(1:4, length.out = nrow(.jgY(g)))
+    )
+    pte <- list(
+        lasso_weights = .je_ensEntries(g, 0.85, folds),
+        enet = .je_ensEntries(g, 0.70, folds)
+    )
+    ens <- pecotmr:::.twasEnsembleLayer(
+        g,
+        pte,
+        list(
+            ensembleParam = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
+            standardized = FALSE
+        )
+    )
+    cv <- cvResult(ens[[1L]])
+    expect_named(cv$metrics, c("corr", "rsq", "adj_rsq", "pval", "RMSE", "MAE"))
+    expect_named(cv$predictions, rownames(.jgY(g)))
+    expect_identical(cv$samplePartition, folds)
+    expect_equal(
+        cv$metrics[["rsq"]],
+        cor(cv$predictions, .jgY(g)[, 1L])^2
+    )
+    # Without the folds there is nothing to cross-fit over.
+    unfolded <- pecotmr:::.twasEnsembleLayer(
+        g,
+        list(
+            lasso_weights = .je_ensEntries(g, 0.85),
+            enet = .je_ensEntries(g, 0.70)
+        ),
+        list(
+            ensembleParam = list(
+                enabled = TRUE,
+                r2Threshold = 0.01,
+                solver = "quadprog",
+                alpha = 1
+            ),
+            standardized = FALSE
+        )
+    )
+    expect_null(cvResult(unfolded[[1L]])$metrics)
 })
 
 test_that(".twasEnsembleLayer: under 2 methods past the R^2 cutoff -> NULL", {

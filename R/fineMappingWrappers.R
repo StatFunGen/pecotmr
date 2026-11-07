@@ -3287,8 +3287,9 @@ susieWeights <- function(
 
 #' Compute SuSiE-ASH TWAS weights
 #'
-#' Extracts coefficients from an existing SuSiE-ASH fit or fits
-#' `susieR::susie()` with `unmappable_effects = "ash"`.
+#' Extracts coefficients from an existing SuSiE-ASH fit
+#' (`susieR::susie()` with `unmappable_effects = "ash"`), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 #'
 #' @param X Optional genotype matrix; when supplied it is only used to
 #'   check that the fit covers the same number of variants.
@@ -3325,8 +3326,9 @@ susieAshWeights <- function(
 
 #' Compute SuSiE-inf TWAS weights
 #'
-#' Extracts coefficients from an existing SuSiE-inf fit or fits
-#' `susieR::susie()` with `unmappable_effects = "inf"`.
+#' Extracts coefficients from an existing SuSiE-inf fit
+#' (`susieR::susie()` with `unmappable_effects = "inf"`), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 #'
 #' @section Non-zero weights with zero PIPs: SuSiE-inf decomposes effects into a
 #'   mappable component (driven by `alpha * mu`, reported as per-variant PIPs)
@@ -3414,8 +3416,9 @@ susieInfWeights <- function(
 
 #' Compute SuSiE-RSS TWAS weights
 #'
-#' Extracts coefficients from an existing SuSiE-RSS fit or fits
-#' \code{susieR::susie_rss()} from summary statistics and LD.
+#' Extracts coefficients from an existing SuSiE-RSS fit
+#' (\code{susieR::susie_rss()}), as \code{\link{fineMappingPipeline}} makes
+#' it from summary statistics and LD; it fits nothing itself.
 #'
 #' @param stat List with components \code{z} (z-scores), \code{n} (sample
 #'   sizes) and, to check against an \code{ldReference}, \code{variantNames}.
@@ -3467,8 +3470,9 @@ susieRssWeights <- function(
 
 #' Compute SuSiE-inf-RSS TWAS weights
 #'
-#' Extracts coefficients from an existing SuSiE-inf-RSS fit or fits
-#' \code{susieR::susie_rss()} with \code{unmappable_effects = "inf"}.
+#' Extracts coefficients from an existing SuSiE-inf-RSS fit
+#' (\code{susieR::susie_rss()} with \code{unmappable_effects = "inf"}), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 #'
 #' @inheritParams susieRssWeights
 #' @param susieInfRssFit Optional pre-fitted SuSiE-inf-RSS object.
@@ -3510,8 +3514,9 @@ susieInfRssWeights <- function(
 
 #' Compute SuSiE-ASH-RSS TWAS weights
 #'
-#' Extracts coefficients from an existing SuSiE-ASH-RSS fit or fits
-#' \code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}.
+#' Extracts coefficients from an existing SuSiE-ASH-RSS fit
+#' (\code{susieR::susie_rss()} with \code{unmappable_effects = "ash"}), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
 #'
 #' @inheritParams susieRssWeights
 #' @param susieAshRssFit Optional pre-fitted SuSiE-ASH-RSS object.

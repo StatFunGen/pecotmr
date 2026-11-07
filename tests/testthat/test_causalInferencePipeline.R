@@ -109,6 +109,11 @@ context("causalInferencePipeline")
     )
 }
 
+# The (Q1, c1, t1) tuple of method `m`, as the pipeline's scorers take it.
+.cip_tuple <- function(m) {
+    list(qStudy = "Q1", qContext = "c1", qTrait = "t1", qMethod = m)
+}
+
 # ===========================================================================
 # Input-type validation
 # ===========================================================================
@@ -307,10 +312,206 @@ test_that("causalInferencePipeline fills MR fields given both inputs", {
         mrParam = MrParam(pipCutoff = 0.5)
     )
     mc <- S4Vectors::mcols(out)
-    # MR uses PIP > 0.5 variants from the FMR (v1, v3, v4).
-    expect_true(is.finite(mc$waldRatio[[1L]]))
-    expect_true(is.finite(mc$mrPval[[1L]]))
-    expect_gt(mc$nIV[[1L]], 0L)
+    expect_equal(as.character(mc$analysis), c("twas", "mr"))
+    # MR uses PIP > 0.5 variants from the FMR (v1, v3, v4), on its own row.
+    mr <- which(mc$analysis == "mr")
+    expect_true(is.finite(mc$waldRatio[[mr]]))
+    expect_true(is.finite(mc$mrPval[[mr]]))
+    expect_gt(mc$nIV[[mr]], 0L)
+    expect_true(is.na(mc$twasZ[[mr]]))
+    expect_true(is.na(mc$waldRatio[[which(mc$analysis == "twas")]]))
+})
+
+# ===========================================================================
+# MR comes from the fine-mapping result alone
+#
+# It used to attach to the TWAS row of the same method name, so it ran only
+# for `susie`, vanished when weight selection kept another method, and never
+# ran for a gene the TWAS weights lacked.
+# ===========================================================================
+
+# Weights for gene `trait` of methods `methods`, each with CV r-squared `rsq`.
+.cip_methodsWeights <- function(methods, rsq, trait = "t1") {
+    TwasWeights(
+        studyName = rep("Q1", length(methods)),
+        context = rep("c1", length(methods)),
+        trait = rep(trait, length(methods)),
+        method = methods,
+        entry = map(rsq, .cip_rsqRow),
+        ldReference = .cip_makeHandle()
+    )
+}
+
+.cip_rsqRow <- function(rsq) {
+    TwasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        weights = c(0.2, 0.1, -0.1, 0.2, 0.1) * rsq,
+        cvResult = list(metrics = c(rsq = rsq, pval = 0.001))
+    )
+}
+
+# The rows of result `out` of analysis `a`, as a data frame.
+.cip_rowsOf <- function(out, a) {
+    mc <- as.data.frame(S4Vectors::mcols(out))
+    mc[mc$analysis == a, ]
+}
+
+test_that("MR runs for every fine-mapping row, whatever TWAS chose", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gw <- .cip_makeGwasSumstats()
+    fmr <- .cip_makeQtlFmr()
+    alone <- .cip_rowsOf(
+        causalInferencePipeline(gw, fineMappingResult = fmr),
+        "mr"
+    )
+    expect_equal(nrow(alone), 1L)
+    # TWAS weights with no fine-mapping method, and ones whose best method is
+    # not the fine-mapping one: the MR row is the fine-mapping result's.
+    expectFmrMr <- function(tw) {
+        out <- causalInferencePipeline(
+            gw,
+            twasWeights = tw,
+            fineMappingResult = fmr
+        )
+        expect_equal(.cip_rowsOf(out, "twas")$method, "lasso")
+        mr <- .cip_rowsOf(out, "mr")
+        expect_equal(mr$method, "susie")
+        expect_equal(mr$waldRatio, alone$waldRatio)
+    }
+    expectFmrMr(.cip_methodsWeights("lasso", 0.5))
+    expectFmrMr(.cip_methodsWeights(c("susie", "lasso"), c(0.2, 0.5)))
+    # A gene the TWAS weights do not hold still gets its MR.
+    other <- causalInferencePipeline(
+        gw,
+        twasWeights = .cip_methodsWeights("lasso", 0.5, trait = "t9"),
+        fineMappingResult = fmr
+    )
+    expect_equal(.cip_rowsOf(other, "twas")$trait, "t9")
+    expect_equal(.cip_rowsOf(other, "mr")$trait, "t1")
+})
+
+test_that("MR never reads a fine-mapping method among the TWAS weights", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gw <- .cip_makeGwasSumstats()
+    fmr <- .cip_makeQtlFmr()
+    # TWAS susie weights unlike the fine-mapping result's.
+    tw <- .cip_methodsWeights("susie", 0.5)
+    both <- causalInferencePipeline(
+        gw,
+        twasWeights = tw,
+        fineMappingResult = fmr
+    )
+    alone <- causalInferencePipeline(gw, fineMappingResult = fmr)
+    expect_equal(
+        .cip_rowsOf(both, "mr")$waldRatio,
+        .cip_rowsOf(alone, "mr")$waldRatio
+    )
+    # Without a fine-mapping result, those TWAS weights give no MR at all.
+    expect_equal(
+        nrow(.cip_rowsOf(causalInferencePipeline(gw, twasWeights = tw), "mr")),
+        0L
+    )
+})
+
+test_that("all, or named methods, score those methods; best one per gene", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gw <- .cip_makeGwasSumstats()
+    tw <- .cip_methodsWeights(c("susie", "lasso", "enet"), c(0.2, 0.5, 0.3))
+    methodsFor <- function(choice) {
+        .cip_rowsOf(
+            causalInferencePipeline(
+                gw,
+                twasWeights = tw,
+                weightSelectionParam = choice
+            ),
+            "twas"
+        )$method
+    }
+    expect_equal(methodsFor(WeightSelectionParam()), "lasso")
+    expect_equal(
+        methodsFor(WeightSelectionParam(methods = "all")),
+        c("susie", "lasso", "enet")
+    )
+    expect_equal(
+        methodsFor(WeightSelectionParam(methods = c("enet", "susie"))),
+        c("susie", "enet")
+    )
+    # The cutoffs bound every choice.
+    expect_equal(
+        methodsFor(WeightSelectionParam(methods = "all", cutoff = 0.25)),
+        c("lasso", "enet")
+    )
+    expect_error(
+        methodsFor(WeightSelectionParam(methods = "mrash")),
+        "names mrash, which the weights do not hold"
+    )
+})
+
+test_that("an MR row is reported even when no TWAS row could be scored", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    # Weights on one variant: too little overlap for a TWAS Z.
+    tw <- TwasWeights(
+        studyName = "Q1",
+        context = "c1",
+        trait = "t1",
+        method = "lasso",
+        entry = list(TwasWeightsRow(
+            variantIds = "chr1:100:A:G",
+            weights = 0.3
+        )),
+        ldReference = .cip_makeHandle()
+    )
+    out <- suppressWarnings(causalInferencePipeline(
+        .cip_makeGwasSumstats(),
+        twasWeights = tw,
+        fineMappingResult = .cip_makeQtlFmr(),
+        mrParam = MrParam(pipCutoff = 0.5, pvalCutoff = 0.01)
+    ))
+    expect_equal(as.character(out$analysis), "mr")
+    # With no TWAS p-value to read, the gate does not withhold it.
+    expect_true(is.finite(out$waldRatio))
+})
+
+test_that("the MR gate reads the gene's reported TWAS p-values", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    gw <- .cip_makeGwasSumstats()
+    fmr <- .cip_makeQtlFmr()
+    tw <- .cip_methodsWeights("lasso", 0.5)
+    twasP <- .cip_rowsOf(
+        causalInferencePipeline(gw, twasWeights = tw),
+        "twas"
+    )$twasPval
+    mrAt <- function(cutoff, weights = tw) {
+        .cip_rowsOf(
+            causalInferencePipeline(
+                gw,
+                twasWeights = weights,
+                fineMappingResult = fmr,
+                mrParam = MrParam(pvalCutoff = cutoff)
+            ),
+            "mr"
+        )$waldRatio
+    }
+    # Withheld when the TWAS p is above the cutoff, the row still reported.
+    expect_true(is.na(mrAt(twasP / 2)))
+    expect_true(is.finite(mrAt(twasP * 2)))
+    # A gene with no TWAS row is not gated.
+    expect_true(is.finite(mrAt(1e-12, .cip_methodsWeights("lasso", 0.5, "t9"))))
 })
 
 # ===========================================================================
@@ -329,6 +530,8 @@ test_that("FMR-only causal inference takes weights from topLoci$betahat", {
     )
     mc <- S4Vectors::mcols(out)
     expect_true(is.finite(mc$twasZ[[1L]]))
+    # The fine-mapping result gives both the TWAS and the MR row.
+    expect_equal(as.character(mc$analysis), c("twas", "mr"))
 })
 
 # ===========================================================================
@@ -382,7 +585,7 @@ test_that(".cipZToSe: falls back to vector of 1 when maf/n are NA", {
     expect_equal(res, c(1, 1))
 })
 
-test_that(".cipFilterEligibleMethods gates rsq and pval; SS-TWAS keeps all", {
+test_that("the cutoffs bound every choice; a gene with no CV keeps all", {
     mkEntry <- function(rsq, pval = 0.01) {
         TwasWeightsRow(
             variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
@@ -397,27 +600,28 @@ test_that(".cipFilterEligibleMethods gates rsq and pval; SS-TWAS keeps all", {
         method = c("susie", "enet", "lasso", "susie"),
         entry = list(mkEntry(0.20), mkEntry(0.05), mkEntry(0.50), mkEntry(0.01))
     )
-    qtlRows <- pecotmr:::.cipBuildQtlWorkList(tw, NULL)
-    mt <- pecotmr:::.cipMethodMetrics(
-        qtlRows,
-        tw,
-        "rsq",
-        c("adj_rsq_pval", "pval")
-    )
-    # rsq gate only: G keeps susie(.20)+lasso(.50); enet(.05) out; G2(.01)
-    # dropped.
-    f1 <- pecotmr:::.cipFilterEligibleMethods(
-        qtlRows,
-        mt,
-        rsqCutoff = 0.1,
-        rsqPvalCutoff = Inf
-    )
-    expect_equal(sort(f1$method), c("lasso", "susie"))
+    keep <- function(x, ...) {
+        choice <- WeightSelectionParam(...)
+        pecotmr:::.selectWeightCells(
+            pecotmr:::.weightCells(x, choice),
+            choice,
+            "f()"
+        )
+    }
+    # rsq gate: G keeps susie (.20) and lasso (.50); enet (.05) and G2 (.01)
+    # are out.
+    f1 <- keep(tw, methods = "all", cutoff = 0.1)
+    expect_equal(f1$method, c("susie", "lasso"))
     expect_true(all(f1$trait == "G"))
-    # rsqCutoff above every method -> empty work-list.
+    expect_equal(nrow(keep(tw, methods = "all", cutoff = 0.99)), 0L)
+    # Within the gates "best" takes each gene's highest rsq.
+    expect_equal(keep(tw, cutoff = 0.1)$method, "lasso")
+    best <- keep(tw)
+    expect_equal(paste(best$trait, best$method), c("G lasso", "G2 susie"))
+    # Named methods, within the gates too.
     expect_equal(
-        nrow(pecotmr:::.cipFilterEligibleMethods(qtlRows, mt, 0.99, Inf)),
-        0L
+        keep(tw, methods = c("enet", "susie"), cutoff = 0.1)$method,
+        "susie"
     )
     # pval gate: a high-rsq method with a bad CV p-value is excluded.
     tw2 <- TwasWeights(
@@ -425,18 +629,10 @@ test_that(".cipFilterEligibleMethods gates rsq and pval; SS-TWAS keeps all", {
         context = rep("c1", 2),
         trait = rep("G", 2),
         method = c("susie", "lasso"),
-        entry = list(mkEntry(0.20, pval = 0.20), mkEntry(0.50, pval = 0.01))
+        entry = list(mkEntry(0.50, pval = 0.20), mkEntry(0.20, pval = 0.01))
     )
-    q2 <- pecotmr:::.cipBuildQtlWorkList(tw2, NULL)
-    m2 <- pecotmr:::.cipMethodMetrics(q2, tw2, "rsq", c("adj_rsq_pval", "pval"))
-    f2 <- pecotmr:::.cipFilterEligibleMethods(
-        q2,
-        m2,
-        rsqCutoff = 0.1,
-        rsqPvalCutoff = 0.05
-    )
-    expect_equal(f2$method, "lasso")
-    # SS-TWAS: no usable cvResult -> keep all methods in the group.
+    expect_equal(keep(tw2, pvalCutoff = 0.05)$method, "lasso")
+    # No usable cvResult: nothing to gate or rank by, so every method stays.
     twss <- TwasWeights(
         studyName = rep("S", 2),
         context = rep("c1", 2),
@@ -453,42 +649,37 @@ test_that(".cipFilterEligibleMethods gates rsq and pval; SS-TWAS keeps all", {
             )
         )
     )
-    qss <- pecotmr:::.cipBuildQtlWorkList(twss, NULL)
-    mss <- pecotmr:::.cipMethodMetrics(
-        qss,
-        twss,
-        "rsq",
-        c("adj_rsq_pval", "pval")
-    )
-    expect_equal(
-        nrow(pecotmr:::.cipFilterEligibleMethods(qss, mss, 0.1, Inf)),
-        2L
-    )
+    expect_equal(nrow(keep(twss, cutoff = 0.1)), 2L)
+    expect_equal(nrow(keep(twss)), 2L)
 })
 
-test_that(".cipSelectBestMethod picks max-rsq finite Z; SS-TWAS keeps all", {
-    lk <- c("S\rc1\rG\rsusie" = 0.5, "S\rc1\rG\rlasso" = 0.2)
-    df <- data.frame(
-        qtlStudy = "S",
+test_that("best passes over a method whose weights are all zero", {
+    cells <- tibble(
+        study = "S",
         context = "c1",
         trait = "G",
-        gwasStudy = "X",
         method = c("susie", "lasso"),
-        twasZ = c(2.0, 1.0),
-        stringsAsFactors = FALSE
+        rsq = c(0.5, 0.2),
+        pval = 0.01,
+        zero = c(TRUE, FALSE)
     )
-    expect_equal(pecotmr:::.cipSelectBestMethod(df, lk)$method, "susie")
-    # top-rsq method has NA Z -> fall back to next-best (lasso).
-    df2 <- df
-    df2$twasZ <- c(NA_real_, 1.0)
-    expect_equal(pecotmr:::.cipSelectBestMethod(df2, lk)$method, "lasso")
-    # none finite -> keep the top-rsq method anyway.
-    df3 <- df
-    df3$twasZ <- c(NA_real_, Inf)
-    expect_equal(pecotmr:::.cipSelectBestMethod(df3, lk)$method, "susie")
-    # SS-TWAS group (rsq lookup all NA) -> keep all rows.
-    lkNA <- c("S\rc1\rG\rsusie" = NA_real_, "S\rc1\rG\rlasso" = NA_real_)
-    expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df, lkNA)), 2L)
+    best <- WeightSelectionParam()
+    expect_equal(
+        pecotmr:::.selectWeightCells(cells, best, "f()")$method,
+        "lasso"
+    )
+    # When every method's weights are zero, the highest rsq is kept anyway.
+    allZero <- mutate(cells, zero = TRUE)
+    expect_equal(
+        pecotmr:::.selectWeightCells(allZero, best, "f()")$method,
+        "susie"
+    )
+    # A tie goes to the first.
+    tied <- mutate(cells, rsq = 0.3, zero = FALSE)
+    expect_equal(
+        pecotmr:::.selectWeightCells(tied, best, "f()")$method,
+        "susie"
+    )
 })
 
 test_that("causal inference picks each group's max-rsq method (rsqCutoff)", {
@@ -523,14 +714,14 @@ test_that("causal inference picks each group's max-rsq method (rsqCutoff)", {
     expect_equal(as.character(S4Vectors::mcols(out)$method), "lasso")
 })
 
-test_that("causalInferencePipeline reselects a method on NA/Inf TWAS-Z", {
+test_that("best passes over all-zero weights, whose TWAS Z would be NaN", {
     tw <- TwasWeights(
         studyName = rep("Q1", 2),
         context = rep("c1", 2),
         trait = rep("t1", 2),
         method = c("susie", "lasso"),
         entry = list(
-            # top rsq but all-zero weights -> wᵀRw = 0 -> twasZ NaN
+            # top rsq but all-zero weights: not a method to score
             TwasWeightsRow(
                 variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
                 weights = rep(0, 5),
@@ -1430,23 +1621,13 @@ test_that(".cipExtractWeights scores one column of weights, not several", {
     }
     one <- pecotmr:::.cipExtractWeights(
         weightsOf(matrix(w, ncol = 1L, dimnames = list(NULL, "susie"))),
-        NULL,
-        "Q1",
-        "c1",
-        "t1",
-        "susie",
-        useFmr = FALSE
+        .cip_tuple("susie")
     )
     expect_equal(one$weights, w)
     expect_warning(
         several <- pecotmr:::.cipExtractWeights(
             weightsOf(cbind(w, -w)),
-            NULL,
-            "Q1",
-            "c1",
-            "t1",
-            "susie",
-            useFmr = FALSE
+            .cip_tuple("susie")
         ),
         "a matrix with 2 columns"
     )
@@ -1459,21 +1640,11 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     # TwasWeights / FMR: tuple absent.
     expect_null(pecotmr:::.cipExtractWeights(
         tw,
-        NULL,
-        "Q1",
-        "c1",
-        "t1",
-        "absent",
-        useFmr = FALSE
+        .cip_tuple("absent")
     ))
     expect_null(pecotmr:::.cipExtractWeights(
-        NULL,
         fmr,
-        "Q1",
-        "c1",
-        "t1",
-        "absent",
-        useFmr = TRUE
+        .cip_tuple("absent")
     ))
     # FMR path: tuple present but topLoci empty / no beta column / all-NA.
     local_mocked_bindings(
@@ -1482,13 +1653,8 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     )
     expect_warning(
         out <- pecotmr:::.cipExtractWeights(
-            NULL,
             fmr,
-            "Q1",
-            "c1",
-            "t1",
-            "susie",
-            useFmr = TRUE
+            .cip_tuple("susie")
         ),
         "no weights resolved"
     )
@@ -1501,13 +1667,8 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     )
     expect_warning(
         out <- pecotmr:::.cipExtractWeights(
-            NULL,
             fmr,
-            "Q1",
-            "c1",
-            "t1",
-            "susie",
-            useFmr = TRUE
+            .cip_tuple("susie")
         ),
         "no weights resolved"
     )
@@ -1520,13 +1681,8 @@ test_that(".cipExtractWeights: NULL on missing tuples and bad topLoci", {
     )
     expect_warning(
         out <- pecotmr:::.cipExtractWeights(
-            NULL,
             fmr,
-            "Q1",
-            "c1",
-            "t1",
-            "susie",
-            useFmr = TRUE
+            .cip_tuple("susie")
         ),
         "no weights resolved"
     )
@@ -1540,6 +1696,7 @@ test_that(".cipCombineAcrossMethods: one-method groups give no combined rows", {
         trait = "t1",
         method = "susie",
         gwasStudy = "G1",
+        analysis = "twas",
         twasZ = 2.0,
         twasPval = 0.05,
         waldRatio = NA_real_,
@@ -1638,14 +1795,8 @@ test_that("an absent GWAS column fills NA rather than dropping rows", {
 test_that("a tuple with no CV record scores NA", {
     # NA, not 0: no cross-validation was run, which is different from a fit
     # that cross-validated badly.
-    expect_true(is.na(pecotmr:::.cipCvMetric(
-        NULL,
-        "s",
-        "c",
-        "t",
-        "m",
-        which = "rsq"
-    )))
+    noCv <- TwasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.1)
+    expect_true(is.na(pecotmr:::.weightCvValue(noCv, "rsq")))
 })
 
 test_that("V is aligned to the weight names, and refuses to guess", {
@@ -1668,15 +1819,23 @@ test_that("V is aligned to the weight names, and refuses to guess", {
 # ===========================================================================
 
 test_that("selecting the best method over an empty frame is a no-op", {
-    df0 <- tibble(
-        qtlStudy = character(0),
+    cells0 <- tibble(
+        study = character(0),
         context = character(0),
         trait = character(0),
         method = character(0),
-        gwasStudy = character(0),
-        twasZ = numeric(0)
+        rsq = numeric(0),
+        pval = numeric(0),
+        zero = logical(0)
     )
-    expect_equal(nrow(pecotmr:::.cipSelectBestMethod(df0, c(a = 1))), 0L)
+    expect_equal(
+        nrow(pecotmr:::.selectWeightCells(
+            cells0,
+            WeightSelectionParam(),
+            "f()"
+        )),
+        0L
+    )
 })
 
 test_that("a credible set below the cumulative-PIP cutoff adds nothing", {
@@ -1728,43 +1887,24 @@ test_that("a well-supported credible set yields a finite composite", {
 # silently, and a tuple that cannot be scored drops out rather than erroring.
 # ---------------------------------------------------------------------------
 
-test_that(".cipResolveWorkList rejects empty weight collections", {
+test_that(".cipChosenCells rejects empty weight collections", {
     local_mocked_bindings(
-        .cipBuildQtlWorkList = function(twasWeights, fineMappingResult) {
-            data.frame()
-        },
+        .weightCells = function(...) tibble(method = character(0)),
         .package = "pecotmr"
     )
     expect_error(
-        pecotmr:::.cipResolveWorkList(NULL, NULL),
+        pecotmr:::.cipChosenCells(NULL, WeightSelectionParam()),
         "no QTL tuples to score"
     )
 })
 
-test_that(".cipCvSelection errors when no method clears the CV cutoffs", {
-    local_mocked_bindings(
-        .cipMethodMetrics = function(...) {
-            data.frame(
-                qtlStudy = "s",
-                context = "c",
-                trait = "t",
-                method = "m",
-                rsq = 0.01,
-                stringsAsFactors = FALSE
-            )
-        },
-        .cipFilterEligibleMethods = function(...) data.frame(),
-        .package = "pecotmr"
-    )
+test_that(".cipChosenCells errors when no method clears the CV cutoffs", {
+    tw <- .cip_methodsWeights("susie", 0.01)
     # Naming the cutoffs in the message is what makes this actionable.
     expect_error(
-        pecotmr:::.cipCvSelection(
-            qtlRows = data.frame(a = 1),
-            twasWeights = "notNull",
-            weightSelectionParam = WeightSelectionParam(
-                cutoff = 0.5,
-                pvalCutoff = 0.05
-            )
+        pecotmr:::.cipChosenCells(
+            tw,
+            WeightSelectionParam(cutoff = 0.5, pvalCutoff = 0.05)
         ),
         "cutoff = 0.5, pvalCutoff = 0.05"
     )
@@ -1774,15 +1914,12 @@ test_that(".cipRun errors when no tuple produced a result", {
     local_mocked_bindings(
         .cipValidateInputs = function(...) invisible(NULL),
         .cipCheckLdRefs = function(...) NULL,
-        .cipResolveWorkList = function(...) data.frame(x = 1),
-        .cipCvSelection = function(...) {
-            list(
-                qtlRows = data.frame(x = 1),
-                rsqLookup = NULL,
-                selectionActive = FALSE
-            )
+        .cipChosenCells = function(...) {
+            tibble(study = "s", context = "c", trait = "t", method = "m")
         },
-        .cipTupleInputs = function(...) NULL,
+        .cipTwasTuple = function(...) NULL,
+        .cipCheckBlockReach = function(...) NULL,
+        .rowSpans = function(...) NULL,
         .package = "pecotmr"
     )
     expect_error(
@@ -1799,20 +1936,13 @@ test_that(".cipRun errors when no tuple produced a result", {
     )
 })
 
-test_that(".cipTupleInputs skips a tuple with no weights", {
+test_that(".cipTwasTuple skips a tuple with no weights", {
     local_mocked_bindings(
         .cipExtractWeights = function(...) NULL,
         .package = "pecotmr"
     )
-    qtlRows <- data.frame(
-        qtlStudy = "s",
-        context = "c",
-        trait = "t",
-        method = "m",
-        useFmrForWeights = FALSE,
-        stringsAsFactors = FALSE
-    )
-    expect_null(pecotmr:::.cipTupleInputs(1L, qtlRows, NULL, NULL))
+    cells <- tibble(study = "s", context = "c", trait = "t", method = "m")
+    expect_null(pecotmr:::.cipTwasTuple(1L, cells, NULL))
 })
 
 test_that("causalInferencePipeline refuses a tuple past given blocks", {
@@ -1863,7 +1993,7 @@ test_that(".cipCheckBlockReach warns of a tuple running past computed spans", {
     )
 })
 
-test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
+test_that(".cipScoreTwasPair skips a pair with no TWAS z", {
     local_mocked_bindings(
         .cipRowsLdRef = function(...) NULL,
         .ssStitchElements = function(...) GenomicRanges::GRanges(),
@@ -1873,20 +2003,13 @@ test_that(".cipScoreGwasPair skips a pair with no TWAS z", {
         .package = "pecotmr"
     )
     expect_null(
-        pecotmr:::.cipScoreGwasPair(
+        pecotmr:::.cipScoreTwasPair(
             1L,
             "G1",
-            NULL,
-            list(),
-            NULL,
+            list(tuple = list(), weightsInfo = list()),
             gwasSumStats = NULL,
             window = NULL,
-            alleleFlip = FALSE,
-            mrParam = MrParam(
-                method = "csAware",
-                cpipCutoff = 0,
-                pvalCutoff = 1
-            )
+            alleleFlip = FALSE
         )
     )
 })
@@ -1899,11 +2022,29 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
     out <- pecotmr:::.cipRunMr(
         fmrEntry = "notNull",
         gdf = NULL,
-        twasOut = list(pval = 0.001),
+        genePvals = 0.001,
         alleleFlip = FALSE,
         mrParam = MrParam(method = "csAware", cpipCutoff = 0.5, pvalCutoff = 1)
     )
     expect_true(isTRUE(out$SENTINEL))
+})
+
+test_that(".cipRunMr gates on the gene's TWAS p-values, if it has any", {
+    local_mocked_bindings(
+        .cipComputeMr = function(...) list(SENTINEL = TRUE),
+        .package = "pecotmr"
+    )
+    ran <- function(genePvals, mrParam = MrParam(pvalCutoff = 0.05)) {
+        isTRUE(
+            pecotmr:::.cipRunMr("fmr", NULL, genePvals, FALSE, mrParam)$SENTINEL
+        )
+    }
+    expect_true(ran(c(0.2, 0.01)))
+    expect_false(ran(c(0.2, NA)))
+    # No TWAS row for the gene: nothing to gate on.
+    expect_true(ran(NULL))
+    # A cutoff of 1 gates nothing.
+    expect_true(ran(0.9, MrParam()))
 })
 
 # One-row weights for (Q1, c1, t1, susie) whose cross-validation is `cv`.
@@ -1921,39 +2062,41 @@ test_that(".cipRunMr routes to the CS-aware estimator when asked", {
     )
 }
 
-test_that(".cipCvMetric reads metrics wrapped or bare, NA when absent", {
+# The (Q1, c1, t1, susie) cell's row of `.cip_cvWeights(cv)`.
+.cip_cvPart <- function(cv) {
+    pecotmr:::.twrCellParts(.cip_cvWeights(cv), 1L, "susie")
+}
+
+test_that(".weightCvValue reads metrics wrapped or bare, NA when absent", {
     # A bare metrics list (no $metrics wrapper) is read directly.
-    bare <- .cip_cvWeights(list(rsq = 0.42, pval = 0.01))
+    bare <- .cip_cvPart(list(rsq = 0.42, pval = 0.01))
+    expect_equal(pecotmr:::.weightCvValue(bare, "rsq"), 0.42)
+    expect_true(is.na(pecotmr:::.weightCvValue(bare, "zzz")))
+    wrapped <- .cip_cvPart(list(metrics = c(rsq = 0.3, pval = 0.02)))
+    expect_equal(pecotmr:::.weightCvValue(wrapped, "pval"), 0.02)
+    # The first candidate the record holds is the one read.
     expect_equal(
-        pecotmr:::.cipCvMetric(bare, "Q1", "c1", "t1", "susie", "rsq"),
-        0.42
-    )
-    expect_true(is.na(
-        pecotmr:::.cipCvMetric(bare, "Q1", "c1", "t1", "susie", "zzz")
-    ))
-    wrapped <- .cip_cvWeights(list(metrics = c(rsq = 0.3, pval = 0.02)))
-    expect_equal(
-        pecotmr:::.cipCvMetric(wrapped, "Q1", "c1", "t1", "susie", "pval"),
+        pecotmr:::.weightCvValue(wrapped, c("adj_rsq_pval", "pval")),
         0.02
     )
-})
-
-test_that(".cipCvMetric returns NA when the CV result cannot be read", {
-    # No row for the tuple; and a row without a CV record.
-    tw <- .cip_cvWeights(list(rsq = 0.42))
-    expect_true(
-        is.na(pecotmr:::.cipCvMetric(tw, "Q9", "c1", "t1", "susie", "rsq"))
-    )
-    expect_true(is.na(
-        pecotmr:::.cipCvMetric(
-            .cip_cvWeights(NULL),
-            "Q1",
-            "c1",
-            "t1",
-            "susie",
-            "rsq"
+    # A one-row metrics matrix, as a fine-mapping CV keeps it.
+    asMatrix <- .cip_cvPart(list(
+        metrics = matrix(
+            c(0.3, 0.02),
+            1L,
+            dimnames = list(NULL, c("rsq", "pval"))
         )
     ))
+    expect_equal(pecotmr:::.weightCvValue(asMatrix, "rsq"), 0.3)
+})
+
+test_that(".weightCvValue returns NA when the CV result cannot be read", {
+    expect_true(is.na(pecotmr:::.weightCvValue(.cip_cvPart(NULL), "rsq")))
+    local_mocked_bindings(
+        cvResult = function(...) stop("unreadable"),
+        .package = "pecotmr"
+    )
+    expect_true(is.na(pecotmr:::.weightCvValue(.cip_cvPart(NULL), "rsq")))
 })
 
 test_that("CV selection warns once about narrowed weights; scoring does not", {
@@ -1991,11 +2134,13 @@ test_that("CV selection warns once about narrowed weights; scoring does not", {
     ))
     expect_length(selected, 1L)
     expect_match(selected, "causalInferencePipeline\\(\\): 2 row\\(s\\)")
-    # Without selection only the weights are read, which the row holds.
+    # A choice that reads no CV metric -- every method, no cutoff -- reads
+    # only the weights, which the row holds.
     expect_length(
         .fitCoverageMessages(causalInferencePipeline(
             gwasSumStats = .cip_makeGwasSumstats(),
-            twasWeights = narrowed
+            twasWeights = narrowed,
+            weightSelectionParam = WeightSelectionParam(methods = "all")
         )),
         0L
     )
@@ -2017,8 +2162,7 @@ test_that("twasZ: nSketch / combineMethods guards fire", {
 # so the guard is the contract: nothing in, empty of the right type out.
 # ---------------------------------------------------------------------------
 
-test_that("the concat helpers answer an empty vector of their own type", {
-    expect_identical(pecotmr:::.cipConcatInt(list()), integer(0))
+test_that("the concat helper answers an empty list for no pieces", {
     expect_identical(pecotmr:::.cipConcat(list()), list())
 })
 
@@ -2051,6 +2195,59 @@ test_that("WeightSelectionParam and MrParam do not overlap", {
     )
     expect_equal(WeightSelectionParam()$cutoff, 0)
     expect_equal(MrParam()$method, "ivwPerVariant")
+})
+
+test_that("WeightSelectionParam takes best, all, or method names", {
+    expect_equal(WeightSelectionParam()$methods, "best")
+    expect_equal(
+        WeightSelectionParam(methods = c("lasso", "mrash"))$methods,
+        c("lasso", "mrash")
+    )
+    expect_error(
+        WeightSelectionParam(methods = c("best", "lasso")),
+        "\"best\" and \"all\" stand alone"
+    )
+    expect_error(
+        WeightSelectionParam(methods = character(0)),
+        "Must have length >= 1"
+    )
+    expect_error(
+        WeightSelectionParam(methods = c("lasso", "lasso")),
+        "duplicated"
+    )
+})
+
+test_that("combineMethods combines TWAS rows only, each where its gene is", {
+    local_mocked_bindings(
+        .handleDosage = .cip_mockExtractor(),
+        .package = "pecotmr"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    tw <- TwasWeights(
+        studyName = rep("Q1", 4L),
+        context = rep("c1", 4L),
+        trait = c("t1", "t1", "t2", "t2"),
+        method = c("susie", "lasso", "susie", "lasso"),
+        entry = list(
+            TwasWeightsRow(ids, c(0.2, 0.1, -0.1, 0.2, 0.1)),
+            TwasWeightsRow(ids, c(0.1, 0.2, 0.1, -0.2, 0.1)),
+            TwasWeightsRow(ids[2:5], c(0.1, -0.1, 0.2, 0.1)),
+            TwasWeightsRow(ids[2:5], c(0.2, 0.1, 0.1, -0.1))
+        ),
+        ldReference = .cip_makeHandle()
+    )
+    out <- causalInferencePipeline(
+        .cip_makeGwasSumstats(),
+        twasWeights = tw,
+        fineMappingResult = .cip_makeQtlFmr(),
+        weightSelectionParam = WeightSelectionParam(methods = "all"),
+        combineMethods = "acat"
+    )
+    combined <- out[startsWith(as.character(out$method), "combined.")]
+    expect_equal(as.character(combined$trait), c("t1", "t2"))
+    expect_true(all(combined$analysis == "twas"))
+    expect_equal(GenomicRanges::start(combined), c(100L, 200L))
+    expect_equal(sum(out$analysis == "mr"), 1L)
 })
 
 test_that(".cipRowsLdRef refuses overlapped rows on two references", {

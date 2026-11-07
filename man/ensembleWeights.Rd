@@ -16,8 +16,9 @@ ensembleWeights(
 \arguments{
 \item{cvResults}{Output of \code{\link{twasWeightsCv}}, with
 \code{$prediction} (named list of method -> out-of-fold prediction matrix,
-keys like \code{"susie_predicted"}). For multi-dataset: a list of such
-objects.}
+keys like \code{"susie_predicted"}) and, to cross-validate the ensemble
+itself, the \code{$samplePartition} the predictions were made over. For
+multi-dataset: a list of such objects.}
 
 \item{Y}{Observed outcome vector or matrix (samples x contexts). For
 multi-dataset: a list of vectors/matrices, one per dataset.}
@@ -58,6 +59,13 @@ A list with components:
   \item{methodPerformance}{Named numeric vector of per-method R-squared
     computed from out-of-fold CV predictions. Preserved so users can still
     report individual method performance.}
+  \item{predictions}{The ensemble's own out-of-fold predictions, cross-fit
+    (see Details) and named by sample, or \code{NULL} unless every sample
+    is named and placed in a fold of \code{cvResults$samplePartition}.}
+  \item{metrics}{The CV metrics of those predictions, as
+    \code{\link{twasWeightsCv}} reports each method's: \code{corr},
+    \code{rsq}, \code{adj_rsq}, \code{pval}, \code{RMSE} and \code{MAE}.
+    \code{NULL} with \code{predictions}.}
 }
 }
 \description{
@@ -93,6 +101,12 @@ warning.
 
 Methods whose CV predictions have zero variance (e.g., when all weights are
 zero) are excluded from the optimization and assigned \eqn{\zeta_k = 0}.
+
+The ensemble is cross-validated over the same folds as its methods, by
+cross-fitting: each fold's samples are predicted with coefficients fit on
+the other folds' out-of-fold predictions only, so its metrics compare with
+the methods' own. The coefficients returned in \code{methodCoef} are the
+ones fit on every sample.
 
 Predictions and Y are aligned by sample names (rownames) when available,
 rather than assuming positional order.

@@ -182,6 +182,16 @@
 #'   dropped inside the run. The data slots the pipeline assembles itself
 #'   (\code{X}, \code{Y}, \code{sumstat}, \code{LD}, \code{X_ref},
 #'   \code{focal_outcome_idx}) are refused.
+#' @param fitRetention Whether the result keeps the \code{colocboost} object
+#'   each run returned. \code{"full"} (the default) keeps them whole, for
+#'   \code{\link{colocboostFit}} to hand to \pkg{colocboost}'s own functions
+#'   (\code{colocboost::colocboost_plot()},
+#'   \code{colocboost::get_robust_colocalization()} and the rest);
+#'   \code{"none"} keeps only the confidence sets and their statistics. A fit
+#'   holds every outcome's z-scores and coefficients and the model's
+#'   per-outcome profiles, so it grows with variants times outcomes: on a
+#'   region of 387 variants and two outcomes it is about four times the size
+#'   of the rest of the result.
 #' @param ... Required by the generic; the methods take no further arguments.
 #' @return A \code{\linkS4class{ColocBoostResult}}: one element per
 #'   confidence set (CoS) across every analysis that ran, holding that set's
@@ -193,8 +203,10 @@
 #'
 #'   Project it with \code{\link{colocPairs}}, \code{\link{colocVariants}}
 #'   or \code{\link{colocBoostOutcomes}}; timings are on
-#'   \code{\link{computingTime}} and the region-wide marginal
-#'   probabilities on \code{\link{regionVcp}}. \code{\link{ldReference}}
+#'   \code{\link{computingTime}}, the region-wide marginal
+#'   probabilities on \code{\link{regionVcp}}, and each run's
+#'   \code{colocboost} object on \code{\link{colocboostFit}}.
+#'   \code{\link{ldReference}}
 #'   returns the LD references the summary statistics were matched against,
 #'   each stored once, and the \code{ldReference} column of
 #'   \code{colocBoostOutcomes()} names the one each outcome used. Its
@@ -557,6 +569,15 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
         ))
     }
     invisible(NULL)
+}
+
+# A MultiStudyQtlDataset run's selection, checked at entry. As in
+# fineMappingPipeline: a context no study has is refused, and one only some
+# lack is skipped for those, with a warning.
+# @noRd
+.cbMsAssertSelected <- function(msqd, contexts, traitId) {
+    parseContexts(contexts, msqd)
+    .cbMsAssertTraitsSelected(msqd, contexts, traitId)
 }
 
 # The multi-study form: refused only when no embedded dataset's contexts and
@@ -2305,6 +2326,17 @@ setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     .inputsBuild(list(...), "colocboostPipeline")
 }
 
+# `res` as `fitRetention` asks: with its runs' colocboost objects ("full"),
+# or without them ("none").
+# @noRd
+.cbRetainFits <- function(res, fitRetention) {
+    if (identical(fitRetention, "full")) {
+        return(res)
+    }
+    methods::slot(res, "fits") <- list()
+    res
+}
+
 #' @rdname colocboostPipeline
 #' @export
 setMethod(
@@ -2328,8 +2360,10 @@ setMethod(
         genotypeFilterParam = GenotypeFilterParam(),
         phenotypeFilterParam = PhenotypeFilterParam(),
         residualizationParam = ResidualizationParam(),
-        methodArgs = ColocboostOptions()
+        methodArgs = ColocboostOptions(),
+        fitRetention = c("full", "none")
     ) {
+        retention <- arg_match(fitRetention)
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
@@ -2355,7 +2389,7 @@ setMethod(
             phenotypeFilterParam = phenotypeFilterParam,
             residualizationParam = residualizationParam
         )
-        .withGenome(res, build)
+        .withGenome(.cbRetainFits(res, retention), build)
     }
 )
 
@@ -2376,8 +2410,10 @@ setMethod(
         separateGwas = FALSE,
         alleleFlip = TRUE,
         panelFilterParam = PanelFilterParam(),
-        methodArgs = ColocboostOptions()
+        methodArgs = ColocboostOptions(),
+        fitRetention = c("full", "none")
     ) {
+        retention <- arg_match(fitRetention)
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
@@ -2404,7 +2440,7 @@ setMethod(
             alleleFlip = alleleFlip,
             cutoffs = cutoffs
         )
-        .withGenome(res, build)
+        .withGenome(.cbRetainFits(res, retention), build)
     }
 )
 
@@ -2431,15 +2467,14 @@ setMethod(
         genotypeFilterParam = GenotypeFilterParam(),
         phenotypeFilterParam = PhenotypeFilterParam(),
         residualizationParam = ResidualizationParam(),
-        methodArgs = ColocboostOptions()
+        methodArgs = ColocboostOptions(),
+        fitRetention = c("full", "none")
     ) {
+        retention <- arg_match(fitRetention)
         .assertMethodOptions(methodArgs, "ColocboostOptions", "methodArgs")
         .cbAssertAnyRun(xqtlColoc, jointGwas, separateGwas)
         .cbAssertFocalOutcome(focalOutcome, xqtlColoc)
-        # As in fineMappingPipeline: a context no study has is refused, and
-        # one only some lack is skipped for those, with a warning.
-        parseContexts(contexts, qtlData)
-        .cbMsAssertTraitsSelected(qtlData, contexts, traitId)
+        .cbMsAssertSelected(qtlData, contexts, traitId)
         build <- .cbBuild(qtlData, gwasSumStats, region)
         res <- .cbPipelineMultiStudy(
             qtlData = qtlData,
@@ -2461,7 +2496,7 @@ setMethod(
             phenotypeFilterParam = phenotypeFilterParam,
             residualizationParam = residualizationParam
         )
-        .withGenome(res, build)
+        .withGenome(.cbRetainFits(res, retention), build)
     }
 )
 

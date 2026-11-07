@@ -6295,3 +6295,89 @@ test_that(".fmAfByVar reads AF, and is NULL when af was never declared", {
     gM <- mk(.afm_cm(maf = "effect_allele_frequency"))
     expect_null(.fmAfByVar(gM, "chr1:100:A:G"))
 })
+
+# ---- h2: SuSiE-RSS's residual variance from a trait's heritability ----
+test_that("the residual variance h2 implies reaches the fits that hold it", {
+    f <- pecotmr:::.fmWithResidualVariance
+    args <- list(susie = list(L = 10L), susieInf = list(L = 10L))
+    out <- f(args, 0.25, c("susie", "susieInf", "susieAsh"))
+    expect_equal(out$susie$residual_variance, 0.75)
+    expect_equal(out$susieAsh$residual_variance, 0.75)
+    expect_equal(out$susie$L, 10L)
+    # susieInf re-estimates its own every sweep.
+    expect_null(out$susieInf$residual_variance)
+    expect_identical(f(args, NULL, "susie"), args)
+    # A residual variance the caller set wins.
+    own <- list(susie = list(residual_variance = 0.9))
+    expect_equal(f(own, 0.25, "susie")$susie$residual_variance, 0.9)
+})
+
+test_that("fineMappingPipeline(QtlSumStats) gives SuSiE-RSS 1 - h2", {
+    capture <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = capture),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    run <- function(methods = "susie", h2 = NULL) {
+        capture$userArgs <- NULL
+        suppressMessages(suppressWarnings(fineMappingPipeline(
+            .fmp_qss,
+            methods = methods,
+            initializeWithSusieInf = FALSE,
+            h2 = h2
+        )))
+        capture$userArgs
+    }
+    expect_null(run()$residual_variance)
+    est <- suppressWarnings(estimateH2(.fmp_qss))
+    S4Vectors::mcols(est)$h2 <- 0.3
+    expect_equal(run(h2 = est)$residual_variance, 0.7)
+    expect_equal(
+        run(list(susie = list(residual_variance = 0.8)), est)$residual_variance,
+        0.8
+    )
+    estimated <- run(h2 = "lava")$residual_variance
+    expect_true(is.numeric(estimated) && estimated >= 0.01 && estimated < 1)
+    expect_error(run(h2 = "greml"), "must be one of")
+    # A collection's run checks the estimator at entry, before any study.
+    expect_error(pecotmr:::.fmAssertH2Method("greml"), "must be one of")
+    expect_null(pecotmr:::.fmAssertH2Method("lava"))
+    expect_null(pecotmr:::.fmAssertH2Method(NULL))
+})
+
+test_that("a real SuSiE-RSS fit holds the residual variance h2 sets", {
+    est <- estimateH2(.rssf_ss, referenceOverlap = 1)
+    S4Vectors::mcols(est)$h2 <- 0.3
+    res <- suppressMessages(suppressWarnings(fineMappingPipeline(
+        .rssf_ss,
+        methods = "susie",
+        initializeWithSusieInf = FALSE,
+        h2 = est
+    )))
+    fit <- susieFit(
+        res,
+        studyName = as.character(.rssf_ss$study[[1L]]),
+        context = as.character(.rssf_ss$context[[1L]]),
+        trait = as.character(.rssf_ss$trait[[1L]]),
+        method = "susie"
+    )
+    expect_equal(fit$sigma2, 0.7)
+})
+
+test_that("fineMappingPipeline(GwasSumStats) takes per-method options", {
+    capture <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmFitSusieRss = .fmp_mockFitRssDiag(flag = FALSE, capture = capture),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    suppressMessages(fineMappingPipeline(
+        .fmp_gss,
+        methods = list(susie = list(max_iter = 50L)),
+        initializeWithSusieInf = FALSE
+    ))
+    expect_equal(capture$userArgs$max_iter, 50L)
+})

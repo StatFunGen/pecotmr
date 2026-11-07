@@ -28,8 +28,9 @@ DENTIST-S statistic above which a variant is an outlier. Default
 \item{r2Threshold}{Minimum r-squared with the lead variant for a variant to
 be tested. Default \code{0.6}.}
 
-\item{leadVariantChoice}{How the lead variant is chosen. Default
-\code{"pvalue"}.}
+\item{leadVariantChoice}{How the lead variant is chosen: \code{"pvalue"}
+(default), the smallest p-value, or \code{"abf"}, the highest ABF
+posterior probability.}
 }
 \value{
 A \code{SlalomParam} object, a \code{\link{MethodParam}}.

@@ -185,7 +185,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 # implementations take `backend`, and .methodBackends records which engines
 # and Options constructors each method has. dpr_gibbs has the
 # SDPR sumstat counterpart;
-# dpr_vb / dpr_adaptive_gibbs remain individual-only. lasso, enet and ridge
+# dpr_vb / dpr_adaptive_gibbs remain individual-only, as does sparsevb, whose
+# engine has no summary-statistics form. lasso, enet and ridge
 # are glmnet on individual data and the penalized RSS solver on summary
 # statistics, at alpha = 1, 0.5 (or the caller's) and 0. prsCs has no
 # individual-level counterpart (it is a sumstat-only Bayesian shrinkage
@@ -250,6 +251,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     ),
     dprAdaptiveGibbs = list(
         individualImpl = "dprAdaptiveGibbsWeights",
+        sumstatImpl = NULL,
+        multivariate = FALSE
+    ),
+    # Spike-and-slab variational Bayes; sparsevb fits individual-level data
+    # only.
+    sparsevb = list(
+        individualImpl = "sparsevbWeights",
         sumstatImpl = NULL,
         multivariate = FALSE
     ),
@@ -429,6 +437,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         "scad",
         "mcp",
         "l0learn",
+        "sparsevb",
         "mvsusie",
         "mrmash"
     )
@@ -461,6 +470,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         scad = "scad",
         mcp = "mcp",
         l0learn = "l0learn",
+        sparsevb = "sparsevb",
         mvsusie = "mvsusie",
         mrmash = "mrmash",
         prsCs = "prsCs",
@@ -1107,8 +1117,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'         (require at least two traits OR at least two contexts).
 #'   \item \code{prsCs} runs only on summary statistics, so it is rejected
 #'         on \code{QtlDataset} input.
-#'   \item \code{dprVb} and \code{dprAdaptiveGibbs} run only on
-#'         individual-level data, so they are rejected on
+#'   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run
+#'         only on individual-level data, so they are rejected on
 #'         \code{QtlSumStats} input.
 #'   \item The Bayesian alphabet (\code{bayesA}, \code{bayesB},
 #'         \code{bayesC}, \code{bayesL}, \code{bayesN}, \code{bayesR})
@@ -1344,6 +1354,23 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   ensemble row.
 #' @param estimatePi If TRUE, estimate spike-and-slab sparsity from mr.ash
 #'   before BGLR / qgg spike-and-slab methods that consume it.
+#' @param h2 The heritability given, trait by trait, to the methods that can
+#'   start from one: the Bayesian alphabet (\code{bayesA} to \code{bayesR},
+#'   as their \code{h2}) and, on summary statistics, LDpred2
+#'   (\code{ldpred2Auto}'s \code{h2Init}, and the centre of
+#'   \code{ldpred2Grid}'s grid). \code{NULL} (the default) gives none, so
+#'   each keeps its own default. An estimator estimates each trait's first,
+#'   once, on the variants, samples and LD its methods fit: \code{"lava"},
+#'   \code{"hdlL"} or \code{"fastHer"}, or on individual-level data
+#'   \code{"greml"} too (see \code{\link{estimateH2}}). On summary statistics
+#'   the reference is taken to share no samples with the study, and LDpred2
+#'   runs the estimator itself. An \code{\linkS4class{H2Estimate}}, as
+#'   \code{\link{estimateH2}} returns, gives each selected (study, context,
+#'   trait) its row's estimate, and must hold exactly one row for each;
+#'   LDpred2-grid's grid is then that value times 0.3, 0.7, 1 and 1.4, at
+#'   most 1. A value is used floored at 0.001 and capped at 0.99, and a trait
+#'   with no estimate keeps each method's default, with a warning. A method's
+#'   own setting in \code{methods} wins.
 #' @param residualizationParam Covariate residualization settings, built with
 #'   \code{\link{ResidualizationParam}} and forwarded to
 #'   \code{\link{residualizedPhenotypes}} /
@@ -1611,6 +1638,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     crossValidationParam = CrossValidationParam(),
     ensembleParam = EnsembleParam(),
     estimatePi = TRUE,
+    h2 = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     fitRetention = c("slim", "none", "full"),
@@ -1656,6 +1684,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         crossValidationParam = crossValidationParam,
         ensembleParam = ensembleParam,
         estimatePi = estimatePi,
+        h2 = .twasQdsH2Spec(h2, data, contexts, traitId, region),
         fitRetention = fitRetention,
         retainX = retainX,
         residualizationParam = residualizationParam,
@@ -1982,7 +2011,8 @@ setMethod(
     retainX,
     residualizationParam,
     verbose,
-    seed
+    seed,
+    h2 = NULL
 ) {
     list(
         genotypeFilter = genotypeFilter,
@@ -1996,6 +2026,7 @@ setMethod(
         crossValidationParam = crossValidationParam,
         ensembleParam = ensembleParam,
         estimatePi = estimatePi,
+        h2 = h2,
         fitRetention = fitRetention,
         retainX = retainX,
         residualizationParam = residualizationParam,
@@ -2022,6 +2053,7 @@ setMethod(
         fitRetention = cfg$fitRetention,
         retainX = cfg$retainX,
         estimatePi = cfg$estimatePi,
+        h2 = cfg$h2,
         verbose = cfg$verbose,
         seed = cfg$seed
     )
@@ -2076,7 +2108,13 @@ setMethod(
 # Traits to iterate: traitId when supplied, else per-context region overlap,
 # else every trait in every selected context.
 # @noRd
-.twasQdsResolveTraits <- function(data, useCtx, traitId, region) {
+.twasQdsResolveTraits <- function(
+    data,
+    useCtx,
+    traitId,
+    region,
+    label = "twasWeightsPipeline(QtlDataset)"
+) {
     perCtxTraits <- map(
         useCtx,
         .contextSelectedTraits,
@@ -2086,7 +2124,7 @@ setMethod(
     )
     allTraits <- unique(list_c(perCtxTraits))
     if (length(allTraits) == 0L) {
-        abort("twasWeightsPipeline(QtlDataset): no traits selected.")
+        abort(glue("{label}: no traits selected."))
     }
     allTraits
 }
@@ -2100,6 +2138,7 @@ setMethod(
     fitRetention,
     retainX,
     estimatePi,
+    h2,
     verbose,
     seed
 ) {
@@ -2119,6 +2158,8 @@ setMethod(
             # Resolved by the caller, which holds the bundle.
             standardized = standardized,
             estimatePi = estimatePi,
+            # The run's `h2`, settled at entry (.h2PipelineSpec()).
+            h2 = h2,
             verbose = verbose,
             seed = seed,
             ldReference = NULL
@@ -2144,12 +2185,19 @@ setMethod(
         } else {
             list(univCell)
         },
-        scope = list(
-            studies = studyName,
-            contexts = set_names(list(useCtx), studyName),
-            traits = set_names(list(allTraits), studyName),
-            traitSelection = traitSelection
-        )
+        scope = .twasQdsScope(studyName, useCtx, allTraits, traitSelection)
+    )
+}
+
+# The engine's scope over one study's selected contexts and traits, with a
+# per-context trait selection when the traits were chosen that way.
+# @noRd
+.twasQdsScope <- function(studyName, useCtx, allTraits, traitSelection) {
+    list(
+        studies = studyName,
+        contexts = set_names(list(useCtx), studyName),
+        traits = set_names(list(allTraits), studyName),
+        traitSelection = traitSelection
     )
 }
 
@@ -2292,6 +2340,7 @@ setMethod(
         jointSpecification = NULL,
         fineMappingResult = NULL,
         twasWeights = NULL,
+        h2 = NULL,
         fitRetention = c("slim", "none", "full"),
         verbose = 1L,
         panelFilterParam = PanelFilterParam(),
@@ -2322,7 +2371,8 @@ setMethod(
             twasWeights = twasWeights,
             fitRetention = fitRetention,
             verbose = verbose,
-            panelFilterParam = panelFilterParam
+            panelFilterParam = panelFilterParam,
+            h2 = h2
         )
         .withGenome(.twasRecordDataTypes(res, data), build)
     }
@@ -2351,7 +2401,8 @@ setMethod(
             twasWeights = cfg$twasWeights,
             fitRetention = cfg$fitRetention,
             fineMappingResult = cfg$fineMappingResult,
-            panelFilterParam = cfg$panelFilterParam
+            panelFilterParam = cfg$panelFilterParam,
+            h2Spec = cfg$h2Spec
         ),
         # `twasWeights` is the resume cache. The univariate builder looks
         # up one (study, context, trait, method) row; the multivariate one
@@ -2391,9 +2442,11 @@ setMethod(
     twasWeights,
     fitRetention,
     verbose,
-    panelFilterParam
+    panelFilterParam,
+    h2 = NULL
 ) {
     inputs <- .twasQssInputs(data, contexts, traitId, cisWindow)
+    h2Spec <- .twasQssH2Spec(h2, inputs)
     # One record of the settings the joint phase and the shared dispatcher
     # both need, so each names them once.
     jointCfg <- list(
@@ -2422,7 +2475,8 @@ setMethod(
         twasWeights = twasWeights,
         fineMappingResult = fineMappingResult,
         fitRetention = fitRetention,
-        panelFilterParam = panelFilterParam
+        panelFilterParam = panelFilterParam,
+        h2Spec = h2Spec
     )
 }
 
@@ -2438,7 +2492,8 @@ setMethod(
     twasWeights,
     fineMappingResult,
     fitRetention,
-    panelFilterParam
+    panelFilterParam,
+    h2Spec = NULL
 ) {
     part <- .twasQssSelectAndPartition(
         data,
@@ -2454,7 +2509,8 @@ setMethod(
             twasWeights = twasWeights,
             fineMappingResult = fineMappingResult,
             fitRetention = fitRetention,
-            panelFilterParam = panelFilterParam
+            panelFilterParam = panelFilterParam,
+            h2Spec = h2Spec
         )
     )
     .twasQssAssemble(rows, joint$result, data)
@@ -2880,7 +2936,8 @@ setMethod(
     fitRetention,
     fineMappingResult,
     methodArgs,
-    panelFilterParam
+    panelFilterParam,
+    h2Spec = NULL
 ) {
     if (length(univariateTokens) == 0L) {
         return(list())
@@ -2897,7 +2954,8 @@ setMethod(
         fitRetention = fitRetention,
         fineMappingResult = fineMappingResult,
         methodArgs = methodArgs,
-        panelFilterParam = panelFilterParam
+        panelFilterParam = panelFilterParam,
+        h2Spec = h2Spec
     ))
 }
 
@@ -2938,7 +2996,8 @@ setMethod(
     fitRetention,
     fineMappingResult,
     methodArgs,
-    panelFilterParam
+    panelFilterParam,
+    h2Spec = NULL
 ) {
     st <- studyCol[i]
     ctx <- contextCol[i]
@@ -2950,13 +3009,17 @@ setMethod(
     if (length(toFit) == 0L) {
         return(cachedRows)
     }
-    fitCtx <- .twasQssUnivariateFitCtx(
+    rowCtx <- .twasQssUnivariateFitCtx(
         data,
         st,
         ctx,
         tr,
         ldReference,
         cutoffs = .panelCutoffs(panelFilterParam)
+    )
+    fitCtx <- c(
+        rowCtx,
+        list(h2 = .twasQssRowH2(h2Spec, st, ctx, tr, rowCtx, toFit))
     )
     fitted <- compact(map(
         toFit,
@@ -3147,11 +3210,12 @@ setMethod(
         return(NULL)
     }
     userArgs <- .twasQssRowBackend(userArgs, tk, fitCtx$ldReference)
+    withH2 <- .twasWithH2(userArgs, tk, fitCtx$h2, "sumstat")
     weights <- .twasTryWeights(
         spec$fn,
         fitCtx$stat,
         fitCtx$ldReference,
-        .twasQssRetainArgs(userArgs, .twasRowRetention(tk, fitRetention)),
+        .twasQssRetainArgs(withH2, .twasRowRetention(tk, fitRetention)),
         .twasFitErrUniv(tk, st, ctx, tr)
     )
     if (is.null(weights)) {
@@ -3688,6 +3752,7 @@ setMethod(
         genotypeFilterParam = cfg$genotypeFilterParam,
         mashPrior = cfg$mashPrior,
         estimatePi = cfg$estimatePi,
+        h2 = cfg$h2,
         usePCA = cfg$usePCA,
         nPCs = cfg$nPCs,
         residualizationParam = cfg$residualizationParam
@@ -3721,6 +3786,7 @@ setMethod(
         cisWindow = cfg$cisWindow,
         fineMappingResult = cfg$fineMappingResult,
         twasWeights = cfg$twasWeights,
+        h2 = cfg$h2,
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam
     ))
@@ -3898,6 +3964,7 @@ setMethod(
     twasWeights = NULL,
     mashPrior = NULL,
     estimatePi = TRUE,
+    h2 = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     fitRetention = c("slim", "none", "full"),
@@ -3914,6 +3981,7 @@ setMethod(
     # here; a summary-statistic study is checked again by its own route.
     .twasWarnUnretainableDetail(fitRetention, methods, "QtlDataset")
     .twasCheckRetainX(retainX, fitRetention, methods)
+    .msAssertH2(h2, data, "twasWeightsPipeline(MultiStudyQtlDataset)")
     # Resolved once here so a bad choice fails before any study runs; the
     # record carries the bundle itself, as each component resolves its own.
     .twasResolvePhenotypeFilter(phenotypeFilterParam)
@@ -3948,6 +4016,7 @@ setMethod(
         panelFilterParam = panelFilterParam,
         mashPrior = mashPrior,
         estimatePi = estimatePi,
+        h2 = h2,
         usePCA = usePCA,
         nPCs = nPCs,
         fitRetention = fitRetention,
@@ -4127,6 +4196,186 @@ setMethod(
         "twasWeightsPipeline",
         noun = "weights"
     )
+}
+
+# ---- the heritability a run's methods start from ----------------------------
+
+# The argument each TWAS method that can start from a trait's heritability
+# takes it as.
+# @noRd
+.twasH2Args <- c(
+    bayesA = "h2",
+    bayesB = "h2",
+    bayesC = "h2",
+    bayesL = "h2",
+    bayesN = "h2",
+    bayesR = "h2",
+    ldpred2Auto = "h2Init",
+    ldpred2Grid = "h2"
+)
+
+# A QtlDataset run's `h2`, settled at entry (.h2PipelineSpec()) against the
+# (study, context, trait) it selects.
+# @noRd
+.twasQdsH2Spec <- function(h2, data, contexts, traitId, region) {
+    .h2PipelineSpec(
+        h2,
+        .h2IndividualMethods(),
+        .twasQdsTuples(data, contexts, traitId, region),
+        "twasWeightsPipeline(QtlDataset)"
+    )
+}
+
+# The (study, context, trait) a QtlDataset run selects.
+# @noRd
+.twasQdsTuples <- function(data, contexts, traitId, region) {
+    list_rbind(map(
+        .twasQdsResolveContexts(data, contexts),
+        .twasQdsContextTuples,
+        data = data,
+        traitId = traitId,
+        region = region
+    ))
+}
+
+# @noRd
+.twasQdsContextTuples <- function(cx, data, traitId, region) {
+    tibble(
+        study = studyName(data),
+        context = cx,
+        trait = .contextSelectedTraits(cx, data, traitId, region)
+    )
+}
+
+# A QtlSumStats run's `h2`, settled at entry against its selected rows; an
+# estimator that reads the LD reference's sample size needs each row's
+# reference to record one.
+# @noRd
+.twasQssH2Spec <- function(h2, inputs) {
+    if (is.null(h2)) {
+        return(NULL)
+    }
+    data <- inputs$data
+    rows <- which(.sumStatsRowsSelected(data, inputs$contexts, inputs$traitId))
+    label <- "twasWeightsPipeline(QtlSumStats)"
+    spec <- .h2PipelineSpec(
+        h2,
+        .h2SumStatsMethods(),
+        .h2RowTuples(data, rows),
+        label
+    )
+    walk(
+        rows,
+        .h2AssertRowReference,
+        data = data,
+        method = spec$method,
+        label = label
+    )
+    spec
+}
+
+# What one QtlSumStats row's trait gets from the run's `h2` (.twasRowH2()),
+# an estimate being made on the row's statistics and LD reference.
+# @noRd
+.twasQssRowH2 <- function(spec, st, ctx, tr, rowCtx, tokens) {
+    label <- glue(
+        "twasWeightsPipeline(QtlSumStats): study='{st}', context='{ctx}', ",
+        "trait='{tr}'"
+    )
+    .twasRowH2(
+        spec,
+        .h2TupleKey(st, ctx, tr),
+        label,
+        .h2StatFit,
+        list(
+            stat = rowCtx$stat,
+            ldReference = rowCtx$ldReference,
+            label = label
+        ),
+        tokens
+    )
+}
+
+# What a trait's methods get from the run's `h2`: NULL when it sets none, or
+# when none of `tokens` starts from a heritability; else the estimator it
+# runs, and the trait's value (.h2ForTrait()), made only when a method among
+# `tokens` takes a number.
+# @noRd
+.twasRowH2 <- function(spec, key, label, fit, fitArgs, tokens) {
+    if (is.null(spec) || !any(is_in(tokens, names(.twasH2Args)))) {
+        return(NULL)
+    }
+    takesValue <- !is.null(spec$values) ||
+        any(is_in(tokens, names(.alphabetBackends$individual)))
+    list(
+        method = spec$method,
+        value = if (takesValue) .h2ForTrait(spec, key, label, fit, fitArgs)
+    )
+}
+
+# A method's arguments with its trait's heritability from the run's `h2`
+# (`rowH2`, .twasRowH2()), unless they set their own.
+# @noRd
+.twasWithH2 <- function(userArgs, tk, rowH2, path) {
+    argName <- .twasH2Args[tk]
+    if (is.null(rowH2) || is.na(argName)) {
+        return(userArgs)
+    }
+    value <- .twasH2Value(tk, rowH2)
+    if (is.null(value) || .twasSetsOwnH2(userArgs, tk, argName, path)) {
+        return(userArgs)
+    }
+    list_assign(userArgs, !!!set_names(list(value), argName))
+}
+
+# The value a method takes: for the alphabet, the trait's number; for
+# LDpred2, the estimator the run names, for LDpred2 to run on its own terms,
+# or else the number, LDpred2-grid's grid centred on it, at most 1.
+# @noRd
+.twasH2Value <- function(tk, rowH2) {
+    if (!is_in(tk, c("ldpred2Auto", "ldpred2Grid"))) {
+        return(rowH2$value)
+    }
+    if (!is.null(rowH2$method)) {
+        return(rowH2$method)
+    }
+    if (is.null(rowH2$value) || identical(tk, "ldpred2Auto")) {
+        return(rowH2$value)
+    }
+    pmin(rowH2$value * c(0.3, 0.7, 1, 1.4), 1)
+}
+
+# Whether a method's own arguments set its heritability: the argument
+# itself, or for the alphabet its backend's spelling of it.
+# @noRd
+.twasSetsOwnH2 <- function(userArgs, tk, argName, path) {
+    given <- c(
+        names(userArgs),
+        names(as.list(userArgs$methodArgs %||% list()))
+    )
+    engineNames <- if (is_in(tk, names(.alphabetBackends[[path]]))) {
+        .alphabetH2Names[[.methodBackend(tk, userArgs$backend, path)]]
+    }
+    any(is_in(c(argName, engineNames), given))
+}
+
+# GREML needs a trait's genotypes, so a collection holding summary
+# statistics cannot run it on all of its studies.
+# @noRd
+.msAssertH2 <- function(h2, data, label) {
+    if (!identical(h2, "greml") || is.null(sumStats(data))) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "{label}: `h2 = \"greml\"` needs individual-level data, and the ",
+            "collection holds summary statistics."
+        ),
+        i = str_c(
+            "Use \"lava\", \"hdlL\" or \"fastHer\", or estimate each study's ",
+            "with estimateH2() and pass them combined with c()."
+        )
+    ))
 }
 
 # =============================================================================
@@ -4360,8 +4609,9 @@ setMethod(
 #'
 #' @param cvResults Output of \code{\link{twasWeightsCv}}, with
 #'   \code{$prediction} (named list of method -> out-of-fold prediction matrix,
-#'   keys like \code{"susie_predicted"}). For multi-dataset: a list of such
-#'   objects.
+#'   keys like \code{"susie_predicted"}) and, to cross-validate the ensemble
+#'   itself, the \code{$samplePartition} the predictions were made over. For
+#'   multi-dataset: a list of such objects.
 #' @param Y Observed outcome vector or matrix (samples x contexts). For
 #'   multi-dataset: a list of vectors/matrices, one per dataset.
 #' @param twasWeightList Optional named list of weight matrices from
@@ -4396,6 +4646,13 @@ setMethod(
 #'   \item{methodPerformance}{Named numeric vector of per-method R-squared
 #'     computed from out-of-fold CV predictions. Preserved so users can still
 #'     report individual method performance.}
+#'   \item{predictions}{The ensemble's own out-of-fold predictions, cross-fit
+#'     (see Details) and named by sample, or \code{NULL} unless every sample
+#'     is named and placed in a fold of \code{cvResults$samplePartition}.}
+#'   \item{metrics}{The CV metrics of those predictions, as
+#'     \code{\link{twasWeightsCv}} reports each method's: \code{corr},
+#'     \code{rsq}, \code{adj_rsq}, \code{pval}, \code{RMSE} and \code{MAE}.
+#'     \code{NULL} with \code{predictions}.}
 #' }
 #'
 #' @details
@@ -4413,6 +4670,12 @@ setMethod(
 #'
 #' Methods whose CV predictions have zero variance (e.g., when all weights are
 #' zero) are excluded from the optimization and assigned \eqn{\zeta_k = 0}.
+#'
+#' The ensemble is cross-validated over the same folds as its methods, by
+#' cross-fitting: each fold's samples are predicted with coefficients fit on
+#' the other folds' out-of-fold predictions only, so its metrics compare with
+#' the methods' own. The coefficients returned in \code{methodCoef} are the
+#' ones fit on every sample.
 #'
 #' Predictions and Y are aligned by sample names (rownames) when available,
 #' rather than assuming positional order.
@@ -4462,6 +4725,7 @@ ensembleWeights <- function(
         solver,
         alpha
     )
+    crossFit <- .ensembleCrossFit(stacked, solver, alpha)
     list(
         methodCoef = zeta,
         ensembleTwasWeights = .ensembleCombineWeights(
@@ -4476,7 +4740,66 @@ ensembleWeights <- function(
             methodSds,
             nm$baseNames,
             nm$K
-        )
+        ),
+        predictions = crossFit$predictions,
+        metrics = crossFit$metrics
+    )
+}
+
+# The ensemble's own out-of-fold predictions, cross-fit -- each fold's
+# samples predicted with coefficients fit on the other folds' out-of-fold
+# predictions only -- named by sample, and their CV metrics. Both NULL unless
+# every sample has a fold.
+# @noRd
+.ensembleCrossFit <- function(stacked, solver, alpha) {
+    if (is.null(stacked$fold) || n_distinct(stacked$fold) < 2L) {
+        return(list(predictions = NULL, metrics = NULL))
+    }
+    parts <- map(
+        unique(stacked$fold),
+        .ensembleFoldPrediction,
+        stacked = stacked,
+        solver = solver,
+        alpha = alpha
+    )
+    rows <- list_c(map(parts, "rows"))
+    pred <- set_names(
+        list_c(map(parts, "pred"))[order(rows)],
+        stacked$samples
+    )
+    list(predictions = pred, metrics = .cvMetricRow(pred, stacked$yObs))
+}
+
+# Fold `f`'s rows of the stacked predictions, combined with the coefficients
+# the other folds' rows give.
+# @noRd
+.ensembleFoldPrediction <- function(f, stacked, solver, alpha) {
+    held <- stacked$fold == f
+    zeta <- .ensembleTrainZeta(
+        stacked$P[!held, , drop = FALSE],
+        stacked$yObs[!held],
+        solver,
+        alpha
+    )
+    list(
+        rows = which(held),
+        pred = drop(stacked$P[held, , drop = FALSE] %*% zeta)
+    )
+}
+
+# Coefficients over every method from training rows `P`: solved over the
+# methods whose predictions vary there, the rest left at 0. A lone such method
+# takes full weight, as .ensembleSolveZeta() gives it, without its message.
+# @noRd
+.ensembleTrainZeta <- function(P, y, solver, alpha) {
+    valid <- apply(P, 2, sd) > .Machine$double.eps
+    if (sum(valid) <= 1L) {
+        return(as.numeric(valid))
+    }
+    replace(
+        rep(0, ncol(P)),
+        valid,
+        .ensembleSolveValid(P[, valid, drop = FALSE], y, solver, alpha)
     )
 }
 
@@ -4590,7 +4913,8 @@ ensembleWeights <- function(
 }
 
 # Build the stacked prediction matrix P and observed y vector, dropping rows
-# with any NA. Returns list(P, yObs).
+# with any NA. Returns list(P, yObs, fold, samples): each row's fold and
+# sample, both NULL unless every dataset gives them.
 # @noRd
 .ensembleStackPredictions <- function(cvResults, Y, nm, contextIndex) {
     perDataset <- map(
@@ -4602,16 +4926,49 @@ ensembleWeights <- function(
         contextIndex = contextIndex
     )
     pMats <- map(perDataset, "P")
-    P <- exec(rbind, !!!pMats)
-    yObs <- list_c(map(perDataset, "y"))
-    .ensembleDropIncomplete(P, yObs, nm$K)
+    stacked <- list(
+        P = exec(rbind, !!!pMats),
+        yObs = list_c(map(perDataset, "y")),
+        fold = .ensembleAllOrNone(map(perDataset, "fold")),
+        samples = .ensembleAllOrNone(map(perDataset, "samples"))
+    )
+    .ensembleDropIncomplete(stacked, nm$K)
 }
 
-# Per-dataset prediction matrix + aligned outcome. Returns list(P, y).
+# `parts` joined, or NULL when any is NULL.
+# @noRd
+.ensembleAllOrNone <- function(parts) {
+    if (any(map_lgl(parts, is.null))) {
+        return(NULL)
+    }
+    list_c(parts)
+}
+
+# Per-dataset prediction matrix + aligned outcome. Returns list(P, y,
+# samples).
 # @noRd
 .ensembleDatasetMatrix <- function(predsD, yRaw, nm, contextIndex, d) {
     aln <- .ensembleAlignSamples(predsD, yRaw, nm$predNames, contextIndex, d)
-    list(P = .ensembleBuildPd(predsD, nm, aln, contextIndex, d), y = aln$yD)
+    list(
+        P = .ensembleBuildPd(predsD, nm, aln, contextIndex, d),
+        y = aln$yD,
+        samples = aln$samples
+    )
+}
+
+# Each of `samples`' fold in dataset `d`'s partition, keyed by the dataset so
+# the folds of different datasets stay apart; NULL unless every sample has
+# one.
+# @noRd
+.ensembleDatasetFolds <- function(partition, samples, d) {
+    if (is.null(partition) || is.null(samples)) {
+        return(NULL)
+    }
+    fold <- partition$Fold[match(samples, partition$Sample)]
+    if (anyNA(fold)) {
+        return(NULL)
+    }
+    str_c(d, "\r", fold)
 }
 
 # Align prediction rows to the outcome, by sample name when available else
@@ -4627,7 +4984,7 @@ ensembleWeights <- function(
     if (!is.null(predSamples) && !is.null(yNames)) {
         return(.ensembleAlignByName(predSamples, yNames, yRaw, contextIndex, d))
     }
-    .ensembleAlignPositional(yRaw, contextIndex, d)
+    .ensembleAlignPositional(yRaw, contextIndex, d, predSamples)
 }
 
 # Name-based alignment over the intersection of sample names.
@@ -4660,19 +5017,30 @@ ensembleWeights <- function(
     } else {
         as.numeric(yRaw[match(common, yNames)])
     }
-    list(yD = yD, predOrder = match(common, predSamples), nD = length(common))
+    list(
+        yD = yD,
+        predOrder = match(common, predSamples),
+        nD = length(common),
+        samples = common
+    )
 }
 
-# Positional alignment fallback (no sample names on either side).
+# Positional alignment fallback (no sample names on one side). The samples are
+# the predictions' own names, when they have them.
 # @noRd
-.ensembleAlignPositional <- function(yRaw, contextIndex, d) {
+.ensembleAlignPositional <- function(yRaw, contextIndex, d, predSamples) {
     yD <- if (is.matrix(yRaw) || is.data.frame(yRaw)) {
         .ensembleCheckContextIndex(contextIndex, ncol(yRaw), d)
         as.numeric(as.matrix(yRaw)[, contextIndex])
     } else {
         as.numeric(yRaw)
     }
-    list(yD = yD, predOrder = seq_len(length(yD)), nD = length(yD))
+    list(
+        yD = yD,
+        predOrder = seq_len(length(yD)),
+        nD = length(yD),
+        samples = predSamples[seq_len(length(yD))]
+    )
 }
 
 # Guard: contextIndex must not exceed the outcome's column count.
@@ -4731,10 +5099,11 @@ ensembleWeights <- function(
     )
 }
 
-# Drop rows with any NA prediction/outcome; error when too few remain.
+# Drop the rows of `stacked` with any NA prediction/outcome; error when too
+# few remain.
 # @noRd
-.ensembleDropIncomplete <- function(P, yObs, K) {
-    complete <- complete.cases(P, yObs)
+.ensembleDropIncomplete <- function(stacked, K) {
+    complete <- complete.cases(stacked$P, stacked$yObs)
     nDropped <- sum(!complete)
     if (nDropped > 0) {
         msg <- glue(
@@ -4752,7 +5121,12 @@ ensembleWeights <- function(
         )
         abort(msg)
     }
-    list(P = P[complete, , drop = FALSE], yObs = yObs[complete])
+    list(
+        P = stacked$P[complete, , drop = FALSE],
+        yObs = stacked$yObs[complete],
+        fold = stacked$fold[complete],
+        samples = stacked$samples[complete]
+    )
 }
 
 # Solve for the method-combination coefficients zeta (length K), routing through
@@ -5167,12 +5541,20 @@ ensembleWeights <- function(
 # The stacked prediction/observed matrix for ensemble dataset `d`.
 # @noRd
 .ensembleDatasetRow <- function(d, cvResults, Y, nm, contextIndex) {
-    .ensembleDatasetMatrix(
+    m <- .ensembleDatasetMatrix(
         cvResults[[d]]$prediction,
         Y[[d]],
         nm,
         contextIndex,
         d
+    )
+    list_assign(
+        m,
+        fold = .ensembleDatasetFolds(
+            cvResults[[d]]$samplePartition,
+            m$samples,
+            d
+        )
     )
 }
 

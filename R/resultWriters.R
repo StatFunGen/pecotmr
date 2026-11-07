@@ -1511,9 +1511,18 @@ setMethod(
         region_start = if (inRange) start(rg)[[row]] else NA_integer_,
         region_end = if (inRange) end(rg)[[row]] else NA_integer_,
         region_given = .pubRowValue(md, "regionGiven", row),
-        V = .pubPackOrNa(.fitField(fit, "V")),
+        V = .pubPackOrNa(.pubSignif(.fitField(fit, "V"))),
         cs_index = .pubPackOrNa(.fitField(fit, "sets", "cs_index"))
     )
+}
+
+# A fitted numeric field to the precision it is written at. Full precision
+# carries the last-bit drift between BLAS / libm builds into the text, so the
+# same fit wrote a different header on Linux and macOS; ten significant digits
+# hide that drift and still read back well inside the 1e-8 a round trip needs.
+# @noRd
+.pubSignif <- function(v) {
+    if (is.numeric(v)) signif(v, 10L) else v
 }
 
 # One mcols cell as a string. `[[row]]` then pack, rather than
