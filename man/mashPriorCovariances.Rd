@@ -13,7 +13,8 @@ mashPriorCovariances(
   nPcs = NULL,
   priorCovariances = NULL,
   priorComponents = NULL,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   mashArgs = MashOptions(),
   setSeed = 999
@@ -66,7 +67,12 @@ mixture-prior pipeline where separate steps built the components.
 \code{components} / \code{nPcs} are then ignored. Distinct from
 \code{priorCovariances}, which bypasses the engine entirely.}
 
-\item{inputScale}{SumStats -> matrix conversion scale.}
+\item{inputScale}{SumStats -> matrix conversion scale (see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts).}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

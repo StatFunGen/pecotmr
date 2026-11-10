@@ -77,13 +77,18 @@ fit <- mashPipeline(
 ```
 
 ```{r mash-pipeline-show}
-length(fit$U)
-round(head(sort(fit$w, decreasing = TRUE), 5), 4)
+names(fit)
+contextPrior <- fit$context
+length(contextPrior$U)
+round(head(sort(contextPrior$w, decreasing = TRUE), 5), 4)
+contextPrior$conditions
 ```
 
-`fit$U` is the prior covariance list and `fit$w` the estimated mixture
-weights over it. A large weight on `null` is normal and healthy: most
-variants are not QTLs.
+`mashPipeline()` returns one prior per joint specification, named by its
+axes; without one it fits a single prior across the contexts, named
+`context`. Each holds the prior covariance list `U`, the estimated mixture
+weights `w` over it, and the conditions the rows of `U` stand for. A large
+weight on `null` is normal and healthy: most variants are not QTLs.
 
 `alpha` must match the scale you are on: `alpha = 0` for effect sizes
 (BETA/SE), `alpha = 1` for Z-scores. `inputScale` controls which pair is
@@ -115,18 +120,19 @@ fitSimple <- mashPipeline(
     sumStatsList,
     alpha = 0,
     residualCorrelationMethod = "simple",
-    prior = MashPriorParam(priorCovariances = fit$U)
+    prior = MashPriorParam(priorCovariances = contextPrior$U)
 )
 ```
 
 ```{r mash-vhat-show}
-round(head(sort(fitSimple$w, decreasing = TRUE), 5), 4)
+round(head(sort(fitSimple$context$w, decreasing = TRUE), 5), 4)
 ```
 
-Passing `fit$U` back in holds the prior fixed, so `Vhat` is the only thing
-that differs from the fit above and the shift in the weights is attributable
-to it alone. Re-estimating the prior here would confound the comparison --
-and cost a second data-driven estimate for a prior you already have.
+Passing `contextPrior$U` back in holds the prior fixed, so `Vhat` is the
+only thing that differs from the fit above and the shift in the weights is
+attributable to it alone. Re-estimating the prior here would confound the
+comparison -- and cost a second data-driven estimate for a prior you already
+have.
 
 Supplying a `null` partition while leaving the default in place reports that
 the partition is going unused, since that combination is more often an
@@ -139,6 +145,35 @@ artefact:
 ```{r mash-vhat-supplied, eval=FALSE}
 mashPipeline(sumStatsList, alpha = 0, residualCorrelation = myVhat)
 ```
+
+## Priors across studies, contexts and traits
+
+`jointSpecification` chooses what a prior's conditions are, in the
+vocabulary the TWAS and fine-mapping pipelines use: the combinations of the
+values of its axes. The axes it leaves out are pooled, each combination of
+their values a block of variants, in which a condition the block lacks is a
+missing cell. A list of specifications fits one prior for each:
+
+```{r mash-joint-spec, eval=FALSE}
+fits <- mashPipeline(
+    sumStatsList,
+    alpha = 0,
+    inputScale = "standardized",
+    jointSpecification = list("context", c("study", "context"))
+)
+names(fits) # "context", "study+context"
+```
+
+With the study among the axes, each block's studies are joined by allele.
+Their per-allele effects differ with allele frequency and phenotype scale,
+so `inputScale = "standardized"` puts them on a common footing: each
+variant's Z and N give its correlation with the phenotype, the per-SD
+effect, fitted with `alpha = 0`.
+
+`MashPrior(fullFit = fits)` hands the priors to `twasWeightsPipeline()`,
+where each mr.mash group takes the one over its own joint specification's
+axes, on its own conditions. A prior fitted on the z scale (`alpha = 1`) is
+put on the per-SD scale mr.mash fits on by the conditions' sample sizes.
 
 ## The chain, step by step
 

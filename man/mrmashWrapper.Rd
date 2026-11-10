@@ -25,7 +25,10 @@ individuals and p is the number of SNPs.}
 
 \item{Y}{An n x r matrix of residual expression data, where n is the total
 number of individuals and r is the total number of conditions
-(tissue/cell-types).}
+(tissue/cell-types). Missing values are allowed: each condition is
+fitted on the individuals it is observed in (mr.mash's
+\code{missing_y_method = "approximate"}), as when studies on different
+individuals are stacked.}
 
 \item{V}{Optional residual covariance matrix (conditions x conditions), or
 \code{NULL} to estimate it.}
@@ -96,8 +99,8 @@ criteria at each iteration.}
 \item{converged}{A logical indicating whether the optimization algorithm
 converged to a solution within the chosen tolerance level.}
 \item{elapsed_time}{The computation runtime for fitting mr.mash.}
-\item{Y}{An n x r matrix of responses at the last iteration (only relevant
-when missing values are present in the input Y).}
+\item{Y}{An n x r matrix of responses at the last iteration (only when
+missing values in Y are imputed, \code{missing_y_method = "impute"}).}
 }
 \description{
 Compute weights with mr.mash using a precomputed prior grid and

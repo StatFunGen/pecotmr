@@ -10,7 +10,8 @@ mashCovarianceComponents(
   vhat = NULL,
   components = c("canonical", "pca", "flash", "flashNonneg"),
   nPcs = NULL,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   setSeed = 999
 )
@@ -29,7 +30,12 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
-\item{inputScale}{SumStats -> matrix conversion scale.}
+\item{inputScale}{SumStats -> matrix conversion scale (see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts).}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

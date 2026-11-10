@@ -11,7 +11,8 @@ mashPipeline(
   residualCorrelationMethod = c("identity", "simple", "simpleSpecific", "corshrink",
     "mle"),
   prior = MashPriorParam(),
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   mashArgs = MashOptions(),
   setSeed = 999
@@ -67,20 +68,39 @@ refined, and \code{nPcs} parametrises the \code{pca} component.
 Forwarded whole to \code{\link{mashPriorCovariances}}.}
 
 \item{inputScale}{One of \code{"auto"} (default), \code{"beta"},
-\code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
-sumstats entry:
+\code{"z"}, \code{"standardized"}. Controls which (Bhat, Shat) pair is
+extracted from each sumstats entry:
 \describe{
   \item{\code{"beta"}}{Bhat = BETA, Shat = SE -- the standard
     effect-size scale mashr was designed around. Requires every
     entry to carry BETA + SE mcols.}
   \item{\code{"z"}}{Bhat = Z, Shat = 1 -- z-score scale. Requires Z.}
+  \item{\code{"standardized"}}{Bhat = Z / sqrt(N - 2 + Z^2), the
+    variant's correlation with the phenotype, and Shat =
+    sqrt((1 - Bhat^2) / (N - 2)) -- the per-SD scale. Requires Z and
+    N. Effects on it compare across studies whose per-allele effects do
+    not, their allele frequencies and phenotype scales differing.}
   \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
     otherwise fall back to (Z, 1) when every entry carries Z. Mixed
     inputs (some entries missing BETA, others missing Z) are a
     hard error.}
 }
 \code{alpha} should be chosen consistently with the resolved scale:
-typically \code{alpha = 0} for beta, \code{alpha = 1} for z.}
+typically \code{alpha = 0} for beta and standardized, \code{alpha = 1}
+for z.}
+
+\item{jointSpecification}{Which conditions the priors are over, in the
+vocabulary of \code{\link{twasWeightsPipeline}}: a character vector of
+axes (\code{"study"}, \code{"context"}, \code{"trait"}), a
+\code{list(axes, scope)}, or a list of such specs, one prior each. A
+spec's conditions are the combinations of its axes' values; the other
+axes are pooled, each combination of their values a block of rows, in
+which a condition it lacks is a missing cell. With the study among the
+axes a block's studies are matched by allele. \code{NULL} (the default)
+takes a \code{QtlSumStats}' contexts, or a \code{GwasSumStats}'
+studies. A supplied \code{residualCorrelation} or
+\code{priorCovariances} is over one spec's conditions, so it takes one
+spec.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with
@@ -99,15 +119,23 @@ refused by the constructor.}
 \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.}
 }
 \value{
-A list with elements \code{U} (the combined covariance list:
-  canonical + PCA + flash + ED) and \code{w} (the estimated mixture weights).
+A named list with one prior per spec, named by its axes joined by
+  \code{"+"}. Each is a list of \code{U} (the combined covariance list:
+  canonical + PCA + flash + ED), \code{w} (the estimated mixture weights),
+  \code{alpha}, \code{inputScale} (the resolved scale), \code{axes},
+  \code{scope} and \code{conditions}: one row per row of each \code{U}
+  matrix, its \code{study}, \code{context} and \code{trait} (\code{NA}
+  for a pooled axis) and \code{n}, the median sample size of its summary
+  statistics (\code{NA} without an \code{N} column). This is what
+  \code{\link{MashPrior}} takes.
 }
 \description{
 End-to-end driver: from `(strong, random, null)` sumstats
-  collections, builds the variant x context Bhat / Shat matrices, estimates
-  the residual correlation (\code{Vhat}), and fits the mash model with
-  canonical + PCA + flash + ED covariance components, returning the fitted
-  covariance list and the estimated mixture weights.
+  collections, builds the variant x condition Bhat / Shat matrices,
+  estimates the residual correlation (\code{Vhat}), and fits the mash model
+  with canonical + PCA + flash + ED covariance components, returning the
+  fitted covariance list and the estimated mixture weights -- one prior per
+  joint spec.
 }
 \examples{
 data(qtlSumStatsMulticontextExample)

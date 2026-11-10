@@ -11,7 +11,8 @@ mashResidualCorrelation(
   priorCovariances = NULL,
   nSubset = 6000L,
   maxIter = 6L,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   setSeed = 999
 )
@@ -43,7 +44,12 @@ correlation (needs the \pkg{CorShrink} package); \code{"mle"} =
 EM iterations).}
 
 \item{inputScale}{SumStats -> matrix conversion scale (\code{"auto"} /
-\code{"beta"} / \code{"z"}).}
+\code{"beta"} / \code{"z"} / \code{"standardized"}; see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts).}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

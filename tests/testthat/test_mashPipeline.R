@@ -546,16 +546,43 @@ test_that("mashPipeline runs end-to-end on qtlSumStatsMulticontextExample", {
             setSeed = 1L
         )
     ))
-    expect_named(res, c("U", "w"))
-    expect_type(res$U, "list")
-    expect_gt(length(res$U), 0L)
+    # Without a jointSpecification, one prior across the contexts.
+    expect_named(res, "context")
+    prior <- res$context
+    expect_named(
+        prior,
+        c("U", "w", "alpha", "inputScale", "axes", "scope", "conditions")
+    )
+    expect_type(prior$U, "list")
+    expect_gt(length(prior$U), 0L)
     # Every covariance matrix is 3x3 (one row/col per context)
     expect_true(all(map_lgl(
-        res$U,
+        prior$U,
         function(m) all(dim(m) == c(3L, 3L))
     )))
-    expect_type(res$w, "double")
-    expect_equal(sum(res$w), 1, tolerance = 1e-6)
+    expect_type(prior$w, "double")
+    expect_equal(sum(prior$w), 1, tolerance = 1e-6)
+    # What applying it takes: the scale it is on and its rows' conditions,
+    # each with the median N of its summary statistics.
+    expect_identical(prior$alpha, 0)
+    expect_identical(prior$inputScale, "beta")
+    expect_identical(prior$axes, "context")
+    rowContexts <- as.character(ss$context)
+    expect_identical(prior$conditions$context, rowContexts)
+    expect_true(all(is.na(prior$conditions$study)))
+    expect_equal(
+        prior$conditions$n,
+        map_dbl(rowContexts, function(cx) {
+            median(
+                pecotmr:::.sumStatsDf(
+                    ss,
+                    studyName = as.character(ss$study[[1L]]),
+                    context = cx,
+                    trait = as.character(ss$trait[[1L]])
+                )$N
+            )
+        })
+    )
 })
 
 # ---------------------------------------------------------------------------
@@ -759,12 +786,12 @@ test_that("mashPipeline passes residualCorrelation, priorCovariances on", {
             prior = MashPriorParam(priorCovariances = U0)
         )
     ))
-    expect_named(res, c("U", "w"))
+    expect_named(res, "context")
     # priorCovariances passed straight through as the covariance list (bypass of
     # the cov_canonical / cov_pca / cov_flash / cov_ed chain).
-    expect_identical(res$U, U0)
-    expect_type(res$w, "double")
-    expect_equal(sum(res$w), 1, tolerance = 1e-6)
+    expect_identical(res$context$U, U0)
+    expect_type(res$context$w, "double")
+    expect_equal(sum(res$context$w), 1, tolerance = 1e-6)
 })
 
 # ---------------------------------------------------------------------------
@@ -777,8 +804,7 @@ test_that("mashPipeline estimates Vhat from a null set and defaults nPcs", {
     # `residualCorrelationMethod = "simple"` runs
     # estimate_null_correlation_simple on the null set; leaving nPcs NULL
     # exercises the `nPcs <- ncol(Bhat) - 1` default in the cov_* chain.
-    res <- .mpSimpleFull
-    expect_named(res, c("U", "w"))
+    res <- .mpSimpleFull$context
     expect_gt(length(res$U), 0L)
     expect_true(all(map_lgl(
         res$U,
@@ -831,8 +857,8 @@ test_that("mashPipeline honours a data-driven residualCorrelationMethod", {
     skip_if_not_installed("flashier")
     # A different V has to move the fit, or the argument is not reaching it.
     expect_false(isTRUE(all.equal(
-        .mpVhatIdentity$result$w,
-        .mpVhatSimple$result$w
+        .mpVhatIdentity$result$context$w,
+        .mpVhatSimple$result$context$w
     )))
 })
 
@@ -875,7 +901,7 @@ test_that("a supplied residualCorrelation wins over the method", {
         prior = MashPriorParam(priorCovariances = mashTinyPrior()),
         setSeed = 1L
     )))
-    expect_named(res, c("U", "w"))
+    expect_named(res, "context")
 })
 
 # ---------------------------------------------------------------------------
@@ -1397,8 +1423,8 @@ test_that("mashPipeline equals composing its two building blocks", {
             setSeed = NULL
         )
     ))
-    expect_equal(full$U, prior$U)
-    expect_equal(full$w, prior$w)
+    expect_equal(full$context$U, prior$U)
+    expect_equal(full$context$w, prior$w)
 })
 
 # ---------------------------------------------------------------------------
@@ -1864,6 +1890,10 @@ test_that("engine 'none' leaves the data-driven components unrefined", {
     # used to refine unconditionally.
     expect_true(any(grepl("^PCA", names(raw$U))))
     expect_false(any(grepl("^ED", names(raw$U))))
+    # MashPriorParam() keeps "none" as no engine, which mashPipeline() hands
+    # on to mashPriorCovariances() and which normalizes to itself.
+    expect_null(MashPriorParam(engine = "none")$engine)
+    expect_null(pecotmr:::.mashNormalizeEngine(NULL))
 })
 
 test_that("mashPriorCovariances rejects an unknown engine", {
@@ -3068,8 +3098,9 @@ test_that(".mashSumStatsToMatrices errors when entry lacks SNP mcol", {
     )
 })
 
-test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
-    set.seed(11L)
+# Two GWAS studies of three variants on BETA/SE, the second lacking the third
+# variant.
+.mpGwasSs <- function() {
     gh <- new(
         "GenotypeHandle",
         path = "/tmp/sketch",
@@ -3098,42 +3129,81 @@ test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
             SNP = snpIds,
             A1 = "A",
             A2 = "G",
-            Z = rnorm(length(snpIds)),
-            BETA = rnorm(length(snpIds), sd = 0.1),
+            Z = withr::with_seed(11L, rnorm(length(snpIds))),
+            BETA = withr::with_seed(12L, rnorm(length(snpIds), sd = 0.1)),
             SE = rep(0.05, length(snpIds))
         )
         gr
     }
-    # Each study is its own (study) block; columns of the mash matrix are the
-    # studies, so the result is block-diagonal with NA-fill off the diagonal.
-    ss <- GwasSumStats(
+    GwasSumStats(
         studyName = c("studyA", "studyB"),
         entry = list(
             mkGr(sprintf("chr1:%d:A:G", 100L * (1:3))),
-            mkGr(sprintf("chr1:%d:A:G", 100L * (1:3)))
+            mkGr(sprintf("chr1:%d:A:G", 100L * (1:2)))
         ),
         genome = "hg19",
         ldReference = gh,
         qcOptions = list(prebuilt = "synthetic")
     )
-    out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "auto")
-    expect_equal(ncol(out$b), 2L)
+}
+
+test_that(".mashSumStatsToMatrices on GwasSumStats: studies become columns", {
+    # The studies are the columns, in one block of rows: each variant's row
+    # carries every study's effect, matched by allele. studyB lacks the third
+    # variant, which leaves that cell missing.
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpGwasSs(),
+        "strong",
+        inputScale = "auto"
+    )
     expect_equal(colnames(out$b), c("studyA", "studyB"))
-    # 2 studies x 3 variants = 6 rows; rownames prefixed by the study block key.
-    expect_equal(nrow(out$b), 6L)
+    # One row per variant, prefixed by the one block's key.
     expect_setequal(
         rownames(out$b),
-        c(
-            paste0("studyA::", sprintf("chr1:%d:A:G", 100L * (1:3))),
-            paste0("studyB::", sprintf("chr1:%d:A:G", 100L * (1:3)))
-        )
+        paste0("study::", sprintf("chr1:%d:A:G", 100L * (1:3)))
     )
-    # studyA's rows are absent from studyB's column -> bhat 0 / shat 1000 fill.
-    studyArows <- grep("^studyA::", rownames(out$b))
-    expect_equal(unname(out$b[studyArows, "studyB"]), rep(0, 3))
-    expect_equal(unname(out$s[studyArows, "studyB"]), rep(1000, 3))
+    # studyB lacks the third variant -> bhat 0 / shat 1000 fill.
+    third <- rownames(out$b) == "study::chr1:300:A:G"
+    expect_equal(unname(out$b[third, "studyB"]), 0)
+    expect_equal(unname(out$s[third, "studyB"]), 1000)
     # On the BETA scale, the present cells carry the small generated SEs.
-    expect_true(all(out$s[studyArows, "studyA"] < 1))
+    expect_true(all(out$s[, "studyA"] < 1))
+    expect_true(all(out$s[!third, "studyB"] < 1))
+})
+
+test_that("a GWAS's studies can be scoped, but it has no other axis", {
+    ss <- .mpGwasSs()
+    spec <- pecotmr:::.mashOneSpec(
+        list(list(axes = "study", scope = list(study = "studyB"))),
+        ss,
+        "x"
+    )
+    out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", spec = spec)
+    expect_identical(colnames(out$b), "studyB")
+    expect_error(
+        pecotmr:::.mashOneSpec(
+            list(list(axes = "study", scope = list(context = "brain"))),
+            ss,
+            "x"
+        ),
+        "scope\\$context contains values not in data: brain"
+    )
+    expect_error(
+        pecotmr:::.mashOneSpec(
+            list(list(axes = "study", scope = list(trait = "height"))),
+            ss,
+            "x"
+        ),
+        "scope\\$trait contains values not in data: height"
+    )
+    expect_error(
+        pecotmr:::.mashSumStatsToMatrices(
+            ss,
+            "strong",
+            spec = list(axes = "context", scope = NULL)
+        ),
+        "no context axis to join on"
+    )
 })
 
 test_that(".mashSumStatsToMatrices errors on a non-SumStats input", {
@@ -3783,5 +3853,263 @@ test_that("a GWAS fine-mapping result's conditions are its studies", {
     expect_identical(
         rownames(mats$b)[mats$strongRows],
         c("chr1:100:A:G", "chr1:10100:A:G")
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Layouts under a joint spec
+# ---------------------------------------------------------------------------
+
+# Two studies, each with contexts c1 and c2 of one trait g1. Study s2 lacks the
+# third variant and spells the second with its alleles the other way round,
+# its z negated to match; its N is 400 where s1's is 100 (no N column at all
+# when `withN` is FALSE).
+.mpTwoStudySs <- function(withN = TRUE) {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
+    gh <- new(
+        "GenotypeHandle",
+        path = "/tmp/sketch",
+        format = "plink2",
+        snpInfo = data.frame(
+            SNP = ids,
+            CHR = "chr1",
+            BP = 100L * (1:3),
+            A1 = "A",
+            A2 = "G",
+            stringsAsFactors = FALSE
+        ),
+        nSamples = 50L,
+        sampleIds = paste0("s", seq_len(50L)),
+        pgenPtr = NULL
+    )
+    mkGr <- function(snps, a1, a2, z, n) {
+        gr <- GenomicRanges::GRanges(
+            seqnames = "chr1",
+            ranges = IRanges::IRanges(100L * seq_along(snps), width = 1L)
+        )
+        stats <- S4Vectors::DataFrame(SNP = snps, A1 = a1, A2 = a2, Z = z)
+        S4Vectors::mcols(gr) <- if (withN) cbind(stats, N = n) else stats
+        gr
+    }
+    s2ids <- c(ids[[1L]], "chr1:200:G:A")
+    QtlSumStats(
+        studyName = c("s1", "s1", "s2", "s2"),
+        context = c("c1", "c2", "c1", "c2"),
+        trait = rep("g1", 4L),
+        entry = list(
+            mkGr(ids, "A", "G", c(1, 2, 3), 100),
+            mkGr(ids, "A", "G", c(4, 5, 6), 100),
+            mkGr(s2ids, c("A", "G"), c("G", "A"), c(7, -8), 400),
+            mkGr(s2ids, c("A", "G"), c("G", "A"), c(9, -10), 400)
+        ),
+        genome = "hg19",
+        ldReference = gh,
+        qcOptions = list(prebuilt = "synthetic")
+    )
+}
+
+test_that("a spec over study and context joins the studies by allele", {
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpTwoStudySs(),
+        "strong",
+        inputScale = "z",
+        spec = list(axes = c("study", "context"), scope = NULL)
+    )
+    expect_identical(colnames(out$b), c("s1:c1", "s1:c2", "s2:c1", "s2:c2"))
+    # The trait is pooled: its one value is the one block of rows.
+    expect_setequal(
+        rownames(out$b),
+        str_c("g1::", sprintf("chr1:%d:A:G", 100L * (1:3)))
+    )
+    # s2's second variant, spelled the other way round, is turned back.
+    expect_equal(
+        unname(out$b["g1::chr1:200:A:G", c("s2:c1", "s2:c2")]),
+        c(8, 10)
+    )
+    expect_equal(unname(out$b["g1::chr1:100:A:G", ]), c(1, 4, 7, 9))
+    # s2 lacks the third variant: a missing cell.
+    expect_equal(unname(out$b["g1::chr1:300:A:G", "s2:c1"]), 0)
+    expect_equal(unname(out$s["g1::chr1:300:A:G", "s2:c1"]), 1000)
+    expect_identical(out$scale, "z")
+    expect_equal(
+        out$conditions,
+        tibble(
+            study = c("s1", "s1", "s2", "s2"),
+            context = c("c1", "c2", "c1", "c2"),
+            trait = NA_character_,
+            n = c(100, 100, 400, 400)
+        )
+    )
+})
+
+test_that("a spec over the context stacks each study's variants", {
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpTwoStudySs(),
+        "strong",
+        inputScale = "z",
+        spec = list(axes = "context", scope = NULL)
+    )
+    expect_identical(colnames(out$b), c("c1", "c2"))
+    # One block per (study, trait), each in its own allele frame.
+    expect_setequal(
+        rownames(out$b),
+        c(
+            str_c("s1::g1::", sprintf("chr1:%d:A:G", 100L * (1:3))),
+            "s2::g1::chr1:100:A:G",
+            "s2::g1::chr1:200:G:A"
+        )
+    )
+    expect_equal(unname(out$b["s2::g1::chr1:200:G:A", ]), c(-8, -10))
+    # A column's sample size: the median over its blocks.
+    expect_equal(out$conditions$n, c(250, 250))
+    expect_true(all(is.na(out$conditions$study)))
+})
+
+test_that("a spec over the study blocks by context and trait", {
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpTwoStudySs(),
+        "strong",
+        inputScale = "z",
+        spec = list(axes = "study", scope = NULL)
+    )
+    expect_identical(colnames(out$b), c("s1", "s2"))
+    expect_length(rownames(out$b), 6L)
+    expect_equal(unname(out$b["c2::g1::chr1:200:A:G", ]), c(5, 10))
+    expect_identical(out$conditions$study, c("s1", "s2"))
+})
+
+test_that("a spec's scope leaves the rows outside it out", {
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpTwoStudySs(),
+        "strong",
+        inputScale = "z",
+        spec = list(axes = "context", scope = list(study = "s1"))
+    )
+    expect_setequal(
+        rownames(out$b),
+        str_c("s1::g1::", sprintf("chr1:%d:A:G", 100L * (1:3)))
+    )
+    expect_equal(out$conditions$n, c(100, 100))
+})
+
+test_that("the standardized scale gives each variant's per-SD effect", {
+    out <- pecotmr:::.mashSumStatsToMatrices(
+        .mpTwoStudySs(),
+        "strong",
+        inputScale = "standardized",
+        spec = list(axes = c("study", "context"), scope = NULL)
+    )
+    b <- 7 / sqrt(400 - 2 + 7^2)
+    expect_equal(unname(out$b["g1::chr1:100:A:G", "s2:c1"]), b)
+    expect_equal(
+        unname(out$s["g1::chr1:100:A:G", "s2:c1"]),
+        sqrt((1 - b^2) / (400 - 2))
+    )
+    expect_identical(out$scale, "standardized")
+})
+
+test_that("the standardized scale needs an N to go with each Z", {
+    ss <- .mpTwoStudySs(withN = FALSE)
+    expect_error(
+        pecotmr:::.mashSumStatsToMatrices(
+            ss,
+            "strong",
+            inputScale = "standardized"
+        ),
+        "no N mcol"
+    )
+    # The z scale needs none, and leaves each column's sample size unknown.
+    out <- pecotmr:::.mashSumStatsToMatrices(ss, "strong", inputScale = "z")
+    expect_true(all(is.na(out$conditions$n)))
+    # Nor does it go without a Z.
+    expect_error(
+        pecotmr:::.mashScaleStandardized(FALSE, "strong"),
+        "requires every 'strong' entry to carry a Z mcol"
+    )
+})
+
+test_that("a scoped spec lays out the residual correlation", {
+    skip_if_not_installed("mashr")
+    ss <- .mpTwoStudySs()
+    vhat <- function(spec) {
+        mashResidualCorrelation(
+            list(strong = ss),
+            alpha = 0,
+            method = "identity",
+            jointSpecification = spec
+        )
+    }
+    expect_equal(vhat(list(c("study", "context"))), diag(4))
+    expect_equal(
+        vhat(list(list(axes = "context", scope = list(study = "s1")))),
+        diag(2)
+    )
+    expect_error(
+        vhat(list(list(axes = "context", scope = list(study = "s3")))),
+        "scope\\$study contains values not in data: s3"
+    )
+})
+
+test_that("a mash step takes one joint spec", {
+    expect_error(
+        pecotmr:::.mashOneSpec(
+            list("context", "study"),
+            .mpTwoStudySs(),
+            "mashPriorCovariances"
+        ),
+        "takes one spec here"
+    )
+    expect_null(pecotmr:::.mashOneSpec(NULL, .mpTwoStudySs(), "x"))
+    expect_identical(
+        pecotmr:::.mashOneSpec(c("study", "context"), .mpTwoStudySs(), "x"),
+        list(axes = c("study", "context"), scope = NULL)
+    )
+})
+
+test_that("mashPipeline fits one prior per joint spec", {
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    ss <- .mpTwoStudySs()
+    res <- suppressMessages(suppressWarnings(mashPipeline(
+        list(strong = ss, random = ss),
+        alpha = 0,
+        inputScale = "standardized",
+        jointSpecification = list("context", c("study", "context")),
+        prior = MashPriorParam(components = "canonical", engine = "none"),
+        setSeed = 1L
+    )))
+    expect_named(res, c("context", "study+context"))
+    expect_identical(dim(res$context$U[[1L]]), c(2L, 2L))
+    expect_identical(dim(res[["study+context"]]$U[[1L]]), c(4L, 4L))
+    expect_identical(res[["study+context"]]$axes, c("study", "context"))
+    expect_identical(
+        res[["study+context"]]$conditions$study,
+        c("s1", "s1", "s2", "s2")
+    )
+    # Each prior is what MashPrior takes.
+    expect_s4_class(MashPrior(fullFit = res), "MashPrior")
+})
+
+test_that("a supplied prior or residual correlation takes one spec", {
+    ss <- .mpTwoStudySs()
+    expect_error(
+        mashPipeline(
+            list(strong = ss, random = ss),
+            alpha = 0,
+            jointSpecification = list("context", "study"),
+            residualCorrelation = diag(2)
+        ),
+        "over one spec's conditions"
+    )
+    # Two specs over the same axes are told apart in the result's names.
+    expect_identical(
+        make.unique(
+            map_chr(
+                list(list(axes = "context"), list(axes = "context")),
+                pecotmr:::.mashSpecName
+            ),
+            sep = "_"
+        ),
+        c("context", "context_1")
     )
 })

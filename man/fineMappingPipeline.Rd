@@ -189,22 +189,25 @@ spec always goes inside the outer list, even on its own. Other methods
 run per (study, context, trait) as usual. The \code{"study"} axis needs
 more than one study, so it is rejected on a \code{QtlDataset}. On a
 \code{MultiStudyQtlDataset}, the summary-statistics studies are fitted
-with one another, and so are the individual-level ones: one
-\code{mvsusie} fit per (context, trait) that two or more of them carry,
-for instance the same gene measured in several ancestries. Their samples
-must be disjoint. The fit stacks them, each study's phenotype observed
-on its own samples only, over the union of the studies' variants, which
-are matched by allele; a variant a study lacks carries no evidence for
-it. Each study keeps its own residualization, genotype filters and
-scaling, and its row reports its own samples' allele frequencies and
-credible-set purity. While the residualizer scales X and Y
-(\code{ResidualizationParam(scaleResiduals = TRUE)}, the default), every
-joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so its
-prior describes per-SD effects and a component shared across studies
+with one another, and so are the individual-level ones: on the study
+axis alone, one \code{mvsusie} fit per (context, trait) that two or more
+of them carry, for instance the same gene measured in several
+ancestries; with a composed spec including \code{"study"}, one fit per
+value of the axes it leaves out (each trait for \code{c("study",
+"context")}), over every (study, context, trait) the studies carry.
+Their samples must be disjoint. The fit stacks them, each study's
+conditions observed on its own samples only (a study's conditions on the
+samples it observes for all of them), over the union of the studies'
+variants, which are matched by allele; a variant a study lacks carries no
+evidence for it. Each study keeps its own residualization, genotype
+filters and scaling, and its rows report its own samples' allele
+frequencies and credible-set purity. While the residualizer scales X and
+Y (\code{ResidualizationParam(scaleResiduals = TRUE)}, the default),
+every joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so
+its prior describes per-SD effects and a component shared across studies
 means effects equal per SD whatever the studies' sizes;
 \code{MvsusieOptions(standardize = TRUE)} restores mvsusieR's own
-scaling. \code{fsusie} has no cross-study fit, and a composed spec
-including \code{"study"} runs on summary statistics only.}
+scaling. \code{fsusie} has no cross-study fit.}
 
 \item{initializeWithSusieInf}{Logical. When \code{susieInf} is in
 \code{methods} alongside \code{susie} and/or \code{susieAsh}, whether the

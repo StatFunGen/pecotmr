@@ -3091,7 +3091,7 @@ test_that(".twasCvResultFor returns NULL when no entry carries CV", {
 
 test_that(".unpackMashPrior routes a MashPrior into the CV arguments", {
     unpack <- pecotmr:::.unpackMashPrior
-    U <- list(U1 = diag(2))
+    priors <- list(context = mashPriorPayload())
     sp <- data.frame(
         Sample = paste0("s", 1:6),
         Fold = rep(1:3, each = 2),
@@ -3102,30 +3102,175 @@ test_that(".unpackMashPrior routes a MashPrior into the CV arguments", {
         Fold = rep(c(1, 2), 3),
         stringsAsFactors = FALSE
     )
-    pf <- list(list(U = U), list(U = U), list(U = U))
+    pf <- list(priors, priors, priors)
 
-    # NULL -> all NULL, but the explicitly supplied partition is preserved.
+    # NULL -> no priors, but the explicitly supplied partition is preserved.
     r1 <- unpack(NULL, sp)
-    expect_null(r1$fullPrior)
-    expect_null(r1$dataDrivenPriorMatricesCv)
+    expect_null(r1$priors)
     expect_identical(r1$samplePartition, sp)
 
     # full-only.
-    r2 <- unpack(MashPrior(fullFit = list(U = U)), NULL)
-    expect_identical(r2$fullPrior$U, U)
-    expect_null(r2$dataDrivenPriorMatricesCv)
+    r2 <- unpack(MashPrior(fullFit = priors), NULL)
+    expect_identical(r2$priors$full, priors)
+    expect_null(r2$priors$folds)
 
     # cv -> per-fold priors + the partition the priors were computed on.
     mpC <- MashPrior(cvFits = list(samplePartition = sp, perFoldFits = pf))
     r3 <- unpack(mpC, NULL)
-    expect_length(r3$dataDrivenPriorMatricesCv, 3L)
+    expect_null(r3$priors$full)
+    expect_length(r3$priors$folds, 3L)
     expect_identical(r3$samplePartition, sp)
 
     # An explicit partition wins over the bundle's.
     expect_identical(unpack(mpC, spX)$samplePartition, spX)
 
     # A non-MashPrior is rejected.
-    expect_error(unpack(list(U = U)), "MashPrior")
+    expect_error(unpack(priors), "MashPrior")
+})
+
+test_that("a group takes the prior over its axes, on its own conditions", {
+    U <- matrix(c(4, 1, 2, 1, 5, 3, 2, 3, 6), 3L, 3L)
+    priors <- list(
+        context = mashPriorPayload(
+            c("brain", "liver", "lung"),
+            U = list(a = U)
+        ),
+        trait = list_assign(
+            mashPriorPayload(c("brain", "liver", "lung"), U = list(a = U)),
+            axes = "trait"
+        )
+    )
+    cond <- data.frame(study = "s1", context = c("lung", "brain"), trait = "g")
+    out <- pecotmr:::.mashPriorForGroup(
+        priors,
+        cond,
+        "context",
+        c("Y_lung", "Y_brain")
+    )
+    expect_equal(
+        out$U$a,
+        matrix(
+            c(6, 2, 2, 4),
+            2L,
+            2L,
+            dimnames = list(c("Y_lung", "Y_brain"), c("Y_lung", "Y_brain"))
+        )
+    )
+})
+
+test_that("a prior fitted on the z scale is put on the per-SD scale", {
+    U <- list(a = matrix(c(4, 2, 2, 9), 2L, 2L))
+    cond <- data.frame(study = "s1", context = c("brain", "liver"), trait = "g")
+    n <- c(100, 400)
+    expected <- U$a / sqrt(outer(n, n))
+    onZ <- mashPriorPayload(U = U, alpha = 1, n = n)
+    expect_equal(
+        unname(
+            pecotmr:::.mashPriorForGroup(
+                list(context = onZ),
+                cond,
+                "context",
+                NULL
+            )$U$a
+        ),
+        expected
+    )
+    # The z scale is divided by sqrt(n) whatever alpha was: Shat is 1 there.
+    zScale <- mashPriorPayload(U = U, inputScale = "z", n = n)
+    expect_equal(
+        unname(
+            pecotmr:::.mashPriorForGroup(
+                list(context = zScale),
+                cond,
+                "context",
+                NULL
+            )$U$a
+        ),
+        expected
+    )
+    # A per-SD prior (standardized, alpha = 0) is taken as it is, no N needed.
+    perSd <- mashPriorPayload(U = U, n = NA)
+    expect_equal(
+        unname(
+            pecotmr:::.mashPriorForGroup(
+                list(context = perSd),
+                cond,
+                "context",
+                NULL
+            )$U$a
+        ),
+        U$a
+    )
+    expect_error(
+        pecotmr:::.mashPriorForGroup(
+            list(context = list_assign(onZ, conditions = perSd$conditions)),
+            cond,
+            "context",
+            NULL
+        ),
+        "carried no N"
+    )
+})
+
+test_that("a group no prior covers, or several do, is an error", {
+    prior <- mashPriorPayload()
+    cond <- data.frame(study = "s1", context = c("brain", "heart"), trait = "g")
+    expect_error(
+        pecotmr:::.mashPriorForGroup(
+            list(context = prior),
+            cond,
+            "context",
+            NULL
+        ),
+        str_c(
+            "none of its priors \\(context\\) is over the axes context and ",
+            "the conditions brain, heart"
+        )
+    )
+    covered <- data.frame(
+        study = "s1",
+        context = c("brain", "liver"),
+        trait = "g"
+    )
+    expect_error(
+        pecotmr:::.mashPriorForGroup(
+            list(context = prior, again = prior),
+            covered,
+            "context",
+            NULL
+        ),
+        "more than one of its priors"
+    )
+    # A prior over other axes is not a candidate.
+    expect_error(
+        pecotmr:::.mashPriorForGroup(
+            list(context = prior),
+            covered,
+            "trait",
+            NULL
+        ),
+        "none of its priors"
+    )
+    # Nor is one whose scope, on an axis it pools, leaves the group out.
+    scoped <- list_assign(prior, scope = list(study = "s2"))
+    expect_error(
+        pecotmr:::.mashPriorForGroup(
+            list(context = scoped),
+            covered,
+            "context",
+            NULL
+        ),
+        "none of its priors"
+    )
+    expect_length(
+        pecotmr:::.mashPriorForGroup(
+            list(context = list_assign(prior, scope = list(study = "s1"))),
+            covered,
+            "context",
+            NULL
+        )$U,
+        1L
+    )
 })
 
 # ===========================================================================
@@ -3562,7 +3707,7 @@ test_that("a mashPrior without mrmash warns and is ignored", {
         suppressMessages(twasWeightsPipeline(
             qd,
             methods = list(lasso = list()),
-            mashPrior = MashPrior(fullFit = list(U = list(comp = diag(2)))),
+            mashPrior = MashPrior(fullFit = list(context = mashPriorPayload())),
             cisWindow = 1000L,
             estimatePi = FALSE,
             verbose = 0,
@@ -3575,7 +3720,11 @@ test_that("a mashPrior without mrmash warns and is ignored", {
 
 test_that("a full mashPrior reaches mr.mash's arguments", {
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
-    ddpm <- list(U = list(comp = diag(2)))
+    # The prior's rows run liver, brain; the group's columns brain, liver.
+    prior <- mashPriorPayload(
+        c("liver", "brain"),
+        U = list(comp = diag(c(1, 2)))
+    )
     captured <- NULL
     local_mocked_bindings(
         .handleDosage = .tp_mockExtractor(),
@@ -3594,24 +3743,44 @@ test_that("a full mashPrior reaches mr.mash's arguments", {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = list(mrmash = list()),
-        mashPrior = MashPrior(fullFit = ddpm),
+        mashPrior = MashPrior(fullFit = list(context = prior)),
         cisWindow = 1000L,
         estimatePi = FALSE,
         verbose = 0,
         crossValidationParam = CrossValidationParam(folds = 0),
         ensembleParam = EnsembleParam()
     )))
-    expect_identical(captured, ddpm)
+    cx <- c("brain", "liver")
+    expect_equal(
+        captured,
+        list(U = list(comp = diag(c(2, 1)) |> `dimnames<-`(list(cx, cx))))
+    )
 })
 
-test_that("a full mashPrior reaches mr.mash.rss's arguments", {
+test_that("a summary-statistics mr.mash group takes its own prior", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L)
-    ddpm <- list(U = list(comp = diag(2)))
+    # The prior's rows run c2, c1, and it was fitted on the z scale
+    # (alpha = 1), so the group takes them reordered and divided by
+    # sqrt(n_k n_l); the trait prior is over other axes and is passed by.
+    U <- matrix(c(4, 1, 1, 9), 2L, 2L)
+    n <- c(400, 100)
+    priors <- list(
+        context = mashPriorPayload(
+            c("c2", "c1"),
+            U = list(comp = U),
+            alpha = 1,
+            n = n
+        ),
+        trait = list_assign(mashPriorPayload(c("c1", "c2")), axes = "trait")
+    )
     captured <- NULL
     local_mocked_bindings(
         .handleDosage = .tp_mockExtractor(),
         mrmashRssWeights = function(stat, ldReference, ...) {
-            captured <<- list(...)$dataDrivenPriorMatrices
+            captured <<- list(
+                prior = list(...)$dataDrivenPriorMatrices,
+                labels = colnames(stat$z)
+            )
             matrix(
                 0,
                 length(stat$variantNames),
@@ -3624,22 +3793,33 @@ test_that("a full mashPrior reaches mr.mash.rss's arguments", {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = "mrmash",
-        mashPrior = MashPrior(fullFit = ddpm),
+        mashPrior = MashPrior(fullFit = priors),
         verbose = 0
     )))
-    expect_identical(captured, ddpm)
+    labels <- captured$labels
+    expect_equal(
+        captured$prior,
+        list(
+            U = list(
+                comp = `dimnames<-`(
+                    U[2:1, 2:1] / sqrt(outer(n[2:1], n[2:1])),
+                    list(labels, labels)
+                )
+            )
+        )
+    )
 })
 
-test_that("summary statistics take a mashPrior's full-data prior alone", {
+test_that("summary statistics take a mashPrior's full-data priors alone", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L)
-    U <- list(comp = diag(2))
+    prior <- mashPriorPayload(c("c1", "c2"))
     # Not cross-validated, they have no use for per-fold priors.
     expect_error(
         twasWeightsPipeline(
             ss,
             methods = "mrmash",
             mashPrior = MashPrior(
-                cvFits = list(perFoldFits = list(list(U = U)))
+                cvFits = list(perFoldFits = list(list(context = prior)))
             ),
             verbose = 0
         ),
@@ -3656,7 +3836,7 @@ test_that("summary statistics take a mashPrior's full-data prior alone", {
         suppressMessages(twasWeightsPipeline(
             ss,
             methods = "lasso",
-            mashPrior = MashPrior(fullFit = list(U = U)),
+            mashPrior = MashPrior(fullFit = list(context = prior)),
             verbose = 0
         )),
         "not among `methods`"
@@ -3672,7 +3852,7 @@ test_that("a MultiStudyQtlDataset's summary statistics take its mashPrior", {
         },
         .package = "pecotmr"
     )
-    mp <- MashPrior(fullFit = list(U = list(comp = diag(2))))
+    mp <- MashPrior(fullFit = list(context = mashPriorPayload()))
     pecotmr:::.twasSumStats(
         .tp_makeQtlSumStats(n_entries = 2L),
         list(mashPrior = mp)
@@ -4626,6 +4806,101 @@ test_that("studyCoupling takes non-negative, distinct strengths", {
     expect_error(
         twasWeightsPipeline(.fm_disjointStudies(), studyCoupling = -0.1),
         "studyCoupling"
+    )
+})
+
+test_that("mr.mash is fitted on the groups across studies", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("missing_y_method", names(formals(mr.mashr::mr.mash))),
+        "mr.mashr predates missing_y_method"
+    )
+    fit <- function(data, spec) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            data,
+            methods = "mrmash",
+            jointSpecification = spec,
+            cisWindow = 50000L,
+            crossValidationParam = CrossValidationParam(folds = 0),
+            verbose = 0
+        )))
+    }
+    # The study axis alone: one fit per (context, trait), a row per study.
+    alone <- S4Vectors::mcols(
+        fit(.fm_disjointStudies(), "study"),
+        use.names = FALSE
+    )
+    expect_equal(as.character(alone$study), c("study1", "study2"))
+    expect_true(all(alone$jointStudies == "study1;study2"))
+    # Composed with the context: one fit over each study's contexts.
+    composed <- S4Vectors::mcols(
+        fit(.fm_disjointTwoContextStudies(), list(c("study", "context"))),
+        use.names = FALSE
+    )
+    expect_equal(
+        as.character(composed$context),
+        c("brain", "liver", "brain", "liver")
+    )
+    expect_true(all(composed$jointContexts == "brain;liver"))
+    expect_equal(as.integer(composed$jointIndex), 1:4)
+})
+
+test_that("mr.mash across studies takes the prior over its spec's axes", {
+    # The study+context prior's rows run study2 first, and it was fitted on
+    # the z scale (alpha = 1), so the group takes them reordered and divided
+    # by sqrt(n_k n_l); the context prior is over other axes and is passed by.
+    rows <- tibble(
+        study = c("study2", "study2", "study1", "study1"),
+        context = c("brain", "liver", "brain", "liver"),
+        trait = NA_character_,
+        n = c(400, 400, 100, 100)
+    )
+    U <- matrix(0.5, 4L, 4L) + diag(c(3.5, 2.5, 1.5, 0.5))
+    composedPrior <- list_assign(
+        mashPriorPayload(U = list(comp = U), alpha = 1),
+        axes = c("study", "context"),
+        conditions = rows
+    )
+    captured <- list()
+    local_mocked_bindings(
+        mrmashWeights = function(X, Y, ...) {
+            captured <<- c(
+                captured,
+                list(list(prior = list(...)$dataDrivenPriorMatrices, Y = Y))
+            )
+            matrix(
+                0,
+                ncol(X),
+                ncol(Y),
+                dimnames = list(colnames(X), colnames(Y))
+            )
+        },
+        .package = "pecotmr"
+    )
+    suppressWarnings(suppressMessages(twasWeightsPipeline(
+        .fm_disjointTwoContextStudies(),
+        methods = "mrmash",
+        jointSpecification = list(c("study", "context")),
+        mashPrior = MashPrior(
+            fullFit = list(
+                context = mashPriorPayload(),
+                "study+context" = composedPrior
+            )
+        ),
+        cisWindow = 50000L,
+        crossValidationParam = CrossValidationParam(folds = 0),
+        verbose = 0
+    )))
+    expect_length(captured, 1L)
+    labels <- colnames(captured[[1L]]$Y)
+    # The group's columns are study1's contexts, then study2's.
+    at <- c(3L, 4L, 1L, 2L)
+    expect_equal(
+        captured[[1L]]$prior$U$comp,
+        `dimnames<-`(
+            U[at, at] / sqrt(outer(rows$n[at], rows$n[at])),
+            list(labels, labels)
+        )
     )
 })
 
@@ -6259,6 +6534,89 @@ test_that("a multivariate TWAS group refuses contexts on two LD references", {
     )
 })
 
+test_that("mr.mash across studies takes each study's own LD reference", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("missing_y_method", names(formals(mr.mashr::mr.mash))),
+        "mr.mashr predates missing_y_method"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:5), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = "A",
+        A2 = "G",
+        Z = c(6, 5.5, 1, 0.5, 0.2),
+        N = 1000L
+    )
+    ldm <- function(rho) {
+        LdMatrix(`dimnames<-`(rho^abs(outer(1:5, 1:5, "-")), list(ids, ids)))
+    }
+    # Two studies, each on its own panel; the second lacks the last variant.
+    ss <- QtlSumStats(
+        studyName = c("S1", "S2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(gr, gr[1:4]),
+        genome = "hg19",
+        ldReference = list(ldm(0.1), ldm(0.6)),
+        qcOptions = list(step1 = "ok")
+    )
+    res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
+        ss,
+        methods = "mrmash",
+        jointSpecification = "study",
+        verbose = 0
+    )))
+    md <- S4Vectors::mcols(res, use.names = FALSE)
+    expect_equal(as.character(md$study), c("S1", "S2"))
+    expect_true(all(md$jointStudies == "S1;S2"))
+    # Composed with the context: each study's contexts on the study's own
+    # reference, one mr.mash fit over the four conditions.
+    both <- QtlSumStats(
+        studyName = c("S1", "S1", "S2", "S2"),
+        context = c("c1", "c2", "c1", "c2"),
+        trait = rep("t1", 4L),
+        entry = list(gr, gr, gr[1:4], gr[1:4]),
+        genome = "hg19",
+        ldReference = list(ldm(0.1), ldm(0.1), ldm(0.6), ldm(0.6)),
+        qcOptions = list(step1 = "ok")
+    )
+    composed <- S4Vectors::mcols(
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            both,
+            methods = "mrmash",
+            jointSpecification = list(c("study", "context")),
+            verbose = 0
+        ))),
+        use.names = FALSE
+    )
+    expect_equal(as.character(composed$study), c("S1", "S1", "S2", "S2"))
+    expect_equal(as.integer(composed$jointIndex), 1:4)
+    # A study's own contexts on two references share no sample frame.
+    mixed <- QtlSumStats(
+        studyName = c("S1", "S1", "S2", "S2"),
+        context = c("c1", "c2", "c1", "c2"),
+        trait = rep("t1", 4L),
+        entry = list(gr, gr, gr[1:4], gr[1:4]),
+        genome = "hg19",
+        ldReference = list(ldm(0.1), ldm(0.3), ldm(0.6), ldm(0.6)),
+        qcOptions = list(step1 = "ok")
+    )
+    expect_error(
+        suppressMessages(twasWeightsPipeline(
+            mixed,
+            methods = "mrmash",
+            jointSpecification = list(c("study", "context")),
+            verbose = 0
+        )),
+        "a joint fit uses one LD matrix"
+    )
+})
+
 test_that("twasWeightsPipeline(QtlSumStats) lays a cisWindow around traitPos", {
     mockArgs <- c(
         list(.handleDosage = .tp_mockExtractor()),
@@ -6813,7 +7171,6 @@ test_that("a study-axis spec fits lasso across summary-statistics studies", {
     ))
     alone <- run(NULL)
     expect_false("jointStudies" %in% pecotmr:::.tupleColumnNames(alone))
-    expect_error(run(c(0.1, 1), "mrmash"), "a joint fit uses one LD matrix")
 })
 
 test_that("studies on their own LD stack their z-scores over the union", {

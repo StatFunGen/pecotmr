@@ -1304,6 +1304,87 @@ test_that("mrmashRssWeights errors on single-context stat$z", {
     expect_error(mrmashRssWeights(oneCol, f$ldReference), ">= 2 columns")
 })
 
+test_that("mrmashRssWeights takes one LD reference per condition", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("missing_y_method", names(formals(mr.mashr::mr.mash))),
+        "mr.mashr predates missing_y_method"
+    )
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    opts <- MrmashRssOptions(verbose = FALSE)
+    # The same reference for every condition is the one-reference fit.
+    expect_equal(
+        mrmashRssWeights(
+            m$stat,
+            rep(list(m$ldReference), 3L),
+            methodArgs = opts
+        ),
+        mrmashRssWeights(m$stat, m$ldReference, methodArgs = opts),
+        tolerance = 1e-8
+    )
+    # Two studies on their own references: the third condition's study lacks
+    # the last variant, which carries no information there.
+    other <- LdMatrix(`dimnames<-`(
+        0.5^abs(outer(1:6, 1:6, "-")),
+        list(m$stat$variantNames, m$stat$variantNames)
+    ))
+    stat <- m$stat
+    stat$z[6L, 3L] <- NA
+    refs <- list(m$ldReference, m$ldReference, other)
+    w <- mrmashRssWeights(stat, refs, methodArgs = opts)
+    expect_equal(dim(w), c(m$p, m$K))
+    expect_true(all(is.finite(w)))
+})
+
+test_that("one LD reference per condition is laid on the variants", {
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    other <- LdMatrix(`dimnames<-`(
+        0.5^abs(outer(1:6, 1:6, "-")),
+        list(m$stat$variantNames, m$stat$variantNames)
+    ))
+    # The third condition's study lacks the last variant.
+    stat <- m$stat
+    stat$z[6L, 3L] <- NA
+    refs <- list(m$ldReference, m$ldReference, other)
+    ld <- pecotmr:::.mrmashRssLd(stat, refs)
+    expect_identical(ld$R[[1L]], ld$R[[2L]])
+    expect_equal(unname(ld$R[[3L]][6L, ]), rep(0, 6L))
+    expect_equal(unname(ld$R[[3L]][1:5, 1:5]), 0.5^abs(outer(1:5, 1:5, "-")))
+    expect_equal(ld$n, rep(60, 3L))
+    expect_error(
+        pecotmr:::.mrmashRssLd(stat, refs[1:2]),
+        "one LD reference per column of stat\\$z \\(3\\); got 2"
+    )
+    # A statistic a condition lacks carries no information: z and Bhat 0,
+    # Shat 1, where its LD is zero.
+    expect_equal(
+        unname(pecotmr:::.mrmashRssCarriedStat(stat, ld)$z[6L, 3L]),
+        0
+    )
+    withSe <- pecotmr:::.mrmashRssCarriedStat(
+        list(Bhat = matrix(c(NA, 1), 2L), Shat = matrix(c(NA, 2), 2L)),
+        ld
+    )
+    expect_equal(withSe$Bhat[, 1L], c(0, 1))
+    expect_equal(withSe$Shat[, 1L], c(1, 2))
+    # On one reference the statistics go as they are.
+    expect_identical(
+        pecotmr:::.mrmashRssCarriedStat(stat, list(R = diag(6))),
+        stat
+    )
+})
+
+test_that("conditions share a reference group only with an identical one", {
+    a <- .rrwLdMatrix(diag(2))
+    b <- .rrwLdMatrix(0.5 + diag(0.5, 2))
+    expect_equal(pecotmr:::.mrmashRssRefGroups(list(a, b, a, b)), c(1, 2, 1, 2))
+    # A reference holding none of the variants contributes zero LD.
+    expect_equal(
+        pecotmr:::.mrmashRssEmbedLd(NULL, c("v1", "v2")),
+        matrix(0, 2L, 2L, dimnames = list(c("v1", "v2"), c("v1", "v2")))
+    )
+})
+
 
 # ------------------------------- pure helpers -------------------------------
 
@@ -1812,11 +1893,10 @@ test_that("mrmashWrapper refuses to let methodArgs override derived values", {
 test_that("near-duplicate contexts get a floor on V's eigenvalues", {
     skip_if_not_installed("mr.mashr")
     set.seed(1)
-    X <- matrix(rnorm(60 * 4), 60, 4)
     y <- rnorm(60)
     nearDuplicate <- cbind(y, y + 1e-5 * rnorm(60))
     initV <- function(Y, floorValue = 1e-3) {
-        pecotmr:::.mrmashInitV(X, Y, NULL, TRUE, "full", floorValue)
+        pecotmr:::.mrmashInitV(Y, NULL, TRUE, "full", floorValue)
     }
     eigenRatio <- function(V) {
         values <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
@@ -1834,10 +1914,64 @@ test_that("near-duplicate contexts get a floor on V's eigenvalues", {
     expect_true(kept$updateV)
     expect_equal(
         kept$V,
-        pecotmr:::.mrmashComputeVInit(X, distinct, FALSE)
+        pecotmr:::.mrmashComputeVInit(distinct)
     )
     # A user's floor decides whether they count as near-duplicate.
     expect_warning(initV(distinct, 0.99), "close to singular")
+})
+
+test_that("V starts at the pairwise covariance, or at its diagonal", {
+    set.seed(3)
+    Y <- matrix(rnorm(90), 30L, 3L)
+    expect_equal(pecotmr:::.mrmashComputeVInit(Y), cov(Y))
+    # Two studies observing one condition each: zero between them.
+    blocks <- Y[, 1:2]
+    blocks[16:30, 1] <- NA
+    blocks[1:15, 2] <- NA
+    V <- pecotmr:::.mrmashComputeVInit(blocks)
+    expect_equal(V[1, 2], 0)
+    expect_equal(diag(V), apply(blocks, 2, var, na.rm = TRUE))
+    # Pairs observed on different rows can disagree past any covariance:
+    # the first two move together, the second and third too, and the first
+    # and third against each other. Then only the variances are kept.
+    x <- rnorm(30)
+    clash <- cbind(
+        c(x[1:10], rep(NA, 10), x[21:30]),
+        c(x[1:10], x[11:20], rep(NA, 10)),
+        c(rep(NA, 10), x[11:20], -x[21:30])
+    )
+    pairwise <- cov(clash, use = "pairwise.complete.obs")
+    expect_lt(min(eigen(pairwise, symmetric = TRUE)$values), 0)
+    expect_equal(
+        pecotmr:::.mrmashComputeVInit(clash),
+        diag(diag(pairwise))
+    )
+})
+
+test_that("mrmashWrapper fits studies stacked with block-missing Y", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    skip_if_not(
+        is_in("missing_y_method", names(formals(mr.mashr::mr.mash))),
+        "mr.mashr predates missing_y_method"
+    )
+    m <- .rrwMulti(n = 80, p = 6, K = 2)
+    # Two studies on different individuals, each observing one condition;
+    # a variant the second study lacks is zero on its rows.
+    Y <- m$Y
+    Y[41:80, 1] <- NA
+    Y[1:40, 2] <- NA
+    X <- m$X
+    X[41:80, 6] <- 0
+    fit <- suppressMessages(mrmashWrapper(
+        X,
+        Y,
+        prior = MrmashPriorParam(canonicalPriorMatrices = TRUE),
+        methodArgs = MrmashOptions(max_iter = 50)
+    ))
+    expect_equal(dim(fit$mu1), c(6L, 2L))
+    expect_null(fit$Y)
+    expect_equal(unname(fit$V[1, 2]), 0)
 })
 
 test_that("vEigenFloor reaches the wrapper and stops short of mr.mash", {

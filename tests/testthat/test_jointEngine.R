@@ -4101,17 +4101,220 @@ test_that(".xsRequireDisjointSamples refuses studies sharing samples", {
     }
     expect_null(pecotmr:::.xsRequireDisjointSamples(
         list(plan("A", c("s1", "s2")), plan("B", c("s3", "s4"))),
-        "brain",
-        "g1"
+        "context 'brain', trait 'g1'"
     ))
     expect_error(
         pecotmr:::.xsRequireDisjointSamples(
             list(plan("A", c("s1", "s2")), plan("B", c("s2", "s3"))),
-            "brain",
-            "g1"
+            "context 'brain', trait 'g1'"
         ),
-        "share 1 sample"
+        "fitted for context 'brain', trait 'g1' share 1 sample"
     )
+})
+
+test_that(".xsStack stacks each study's conditions on its own rows", {
+    a <- .je_xsPiece(
+        "A",
+        c("a1", "a2", "a3"),
+        c("chr1:100:A:G", "chr1:200:C:T"),
+        c(0.1, 0.2),
+        1L
+    )
+    b <- .je_xsPiece("B", c("b1", "b2"), "chr1:100:A:G", 0.3, 2L)
+    # A holds two conditions, B one.
+    a$Y <- cbind(a$Y, a$Y[, 1L] + 1)
+    a$labels <- c("A:brain", "A:liver")
+    b$labels <- "B:brain"
+    s <- pecotmr:::.xsStack(list(a, b))
+    labels <- c("A:brain", "A:liver", "B:brain")
+    expect_equal(colnames(s$Y), labels)
+    expect_equal(
+        unname(s$Y[c("a1", "a2", "a3"), labels[1:2]]),
+        unname(a$Y)
+    )
+    expect_true(all(is.na(s$Y[c("a1", "a2", "a3"), "B:brain"])))
+    expect_true(all(is.na(s$Y[c("b1", "b2"), labels[1:2]])))
+    expect_equal(unname(s$Y[c("b1", "b2"), "B:brain"]), unname(b$Y[, 1L]))
+    # Each condition carries its study's frequencies.
+    expect_equal(colnames(s$af), labels)
+    expect_equal(s$af[, "A:brain"], s$af[, "A:liver"])
+    expect_equal(unname(s$af[, "B:brain"]), c(0.3, NA))
+})
+
+test_that("a composed spec with the study groups by the axes it leaves out", {
+    expect_equal(pecotmr:::.jointSpecPattern("study"), "study")
+    expect_equal(
+        pecotmr:::.jointSpecPattern(c("context", "trait")),
+        "composed"
+    )
+    expect_equal(
+        pecotmr:::.jointSpecPattern(c("study", "context")),
+        "composedStudy"
+    )
+    # Summary statistics take a composed spec with the study as any other
+    # composed spec. The cells are compared with each other: each holds the
+    # function it was built with, which covr's instrumented namespace copy is
+    # not.
+    expect_identical(
+        pecotmr:::.jcEnumerate(
+            pecotmr:::.lookupJointCell("composedStudy", "sumstats")
+        ),
+        pecotmr:::.jcEnumerate(
+            pecotmr:::.lookupJointCell("composed", "sumstats")
+        )
+    )
+    tuples <- tibble::tibble(
+        study = c("A", "A", "B"),
+        context = c("brain", "liver", "brain"),
+        trait = "g"
+    )
+    # Conditions are labelled by the joined axes, in study, context, trait
+    # order.
+    expect_equal(
+        pecotmr:::.xsConditionLabels(tuples, c("context", "study")),
+        c("A:brain", "A:liver", "B:brain")
+    )
+    expect_equal(
+        pecotmr:::.xsConditionLabels(tuples, c("study", "context", "trait")),
+        c("A:brain:g", "A:liver:g", "B:brain:g")
+    )
+    expect_equal(
+        pecotmr:::.xsGroupDescription(tuples, c("study", "context")),
+        "trait 'g'"
+    )
+    expect_equal(
+        pecotmr:::.xsGroupDescription(tuples, c("study", "context", "trait")),
+        "every (context, trait)"
+    )
+})
+
+test_that("a composed spec with the study defers one self-reading group", {
+    data <- .fm_disjointTwoContextStudies()
+    spec <- list(axes = c("study", "context"), scope = NULL)
+    scope <- pecotmr:::.jointSpecScope(
+        spec,
+        data,
+        "individual",
+        NULL,
+        NULL,
+        NULL
+    )
+    # Called directly: reached through the dispatch table, covr cannot see it.
+    enumerate <- function(axes, scope) {
+        pecotmr:::.enumComposedCrossStudyIndividual(
+            data,
+            scope,
+            list(axes = axes, cisWindow = 50000L)
+        )
+    }
+    units <- enumerate(spec$axes, scope)
+    expect_length(units, 1L)
+    expect_true(units[[1L]]$readsOwn)
+    conds <- pecotmr:::.xsUnitConditions(units[[1L]])
+    expect_equal(conds$study, c("study1", "study1", "study2", "study2"))
+    expect_equal(conds$context, c("brain", "liver", "brain", "liver"))
+    # Joining every axis leaves one group of every condition.
+    expect_length(enumerate(c("study", "context", "trait"), scope), 1L)
+    # A scope with no tuples has no group.
+    expect_identical(
+        enumerate(spec$axes, list_assign(scope, studies = character(0))),
+        list()
+    )
+})
+
+test_that("a composed spec with the study takes each study's own reference", {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100L * (1:5), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = "A",
+        A2 = "G",
+        Z = c(6, 5.5, 1, 0.5, 0.2),
+        N = 1000L
+    )
+    ldm <- function(rho) {
+        LdMatrix(`dimnames<-`(rho^abs(outer(1:5, 1:5, "-")), list(ids, ids)))
+    }
+    # Two studies with two contexts each; the second lacks the last variant.
+    sumStats <- function(refs) {
+        QtlSumStats(
+            studyName = c("S1", "S1", "S2", "S2"),
+            context = c("c1", "c2", "c1", "c2"),
+            trait = rep("t1", 4L),
+            entry = list(gr, gr, gr[1:4], gr[1:4]),
+            genome = "hg19",
+            ldReference = refs,
+            qcOptions = list(step1 = "ok")
+        )
+    }
+    spec <- list(axes = c("study", "context"), scope = NULL)
+    enumerate <- function(data) {
+        pecotmr:::.enumComposedSumstats(
+            data,
+            pecotmr:::.jointSpecScope(spec, data, "sumstats", NULL, NULL, NULL),
+            list(axes = spec$axes)
+        )
+    }
+    groups <- enumerate(sumStats(list(ldm(0.1), ldm(0.1), ldm(0.6), ldm(0.6))))
+    expect_length(groups, 1L)
+    refs <- pecotmr:::.jgLdRef(groups[[1L]])
+    expect_length(refs, 4L)
+    expect_identical(refs[[1L]], refs[[2L]])
+    expect_false(identical(refs[[1L]], refs[[3L]]))
+    z <- pecotmr:::.jgZ(groups[[1L]])
+    expect_equal(dim(z), c(5L, 4L))
+    expect_true(all(is.na(z[5L, 3:4])))
+    # A study's own contexts on two references share no sample frame.
+    expect_error(
+        enumerate(sumStats(list(ldm(0.1), ldm(0.3), ldm(0.6), ldm(0.6)))),
+        "a joint fit uses one LD matrix"
+    )
+})
+
+test_that("a composed cross-study group needs two conditions with data", {
+    tuples <- tibble::tibble(study = "A", context = "brain", trait = "g")
+    # A study whose samples observe its tuples together fewer than twice
+    # gives no plan.
+    expect_null(pecotmr:::.xsComposedPlanOf(
+        "A",
+        NULL,
+        tuples,
+        matrix(c(1, NA, 2, 3), 2L, 2L),
+        list(axes = c("study", "context"))
+    ))
+    # A study whose tuples have no phenotype gives no plan.
+    local_mocked_bindings(
+        .fmResidPheno = function(...) {
+            matrix(1, 2L, 1L, dimnames = list(c("a1", "a2"), "other"))
+        }
+    )
+    expect_null(pecotmr:::.xsComposedStudyPlan(
+        "A",
+        tuples,
+        list(A = NULL),
+        list(axes = c("study", "context")),
+        NULL
+    ))
+    # One condition, planned or read, is no group.
+    one <- list(Y = matrix(1, 2L, 1L, dimnames = list(c("a1", "a2"), "x")))
+    local_mocked_bindings(.xsComposedStudyPlan = function(...) one)
+    expect_null(pecotmr:::.deferComposedCrossStudy(
+        "g",
+        tuples,
+        "g",
+        list(),
+        list(axes = c("study", "context")),
+        NULL
+    ))
+    local_mocked_bindings(.xsStudyPiece = function(plan, args) one)
+    expect_null(pecotmr:::.enumComposedCrossStudyGroupFor(
+        "g",
+        list(one),
+        list()
+    ))
 })
 
 test_that("a cross-study group carries one frequency column per condition", {
@@ -4491,4 +4694,41 @@ test_that("summary statistics' weights carried per allele scale by the SDs", {
         pecotmr:::.twasSumstatTransfer(w, ids, list(bare, to), "perAllele"),
         "needs each study's allele frequencies"
     )
+})
+
+test_that("mr.mash's priors are the group's own, in full and per fold", {
+    lb <- c("liver", "brain")
+    priors <- list(
+        context = mashPriorPayload(
+            c("brain", "liver"),
+            U = list(a = diag(c(1, 2)))
+        )
+    )
+    args <- list(
+        axes = "context",
+        methodList = list(mrmash_weights = list(), lasso_weights = list()),
+        mashPriors = list(full = priors, folds = list(priors, priors))
+    )
+    cond <- data.frame(study = "s", context = lb, trait = "g")
+    out <- pecotmr:::.jointTwasGroupPriors(args, "mrmash", cond, lb)
+    want <- list(U = list(a = `dimnames<-`(diag(c(2, 1)), list(lb, lb))))
+    expect_equal(out$methodList$mrmash_weights$dataDrivenPriorMatrices, want)
+    expect_equal(out$dataDrivenPriorMatricesCv, list(want, want))
+    expect_identical(out$methodList$lasso_weights, list())
+    # Another method's arguments, or a run's with no MashPrior, stay as they
+    # are.
+    expect_identical(
+        pecotmr:::.jointTwasGroupPriors(args, "lasso", cond, lb),
+        args
+    )
+    noPrior <- list_assign(args, mashPriors = zap())
+    expect_identical(
+        pecotmr:::.jointTwasGroupPriors(noPrior, "mrmash", cond, lb),
+        noPrior
+    )
+    # Per-fold priors alone leave the full-data arguments without one.
+    foldsOnly <- list_assign(args, mashPriors = list(folds = list(priors)))
+    out2 <- pecotmr:::.jointTwasGroupPriors(foldsOnly, "mrmash", cond, lb)
+    expect_null(out2$methodList$mrmash_weights$dataDrivenPriorMatrices)
+    expect_length(out2$dataDrivenPriorMatricesCv, 1L)
 })

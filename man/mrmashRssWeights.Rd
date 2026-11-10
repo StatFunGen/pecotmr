@@ -28,7 +28,15 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 \code{\link{LdMatrix}}. \code{mr.mash.rss} takes an LD matrix, which is
 formed from the reference over these variants; it is not read when
-\code{mrmashRssFit} is supplied.}
+\code{mrmashRssFit} is supplied. Conditions measured on different
+samples, such as studies of different ancestries, take a list of one
+reference per column of \code{stat$z}, the same reference for the
+conditions of one study. Each reference's LD is then formed over the
+variants its conditions carry (a non-missing z-score in any of them),
+a variant they lack carrying no information in them; the conditions on
+different references are fitted as different samples, with a residual
+covariance \code{V} and \code{covY} of zero between them, and the
+conditions on one reference share the median of their sample sizes.}
 
 \item{mrmashRssFit}{Optional pre-fitted \code{mr.mash.rss} object; skips
 fitting when supplied.}

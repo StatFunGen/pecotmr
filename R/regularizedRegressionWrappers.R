@@ -998,7 +998,15 @@ mrmashWeights <- function(
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 #'   \code{\link{LdMatrix}}. \code{mr.mash.rss} takes an LD matrix, which is
 #'   formed from the reference over these variants; it is not read when
-#'   \code{mrmashRssFit} is supplied.
+#'   \code{mrmashRssFit} is supplied. Conditions measured on different
+#'   samples, such as studies of different ancestries, take a list of one
+#'   reference per column of \code{stat$z}, the same reference for the
+#'   conditions of one study. Each reference's LD is then formed over the
+#'   variants its conditions carry (a non-missing z-score in any of them),
+#'   a variant they lack carrying no information in them; the conditions on
+#'   different references are fitted as different samples, with a residual
+#'   covariance \code{V} and \code{covY} of zero between them, and the
+#'   conditions on one reference share the median of their sample sizes.
 #' @param mrmashRssFit Optional pre-fitted \code{mr.mash.rss} object; skips
 #'   fitting when supplied.
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
@@ -1066,7 +1074,7 @@ mrmashRssWeights <- function(
     if (is.null(mrmashRssFit)) {
         mrmashRssFit <- .mrmashRssComputeFit(
             stat,
-            .rssLdMatrix(stat, ldReference, "mrmashRssWeights"),
+            .mrmashRssLd(stat, ldReference),
             dataDrivenPriorMatrices,
             canonicalPriorMatrices,
             S0,
@@ -1117,6 +1125,107 @@ mrmashRssWeights <- function(
     list(Z = Z, K = K, nVec = nVec, Bhat = Bhat, Shat = Shat)
 }
 
+# The LD mr.mash.rss is given, as list(R, n): one reference's LD matrix over
+# the statistics' variants (n left to .mrmashRssComputeFit()), or, for a list
+# of one reference per condition, one matrix per reference over the variants
+# its conditions carry (.mrmashRssGroupLd()), and each condition the median
+# sample size of the conditions sharing its reference, which mr.mash.rss
+# fits as one sample.
+# @noRd
+#' @importFrom stats ave median
+.mrmashRssLd <- function(stat, ldReference) {
+    if (!.jgIsPerConditionLd(ldReference)) {
+        return(list(
+            R = .rssLdMatrix(stat, ldReference, "mrmashRssWeights"),
+            n = NULL
+        ))
+    }
+    Z <- as.matrix(stat$z)
+    if (length(ldReference) != ncol(Z)) {
+        abort(glue(
+            "mrmashRssWeights: a list `ldReference` holds one LD reference ",
+            "per column of stat$z ({ncol(Z)}); got {length(ldReference)}."
+        ))
+    }
+    groups <- .mrmashRssRefGroups(ldReference)
+    ld <- map(
+        seq_len(max(groups)),
+        .mrmashRssGroupLd,
+        groups = groups,
+        refs = ldReference,
+        Z = Z,
+        ids = .rssStatVariantIds(stat, "mrmashRssWeights")
+    )
+    list(
+        R = ld[groups],
+        n = ave(rep_len(as.numeric(stat$n), ncol(Z)), groups, FUN = median)
+    )
+}
+
+# Each condition's reference group: conditions with one (identical) reference
+# share a group, numbered in order of first appearance.
+# @noRd
+#' @importFrom purrr detect_index
+.mrmashRssRefGroups <- function(refs) {
+    first <- map_int(seq_along(refs), .mrmashRssFirstRef, refs = refs)
+    match(first, unique(first))
+}
+
+# @noRd
+.mrmashRssFirstRef <- function(i, refs) {
+    detect_index(refs, identical, refs[[i]])
+}
+
+# The LD of the conditions in group `g`: their reference's over the variants
+# they carry, laid on the statistics' variants with zero rows and columns
+# (and diagonal) for the rest, which carry no information in them.
+# @noRd
+.mrmashRssGroupLd <- function(g, groups, refs, Z, ids) {
+    cols <- which(groups == g)
+    carried <- ids[rowSums(!is.na(Z[, cols, drop = FALSE])) > 0L]
+    ld <- if (length(carried) > 0L) {
+        .ldFromRef(
+            refs[[cols[[1L]]]],
+            carried,
+            "mrmashRssWeights",
+            onMissing = "drop"
+        )
+    }
+    .mrmashRssEmbedLd(ld, ids)
+}
+
+# `ld` laid on the variants `ids`: zero where it holds no row.
+# @noRd
+.mrmashRssEmbedLd <- function(ld, ids) {
+    if (is.null(ld)) {
+        return(matrix(0, length(ids), length(ids), dimnames = list(ids, ids)))
+    }
+    at <- match(ids, rownames(ld))
+    embedded <- unname(as.matrix(ld)[at, at, drop = FALSE])
+    `dimnames<-`(replace(embedded, is.na(embedded), 0), list(ids, ids))
+}
+
+# The statistics as mr.mash.rss is given them: under one reference per
+# condition, a variant a condition lacks has z and Bhat 0 and Shat 1, its LD
+# there being zero (.mrmashRssGroupLd()).
+# @noRd
+.mrmashRssCarriedStat <- function(stat, LD) {
+    if (!is.list(LD$R)) {
+        return(stat)
+    }
+    held <- intersect(c("z", "Bhat", "Shat"), names(compact(stat)))
+    list_assign(
+        stat,
+        !!!set_names(map(held, .mrmashRssFillNa, stat = stat), held)
+    )
+}
+
+# @noRd
+.mrmashRssFillNa <- function(field, stat) {
+    values <- as.matrix(stat[[field]])
+    replace(values, is.na(values), if (identical(field, "Shat")) 1 else 0)
+}
+
 # Fit mr.mash.rss, defaulting the prior / w0 / V / covY when not supplied.
 # @noRd
 .mrmashRssComputeFit <- function(
@@ -1130,7 +1239,7 @@ mrmashRssWeights <- function(
     covY,
     dots
 ) {
-    ss <- .mrmashRssStats(stat)
+    ss <- .mrmashRssStats(.mrmashRssCarriedStat(stat, LD))
     prior <- .mrmashRssDefaults(
         ss,
         dataDrivenPriorMatrices,
@@ -1141,13 +1250,14 @@ mrmashRssWeights <- function(
         covY
     )
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
-    # Bhat/Shat. n must be a scalar (mr.mash.rss contract); use the median.
+    # Bhat/Shat. On one reference, n is one sample's: the median of the
+    # conditions'.
     callArgs <- c(
         list(
             Bhat = ss$Bhat,
             Shat = ss$Shat,
-            R = LD,
-            n = as.numeric(stats::median(ss$nVec)),
+            R = LD$R,
+            n = LD$n %||% as.numeric(stats::median(ss$nVec)),
             covY = prior$covY,
             V = prior$V,
             S0 = prior$S0,
@@ -8796,7 +8906,10 @@ sparsevbWeights <- function(
 #'   individuals and p is the number of SNPs.
 #' @param Y An n x r matrix of residual expression data, where n is the total
 #'   number of individuals and r is the total number of conditions
-#'   (tissue/cell-types).
+#'   (tissue/cell-types). Missing values are allowed: each condition is
+#'   fitted on the individuals it is observed in (mr.mash's
+#'   \code{missing_y_method = "approximate"}), as when studies on different
+#'   individuals are stacked.
 #' @param dataDrivenPriorMatrices A list of data-driven covariance matrices.
 #'   Default is NULL.
 #' @param prior Prior-covariance construction options, built with
@@ -8856,8 +8969,8 @@ sparsevbWeights <- function(
 #' \item{converged}{A logical indicating whether the optimization algorithm
 #' converged to a solution within the chosen tolerance level.}
 #' \item{elapsed_time}{The computation runtime for fitting mr.mash.}
-#' \item{Y}{An n x r matrix of responses at the last iteration (only relevant
-#' when missing values are present in the input Y).}
+#' \item{Y}{An n x r matrix of responses at the last iteration (only when
+#' missing values in Y are imputed, \code{missing_y_method = "impute"}).}
 #'
 #' @examples
 #' data(multiTraitData)
@@ -8900,7 +9013,6 @@ mrmashWrapper <- function(
     time1 <- proc.time()
     bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, BPPARAM)
     vInit <- .mrmashInitV(
-        X,
         Y,
         V,
         updateV,
@@ -9021,11 +9133,11 @@ mrmashWrapper <- function(
 # back to singular. Near-duplicate contexts make such a V, and mr.mash's ELBO
 # can turn NaN on one.
 # @noRd
-.mrmashInitV <- function(X, Y, V, updateV, updateVMethod, vEigenFloor) {
+.mrmashInitV <- function(Y, V, updateV, updateVMethod, vEigenFloor) {
     if (!is.null(V)) {
         return(list(V = V, updateV = updateV))
     }
-    V <- .mrmashComputeVInit(X, Y, any(is.na(Y)))
+    V <- .mrmashComputeVInit(Y)
     if (updateVMethod == "diagonal") {
         return(list(V = diag(diag(V)), updateV = updateV))
     }
@@ -9048,26 +9160,23 @@ mrmashWrapper <- function(
     list(V = V, updateV = updateV)
 }
 
-# Compute V_init via mr.mashr (cov for complete Y, flash when Y has missing).
+# The residual covariance mr.mash starts from, its coefficients starting at
+# zero: the covariance of Y. With missing values, each pair of responses
+# over the rows where both are observed and zero for a pair never observed
+# together, as mr.mash's approximate method for missing Y starts; only the
+# diagonal when that is not positive definite.
 # @noRd
-.mrmashComputeVInit <- function(X, Y, yHasMissing) {
-    zeroB <- matrix(0, nrow = ncol(X), ncol = ncol(Y))
-    if (!yHasMissing) {
-        return(mr.mashr:::compute_V_init(
-            X,
-            Y,
-            zeroB,
-            rep(0, ncol(Y)),
-            method = "cov"
-        ))
+#' @importFrom stats cov
+.mrmashComputeVInit <- function(Y) {
+    if (!anyNA(Y)) {
+        return(cov(Y))
     }
-    mr.mashr:::compute_V_init(
-        X,
-        Y,
-        zeroB,
-        colMeans(Y, na.rm = TRUE),
-        method = "flash"
-    )
+    pairwise <- cov(Y, use = "pairwise.complete.obs")
+    V <- replace(pairwise, is.na(pairwise), 0)
+    if (min(eigen(V, symmetric = TRUE, only.values = TRUE)$values) > 0) {
+        return(V)
+    }
+    diag(diag(V), nrow = ncol(Y))
 }
 
 # Run mr.mash with the resolved prior / init / V. Everything pecotmr derives --

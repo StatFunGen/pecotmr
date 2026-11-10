@@ -551,7 +551,7 @@ test_that("fineMappingPipeline(QtlDataset): composed joint refuses 'study'", {
             cisWindow = 1000L,
             jointSpecification = list(c("study", "context"))
         ),
-        "axes including 'study' require sumstats"
+        "axis 'study' needs more than one study"
     )
 })
 
@@ -1130,7 +1130,7 @@ test_that("twasWeightsPipeline(QtlDataset): composed joint with study errors", {
             cisWindow = 1000L,
             jointSpecification = list(c("study", "context"))
         ),
-        "require sumstats|requires sumstats"
+        "axis 'study' needs more than one study"
     )
 })
 
@@ -2183,17 +2183,17 @@ test_that(".fmDispatchJointSpecsMultiStudy: a study spec joins the studies", {
         list(axes = "study", scope = NULL),
         list(axes = c("study", "context"), scope = NULL)
     )
-    expect_message(
+    expect_silent(
         out <- pecotmr:::.fmDispatchJointSpecsMultiStudy(
             parsed,
             "mvsusie",
             list(),
             list(data = mt, verbose = 1, xRegions = list(NULL))
-        ),
-        "composed specs including the study axis produce no result"
+        )
     )
-    # Only the study-axis-only spec reaches the individual-level studies.
-    expect_equal(seen$axes, list("study"))
+    # Every spec with the study axis, alone or composed, reaches the
+    # individual-level studies.
+    expect_equal(seen$axes, list("study", c("study", "context")))
     expect_identical(out, acrossStudies)
 })
 
@@ -2275,7 +2275,7 @@ test_that(".twasDispatchJointSpecsMultiStudy: routes and rbinds by axis", {
     expect_equal(nrow(out), 2L)
 })
 
-test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats: NULL", {
+test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats: mr.mash", {
     qdA <- .jd_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -2288,15 +2288,27 @@ test_that(".twasDispatchJointSpecsMultiStudy: study spec, no sumStats: NULL", {
     )
     mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
     parsed <- list(list(axes = "study", scope = NULL))
-    expect_message(
+    seen <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .twasStudyAxisFits = function(specs, fitted, methods, cfg, studies) {
+            if (length(specs) > 0L) {
+                seen$fitted <- c(seen$fitted, fitted)
+            }
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    # mr.mash is fitted across the individual-level studies, and with no
+    # summary statistics there is nothing more to fit or say.
+    expect_silent(
         out <- pecotmr:::.twasDispatchJointSpecsMultiStudy(
             parsed,
             "mrmash",
             "mrmash",
             list(data = mt, verbose = 1)
-        ),
-        "no sumStats slot"
+        )
     )
+    expect_equal(seen$fitted, "mrmash")
     expect_null(out)
 })
 
@@ -3011,25 +3023,55 @@ test_that("a merged row's joint position is NA where no result holds it", {
     expect_true(is.na(pecotmr:::.fmJointIndexForKey(NULL, "b")))
 })
 
-test_that("a composed spec with the study axis says which studies sit out", {
-    composed <- list(list(axes = c("study", "context")))
-    expect_message(
-        pecotmr:::.twasMultiStudyWarnExcluded(
-            composed,
-            list(A = NULL, B = NULL),
-            1L
-        ),
-        "excluding individual-level studies \\(A, B\\)"
+test_that("a composed spec with the study axis fits mr.mash alone across studies", {
+    qdA <- .js_makeQtlDataset(
+        studyName = "indA",
+        contexts = c("c1", "c2"),
+        traits = "t1"
     )
-    # The study axis alone, or a quiet run, says nothing.
-    expect_silent(pecotmr:::.twasMultiStudyWarnExcluded(
-        list(list(axes = "study")),
-        list(A = NULL),
-        1L
+    qdB <- .js_makeQtlDataset(
+        studyName = "indB",
+        contexts = c("c1", "c2"),
+        traits = "t1"
+    )
+    mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
+    seen <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .twasStudyAxisFits = function(specs, fitted, methods, cfg, studies) {
+            if (length(specs) > 0L) {
+                key <- paste(specs[[1L]]$axes, collapse = "+")
+                seen[[key]] <- list(
+                    fitted = fitted,
+                    coupling = cfg$studyCoupling,
+                    across = cfg$ensembleParam$acrossStudies
+                )
+            }
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    parsed <- list(
+        list(axes = "study", scope = NULL),
+        list(axes = c("study", "context"), scope = NULL)
+    )
+    cfg <- list(
+        data = mt,
+        studyCoupling = c(0.1, 1),
+        ensembleParam = EnsembleParam(enabled = TRUE, acrossStudies = TRUE),
+        backend = c(bayesC = "bglr"),
+        genotypeFilter = list()
+    )
+    expect_null(pecotmr:::.twasDispatchStudySpecsCoupled(
+        parsed,
+        c("lasso", "mrmash", "bayesC"),
+        list(),
+        cfg
     ))
-    expect_silent(pecotmr:::.twasMultiStudyWarnExcluded(
-        composed,
-        list(A = NULL),
-        0L
-    ))
+    # The study axis alone: coupled, stacked and joint methods.
+    expect_setequal(seen$study$fitted, c("lasso", "mrmash", "bayesC"))
+    expect_equal(seen$study$coupling, c(0.1, 1))
+    # Composed with the context: mr.mash alone, neither coupled nor stacked.
+    expect_equal(seen[["study+context"]]$fitted, "mrmash")
+    expect_null(seen[["study+context"]]$coupling)
+    expect_false(seen[["study+context"]]$across)
 })

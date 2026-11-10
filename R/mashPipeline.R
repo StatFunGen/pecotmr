@@ -55,9 +55,13 @@ setClass(
 }
 
 # "none" has no constructor, so it is the absent engine: NULL. The default
-# resolves to CovEdOptions(), so NULL in the slot is unambiguous.
+# resolves to CovEdOptions(), so NULL in the slot is unambiguous -- and is
+# taken back as "none", so a MashPriorParam()'s engine normalizes to itself.
 # @noRd
 .mashNormalizeEngine <- function(v) {
+    if (is.null(v)) {
+        return(NULL)
+    }
     if (.isMethodOptions(v)) {
         return(.mashAssertEngineRecord(v))
     }
@@ -156,10 +160,11 @@ MashPriorParam <- function(
 
 #' @title Run mashr Across Multi-Context QTL or GWAS Summary Statistics
 #' @description End-to-end driver: from `(strong, random, null)` sumstats
-#'   collections, builds the variant x context Bhat / Shat matrices, estimates
-#'   the residual correlation (\code{Vhat}), and fits the mash model with
-#'   canonical + PCA + flash + ED covariance components, returning the fitted
-#'   covariance list and the estimated mixture weights.
+#'   collections, builds the variant x condition Bhat / Shat matrices,
+#'   estimates the residual correlation (\code{Vhat}), and fits the mash model
+#'   with canonical + PCA + flash + ED covariance components, returning the
+#'   fitted covariance list and the estimated mixture weights -- one prior per
+#'   joint spec.
 #' @param sumStatsList Named list (or \code{SimpleList}) of
 #'   \code{\link{QtlSumStats}} or \code{\link{GwasSumStats}} objects. Required
 #'   names: \code{"strong"} (discovery variants), \code{"random"} (random
@@ -204,20 +209,38 @@ MashPriorParam <- function(
 #'   refined, and \code{nPcs} parametrises the \code{pca} component.
 #'   Forwarded whole to \code{\link{mashPriorCovariances}}.
 #' @param inputScale One of \code{"auto"} (default), \code{"beta"},
-#'   \code{"z"}. Controls which (Bhat, Shat) pair is extracted from each
-#'   sumstats entry:
+#'   \code{"z"}, \code{"standardized"}. Controls which (Bhat, Shat) pair is
+#'   extracted from each sumstats entry:
 #'   \describe{
 #'     \item{\code{"beta"}}{Bhat = BETA, Shat = SE -- the standard
 #'       effect-size scale mashr was designed around. Requires every
 #'       entry to carry BETA + SE mcols.}
 #'     \item{\code{"z"}}{Bhat = Z, Shat = 1 -- z-score scale. Requires Z.}
+#'     \item{\code{"standardized"}}{Bhat = Z / sqrt(N - 2 + Z^2), the
+#'       variant's correlation with the phenotype, and Shat =
+#'       sqrt((1 - Bhat^2) / (N - 2)) -- the per-SD scale. Requires Z and
+#'       N. Effects on it compare across studies whose per-allele effects do
+#'       not, their allele frequencies and phenotype scales differing.}
 #'     \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
 #'       otherwise fall back to (Z, 1) when every entry carries Z. Mixed
 #'       inputs (some entries missing BETA, others missing Z) are a
 #'       hard error.}
 #'   }
 #'   \code{alpha} should be chosen consistently with the resolved scale:
-#'   typically \code{alpha = 0} for beta, \code{alpha = 1} for z.
+#'   typically \code{alpha = 0} for beta and standardized, \code{alpha = 1}
+#'   for z.
+#' @param jointSpecification Which conditions the priors are over, in the
+#'   vocabulary of \code{\link{twasWeightsPipeline}}: a character vector of
+#'   axes (\code{"study"}, \code{"context"}, \code{"trait"}), a
+#'   \code{list(axes, scope)}, or a list of such specs, one prior each. A
+#'   spec's conditions are the combinations of its axes' values; the other
+#'   axes are pooled, each combination of their values a block of rows, in
+#'   which a condition it lacks is a missing cell. With the study among the
+#'   axes a block's studies are matched by allele. \code{NULL} (the default)
+#'   takes a \code{QtlSumStats}' contexts, or a \code{GwasSumStats}'
+#'   studies. A supplied \code{residualCorrelation} or
+#'   \code{priorCovariances} is over one spec's conditions, so it takes one
+#'   spec.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -231,8 +254,15 @@ MashPriorParam <- function(
 #'   refused by the constructor.
 #' @param setSeed Integer. RNG seed for reproducibility of
 #'   \code{mashr::cov_flash} and \code{mashr::cov_ed}. Default 999.
-#' @return A list with elements \code{U} (the combined covariance list:
-#'   canonical + PCA + flash + ED) and \code{w} (the estimated mixture weights).
+#' @return A named list with one prior per spec, named by its axes joined by
+#'   \code{"+"}. Each is a list of \code{U} (the combined covariance list:
+#'   canonical + PCA + flash + ED), \code{w} (the estimated mixture weights),
+#'   \code{alpha}, \code{inputScale} (the resolved scale), \code{axes},
+#'   \code{scope} and \code{conditions}: one row per row of each \code{U}
+#'   matrix, its \code{study}, \code{context} and \code{trait} (\code{NA}
+#'   for a pooled axis) and \code{n}, the median sample size of its summary
+#'   statistics (\code{NA} without an \code{N} column). This is what
+#'   \code{\link{MashPrior}} takes.
 #' @examples
 #' data(qtlSumStatsMulticontextExample)
 #' ss <- qtlSumStatsMulticontextExample
@@ -251,7 +281,8 @@ mashPipeline <- function(
         "mle"
     ),
     prior = MashPriorParam(),
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     mashArgs = MashOptions(),
     setSeed = 999
@@ -259,24 +290,89 @@ mashPipeline <- function(
     inputScale <- arg_match(inputScale)
     residualCorrelationMethod <- arg_match(residualCorrelationMethod)
     .mashPipelineAssert(prior, mashDataArgs, mashArgs)
+    .mashRequirePriorPackages()
+    partitions <- .mashPartitions(sumStatsList)
+    .mashValidateSumStatsList(partitions, residualCorrelation)
+    specs <- .mashPipelineSpecs(
+        jointSpecification,
+        partitions$strong,
+        supplied = !is.null(residualCorrelation) ||
+            !is.null(prior$priorCovariances)
+    )
+    # One RNG stream across the specs' fits, in their order.
+    withr::local_seed(setSeed)
+    set_names(
+        map(
+            specs,
+            .mashPipelineSpecPrior,
+            sumStatsList = partitions,
+            alpha = alpha,
+            residualCorrelation = residualCorrelation,
+            method = residualCorrelationMethod,
+            prior = prior,
+            inputScale = inputScale,
+            mashDataArgs = mashDataArgs,
+            mashArgs = mashArgs
+        ),
+        make.unique(map_chr(specs, .mashSpecName), sep = "_")
+    )
+}
+
+# The specs mashPipeline() fits a prior for: those given, or the default
+# layout's one (.mashSpecAxes()). A supplied residual correlation or prior
+# covariance list is over one spec's conditions, so it takes one spec.
+# @noRd
+.mashPipelineSpecs <- function(jointSpecification, strong, supplied) {
+    specs <- parseJointSpecification(jointSpecification, strong)
+    if (length(specs) > 1L && supplied) {
+        abort(glue(
+            "mashPipeline: a supplied `residualCorrelation` or ",
+            "`priorCovariances` is over one spec's conditions, but ",
+            "`jointSpecification` has {length(specs)} specs."
+        ))
+    }
+    if (length(specs) > 0L) {
+        return(specs)
+    }
+    available <- names(.mashAxisColumns(strong))
+    list(list(axes = .mashSpecAxes(NULL, available), scope = NULL))
+}
+
+# A spec's name in mashPipeline()'s result: its axes joined by "+".
+# @noRd
+.mashSpecName <- function(spec) {
+    str_flatten(spec$axes, "+")
+}
+
+# One spec's prior: its residual correlation and covariances, fitted on the
+# spec's layout of the summary statistics (.mashBlockSetup()), with what
+# applying it to a group of conditions takes (.mashPriorForGroup()): the
+# conditions and sample sizes of its columns, and the scale its covariances
+# are on.
+# @noRd
+.mashPipelineSpecPrior <- function(
+    spec,
+    sumStatsList,
+    alpha,
+    residualCorrelation,
+    method,
+    prior,
+    inputScale,
+    mashDataArgs,
+    mashArgs
+) {
+    jointSpecification <- list(spec)
     # Needed here as well as in the prior fit: the 'mle' Vhat estimator
     # refines against the supplied prior.
-    priorCovariances <- prior$priorCovariances
-    .mashRequirePriorPackages()
-    # Accept either a base list or a S4Vectors::SimpleList.
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
-    }
-    .mashValidateSumStatsList(sumStatsList, residualCorrelation)
-    withr::local_seed(setSeed)
     vhat <- .mashResolveVhat(
         sumStatsList,
         alpha,
         inputScale,
         residualCorrelation,
-        residualCorrelationMethod,
-        priorCovariances,
-        mashDataArgs
+        method,
+        prior$priorCovariances,
+        mashDataArgs,
+        jointSpecification
     )
     fitted <- .mashPipelinePrior(
         sumStatsList,
@@ -285,9 +381,80 @@ mashPipeline <- function(
         prior = prior,
         inputScale = inputScale,
         mashDataArgs = mashDataArgs,
-        mashArgs = mashArgs
+        mashArgs = mashArgs,
+        jointSpecification = jointSpecification
     )
-    list(U = fitted$U, w = fitted$w)
+    layout <- .mashSumStatsToMatrices(
+        sumStatsList$strong,
+        "strong",
+        inputScale = inputScale,
+        spec = spec
+    )
+    list(
+        U = fitted$U,
+        w = fitted$w,
+        alpha = alpha,
+        inputScale = layout$scale,
+        axes = spec$axes,
+        scope = spec$scope,
+        conditions = layout$conditions
+    )
+}
+
+# The one joint spec a mash step lays its matrices out by: NULL for the
+# default layout, else `jointSpecification` parsed against the summary
+# statistics `x`. A step fits one prior, so it takes one spec.
+# @noRd
+.mashOneSpec <- function(jointSpecification, x, caller) {
+    specs <- parseJointSpecification(jointSpecification, x)
+    if (length(specs) > 1L) {
+        abort(glue(
+            "{caller}: `jointSpecification` takes one spec here; ",
+            "mashPipeline() fits one prior per spec."
+        ))
+    }
+    if (length(specs) == 0L) NULL else specs[[1L]]
+}
+
+# The partition a step's spec is checked against: the first given of strong,
+# random and null.
+# @noRd
+.mashSpecPartition <- function(sumStatsList) {
+    compact(sumStatsList[c("strong", "random", "null")])[[1L]]
+}
+
+# The partitions as a base list: every step accepts a S4Vectors::SimpleList
+# as well.
+# @noRd
+.mashPartitions <- function(sumStatsList) {
+    if (methods::is(sumStatsList, "SimpleList")) {
+        return(as.list(sumStatsList))
+    }
+    sumStatsList
+}
+
+# mash data over the strong partition laid out by the joint spec: what the
+# prior-covariance steps learn on.
+# @noRd
+.mashStrongData <- function(
+    sumStatsList,
+    vhat,
+    alpha,
+    inputScale,
+    jointSpecification,
+    mashDataArgs,
+    caller
+) {
+    strong <- .mashPartitions(sumStatsList)$strong
+    .mashMakeMashData(
+        strong,
+        "strong",
+        vhat,
+        alpha,
+        inputScale,
+        mashDataArgs,
+        .mashOneSpec(jointSpecification, strong, caller)
+    )
 }
 
 # Every bundle mashPipeline() takes, checked together.
@@ -310,7 +477,8 @@ mashPipeline <- function(
     prior,
     inputScale,
     mashDataArgs,
-    mashArgs
+    mashArgs,
+    jointSpecification = NULL
 ) {
     # Normalized to a Param first: `prior` may be list() for "no settings",
     # and reading $engine off that would give NULL -- which now MEANS
@@ -325,6 +493,7 @@ mashPipeline <- function(
         priorCovariances = prior$priorCovariances,
         nPcs = prior$nPcs,
         inputScale = inputScale,
+        jointSpecification = jointSpecification,
         mashDataArgs = mashDataArgs,
         mashArgs = mashArgs,
         setSeed = NULL
@@ -425,7 +594,8 @@ mashPipeline <- function(
     residualCorrelation,
     method,
     priorCovariances,
-    mashDataArgs = MashDataOptions()
+    mashDataArgs = MashDataOptions(),
+    jointSpecification = NULL
 ) {
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
@@ -437,6 +607,7 @@ mashPipeline <- function(
         method = method,
         priorCovariances = priorCovariances,
         inputScale = inputScale,
+        jointSpecification = jointSpecification,
         mashDataArgs = mashDataArgs,
         setSeed = NULL
     )
@@ -468,7 +639,11 @@ mashPipeline <- function(
 #' @param nSubset,maxIter \code{method = "mle"} controls (random-subset size and
 #'   EM iterations).
 #' @param inputScale SumStats -> matrix conversion scale (\code{"auto"} /
-#'   \code{"beta"} / \code{"z"}).
+#'   \code{"beta"} / \code{"z"} / \code{"standardized"}; see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts).
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -493,7 +668,8 @@ mashResidualCorrelation <- function(
     priorCovariances = NULL,
     nSubset = 6000L,
     maxIter = 6L,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     setSeed = 999
 ) {
@@ -511,22 +687,26 @@ mashResidualCorrelation <- function(
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
     }
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
-    }
+    partitions <- .mashPartitions(sumStatsList)
+    spec <- .mashOneSpec(
+        jointSpecification,
+        .mashSpecPartition(partitions),
+        "mashResidualCorrelation"
+    )
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
     }
     .mashResidCorDispatch(
         method,
-        sumStatsList,
+        partitions,
         alpha,
         inputScale,
         priorCovariances,
         nSubset,
         maxIter,
         mashDataArgs,
-        corArgs
+        corArgs,
+        spec
     )
 }
 
@@ -544,13 +724,15 @@ mashResidualCorrelation <- function(
     nSubset,
     maxIter,
     mashDataArgs,
-    corArgs
+    corArgs,
+    spec = NULL
 ) {
     if (method == "identity") {
         strongMats <- .mashSumStatsToMatrices(
             sumStatsList$strong,
             "strong",
-            inputScale = inputScale
+            inputScale = inputScale,
+            spec = spec
         )
         return(diag(rep(1, ncol(strongMats$b))))
     }
@@ -560,7 +742,8 @@ mashResidualCorrelation <- function(
             alpha,
             inputScale,
             mashDataArgs,
-            corArgs
+            corArgs,
+            spec
         ))
     }
     if (method == "mle") {
@@ -572,10 +755,11 @@ mashResidualCorrelation <- function(
             nSubset,
             maxIter,
             mashDataArgs,
-            corArgs
+            corArgs,
+            spec
         ))
     }
-    .mashResidCorNullBased(sumStatsList, inputScale, method, corArgs)
+    .mashResidCorNullBased(sumStatsList, inputScale, method, corArgs, spec)
 }
 
 # The component contract is a named LIST of covariance matrices. c() collapses
@@ -606,7 +790,11 @@ mashResidualCorrelation <- function(
 #'   (\code{\link{CovSubsetsOptions}}, at its defaults), \code{"pca"},
 #'   \code{"flash"}, \code{"flashNonneg"}. Built in that fixed order.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts).
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -629,7 +817,8 @@ mashCovarianceComponents <- function(
     vhat = NULL,
     components = c("canonical", "pca", "flash", "flashNonneg"),
     nPcs = NULL,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     setSeed = 999
 ) {
@@ -637,19 +826,17 @@ mashCovarianceComponents <- function(
     inputScale <- arg_match(inputScale)
     .mashValidateComponents(components, "mashCovarianceComponents")
     .mashRequirePriorPackages()
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
-    }
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
     }
-    mashData <- .mashMakeMashData(
-        sumStatsList$strong,
-        "strong",
+    mashData <- .mashStrongData(
+        sumStatsList,
         vhat,
         alpha,
         inputScale,
-        mashDataArgs
+        jointSpecification,
+        mashDataArgs,
+        "mashCovarianceComponents"
     )
     # This function's contract is one flat named list of covariance matrices,
     # so the role split that .mashBuildComponents keeps for the engine is
@@ -726,7 +913,11 @@ mashCovarianceComponents <- function(
 #'   mixture-prior pipeline where separate steps built the components.
 #'   \code{components} / \code{nPcs} are then ignored. Distinct from
 #'   \code{priorCovariances}, which bypasses the engine entirely.
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts).
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -759,7 +950,8 @@ mashPriorCovariances <- function(
     nPcs = NULL,
     priorCovariances = NULL,
     priorComponents = NULL,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     mashArgs = MashOptions(),
     setSeed = 999
@@ -772,19 +964,17 @@ mashPriorCovariances <- function(
         .mashNormalizeEngine(engine)
     )
     .mashRequirePriorPackages()
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
-    }
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
     }
-    mashData <- .mashMakeMashData(
-        sumStatsList$strong,
-        "strong",
+    mashData <- .mashStrongData(
+        sumStatsList,
         vhat,
         alpha,
         inputScale,
-        mashDataArgs
+        jointSpecification,
+        mashDataArgs,
+        "mashPriorCovariances"
     )
     .mashPriorFit(
         mashData,
@@ -977,7 +1167,8 @@ MashComponentParam <- function(
     }
 }
 
-# mashr mash_set_data over the STRONG effects (V defaults to identity).
+# mashr mash_set_data over the STRONG effects (V defaults to identity), laid
+# out by the joint spec `spec` (.mashBlockSetup()).
 # @noRd
 .mashMakeMashData <- function(
     partition,
@@ -985,13 +1176,22 @@ MashComponentParam <- function(
     vhat,
     alpha,
     inputScale,
-    mashDataArgs
+    mashDataArgs,
+    spec = NULL
 ) {
-    mats <- .mashSumStatsToMatrices(partition, label, inputScale = inputScale)
-    if (is.null(vhat)) {
-        vhat <- diag(rep(1, ncol(mats$b)))
-    }
-    .mashSetData(mats$b, mats$s, alpha, vhat, mashDataArgs)
+    mats <- .mashSumStatsToMatrices(
+        partition,
+        label,
+        inputScale = inputScale,
+        spec = spec
+    )
+    .mashSetData(
+        mats$b,
+        mats$s,
+        alpha,
+        vhat %||% diag(rep(1, ncol(mats$b))),
+        mashDataArgs
+    )
 }
 
 # Caller-supplied prior covariance matrices (bypasses the cov_* chain; mashr
@@ -3274,11 +3474,12 @@ qtlSumStatsFromBetaMatrix <- function(
 .mashSumStatsToMatrices <- function(
     x,
     role,
-    inputScale = c("auto", "beta", "z")
+    inputScale = c("auto", "beta", "z", "standardized"),
+    spec = NULL
 ) {
     inputScale <- arg_match(inputScale)
     .mashValidateInput(x, role)
-    setup <- .mashBlockSetup(x)
+    setup <- .mashBlockSetup(x, spec)
     resolvedScale <- .mashResolveScale(x, role, inputScale)
     blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
     bhatBlocks <- blocks$bhat
@@ -3287,11 +3488,22 @@ qtlSumStatsFromBetaMatrix <- function(
     shat <- exec(rbind, !!!shatBlocks)
     # bhat NA -> 0, shat NA / <= 0 -> 1000 (the mash_set_data
     # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
-    # fit).
+    # fit). The scale and each column's condition and sample size go with
+    # them, for the prior a fit on them is (mashPipeline()).
     list(
         b = replace(bhat, is.na(bhat), 0),
-        s = replace(shat, is.na(shat) | shat <= 0, 1000)
+        s = replace(shat, is.na(shat) | shat <= 0, 1000),
+        scale = resolvedScale,
+        conditions = mutate(setup$conditions, n = .mashColumnN(blocks$n))
     )
+}
+
+# Each column's sample size: the median over its blocks of each block's
+# median N, NA where the summary statistics carry none.
+# @noRd
+.mashColumnN <- function(perBlock) {
+    nByBlock <- exec(rbind, !!!perBlock)
+    unname(apply(nByBlock, 2L, stats::median, na.rm = TRUE))
 }
 
 # The SumStats input must be a QC'd, non-empty QtlSumStats / GwasSumStats.
@@ -3321,31 +3533,121 @@ qtlSumStatsFromBetaMatrix <- function(
     }
 }
 
-# Block / column layout: QtlSumStats blocks by (study, trait) with context
-# columns; GwasSumStats blocks by study with study columns.
+# Block / column layout under a joint spec (`spec`, parsed): the columns are
+# the combinations of the values of the spec's axes, labelled by them joined
+# with ":", and each combination of the other axes' values is a block of rows,
+# one row per variant, so those axes are pooled. Without a spec a QtlSumStats
+# takes its contexts as columns, blocked by (study, trait), and a
+# GwasSumStats, whose one axis is its study, its studies as columns, in one
+# block. With the study among the axes a block holds several studies, whose
+# variants are matched by allele (.mashBlockPerContext()). Rows outside the
+# spec's scope are left out.
 # @noRd
-.mashBlockSetup <- function(x) {
+.mashBlockSetup <- function(x, spec = NULL) {
     isQtl <- methods::is(x, "QtlSumStats")
-    studyCol <- as.character(x$study)
-    if (isQtl) {
-        traitCol <- as.character(x$trait)
-        contextCol <- as.character(x$context)
-        blockKeys <- str_c(studyCol, traitCol, sep = "::")
-        columnLabels <- unique(contextCol)
-    } else {
-        traitCol <- NULL
-        contextCol <- studyCol
-        blockKeys <- studyCol
-        columnLabels <- unique(studyCol)
-    }
+    cols <- .mashAxisColumns(x)
+    studyCol <- cols$study
+    axes <- .mashSpecAxes(spec, names(cols))
+    columnCol <- .mashAxesLabel(cols, axes, ":")
+    rows <- which(.mashRowsInScope(cols, spec$scope))
     list(
         isQtl = isQtl,
         studyCol = studyCol,
-        traitCol = traitCol,
-        contextCol = contextCol,
-        blockKeys = blockKeys,
-        columnLabels = columnLabels
+        traitCol = cols$trait,
+        contextCol = cols$context %||% studyCol,
+        columnCol = columnCol,
+        blockKeys = .mashAxesLabel(
+            cols,
+            setdiff(names(cols), axes),
+            "::",
+            str_flatten(axes, "+")
+        ),
+        rows = rows,
+        columnLabels = unique(columnCol[rows]),
+        conditions = .mashColumnConditions(cols, axes, rows),
+        axes = axes,
+        joinByAllele = is_in("study", axes)
     )
+}
+
+# Each row's value of every axis the summary statistics have: a
+# QtlSumStats' study, context and trait, a GwasSumStats' study.
+# @noRd
+.mashAxisColumns <- function(x) {
+    studyCol <- as.character(x$study)
+    if (!methods::is(x, "QtlSumStats")) {
+        return(list(study = studyCol))
+    }
+    list(
+        study = studyCol,
+        context = as.character(x$context),
+        trait = as.character(x$trait)
+    )
+}
+
+# The axes a spec joins on: its own, or a QtlSumStats' contexts and a
+# GwasSumStats' studies by default. An axis the input does not have is
+# refused.
+# @noRd
+.mashSpecAxes <- function(spec, available) {
+    axes <- spec$axes %||%
+        if (is_in("context", available)) "context" else "study"
+    absent <- setdiff(axes, available)
+    if (length(absent) > 0L) {
+        abort(glue(
+            "mash: the summary statistics have no {str_flatten(absent, ', ')} ",
+            "axis to join on; their axes are {str_flatten(available, ', ')}."
+        ))
+    }
+    axes
+}
+
+# Each row's values of `axes`, joined by `sep`; `none` for every row when no
+# axis is named (one block holding every row).
+# @noRd
+.mashAxesLabel <- function(cols, axes, sep, none = "all") {
+    if (length(axes) == 0L) {
+        return(rep(none, length(cols[[1L]])))
+    }
+    exec(str_c, !!!unname(cols[axes]), sep = sep)
+}
+
+# Whether each row is in the spec's scope: every scoped axis lists its value.
+# @noRd
+.mashRowsInScope <- function(cols, scope) {
+    keys <- intersect(names(scope), names(cols))
+    if (length(keys) == 0L) {
+        return(rep(TRUE, length(cols[[1L]])))
+    }
+    reduce(
+        map(keys, .mashRowsInScopeKey, cols = cols, scope = scope),
+        `&`
+    )
+}
+
+# @noRd
+.mashRowsInScopeKey <- function(key, cols, scope) {
+    is_in(cols[[key]], scope[[key]])
+}
+
+# The conditions the columns stand for, one row per column in column order:
+# the study, context and trait of the joined axes, NA for the pooled ones.
+# @noRd
+.mashColumnConditions <- function(cols, axes, rows) {
+    first <- rows[!duplicated(.mashAxesLabel(cols, axes, ":")[rows])]
+    tibble(
+        study = .mashConditionAxis(cols, "study", axes, first),
+        context = .mashConditionAxis(cols, "context", axes, first),
+        trait = .mashConditionAxis(cols, "trait", axes, first)
+    )
+}
+
+# @noRd
+.mashConditionAxis <- function(cols, axis, axes, rows) {
+    if (!is_in(axis, axes)) {
+        return(rep(NA_character_, length(rows)))
+    }
+    cols[[axis]][rows]
 }
 
 # Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE) or "z"
@@ -3361,8 +3663,26 @@ qtlSumStatsFromBetaMatrix <- function(
         inputScale,
         beta = .mashScaleBeta(allHaveBetaSe, role),
         z = .mashScaleZ(allHaveZ, role),
+        standardized = .mashScaleStandardized(allHaveZ, role),
         auto = .mashScaleAuto(allHaveBetaSe, allHaveZ, role)
     )
+}
+
+# The per-SD scale: Bhat = Z / sqrt(N - 2 + Z^2), the correlation of the
+# variant with the phenotype, and Shat = sqrt((1 - Bhat^2) / (N - 2)), from
+# each variant's Z and sample size N (.mashContextRow()). Comparable across
+# studies whose per-allele effects are not, their allele frequencies and
+# phenotype scales differing.
+# @noRd
+.mashScaleStandardized <- function(allHaveZ, role) {
+    if (!allHaveZ) {
+        msg <- glue(
+            "mashPipeline: inputScale = 'standardized' requires every ",
+            "'{role}' entry to carry a Z mcol."
+        )
+        abort(msg)
+    }
+    "standardized"
 }
 
 # @noRd
@@ -3404,45 +3724,79 @@ qtlSumStatsFromBetaMatrix <- function(
     abort(msg)
 }
 
-# Per (study, trait) block, a variant x context Bhat / Shat matrix pair.
+# Per block of rows (.mashBlockSetup()), a variant x column Bhat / Shat
+# matrix pair.
 # @noRd
 .mashBuildBlockMatrices <- function(x, setup, resolvedScale) {
     blocks <- map(
-        unique(setup$blockKeys),
+        unique(setup$blockKeys[setup$rows]),
         .mashBlockMatrix,
         x = x,
         setup = setup,
         resolvedScale = resolvedScale
     )
-    list(bhat = map(blocks, "b"), shat = map(blocks, "s"))
+    list(
+        bhat = map(blocks, "b"),
+        shat = map(blocks, "s"),
+        n = map(blocks, "n")
+    )
 }
 
-# The per-context (Bhat, Shat) vectors for one block: the variant universe is
-# the first-seen union of SNP ids across the block's contexts.
+# The per-column (Bhat, Shat) vectors for one block: the variant universe is
+# the first-seen union of SNP ids across the block's columns, or, when the
+# block joins studies, their union matched by allele, each study's effects
+# signed into its frame (.mashAlignToUnion()).
 # @noRd
 .mashBlockPerContext <- function(x, rowsInBlock, setup, resolvedScale) {
-    requireCols <- if (resolvedScale == "beta") {
-        c("SNP", "BETA", "SE")
-    } else {
+    requireCols <- switch(
+        resolvedScale,
+        beta = c("SNP", "BETA", "SE"),
+        standardized = c("SNP", "Z", "N"),
         c("SNP", "Z")
-    }
+    )
     # One read per context. A GWAS study split by chromosome or LD block is
     # several rows of one context (its study), and each read already stitches
     # every row of it, so reading once per row would read the study k times.
-    rows <- map(
-        rowsInBlock[!duplicated(setup$contextCol[rowsInBlock])],
+    read <- map(
+        rowsInBlock[!duplicated(setup$columnCol[rowsInBlock])],
         .mashContextRow,
         x = x,
         setup = setup,
         requireCols = requireCols,
         resolvedScale = resolvedScale
     )
+    variantOrder <- if (setup$joinByAllele) {
+        .xsVariantUnion(map(read, "snps"))
+    } else {
+        unique(.mashConcatChr(map(read, "snps")))
+    }
+    rows <- if (setup$joinByAllele) {
+        map(read, .mashAlignToUnion, ids = variantOrder)
+    } else {
+        read
+    }
     contexts <- map_chr(rows, "context")
-    # The variant order is first-seen across the contexts.
     list(
-        variantOrder = unique(.mashConcatChr(map(rows, "snps"))),
+        variantOrder = variantOrder,
         perContextB = set_names(map(rows, "b"), contexts),
-        perContextSe = set_names(map(rows, "se"), contexts)
+        perContextSe = set_names(map(rows, "se"), contexts),
+        perContextN = set_names(map_dbl(rows, "n"), contexts)
+    )
+}
+
+# A column's effects and standard errors on the union `ids`, matched by
+# allele: an effect is negated where the column spells the variant's alleles
+# the other way round, and NA where the column lacks it.
+# @noRd
+.mashAlignToUnion <- function(row, ids) {
+    m <- matchVariants(row$snps, ids, removeStrandAmbiguous = FALSE)
+    at <- match(seq_along(ids), m$idxB)
+    list(
+        context = row$context,
+        snps = ids,
+        b = set_names(unname(row$b)[m$idxA[at]] * m$sign[at], ids),
+        se = set_names(unname(row$se)[m$idxA[at]], ids),
+        n = row$n
     )
 }
 
@@ -3454,22 +3808,40 @@ qtlSumStatsFromBetaMatrix <- function(
     as.character(list_c(pieces))
 }
 
-# One row's effect / standard-error vectors for its context. On the z scale
-# the standard errors are unit by construction.
+# One row's effect / standard-error vectors for its column. On the z scale
+# the standard errors are unit by construction; on the standardized scale they
+# are the per-SD effect's (.mashScaleStandardized()).
 # @noRd
 .mashContextRow <- function(rIdx, x, setup, requireCols, resolvedScale) {
     df <- .mashRowDf(x, rIdx, setup, requireCols)
     snps <- df$variant_id
-    onBeta <- resolvedScale == "beta"
-    list(
-        context = setup$contextCol[[rIdx]],
-        snps = snps,
-        b = set_names(if (onBeta) df$beta else df$z, snps),
-        se = set_names(
-            if (onBeta) df$se else rep(1, length(snps)),
-            snps
-        )
+    est <- switch(
+        resolvedScale,
+        beta = list(b = df$beta, se = df$se),
+        standardized = .mashStandardizedEffects(df$z, df$N),
+        list(b = df$z, se = rep(1, length(snps)))
     )
+    list(
+        context = setup$columnCol[[rIdx]],
+        snps = snps,
+        b = set_names(est$b, snps),
+        se = set_names(est$se, snps),
+        n = .mashMedianN(df[["N"]])
+    )
+}
+
+# A row's sample size: the median of its variants' N, NA without an N column.
+# @noRd
+.mashMedianN <- function(N) {
+    if (is.null(N)) NA_real_ else stats::median(N, na.rm = TRUE)
+}
+
+# Per-SD effects from z-scores and sample sizes: the variant's correlation
+# with the phenotype, and its standard error.
+# @noRd
+.mashStandardizedEffects <- function(z, n) {
+    b <- z / sqrt(n - 2 + z^2)
+    list(b = b, se = sqrt((1 - b^2) / (n - 2)))
 }
 
 # One row's sumstat data.frame (QtlSumStats keyed by study/context/trait;
@@ -3497,7 +3869,7 @@ qtlSumStatsFromBetaMatrix <- function(
 # rownames by block key to avoid silent cross-block dedup.
 # @noRd
 .mashBlockMatrix <- function(bkey, x, setup, resolvedScale) {
-    rowsInBlock <- which(setup$blockKeys == bkey)
+    rowsInBlock <- intersect(which(setup$blockKeys == bkey), setup$rows)
     pc <- .mashBlockPerContext(x, rowsInBlock, setup, resolvedScale)
     # Every context owns one column, so each is built whole and the columns
     # are laid side by side -- no scatter into a preallocated matrix, and the
@@ -3508,7 +3880,8 @@ qtlSumStatsFromBetaMatrix <- function(
     )
     list(
         b = .mashContextMatrix(pc$perContextB, pc$variantOrder, dims),
-        s = .mashContextMatrix(pc$perContextSe, pc$variantOrder, dims)
+        s = .mashContextMatrix(pc$perContextSe, pc$variantOrder, dims),
+        n = unname(pc$perContextN[setup$columnLabels])
     )
 }
 

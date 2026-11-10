@@ -231,14 +231,15 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
 
 # The bundled two-study collection, its studies cut to disjoint halves of the
 # samples they share: two studies of one trait on real genotypes, as a fit
-# across studies expects them.
-.fm_disjointStudies <- function() {
+# across studies expects them. `transform` is applied to each whole study
+# before it is cut.
+.fm_disjointStudies <- function(transform = identity) {
     data(
         "multiStudyQtlDatasetExample",
         package = "pecotmr",
         envir = environment()
     )
-    studies <- as.list(multiStudyQtlDatasetExample)
+    studies <- map(as.list(multiStudyQtlDatasetExample), transform)
     ids <- colnames(pecotmr:::.qtlContextSe(studies[[1L]], "brain"))
     half <- seq_len(length(ids) %/% 2L)
     MultiStudyQtlDataset(
@@ -246,5 +247,28 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
             study1 = pecotmr:::.qtlRestrictSamples(studies[[1L]], ids[half]),
             study2 = pecotmr:::.qtlRestrictSamples(studies[[2L]], ids[-half])
         )
+    )
+}
+
+# .fm_disjointStudies() with a second context in each study, liver, whose
+# expression is brain's plus noise: two studies of one trait in two contexts
+# that share their effects, for the study axis composed with the context.
+.fm_disjointTwoContextStudies <- function() {
+    .fm_disjointStudies(.fm_withLiver)
+}
+
+.fm_withLiver <- function(qd) {
+    brain <- pecotmr:::.qtlContextSe(qd, "brain")
+    expr <- SummarizedExperiment::assay(brain)
+    noise <- withr::with_seed(
+        5L,
+        matrix(rnorm(length(expr), sd = stats::sd(expr) / 2), nrow(expr))
+    )
+    liver <- brain
+    SummarizedExperiment::assay(liver) <- expr + noise
+    QtlDataset(
+        studyName = studyName(qd),
+        genotypes = pecotmr:::.qtlGenotypeSe(qd),
+        phenotypes = list(brain = brain, liver = liver)
     )
 }

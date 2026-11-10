@@ -859,9 +859,11 @@ importFrom(rlang,
   warn
 )
 importFrom(stats,
+  ave,
   coef,
   complete.cases,
   cor,
+  cov,
   lm,
   lm.fit,
   median,

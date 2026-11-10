@@ -144,30 +144,130 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 }
 
 # Unpack a MashPrior input into the internal twasWeightsPipeline arguments:
-# $fullPrior -> mr.mash full-data dataDrivenPriorMatrices
-# $dataDrivenPriorMatricesCv -> per-fold priors for twasWeightsCv
+# $priors -> list(full, folds): the full-data priors and each fold's, from
+# which each mr.mash group takes its own (.jointTwasGroupPriors())
 # $samplePartition -> the CV folds (an explicit `samplePartition` arg wins;
-# otherwise the partition the per-fold priors were computed on) NULL input
-# returns all-NULL, preserving the supplied samplePartition.
+# otherwise the partition the per-fold priors were computed on). NULL input
+# returns no priors, preserving the supplied samplePartition.
 # @noRd
 #' @importFrom checkmate assertClass
 .unpackMashPrior <- function(mashPrior, samplePartition = NULL) {
     if (is.null(mashPrior)) {
-        return(list(
-            fullPrior = NULL,
-            dataDrivenPriorMatricesCv = NULL,
-            samplePartition = samplePartition
-        ))
+        return(list(priors = NULL, samplePartition = samplePartition))
     }
     assertClass(mashPrior, "MashPrior")
     cvFits <- cvFits(mashPrior)
-    perFold <- if (!is.null(cvFits)) cvFits$perFoldFits else NULL
-    sp <- samplePartition %||% cvFits$samplePartition
     list(
-        fullPrior = fullFit(mashPrior),
-        dataDrivenPriorMatricesCv = perFold,
-        samplePartition = sp
+        priors = list(full = fullFit(mashPrior), folds = cvFits$perFoldFits),
+        samplePartition = samplePartition %||% cvFits$samplePartition
     )
+}
+
+# The data-driven prior one mr.mash group takes from a set of priors (a
+# MashPrior's full-data set, or one fold's): the prior over the axes of the
+# group's joint spec, `axes`, whose conditions include each of the group's
+# `cond` and whose scope, on the axes it pools, admits their values. Its
+# covariances are taken on the group's conditions, in their order, named by
+# `labels`, and put on the per-SD scale mr.mash fits on
+# (.mashPriorScaleFactor()). No such prior, or several, is an error.
+# @noRd
+.mashPriorForGroup <- function(priors, cond, axes, labels) {
+    rows <- map(priors, .mashPriorRows, cond = cond, axes = axes)
+    hit <- which(!map_lgl(rows, is.null))
+    if (length(hit) != 1L) {
+        .mashPriorMatchError(names(priors), length(hit), cond, axes)
+    }
+    prior <- priors[[hit]]
+    list(
+        U = map(
+            prior$U,
+            .mashPriorOnGroup,
+            rows = rows[[hit]],
+            scale = .mashPriorScaleFactor(prior, rows[[hit]]),
+            labels = labels
+        )
+    )
+}
+
+# The rows of a prior's covariances that are the group's conditions, in
+# their order, or NULL when the prior is over other axes, leaves one of
+# them out, or is scoped away from them.
+# @noRd
+#' @importFrom vctrs vec_match
+.mashPriorRows <- function(prior, cond, axes) {
+    if (
+        !setequal(prior$axes, axes) ||
+            !.mashPriorScopeAdmits(prior$scope, cond, axes)
+    ) {
+        return(NULL)
+    }
+    rows <- vec_match(
+        .mashConditionKeys(cond, axes),
+        .mashConditionKeys(prior$conditions, axes)
+    )
+    if (anyNA(rows)) NULL else rows
+}
+
+# The conditions' values on `axes`, as text, one row per condition.
+# @noRd
+.mashConditionKeys <- function(conditions, axes) {
+    mutate(as_tibble(conditions[axes]), across(everything(), as.character))
+}
+
+# Whether a prior's scope admits the group: on each axis the prior pools, the
+# scope lists every condition's value.
+# @noRd
+.mashPriorScopeAdmits <- function(scope, cond, axes) {
+    pooled <- setdiff(intersect(names(scope), .spValidJointAxes), axes)
+    all(map_lgl(pooled, .mashScopeAdmitsAxis, scope = scope, cond = cond))
+}
+
+# @noRd
+.mashScopeAdmitsAxis <- function(axis, scope, cond) {
+    all(is_in(as.character(cond[[axis]]), scope[[axis]]))
+}
+
+# What divides a prior's covariances to put them on the per-SD scale mr.mash
+# fits on: (n_k n_l)^(e / 2), for the conditions' sample sizes n. mash fits
+# Bhat / Shat^alpha (mash_set_data()), which is the per-SD effect times
+# n^(alpha / 2) on the standardized scale and the z-score on the z scale,
+# where Shat is 1; e is 1 there and `alpha` otherwise.
+# @noRd
+.mashPriorScaleFactor <- function(prior, rows) {
+    e <- if (identical(prior$inputScale, "z")) 1 else prior$alpha
+    if (e == 0) {
+        return(1)
+    }
+    n <- prior$conditions$n[rows]
+    if (anyNA(n)) {
+        abort(glue(
+            "mashPrior: the prior over {str_flatten(prior$axes, '+')} was ",
+            "fitted on the scale of Bhat / Shat^{e}, which is put on ",
+            "mr.mash's per-SD scale by each condition's sample size, and its ",
+            "summary statistics carried no N for some of the group's ",
+            "conditions."
+        ))
+    }
+    tcrossprod(n^(e / 2))
+}
+
+# One covariance matrix on the group's conditions, rescaled and named.
+# @noRd
+.mashPriorOnGroup <- function(U, rows, scale, labels) {
+    `dimnames<-`(U[rows, rows, drop = FALSE] / scale, list(labels, labels))
+}
+
+# @noRd
+.mashPriorMatchError <- function(priorNames, nHit, cond, axes) {
+    what <- if (nHit == 0L) "none" else "more than one"
+    conditions <- exec(str_c, !!!unname(as.list(cond[axes])), sep = ":")
+    abort(glue(
+        "mashPrior: {what} of its priors ",
+        "({str_flatten(priorNames, ', ')}) is over the axes ",
+        "{str_flatten(axes, '+')} and the conditions ",
+        "{str_flatten(conditions, ', ')}; mashPipeline() fits one per ",
+        "joint spec (`jointSpecification`)."
+    ))
 }
 
 # User-facing TWAS method tokens are unified across input classes;
@@ -1323,16 +1423,22 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{jointSpecification} and \code{contexts} / \code{traitId}
 #'   selection. The \code{"study"} axis needs more than one study, so it is
 #'   rejected on a \code{QtlDataset}. On a \code{MultiStudyQtlDataset} it
-#'   reads \code{mvsusie} off the fine-mapping fits across the
-#'   individual-level studies (one per (context, trait) two or more of them
-#'   carry; no genotype is read), fits \code{lasso}, \code{enet},
-#'   \code{ridge} and \code{l0learn} across them under the penalty on the
-#'   difference between their effects (see \code{studyCoupling}), and fits
-#'   \code{mrmash} across the summary-statistics studies; a composed spec
-#'   including \code{"study"} runs on summary statistics only. On summary
-#'   statistics the study axis also fits the penalized methods across the
-#'   studies under that penalty, each study against its own LD reference;
-#'   \code{mrmash} and \code{mvsusie} need the studies on one reference.
+#'   stacks the individual-level studies, each study's conditions observed
+#'   on its own samples only: the study axis alone makes one group per
+#'   (context, trait) two or more of them carry, and a composed spec
+#'   including \code{"study"} one group per value of the axes it leaves out
+#'   (each trait for \code{c("study", "context")}). On those groups it reads
+#'   \code{mvsusie} off the fine-mapping fits (no genotype is read) and fits
+#'   \code{mrmash}, each condition on its own samples (mr.mash's
+#'   \code{missing_y_method = "approximate"}); on the study axis alone it
+#'   also fits \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
+#'   across the studies under the penalty on the difference between their
+#'   effects (see \code{studyCoupling}). The summary-statistics studies are
+#'   fitted as well. On summary statistics the study axis also fits the
+#'   penalized methods across the studies under that penalty, each study
+#'   against its own LD reference, and \code{mrmash} takes each study's own
+#'   reference too (see \code{\link{mrmashRssWeights}}); \code{mvsusie}
+#'   needs the studies on one reference.
 #'   On individual-level data, \code{bayesC} and \code{bayesN} on
 #'   \code{backend = "bglr"} also fit each group of two or more conditions
 #'   at once, through BGLR's \code{Multitrait()} (see
@@ -1342,8 +1448,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{BglrOptions(resCov = )} sets another, and on a
 #'   \code{MultiStudyQtlDataset} the individual-level studies on the study
 #'   axis alone, stacked as for the coupled methods, where the residual
-#'   covariance is diagonal: their samples are disjoint. Without a
-#'   specification they run one tuple at a time only.
+#'   covariance is diagonal: their samples are disjoint. A composed spec
+#'   including \code{"study"} does not fit them, as a diagonal residual
+#'   covariance would drop the correlation of a study's contexts or traits.
+#'   Without a specification they run one tuple at a time only.
 #' @param fineMappingResult Optional \code{QtlFineMappingResult}. When supplied,
 #'   its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
 #'   context, trait) tuples are injected into \code{learnTwasWeights} via
@@ -1373,9 +1481,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{jointTraits}); otherwise the whole group is refit. A method fitted
 #'   per tuple resumes only from the tuple's own fit.
 #' @param mashPrior Optional \code{\link{MashPrior}} supplying data-driven
-#'   prior matrices for mr.mash weight methods; \code{NULL} to skip. On a
-#'   \code{QtlSumStats}, which is not cross-validated, mr.mash takes its
-#'   full-data prior, and one that holds per-fold priors alone is an error.
+#'   priors for mr.mash, one per joint specification
+#'   (\code{\link{mashPipeline}}); \code{NULL} to skip. Each mr.mash group
+#'   takes the prior over its own joint specification's axes, on its own
+#'   conditions, put on the per-SD scale mr.mash fits on (see
+#'   \code{\link{MashPrior}}). A \code{QtlSumStats} is not cross-validated,
+#'   so its groups take the full-data priors, and a \code{MashPrior} that
+#'   holds per-fold priors alone is an error there.
 #' @param usePCA Logical (length 1). Individual-level data only: a
 #'   \code{QtlDataset}, or the \code{QtlDataset} components of a
 #'   \code{MultiStudyQtlDataset}. When
@@ -1701,7 +1813,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             data = settings$data,
             norm = norm,
             fineMappingResult = settings$fineMappingResult,
-            dataDrivenPriorMatricesCv = settings$dataDrivenPriorMatricesCv,
+            mashPriors = settings$mashPriors,
             cisWindow = settings$cisWindow,
             residualizationParam = settings$residualizationParam,
             genotypeFilter = settings$genotypeFilter,
@@ -1876,7 +1988,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             xRegions = resolved$xRegions,
             fineMappingResult = fineMappingResult,
             twasWeights = twasWeights,
-            dataDrivenPriorMatricesCv = setup$ctx$dataDrivenPriorMatricesCv,
+            mashPriors = setup$ctx$mashPriors,
             cisWindow = cisWindow,
             phenotypeFilter = phenotypeFilter,
             residualizationParam = residualizationParam,
@@ -1915,9 +2027,9 @@ setMethod(
     .twasPipelineQtlDataset
 )
 
-# Unpack the MashPrior bundle: route the full-data prior into the mr.mash method
-# args, the per-fold priors + fold partition into the CV machinery. Returns the
-# updated parameter bundle.
+# Unpack the MashPrior bundle: its priors go to the joint groups, which take
+# each mr.mash group's own (.jointTwasGroupPriors()), and its fold partition
+# to the CV machinery.
 # @noRd
 .twasQdsUnpackMash <- function(
     mashPrior,
@@ -1926,32 +2038,22 @@ setMethod(
 ) {
     mp <- .unpackMashPrior(mashPrior, samplePartition)
     .twasWarnUnusedMashPrior(mashPrior, norm$tokens)
-    withPrior <- if (
-        !is.null(mp$fullPrior) &&
-            is_in("mrmash_weights", names(norm$methodList))
-    ) {
-        .twasQdsSetMrmashPrior(norm, mp$fullPrior)
-    } else {
-        norm
-    }
-    list(
-        samplePartition = mp$samplePartition,
-        dataDrivenPriorMatricesCv = mp$dataDrivenPriorMatricesCv,
-        norm = withPrior
-    )
+    list(samplePartition = mp$samplePartition, mashPriors = mp$priors)
 }
 
-# The normalized argument list with mr.mash's full-data prior attached,
-# leaving every other method's arguments untouched.
+# The method arguments with mr.mash's data-driven prior set, when it has
+# arguments and a prior; every other method's are left as they are.
 # @noRd
-.twasQdsSetMrmashPrior <- function(norm, fullPrior) {
-    updated <- list_assign(
-        norm$methodList$mrmash_weights,
-        dataDrivenPriorMatrices = fullPrior
-    )
+.twasWithMrmashPrior <- function(methodList, prior) {
+    if (is.null(prior) || !is_in("mrmash_weights", names(methodList))) {
+        return(methodList)
+    }
     list_assign(
-        norm,
-        methodList = list_assign(norm$methodList, mrmash_weights = updated)
+        methodList,
+        mrmash_weights = list_assign(
+            methodList$mrmash_weights,
+            dataDrivenPriorMatrices = prior
+        )
     )
 }
 
@@ -1967,30 +2069,24 @@ setMethod(
     }
 }
 
-# The summary-statistics methods' arguments, keyed by method, with mr.mash's
-# data-driven prior set from `mashPrior`: its full-data prior, as on the
-# individual-level path (.twasQdsSetMrmashPrior()). Summary statistics are
-# not cross-validated, so per-fold priors alone give mr.mash none.
+# The priors a summary-statistics run's mr.mash groups take theirs from
+# (.jointMrmashRssPrior()): a MashPrior's full-data priors, or NULL without
+# one or without mr.mash. Summary statistics are not cross-validated, so a
+# MashPrior holding per-fold priors alone gives them none.
 # @noRd
-.twasQssSetMrmashPrior <- function(methodArgs, mashPrior, tokens) {
+.twasQssMashPriors <- function(mashPrior, tokens) {
     if (is.null(mashPrior) || !is_in("mrmash", tokens)) {
-        return(methodArgs)
+        return(NULL)
     }
-    prior <- .unpackMashPrior(mashPrior)$fullPrior
-    if (is.null(prior)) {
+    priors <- .unpackMashPrior(mashPrior)$priors$full
+    if (is.null(priors)) {
         abort(glue(
             "twasWeightsPipeline(QtlSumStats): `mashPrior` holds per-fold ",
             "priors only. Summary statistics are not cross-validated, so ",
-            "mr.mash needs its full-data prior (`fullFit`)."
+            "mr.mash needs its full-data priors (`fullFit`)."
         ))
     }
-    list_assign(
-        methodArgs,
-        mrmash = list_assign(
-            as.list(methodArgs$mrmash %||% list()),
-            dataDrivenPriorMatrices = prior
-        )
-    )
+    priors
 }
 
 # Reject the region + cisWindow combination, derive the X windows, resolve the
@@ -2269,9 +2365,9 @@ setMethod(
         ctx = list(
             data = data,
             xRegions = cfg$xRegions,
-            norm = mash$norm,
+            norm = norm,
             fineMappingResult = cfg$fineMappingResult,
-            dataDrivenPriorMatricesCv = mash$dataDrivenPriorMatricesCv,
+            mashPriors = mash$mashPriors,
             cisWindow = cfg$cisWindow,
             residualizationParam = cfg$residualizationParam,
             genotypeFilter = cfg$genotypeFilter,
@@ -2445,7 +2541,7 @@ setMethod(
     norm,
     fineMappingResult,
     twasWeights,
-    dataDrivenPriorMatricesCv,
+    mashPriors,
     cisWindow,
     phenotypeFilter,
     residualizationParam,
@@ -2473,7 +2569,7 @@ setMethod(
             norm = norm,
             fineMappingResult = fineMappingResult,
             twasWeights = twasWeights,
-            dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+            mashPriors = mashPriors,
             cisWindow = cisWindow,
             phenotypeFilter = phenotypeFilter,
             residualizationParam = residualizationParam,
@@ -2500,7 +2596,7 @@ setMethod(
     norm,
     fineMappingResult,
     twasWeights,
-    dataDrivenPriorMatricesCv,
+    mashPriors,
     cisWindow,
     phenotypeFilter,
     residualizationParam,
@@ -2512,7 +2608,7 @@ setMethod(
         methodList = norm$methodList,
         fineMappingResult = fineMappingResult,
         cache = twasWeights,
-        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        mashPriors = mashPriors,
         cisWindow = cisWindow,
         region = xRegions[[bi]],
         regionIndex = bi,
@@ -2919,12 +3015,16 @@ setMethod(
     .twasCheckBackend(cfg$backend, tm$tokens, "sumstat")
     .twasCheckFineMappingMethods(tm$tokens, fineMappingResult, "QtlSumStats")
     .twasWarnUnusedMashPrior(cfg$mashPrior, tm$tokens)
-    methodArgs <- .twasQssSetMrmashPrior(
-        .twasInjectTokenBackends(tm$methodArgs, cfg$backend),
-        cfg$mashPrior,
-        tm$tokens
+    methodArgs <- .twasInjectTokenBackends(tm$methodArgs, cfg$backend)
+    .twasQssJointPhase(
+        parsedJointSpec,
+        tm$tokens,
+        methodArgs,
+        list_assign(
+            cfg,
+            mashPriors = .twasQssMashPriors(cfg$mashPrior, tm$tokens)
+        )
     )
-    .twasQssJointPhase(parsedJointSpec, tm$tokens, methodArgs, cfg)
 }
 
 # The pipeline's `backend` choices added to the summary-statistics methods'
@@ -4182,7 +4282,7 @@ setMethod(
 
 # The groups the study-axis specs `studySpecs` make of the individual-level
 # studies `studies`, made as fineMappingPipeline() makes them: each spec's
-# scope over each region block, by the cross-study enumerator, read only as
+# scope over each region block, by its cross-study enumerator, read only as
 # far as its groups' conditions (their phenotypes; no genotype). One of each.
 # @noRd
 .twasStudyAxisGroups <- function(studySpecs, studies, cfg) {
@@ -4218,10 +4318,12 @@ setMethod(
         cfg$traitId,
         region
     )
-    units <- .enumCrossStudyIndividual(
+    cell <- .lookupJointCell(.jointSpecPattern(spec$axes), "individual")
+    units <- .jcEnumerate(cell)(
         studies,
         scope,
         list(
+            axes = spec$axes,
             region = region,
             cisWindow = cfg$cisWindow,
             residualizationParam = cfg$residualizationParam,
@@ -5752,7 +5854,7 @@ ensembleWeights <- function(
         methodList = ctx$norm$methodList,
         fineMappingResult = ctx$fineMappingResult,
         cache = ctx$twasWeights,
-        dataDrivenPriorMatricesCv = ctx$dataDrivenPriorMatricesCv,
+        mashPriors = ctx$mashPriors,
         cisWindow = ctx$cisWindow,
         region = ctx$xRegions[[bi]],
         regionIndex = bi,
@@ -5776,7 +5878,7 @@ ensembleWeights <- function(
     norm,
     fineMappingResult,
     twasWeights,
-    dataDrivenPriorMatricesCv,
+    mashPriors,
     cisWindow,
     phenotypeFilter,
     residualizationParam,
@@ -5792,7 +5894,7 @@ ensembleWeights <- function(
         norm = norm,
         fineMappingResult = fineMappingResult,
         twasWeights = twasWeights,
-        dataDrivenPriorMatricesCv = dataDrivenPriorMatricesCv,
+        mashPriors = mashPriors,
         cisWindow = cisWindow,
         phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam,

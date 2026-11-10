@@ -1,4 +1,5 @@
-# Shared fixtures for test_mashPipeline.R.
+# Shared fixtures for test_mashPipeline.R, test_MashPrior.R and
+# test_twasWeightsPipeline.R.
 #
 # mashr / flashier fits dominate that file's runtime. These are coverage tests
 # for pecotmr's wiring, not numerical checks of mashr, so the fixture is the
@@ -50,3 +51,29 @@ mashTinyPrior <- function(k = 3L) {
 # collections (mashr times each step with system.time()), which costs far
 # more than the fit itself.
 delayedAssign(".mwSs", mashFixture())
+
+# A prior as mashPipeline() returns one, over `contexts`: the covariances `U`
+# with each row's condition and sample size, on the standardized scale at
+# alpha = 0 unless told otherwise.
+mashPriorPayload <- function(
+    contexts = c("brain", "liver"),
+    U = list(shared = matrix(1, length(contexts), length(contexts))),
+    alpha = 0,
+    inputScale = "standardized",
+    n = 100
+) {
+    list(
+        U = U,
+        w = rep(1 / length(U), length(U)),
+        alpha = alpha,
+        inputScale = inputScale,
+        axes = "context",
+        scope = NULL,
+        conditions = data.frame(
+            study = NA_character_,
+            context = contexts,
+            trait = NA_character_,
+            n = n
+        )
+    )
+}

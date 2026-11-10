@@ -2536,6 +2536,34 @@ test_that("a study-axis spec refuses studies sharing samples", {
     )
 })
 
+test_that("a composed spec with the study stacks the studies' contexts", {
+    # One mvsusie fit over each study's brain and liver, the studies stacked
+    # with each one's conditions on its own samples.
+    res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        .fm_disjointTwoContextStudies(),
+        methods = FineMappingMethodsParam(
+            qtlDatasetMethods = list(mvsusie = list(verbose = FALSE))
+        ),
+        jointSpecification = list(c("study", "context")),
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+        verbose = 0
+    )))
+    md <- S4Vectors::mcols(res, use.names = FALSE)
+    expect_equal(
+        as.character(md$study),
+        c("study1", "study1", "study2", "study2")
+    )
+    expect_equal(
+        as.character(md$context),
+        c("brain", "liver", "brain", "liver")
+    )
+    expect_true(all(md$jointStudies == "study1;study2"))
+    expect_true(all(md$jointContexts == "brain;liver"))
+    expect_equal(as.integer(md$jointIndex), 1:4)
+})
+
 # A study measured in brain and liver, on the synthetic genotypes.
 .fmp_twoContextStudy <- function(studyName) {
     QtlDataset(

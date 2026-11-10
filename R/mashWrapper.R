@@ -20,7 +20,8 @@
     alpha,
     inputScale,
     mashDataArgs,
-    corArgs
+    corArgs,
+    spec = NULL
 ) {
     if (is.null(sumStatsList$null)) {
         msg <- glue(
@@ -32,7 +33,8 @@
     nullMats <- .mashSumStatsToMatrices(
         sumStatsList$null,
         "null",
-        inputScale = inputScale
+        inputScale = inputScale,
+        spec = spec
     )
     user <- as.list(corArgs)
     exec(
@@ -64,14 +66,16 @@
     nSubset,
     maxIter,
     mashDataArgs,
-    corArgs
+    corArgs,
+    spec = NULL
 ) {
     .mashCheckMleInputs(sumStatsList, priorCovariances)
     priorCovariances <- .mashAsUlist(priorCovariances)
     randomMats <- .mashSumStatsToMatrices(
         sumStatsList$random,
         "random",
-        inputScale = inputScale
+        inputScale = inputScale,
+        spec = spec
     )
     n <- nrow(randomMats$b)
     idx <- sample(seq_len(n), min(nSubset, n))
@@ -124,7 +128,8 @@
     sumStatsList,
     inputScale,
     method,
-    corArgs
+    corArgs,
+    spec = NULL
 ) {
     if (is.null(sumStatsList$null)) {
         msg <- glue(
@@ -136,7 +141,8 @@
     nullMats <- .mashSumStatsToMatrices(
         sumStatsList$null,
         "null",
-        inputScale = inputScale
+        inputScale = inputScale,
+        spec = spec
     )
     nullZ <- nullMats$b / nullMats$s
     if (method == "simpleSpecific") {
@@ -931,7 +937,11 @@ CorShrinkOptions <- function(...) {
 #'   (default, the standard unbiased choice) or \code{"strong"}.
 #' @param outputLevel \code{mashr::mash()} \code{outputlevel} (default 4 -- the
 #'   full model \code{\link{mashPosterior}} consumes).
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts). Match the prior's.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -971,7 +981,8 @@ mashModelFit <- function(
     vhat = NULL,
     fitOn = c("random", "strong"),
     outputLevel = 4L,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     mashArgs = MashOptions(),
     setSeed = 999
@@ -983,35 +994,56 @@ mashModelFit <- function(
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
     }
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
+    Ulist <- .mashAsUlist(priorCovariances)
+    .mashValidatePriorCovList(Ulist)
+    mashData <- .mashModelFitData(
+        .mashPartitions(sumStatsList)[[fitOn]],
+        fitOn,
+        vhat,
+        alpha,
+        inputScale,
+        jointSpecification,
+        mashDataArgs
+    )
+    if (!is.null(setSeed)) {
+        withr::local_seed(setSeed)
     }
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    .mashValidatePriorCovList(priorCovariances)
-    if (is.null(sumStatsList[[fitOn]])) {
+    user <- as.list(mashArgs)
+    exec(
+        mashr::mash,
+        mashData,
+        Ulist = Ulist,
+        outputlevel = outputLevel,
+        !!!user
+    )
+}
+
+# The mash data mashModelFit() fits on: the `fitOn` partition, laid out by the
+# joint spec.
+# @noRd
+.mashModelFitData <- function(
+    partition,
+    fitOn,
+    vhat,
+    alpha,
+    inputScale,
+    jointSpecification,
+    mashDataArgs
+) {
+    if (is.null(partition)) {
         msg <- glue(
             "mashModelFit: `sumStatsList` has no '{fitOn}' entry to fit on."
         )
         abort(msg)
     }
-    if (!is.null(setSeed)) {
-        withr::local_seed(setSeed)
-    }
-    mashData <- .mashMakeMashData(
-        sumStatsList[[fitOn]],
+    .mashMakeMashData(
+        partition,
         fitOn,
         vhat,
         alpha,
         inputScale,
-        mashDataArgs
-    )
-    user <- as.list(mashArgs)
-    exec(
-        mashr::mash,
-        mashData,
-        Ulist = priorCovariances,
-        outputlevel = outputLevel,
-        !!!user
+        mashDataArgs,
+        .mashOneSpec(jointSpecification, partition, "mashModelFit")
     )
 }
 
@@ -1034,7 +1066,11 @@ mashModelFit <- function(
 #'   none.
 #' @param outputPosteriorCov Return the full posterior covariance array (needed
 #'   by \code{\link{fitMashContrast}}). Default \code{TRUE}.
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts). Match the prior's.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -1080,7 +1116,8 @@ mashPosterior <- function(
     vhat = NULL,
     excludeCondition = character(0),
     outputPosteriorCov = TRUE,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     posteriorArgs = MashPosteriorOptions()
 ) {
@@ -1090,7 +1127,12 @@ mashPosterior <- function(
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
     }
-    mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
+    mats <- .mashSumStatsToMatrices(
+        sumStats,
+        "target",
+        inputScale = inputScale,
+        spec = .mashOneSpec(jointSpecification, sumStats, "mashPosterior")
+    )
     ex <- .mashExcludeConditions(
         mats$b,
         mats$s,

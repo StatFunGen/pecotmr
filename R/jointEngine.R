@@ -970,8 +970,9 @@ setMethod(
         methodKey <- .twasMethodKey(token)
         stdz <- cfg$standardized %||% FALSE
         fittedModels <- args$fittedModels %||% list()
+        groupArgs <- .jointTwasGroupPriors(args, token, cond, colnames(Yc))
         resolved <- .jointTwasMethodArgs(
-            args,
+            groupArgs,
             methodKey,
             token,
             fittedModels,
@@ -999,7 +1000,7 @@ setMethod(
             nCond,
             token
         )
-        cvRes <- .jointTwasCv(Xc, Yc, wm, ma, full$W, args, cfg, token)
+        cvRes <- .jointTwasCv(Xc, Yc, wm, ma, full$W, groupArgs, cfg, token)
         # One per-condition entry: that condition's weight column + the shared
         # fit + its CV slice. fitFullData = FALSE -> CV-only entry. A
         # fine-mapping fit's columns are its own conditions', each found by
@@ -1015,6 +1016,37 @@ setMethod(
         )
     }
 )
+
+# mr.mash's data-driven priors for one group, from the run's MashPrior
+# (`args$mashPriors`, .unpackMashPrior()): the full-data prior into its method
+# arguments and each fold's for its cross-validation, each the prior of the
+# group's joint spec (`args$axes`) over its conditions
+# (.mashPriorForGroup()). Another method's arguments, or a run's with no
+# MashPrior, are left as they are.
+# @noRd
+.jointTwasGroupPriors <- function(args, token, cond, labels) {
+    priors <- args$mashPriors
+    if (!identical(token, "mrmash") || is.null(priors)) {
+        return(args)
+    }
+    full <- if (!is.null(priors$full)) {
+        .mashPriorForGroup(priors$full, cond, args$axes, labels)
+    }
+    folds <- if (!is.null(priors$folds)) {
+        map(
+            priors$folds,
+            .mashPriorForGroup,
+            cond = cond,
+            axes = args$axes,
+            labels = labels
+        )
+    }
+    list_assign(
+        args,
+        methodList = .twasWithMrmashPrior(args$methodList, full),
+        dataDrivenPriorMatricesCv = folds
+    )
+}
 
 # The first of `keys` that `lst` holds, or NULL.
 # @noRd
@@ -1176,6 +1208,8 @@ setMethod(
 # The mr.mash RSS fit of one summary-statistics joint group, with the caller's
 # per-method options split across the wrapper's own formals and the engine's
 # arguments exactly as the per-tuple path splits them (.twasWeightCallArgs()).
+# A group whose studies are each on their own LD reference hands mr.mash.rss
+# one reference per condition (mrmashRssWeights()).
 # @noRd
 .jointMrmashRssWeights <- function(group, cfg, args) {
     callArgs <- .twasWeightCallArgs(
@@ -1186,12 +1220,37 @@ setMethod(
                 n = .jgN(group),
                 variantNames = .jgVariantIds(group)
             ),
-            ldReference = .jgOneLdRef(group, "mrmash"),
+            ldReference = .jgLdRef(group),
             fitRetention = .jointRetentionLevel(cfg)
         ),
-        .twasUserArgs(args$methodArgs, "mrmash")
+        .jointMrmashRssPrior(
+            .twasUserArgs(args$methodArgs, "mrmash"),
+            group,
+            args
+        )
     )
     exec(mrmashRssWeights, !!!callArgs)
+}
+
+# mr.mash.rss's arguments with the group's own data-driven prior, from the
+# run's MashPrior (`args$mashPriors`, .twasQssMashPriors()): the prior of the
+# group's joint spec (`args$axes`) over its conditions, as on the
+# individual-level path (.jointTwasGroupPriors()). Without one they are as
+# the caller gave them.
+# @noRd
+.jointMrmashRssPrior <- function(userArgs, group, args) {
+    if (is.null(args$mashPriors)) {
+        return(userArgs)
+    }
+    list_assign(
+        as.list(userArgs),
+        dataDrivenPriorMatrices = .mashPriorForGroup(
+            args$mashPriors,
+            .jgConditions(group),
+            args$axes,
+            colnames(.jgZ(group))
+        )
+    )
 }
 
 # Full-data TWAS weight fit for a joint group. Returns list(W, fitParts, vids);
@@ -1440,9 +1499,10 @@ setMethod(
 #' @importFrom rlang try_fetch
 .jointTwasRssWeights <- function(group, cfg, args, token) {
     coupled <- .jointTwasIsCoupledRss(group, cfg, token)
-    if (!coupled) {
+    if (!coupled && !identical(token, "mrmash")) {
         # Refused before the fit, which only warns: a group of studies on
         # their own references is no group for a fit taking one LD matrix.
+        # mr.mash takes one per condition.
         .jgOneLdRef(group, token)
     }
     try_fetch(
@@ -2227,7 +2287,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (length(plans) < 2L) {
         return(NULL)
     }
-    .xsRequireDisjointSamples(plans, cx, tid)
+    .xsRequireDisjointSamples(plans, glue("context '{cx}', trait '{tid}'"))
     .deferSelfReading(
         tid,
         .enumCrossStudyIndividualGroupFor,
@@ -2242,20 +2302,18 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     is_in(tid, traits)
 }
 
-# A cross-study unit's conditions, known before any genotype is read: one per
-# study planned into it (.deferCrossStudy()).
+# A cross-study unit's conditions, known before any genotype is read: those of
+# every study planned into it (.deferCrossStudy(),
+# .deferComposedCrossStudy()).
 # @noRd
 .xsUnitConditions <- function(unit) {
-    tibble(
-        study = map_chr(unit$args$plans, "study"),
-        context = unit$args$cx,
-        trait = unit$args[[1L]]
-    )
+    list_rbind(map(unit$args$plans, "conditions"))
 }
 
 # One study's part of a cross-study unit, before any genotype is read: its
 # phenotype, residualized as the study's own fits residualize it, and the
 # genotypes it is to be read on. NULL when fewer than two samples have one.
+# Its one condition is labelled by its study in the stacked Y.
 # @noRd
 .xsStudyPlan <- function(st, tid, cx, data, args, phenotypeFilter) {
     qd <- data[[st]]
@@ -2273,6 +2331,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         study = st,
         dataset = qd,
         Y = Y,
+        conditions = tibble(study = st, context = cx, trait = tid),
+        labels = st,
         spec = .qtlFitSpec(
             .fmGenoWindow(qd, tid, args$region, args$cisWindow),
             cx,
@@ -2283,9 +2343,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # The studies of a cross-study group share no sample: its rows are each one
 # study's, with residuals independent across studies, so a sample in two of
-# them would be counted twice as two unrelated ones.
+# them would be counted twice as two unrelated ones. `what` names the group.
 # @noRd
-.xsRequireDisjointSamples <- function(plans, cx, tid) {
+.xsRequireDisjointSamples <- function(plans, what) {
     samples <- list_c(map(plans, .xsPlanSamples))
     shared <- unique(samples[duplicated(samples)])
     if (length(shared) == 0L) {
@@ -2293,8 +2353,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     }
     abort(c(
         glue(
-            "jointCrossStudy: the studies fitted for context '{cx}', trait ",
-            "'{tid}' share {length(shared)} sample(s)."
+            "jointCrossStudy: the studies fitted for {what} share ",
+            "{length(shared)} sample(s)."
         ),
         i = glue("Studies: {str_flatten(map_chr(plans, 'study'), ', ')}."),
         i = str_c(
@@ -2310,22 +2370,25 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 }
 
 # One (context, trait) cross-study group, each study's genotypes read on a plan
-# of its own (.xsStudyPiece()) and the studies stacked (.xsStack()); NULL when
-# fewer than two studies keep samples with genotypes.
+# of its own (.xsStudyPiece()) and the studies stacked (.xsGroupOf()); NULL
+# when fewer than two studies keep samples with genotypes.
 # @noRd
 .enumCrossStudyIndividualGroupFor <- function(tid, cx, plans, args) {
     pieces <- compact(map(plans, .xsStudyPiece, args = args))
     if (length(pieces) < 2L) {
         return(NULL)
     }
+    .xsGroupOf(pieces)
+}
+
+# The studies' pieces stacked (.xsStack()) as one group, its conditions the
+# pieces' in order.
+# @noRd
+.xsGroupOf <- function(pieces) {
     stacked <- .xsStack(pieces)
     new(
         "IndividualJointGroup",
-        conditions = tibble(
-            study = map_chr(pieces, "study"),
-            context = cx,
-            trait = tid
-        ),
+        conditions = list_rbind(map(pieces, "conditions")),
         X = stacked$X,
         Y = stacked$Y,
         af = stacked$af
@@ -2360,7 +2423,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         study = plan$study,
         X = .qtlRowsOf(X, common),
         af = block$af %||% rep(NA_real_, ncol(X)),
-        Y = plan$Y[common, , drop = FALSE]
+        Y = plan$Y[common, , drop = FALSE],
+        conditions = plan$conditions,
+        labels = plan$labels
     )
 }
 
@@ -2370,21 +2435,35 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # its genotypes are negated and its frequencies complemented into the union's
 # frame. A variant a study lacks is a column of zeros in its rows -- its
 # residualized genotypes have mean zero, so the column carries nothing there --
-# and NA among its frequencies. Y holds each study's phenotype on its own rows
-# and NA elsewhere; af is variants x studies.
+# and NA among its frequencies. Y holds each study's conditions on its own rows
+# and NA elsewhere, one column per condition, labelled by the piece's
+# `labels` (its study when it has none); af is variants x conditions, each
+# condition with its study's frequencies.
 # @noRd
 .xsStack <- function(pieces) {
     ids <- .xsVariantUnion(map(pieces, .xsPieceIds))
     aligned <- map(pieces, .xsAlignPiece, ids = ids)
-    studies <- map_chr(pieces, "study")
+    labels <- map(pieces, .xsPieceLabels)
     xs <- map(aligned, "X")
-    ys <- map(seq_along(pieces), .xsStudyY, pieces = pieces, studies = studies)
-    afs <- map(aligned, "af")
+    ys <- map(seq_along(pieces), .xsStudyY, pieces = pieces, labels = labels)
+    afs <- map2(aligned, labels, .xsConditionAf)
     list(
         X = exec(rbind, !!!xs),
         Y = exec(rbind, !!!ys),
-        af = `dimnames<-`(exec(cbind, !!!afs), list(ids, studies))
+        af = `dimnames<-`(exec(cbind, !!!afs), list(ids, list_c(labels)))
     )
+}
+
+# The labels of a piece's Y columns: its own, else its study's (one column).
+# @noRd
+.xsPieceLabels <- function(piece) {
+    piece$labels %||% piece$study
+}
+
+# A study's frequencies, aligned to the union, once per condition it holds.
+# @noRd
+.xsConditionAf <- function(aligned, labels) {
+    matrix(aligned$af, nrow = length(aligned$af), ncol = length(labels))
 }
 
 # @noRd
@@ -2424,18 +2503,232 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# Study `k`'s rows of the stacked phenotype: its own phenotype in its column,
-# NA in the other studies'.
+# Study `k`'s rows of the stacked phenotype: its own conditions in their
+# columns, NA in the other studies'.
 # @noRd
-.xsStudyY <- function(k, pieces, studies) {
-    y <- pieces[[k]]$Y[, 1L]
-    cols <- map(seq_along(studies), .xsYColumn, y = y, k = k)
-    `dimnames<-`(exec(cbind, !!!cols), list(rownames(pieces[[k]]$Y), studies))
+.xsStudyY <- function(k, pieces, labels) {
+    y <- pieces[[k]]$Y
+    cols <- map(seq_along(pieces), .xsYColumns, y = y, k = k, labels = labels)
+    `dimnames<-`(
+        exec(cbind, !!!cols),
+        list(rownames(y), list_c(labels))
+    )
 }
 
 # @noRd
-.xsYColumn <- function(j, y, k) {
-    if (j == k) unname(y) else rep(NA_real_, length(y))
+.xsYColumns <- function(j, y, k, labels) {
+    if (j == k) {
+        return(unname(y))
+    }
+    matrix(NA_real_, nrow = nrow(y), ncol = length(labels[[j]]))
+}
+
+# cross-study composed / individual: a MultiStudyQtlDataset's individual-level
+# studies joined on the study axis together with the context axis, the trait
+# axis or both: one group per value of the axes the spec does not join on
+# (each trait for c("study", "context"), each context for c("study",
+# "trait"), one group for all three), its conditions every (study, context,
+# trait) tuple the scoped studies carry. Each study's tuples are fitted on the
+# samples it observes for all of them, as a study's own composed fit is
+# (.composedYCol()); the studies are stacked as on the study axis alone
+# (.xsStack()), each study's conditions observed on its own rows
+# (block-missing Y), labelled by the joined axes' values.
+.enumComposedCrossStudyIndividual <- function(data, scope, args = list()) {
+    studies <- intersect(names(data), scope$studies)
+    tuples <- list_rbind(map(
+        studies,
+        .xsStudyTuples,
+        data = data,
+        scope = scope
+    ))
+    if (is.null(tuples) || nrow(tuples) == 0L) {
+        return(list())
+    }
+    complement <- setdiff(c("context", "trait"), args$axes)
+    keys <- if (length(complement) == 0L) {
+        rep("", nrow(tuples))
+    } else {
+        exec(str_c, !!!as.list(tuples[complement]), sep = "\r")
+    }
+    compact(map(
+        unique(keys),
+        .deferComposedCrossStudy,
+        tuples = tuples,
+        keys = keys,
+        data = data,
+        args = args,
+        phenotypeFilter = .jointPhenotypeFilter(args)
+    ))
+}
+
+# Study `st`'s scoped (context, trait) tuples, the traits each context carries.
+# @noRd
+.xsStudyTuples <- function(st, data, scope) {
+    list_rbind(map(
+        scope$contexts[[st]],
+        .xsContextTuples,
+        st = st,
+        data = data,
+        scope = scope
+    ))
+}
+
+# @noRd
+.xsContextTuples <- function(cx, st, data, scope) {
+    traits <- .xsStudyTraits(st, cx, data, scope)
+    tibble(
+        study = rep(st, length(traits)),
+        context = rep(cx, length(traits)),
+        trait = traits
+    )
+}
+
+# One composed cross-study unit, the tuples whose key is `key`, or NULL when
+# fewer than two of them can be fitted. The phenotypes are read here, before
+# any genotype, so the studies' samples are known to be disjoint before a
+# block is read.
+# @noRd
+.deferComposedCrossStudy <- function(
+    key,
+    tuples,
+    keys,
+    data,
+    args,
+    phenotypeFilter
+) {
+    group <- tuples[keys == key, , drop = FALSE]
+    plans <- compact(map(
+        unique(group$study),
+        .xsComposedStudyPlan,
+        group = group,
+        data = data,
+        args = args,
+        phenotypeFilter = phenotypeFilter
+    ))
+    if (sum(map_int(plans, .xsPlanWidth)) < 2L) {
+        return(NULL)
+    }
+    .xsRequireDisjointSamples(
+        plans,
+        .xsGroupDescription(group, args$axes)
+    )
+    .deferSelfReading(
+        key,
+        .enumComposedCrossStudyGroupFor,
+        plans = plans,
+        args = args
+    )
+}
+
+# How an error names a composed cross-study group: by the values of the axes
+# it does not join on, or as the group of every condition.
+# @noRd
+.xsGroupDescription <- function(group, axes) {
+    complement <- setdiff(c("context", "trait"), axes)
+    if (length(complement) == 0L) {
+        return("every (context, trait)")
+    }
+    str_flatten(
+        str_c(complement, " '", map_chr(group[complement], 1L), "'"),
+        ", "
+    )
+}
+
+# @noRd
+.xsPlanWidth <- function(plan) {
+    ncol(plan$Y)
+}
+
+# Study `st`'s part of a composed cross-study unit, before any genotype is
+# read: its tuples' phenotypes, residualized as its own fits residualize
+# them, on the samples observed for all of them, and the genotypes they are
+# to be read on (the window of their traits). NULL when no tuple has a
+# phenotype on two or more such samples.
+# @noRd
+.xsComposedStudyPlan <- function(st, group, data, args, phenotypeFilter) {
+    rows <- group[group$study == st, , drop = FALSE]
+    qd <- data[[st]]
+    contexts <- unique(rows$context)
+    resid <- .fmResidPheno(
+        qd,
+        contexts = contexts,
+        traitId = unique(rows$trait),
+        phenotypeFilter = phenotypeFilter,
+        residualizationParam = args$residualizationParam
+    )
+    # A single context returns the bare matrix rather than a named list.
+    YresList <- if (length(contexts) == 1L) {
+        set_names(list(resid), contexts)
+    } else {
+        resid
+    }
+    shared <- reduce(map(YresList, rownames), intersect)
+    cols <- map(
+        map2(rows$trait, rows$context, .composedTuple),
+        .composedYCol,
+        YresList = YresList,
+        commonSamples = shared
+    )
+    present <- !map_lgl(cols, is.null)
+    if (!any(present)) {
+        return(NULL)
+    }
+    .xsComposedPlanOf(
+        st,
+        qd,
+        rows[present, , drop = FALSE],
+        exec(cbind, !!!cols[present]),
+        args
+    )
+}
+
+# A composed cross-study plan from a study's present tuples `rows` and their
+# phenotype columns `Y`, kept on the samples observing all of them; NULL when
+# fewer than two remain.
+# @noRd
+.xsComposedPlanOf <- function(st, qd, rows, Y, args) {
+    complete <- stats::complete.cases(Y)
+    if (sum(complete) < 2L) {
+        return(NULL)
+    }
+    labels <- .xsConditionLabels(rows, args$axes)
+    list(
+        study = st,
+        dataset = qd,
+        Y = `colnames<-`(Y[complete, , drop = FALSE], labels),
+        conditions = rows,
+        labels = labels,
+        spec = .qtlFitSpec(
+            .fmGenoWindow(qd, unique(rows$trait), args$region, args$cisWindow),
+            unique(rows$context),
+            rownames(Y)[complete]
+        )
+    )
+}
+
+# The labels of conditions `rows` in a stacked Y: the values of the spec's
+# axes, in study, context, trait order, joined by ":".
+# @noRd
+.xsConditionLabels <- function(rows, axes) {
+    joined <- intersect(c("study", "context", "trait"), axes)
+    exec(str_c, !!!as.list(rows[joined]), sep = ":")
+}
+
+# One composed cross-study group, each study's genotypes read on a plan of its
+# own (.xsStudyPiece()) and the studies stacked (.xsGroupOf()); NULL when fewer
+# than two conditions keep samples with genotypes.
+# @noRd
+.enumComposedCrossStudyGroupFor <- function(key, plans, args) {
+    pieces <- compact(map(plans, .xsStudyPiece, args = args))
+    if (sum(map_int(pieces, .xsPieceWidth)) < 2L) {
+        return(NULL)
+    }
+    .xsGroupOf(pieces)
+}
+
+# @noRd
+.xsPieceWidth <- function(piece) {
+    ncol(piece$Y)
 }
 
 # composed / individual: ONE group joining every scoped (context, trait) tuple
@@ -2631,13 +2924,17 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 }
 
 # One composed cell's group, or NULL when it spans fewer than two tuples --
-# a "joint" fit over one tuple is just that tuple.
+# a "joint" fit over one tuple is just that tuple. A cell joining studies on
+# references of their own is built as .enumComposedStudyGroup() builds it.
 # @noRd
 .enumComposedGroupFor <- function(gIdx, data, gi, args) {
     if (length(gIdx) < 2L) {
         return(NULL)
     }
     label <- "composed (QtlSumStats)"
+    if (is_in("study", gi$axes) && n_distinct(.ldRefKeys(data)[gIdx]) > 1L) {
+        return(.enumComposedStudyGroup(gIdx, data, gi, args, label))
+    }
     ldReference <- .jointRowsLdRef(data, gIdx, label)
     jz <- .buildJointSumstatZMatrix(
         data,
@@ -2656,6 +2953,40 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         ),
         Z = jz$Z,
         ldReference = ldReference,
+        N = jz$nVec
+    )
+}
+
+# A composed cell joining studies each on its own LD reference, as the study
+# axis alone joins them (.crossStudyGroupZ()): one reference per condition,
+# the same for a study's conditions, which share its samples
+# (.jointRowsLdRef() refuses a study whose rows do not), and the z-scores over
+# the union of the studies' variants, NA at a variant a condition lacks.
+# @noRd
+.enumComposedStudyGroup <- function(gIdx, data, gi, args, label) {
+    walk(
+        split(gIdx, gi$studyCol[gIdx]),
+        .jointRowsLdRef,
+        data = data,
+        label = label
+    )
+    refs <- map(gIdx, .rowLdRef, x = data)
+    jz <- .buildJointSumstatZUnion(
+        gIdx,
+        list(study = gi$studyCol, context = gi$contextCol, trait = gi$traitCol),
+        refs,
+        list(data = data, cutoffs = args$cutoffs, label = label),
+        labels = map_chr(gIdx, .jointGroupColLabel, gi = gi)
+    )
+    new(
+        "SumStatsJointGroup",
+        conditions = tibble(
+            study = gi$studyCol[gIdx],
+            context = gi$contextCol[gIdx],
+            trait = gi$traitCol[gIdx]
+        ),
+        Z = jz$Z,
+        ldReference = refs,
         N = jz$nVec
     )
 }
@@ -3302,7 +3633,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # studies the methods it only stacks, fitted there one study at a time
 # (.twasStackEntries()); those make no rows of their own, as each study's
 # own run has them. The methods it fits across the studies, coupled or
-# jointly (`multitraitTokens`), do.
+# jointly (mr.mash, `multitraitTokens`), do.
 # @noRd
 .jointRowTokens <- function(tokens, pipeline, cond) {
     if (!.twasStacksGroup(pipeline, cond)) {
@@ -3314,7 +3645,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     } else {
         union(names(.TWAS_COUPLED_IMPL), .TWAS_COUPLED_SUMSTATS)
     }
-    intersect(tokens, union(coupled, cfg$multitraitTokens))
+    intersect(tokens, union(coupled, c("mrmash", cfg$multitraitTokens)))
 }
 
 # Whether a run stacks across the studies of a group: its ensemble is on and
@@ -4284,6 +4615,22 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         enumerate = .enumComposedSumstats,
         minGroup = 2L
     ),
+    # Composed axes including the study: a MultiStudyQtlDataset's
+    # individual-level studies stacked, block-missing Y.
+    new(
+        "JointDispatchCell",
+        pattern = "composedStudy",
+        dataForm = "individual",
+        enumerate = .enumComposedCrossStudyIndividual,
+        minGroup = 2L
+    ),
+    new(
+        "JointDispatchCell",
+        pattern = "composedStudy",
+        dataForm = "sumstats",
+        enumerate = .enumComposedSumstats,
+        minGroup = 2L
+    ),
     # Univariate: per-(context, trait) 1-condition groups (twas individual
     # only),
     # so univariate methods route through the same engine fitter + ensemble
@@ -4417,10 +4764,21 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         traitIds,
         args$region
     )
-    pattern <- if (length(spec$axes) > 1L) "composed" else spec$axes[[1L]]
-    cell <- .lookupJointCell(pattern, dataForm)
+    cell <- .lookupJointCell(.jointSpecPattern(spec$axes), dataForm)
     spArgs <- c(args, list(axes = spec$axes))
     .jointCellWork(cell, pipeline, data, scope, jointMethods, spArgs)
+}
+
+# The dispatch pattern of a spec's axes: its one axis, or "composed" for
+# several -- "composedStudy" when they include the study, whose groups on
+# individual-level data stack the studies
+# (.enumComposedCrossStudyIndividual()).
+# @noRd
+.jointSpecPattern <- function(axes) {
+    if (length(axes) == 1L) {
+        return(axes[[1L]])
+    }
+    if (is_in("study", axes)) "composedStudy" else "composed"
 }
 
 # One spec's scope: its own, narrowed to the run's selection and, on
@@ -4482,20 +4840,13 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# A QtlDataset is one study, so a study axis has nothing to join on it. Studies
-# join on summary statistics, and fine-mapping also joins a
-# MultiStudyQtlDataset's individual-level studies (.enumCrossStudyIndividual());
-# a composed axis including the study needs summary statistics either way.
+# A QtlDataset is one study, so a study axis has nothing to join on it, alone
+# or composed with others. Studies join on summary statistics and on a
+# MultiStudyQtlDataset's individual-level studies
+# (.enumCrossStudyIndividual(), .enumComposedCrossStudyIndividual()).
 .jointRejectStudyOnIndividual <- function(parsedJointSpec) {
     for (spec in parsedJointSpec) {
         if (is_in("study", spec$axes)) {
-            if (length(spec$axes) > 1L) {
-                msg <- glue(
-                    "composed joint axes including 'study' require sumstats ",
-                    "input."
-                )
-                abort(msg)
-            }
             msg <- glue(
                 "jointSpecification with axis 'study' needs more than one ",
                 "study (QtlDataset is a single individual-level study)."

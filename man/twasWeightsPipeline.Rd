@@ -197,16 +197,22 @@ of stops the run: fine-map and build weights with the same
 \code{jointSpecification} and \code{contexts} / \code{traitId}
 selection. The \code{"study"} axis needs more than one study, so it is
 rejected on a \code{QtlDataset}. On a \code{MultiStudyQtlDataset} it
-reads \code{mvsusie} off the fine-mapping fits across the
-individual-level studies (one per (context, trait) two or more of them
-carry; no genotype is read), fits \code{lasso}, \code{enet},
-\code{ridge} and \code{l0learn} across them under the penalty on the
-difference between their effects (see \code{studyCoupling}), and fits
-\code{mrmash} across the summary-statistics studies; a composed spec
-including \code{"study"} runs on summary statistics only. On summary
-statistics the study axis also fits the penalized methods across the
-studies under that penalty, each study against its own LD reference;
-\code{mrmash} and \code{mvsusie} need the studies on one reference.
+stacks the individual-level studies, each study's conditions observed
+on its own samples only: the study axis alone makes one group per
+(context, trait) two or more of them carry, and a composed spec
+including \code{"study"} one group per value of the axes it leaves out
+(each trait for \code{c("study", "context")}). On those groups it reads
+\code{mvsusie} off the fine-mapping fits (no genotype is read) and fits
+\code{mrmash}, each condition on its own samples (mr.mash's
+\code{missing_y_method = "approximate"}); on the study axis alone it
+also fits \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
+across the studies under the penalty on the difference between their
+effects (see \code{studyCoupling}). The summary-statistics studies are
+fitted as well. On summary statistics the study axis also fits the
+penalized methods across the studies under that penalty, each study
+against its own LD reference, and \code{mrmash} takes each study's own
+reference too (see \code{\link{mrmashRssWeights}}); \code{mvsusie}
+needs the studies on one reference.
 On individual-level data, \code{bayesC} and \code{bayesN} on
 \code{backend = "bglr"} also fit each group of two or more conditions
 at once, through BGLR's \code{Multitrait()} (see
@@ -216,8 +222,10 @@ an unstructured residual covariance unless
 \code{BglrOptions(resCov = )} sets another, and on a
 \code{MultiStudyQtlDataset} the individual-level studies on the study
 axis alone, stacked as for the coupled methods, where the residual
-covariance is diagonal: their samples are disjoint. Without a
-specification they run one tuple at a time only.}
+covariance is diagonal: their samples are disjoint. A composed spec
+including \code{"study"} does not fit them, as a diagonal residual
+covariance would drop the correlation of a study's contexts or traits.
+Without a specification they run one tuple at a time only.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult}. When supplied,
 its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
@@ -250,9 +258,13 @@ that same group (its \code{jointStudies} / \code{jointContexts} /
 per tuple resumes only from the tuple's own fit.}
 
 \item{mashPrior}{Optional \code{\link{MashPrior}} supplying data-driven
-prior matrices for mr.mash weight methods; \code{NULL} to skip. On a
-\code{QtlSumStats}, which is not cross-validated, mr.mash takes its
-full-data prior, and one that holds per-fold priors alone is an error.}
+priors for mr.mash, one per joint specification
+(\code{\link{mashPipeline}}); \code{NULL} to skip. Each mr.mash group
+takes the prior over its own joint specification's axes, on its own
+conditions, put on the per-SD scale mr.mash fits on (see
+\code{\link{MashPrior}}). A \code{QtlSumStats} is not cross-validated,
+so its groups take the full-data priors, and a \code{MashPrior} that
+holds per-fold priors alone is an error there.}
 
 \item{crossValidationParam}{Cross-validation settings, built with
   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
