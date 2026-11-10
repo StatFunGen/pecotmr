@@ -28,10 +28,13 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \item{vhat}{Residual correlation matrix (\code{V}); typically from
 \code{\link{mashResidualCorrelation}}. \code{NULL} -> identity.}
 
-\item{components}{Data-driven covariance components, any of
-\code{"canonical"}, \code{"pca"}, \code{"flash"} (default
-\code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-"nonneg")}). Built in that fixed order. May instead be a
+\item{components}{Covariance components, any of \code{"canonical"},
+\code{"subsets"} (\code{\link{CovSubsetsOptions}}: effects shared by
+some conditions but not all, needing three or more), \code{"pca"},
+\code{"flash"} (default \code{cov_flash}), \code{"flashNonneg"}
+(\code{cov_flash(factors = "nonneg")}). Built in that fixed order; the
+canonical and subset-shared ones are fixed hypotheses, which the engine
+does not refine. May instead be a
 \code{\link{MashComponentParam}} record, which names the components and
 carries each one's options.}
 

@@ -50,6 +50,17 @@
 // path and the swaps from L0Learn (https://github.com/hazimehh/L0Learn,
 // Copyright (c) 2021 Hussein Hazimeh, MIT). Their license notices are in
 // inst/COPYRIGHTS.
+//
+// CoupledPathSolver solves K studies' paths together under a penalty on the
+// difference between their effects, PROSPER's cross-ancestry coupling:
+//   sum_k [beta_k'R_k,s beta_k - 2 beta_k'z_k + penalty(beta_k)]
+//     + strength * sum_j sum_{k < k' carrying j} (beta_jk - beta_jk')^2,
+// each study against its own LD. A coordinate then sees the partial
+// correlation z_j + strength * (the sum of its partners' coefficients) and the
+// curvature (R_s)_jj + strength * (its number of partners), so every
+// thresholding operator stays exact; the studies step through each point
+// together, each refreshing its coupling from the others' current
+// coefficients before every sweep and scan.
 
 #include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
@@ -57,6 +68,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <memory>
 #include <numeric>
 #include <string>
 #include <vector>
@@ -273,13 +285,21 @@ template <> struct KeepsColumns<FactorLd> { static const bool value = true; };
 // `ld` answers R_s's entries for the current beta (rss_ld.h): DenseLd tracks
 // R * beta as a running sum, FactorLd tracks F * beta. It is built once for
 // the whole path, its running product carried from point to point with beta.
+// `shift_` and `extra_` carry the coupling to other studies' coefficients
+// (CoupledPathSolver): zero for a study fitted alone, where adding them
+// changes no value.
+
+template <class Ld> class CoupledPathSolver;
 
 template <class Ld>
 class PathSolver {
+  friend class CoupledPathSolver<Ld>;
+
 public:
   PathSolver(const PathSettings& settings, Ld& ld, const vec& z)
       : st_(settings), ld_(ld), z_(z), p_(z.n_elem), v_(z.n_elem),
         beta_(z.n_elem, fill::zeros), absGrad_(abs(z)),
+        shift_(z.n_elem, fill::zeros), extra_(z.n_elem, fill::zeros),
         ever_(z.n_elem, 0), strong_(z.n_elem, 0), supportChanged_(false),
         pathMax_(0.0) {
     for (uword j = 0; j < p_; j++) v_(j) = ld_.diag(j);
@@ -312,6 +332,8 @@ private:
   vec v_;
   vec beta_;
   vec absGrad_;  // |z - R_s beta| at the last recorded point (or swap)
+  vec shift_;    // coupling: strength * the partners' coefficients
+  vec extra_;    // coupling: strength * the number of partners
   std::vector<unsigned char> ever_;    // strongRule: ever active
   std::vector<unsigned char> strong_;  // strongRule: ever strong
   std::vector<uword> everList_;        // ever_ in index order
@@ -341,7 +363,7 @@ private:
   double path_max() const {
     double best = 0.0;
     for (uword j = 0; j < p_; j++)
-      best = std::max(best, entry_value(std::abs(z_(j)), v_(j)));
+      best = std::max(best, entry_value(std::abs(z_(j)), v_(j) + extra_(j)));
     return best;
   }
 
@@ -351,7 +373,7 @@ private:
     double best = 0.0;
     for (uword j = 0; j < p_; j++)
       if (beta_(j) == 0.0)
-        best = std::max(best, entry_value(absGrad_(j), v_(j)));
+        best = std::max(best, entry_value(absGrad_(j), v_(j) + extra_(j)));
     return best;
   }
 
@@ -382,7 +404,7 @@ private:
   // beta'R_s beta - 2 z'beta.
   void finish_point(double value, const PointPenalty& pp, int conv) {
     vec Rsb = ld_.product(beta_);
-    absGrad_ = abs(z_ - Rsb);
+    absGrad_ = abs(gradient(Rsb));
     double loss = dot(beta_, Rsb) - 2.0 * dot(z_, beta_);
     result_.beta.push_back(beta_);
     result_.value.push_back(value);
@@ -391,12 +413,19 @@ private:
     result_.fbeta.push_back(loss + compute_penalty(st_.pen, beta_, pp, st_.gamma));
   }
 
+  // The gradient's negative half, z - R_s beta less the coupling's pull,
+  // from the product R_s beta.
+  vec gradient(const vec& Rsb) const {
+    return z_ + shift_ - Rsb - extra_ % beta_;
+  }
+
   // One coordinate's exact update; returns how far it moved.
   double update_coordinate(uword j, const PointPenalty& pp) {
     double bj = beta_(j);
-    // Partial correlation: z_j - sum_{k != j} (R_s)_jk beta_k
-    double t = z_(j) - ld_.row(j, beta_) + v_(j) * bj;
-    double b = apply_threshold(st_.pen, t, v_(j), pp, st_.gamma);
+    // Partial correlation: z_j - sum_{k != j} (R_s)_jk beta_k, plus the
+    // coupling to the partners' coefficients
+    double t = z_(j) + shift_(j) - ld_.row(j, beta_) + v_(j) * bj;
+    double b = apply_threshold(st_.pen, t, v_(j) + extra_(j), pp, st_.gamma);
     if (b == bj) return 0.0;
     beta_(j) = b;
     ld_.update(j, b - bj);
@@ -631,7 +660,7 @@ private:
   // it can be held at, (v + 2 l2) |beta_i| + l1, is zeroed and the
   // replacement set to its own L0 update. False when no member qualifies.
   bool swap_once(const PointPenalty& pp) {
-    vec g = z_ - ld_.product(beta_);
+    vec g = gradient(ld_.product(beta_));
     for (uword i = 0; i < p_; i++) {
       double bi = beta_(i);
       if (bi == 0.0) continue;
@@ -647,11 +676,12 @@ private:
         }
       }
       if (jstar == p_) continue;
-      if (best <= (v_(jstar) + 2.0 * pp.l2) * std::abs(bi) + pp.l1) continue;
+      double vstar = v_(jstar) + extra_(jstar);
+      if (best <= (vstar + 2.0 * pp.l2) * std::abs(bi) + pp.l1) continue;
       beta_(i) = 0.0;
       ld_.update(i, -bi);
-      double t = z_(jstar) - ld_.row(jstar, beta_);
-      double b = l0_thresh(t, pp.lambda0, pp.l1, pp.l2, v_(jstar));
+      double t = z_(jstar) + shift_(jstar) - ld_.row(jstar, beta_);
+      double b = l0_thresh(t, pp.lambda0, pp.l1, pp.l2, vstar);
       if (b != 0.0) {
         beta_(jstar) = b;
         ld_.update(jstar, b);
@@ -659,7 +689,7 @@ private:
         strong_[jstar] = 1;
         rebuild_ever_list();
       }
-      absGrad_ = abs(z_ - ld_.product(beta_));
+      absGrad_ = abs(gradient(ld_.product(beta_)));
       return true;
     }
     return false;
@@ -746,6 +776,258 @@ static cpp11::writable::list path_result(const PathResult& res, uword p) {
   return result;
 }
 
+// ---- The coupled path solver ---------------------------------------------
+// K studies' paths, solved together at each point of one shared path. A
+// variant is the same variant in every study carrying it, matched by its
+// index into the studies' union (`unionIdx`), in one allele frame. Each study
+// keeps its own PathSolver -- its LD, screening sets and running product --
+// and the studies step through every stage of a point in turn: a sweep, a
+// scan, a check of the zeros, a swap. Before each, a study's coupling is
+// refreshed from the others' current coefficients (Gauss-Seidel across the
+// studies), so the coupling is felt at every pass rather than once per solve.
+
+template <class Ld>
+class CoupledPathSolver {
+public:
+  CoupledPathSolver(const PathSettings& settings,
+                    std::vector<std::unique_ptr<Ld>>& lds,
+                    const std::vector<vec>& zs,
+                    const std::vector<uvec>& unionIdx, uword nUnion,
+                    double strength)
+      : st_(settings), unionIdx_(unionIdx), members_(nUnion),
+        strength_(strength) {
+    for (uword k = 0; k < zs.size(); k++) {
+      solvers_.emplace_back(new PathSolver<Ld>(settings, *lds[k], zs[k]));
+      for (uword i = 0; i < unionIdx[k].n_elem; i++)
+        members_[unionIdx[k](i)].push_back(std::make_pair(k, i));
+    }
+    for (uword k = 0; k < solvers_.size(); k++) {
+      vec& extra = solvers_[k]->extra_;
+      for (uword i = 0; i < extra.n_elem; i++)
+        extra(i) = strength_ * (members_[unionIdx_[k](i)].size() - 1.0);
+    }
+  }
+
+  // The caller's path, or with none a geometric one from the joint pathMax.
+  void run(const vec& path) {
+    pathMax_ = 0.0;
+    for (auto& s : solvers_) pathMax_ = std::max(pathMax_, s->path_max());
+    for (auto& s : solvers_) s->pathMax_ = pathMax_;
+    vec points = path.n_elem > 0 ? path : geometric_path();
+    double prev = pathMax_;
+    for (uword k = 0; k < points.n_elem; k++) {
+      solve_point(points(k), prev);
+      prev = points(k);
+    }
+  }
+
+  cpp11::writable::list result() const {
+    using namespace cpp11::literals;
+    writable::list studies(solvers_.size());
+    for (uword k = 0; k < solvers_.size(); k++)
+      studies[static_cast<R_xlen_t>(k)] =
+          path_result(solvers_[k]->result_, solvers_[k]->p_);
+    writable::list out({
+      "studies"_nm  = studies,
+      "lambda"_nm   = as_doubles(vec(solvers_[0]->result_.value)),
+      "coupling"_nm = as_doubles(vec(coupling_))
+    });
+    return out;
+  }
+
+private:
+  typedef typename PathSolver<Ld>::ScanSet ScanSet;
+
+  const PathSettings& st_;
+  const std::vector<uvec>& unionIdx_;
+  std::vector<std::vector<std::pair<uword, uword>>> members_;
+  double strength_;
+  double pathMax_ = 0.0;
+  std::vector<std::unique_ptr<PathSolver<Ld>>> solvers_;
+  std::vector<double> coupling_;  // the coupling term at each point
+
+  // `points` values from the joint pathMax down to `ratio` of it, evenly on
+  // a log scale, as PathSolver::geometric_path() takes them.
+  vec geometric_path() const {
+    int points = st_.control.points;
+    vec out(points);
+    for (int k = 0; k < points; k++) {
+      double frac = points > 1 ? static_cast<double>(k) / (points - 1) : 0.0;
+      out(k) = pathMax_ * std::pow(st_.control.ratio, frac);
+    }
+    return out;
+  }
+
+  // Study k's coupling: strength times the sum of each of its coefficients'
+  // partners in the other studies.
+  void refresh_shift(uword k) {
+    vec& shift = solvers_[k]->shift_;
+    for (uword i = 0; i < shift.n_elem; i++) {
+      double sum = 0.0;
+      for (const auto& m : members_[unionIdx_[k](i)])
+        if (m.first != k) sum += solvers_[m.first]->beta_(m.second);
+      shift(i) = strength_ * sum;
+    }
+  }
+
+  // strength * the sum over variants of (beta_jk - beta_jk')^2 over every
+  // pair of studies carrying the variant.
+  double coupling_term() const {
+    double total = 0.0;
+    for (const auto& carriers : members_) {
+      for (uword a = 0; a < carriers.size(); a++) {
+        for (uword b = a + 1; b < carriers.size(); b++) {
+          double d = solvers_[carriers[a].first]->beta_(carriers[a].second) -
+                     solvers_[carriers[b].first]->beta_(carriers[b].second);
+          total += d * d;
+        }
+      }
+    }
+    return strength_ * total;
+  }
+
+  bool all_zero() const {
+    for (const auto& s : solvers_)
+      if (s->support_size() > 0) return false;
+    return true;
+  }
+
+  // One point, as PathSolver::solve_point() takes it: recorded as zero at or
+  // above the joint pathMax while every study is still zero.
+  void solve_point(double value, double prev) {
+    PointPenalty pp = solvers_[0]->point_penalty(value);
+    if (all_zero() && value >= pathMax_ * (1.0 - 1e-12)) {
+      finish(value, pp, 1);
+      return;
+    }
+    int conv = solve(pp, value, prev);
+    if (st_.pen == PEN_L0 && st_.maxSwaps > 0)
+      conv = std::min(conv, swap_phase(pp, value, prev));
+    finish(value, pp, conv);
+  }
+
+  int solve(const PointPenalty& pp, double value, double prev) {
+    if (st_.strategy == STRONG_RULE) return solve_strong(pp, value, prev);
+    return solve_ranked(pp);
+  }
+
+  void finish(double value, const PointPenalty& pp, int conv) {
+    for (uword k = 0; k < solvers_.size(); k++) {
+      refresh_shift(k);
+      solvers_[k]->finish_point(value, pp, conv);
+    }
+    coupling_.push_back(coupling_term());
+  }
+
+  // PathSolver::solve_strong() across the studies: each one's strong set
+  // marked from its own gradient, then descent over every study's
+  // ever-active set until no coefficient of any moves by thr, and the scans
+  // of every study.
+  int solve_strong(const PointPenalty& pp, double value, double prev) {
+    for (auto& s : solvers_) {
+      double cut = s->strong_cutoff(value, prev);
+      for (uword j = 0; j < s->p_; j++)
+        if (!s->strong_[j] && s->absGrad_(j) > cut) s->strong_[j] = 1;
+    }
+    int budget = st_.maxiter;
+    while (true) {
+      do {
+        if (!descend(pp, budget)) return 0;
+      } while (scan_all(pp, PathSolver<Ld>::IN_STRONG));
+      if (!scan_all(pp, PathSolver<Ld>::OUTSIDE_STRONG)) return 1;
+    }
+  }
+
+  bool descend(const PointPenalty& pp, int& budget) {
+    while (budget > 0) {
+      budget--;
+      double dlx = 0.0;
+      for (uword k = 0; k < solvers_.size(); k++) {
+        refresh_shift(k);
+        dlx = std::max(dlx, solvers_[k]->sweep(solvers_[k]->everList_, pp));
+      }
+      if (dlx < st_.thr) return true;
+    }
+    return false;
+  }
+
+  bool scan_all(const PointPenalty& pp, ScanSet which) {
+    bool added = false;
+    for (uword k = 0; k < solvers_.size(); k++) {
+      refresh_shift(k);
+      if (solvers_[k]->scan(pp, which)) added = true;
+    }
+    return added;
+  }
+
+  // PathSolver::solve_ranked() across the studies: each study sweeps its own
+  // ranked set, restricted to its support once that has held, and at
+  // convergence every study checks its zeros.
+  int solve_ranked(const PointPenalty& pp) {
+    uword K = solvers_.size();
+    std::vector<std::vector<uword>> sets(K);
+    std::vector<std::vector<unsigned char>> inSet(K);
+    std::vector<int> stable(K, 0);
+    for (uword k = 0; k < K; k++) {
+      sets[k] = solvers_[k]->ranked_set();
+      inSet[k].assign(solvers_[k]->p_, 0);
+      for (uword j : sets[k]) inSet[k][j] = 1;
+    }
+    for (int budget = st_.maxiter; budget > 0; budget--) {
+      double dlx = 0.0;
+      for (uword k = 0; k < K; k++) {
+        PathSolver<Ld>& s = *solvers_[k];
+        refresh_shift(k);
+        s.supportChanged_ = false;
+        dlx = std::max(dlx, s.sweep(sets[k], pp));
+        stable[k] = s.supportChanged_ ? 0 : stable[k] + 1;
+        if (stable[k] == st_.control.stableSweeps)
+          s.restrict_to_support(sets[k], inSet[k]);
+      }
+      if (dlx >= st_.thr) continue;
+      if (!add_zeros(pp, sets, inSet, stable)) return 1;
+    }
+    return 0;
+  }
+
+  // Every study's zero coordinates checked; those that left zero join its
+  // set. Whether any did.
+  bool add_zeros(const PointPenalty& pp, std::vector<std::vector<uword>>& sets,
+                 std::vector<std::vector<unsigned char>>& inSet,
+                 std::vector<int>& stable) {
+    bool any = false;
+    for (uword k = 0; k < solvers_.size(); k++) {
+      refresh_shift(k);
+      std::vector<uword> added = solvers_[k]->check_zeros(pp);
+      if (added.empty()) continue;
+      any = true;
+      stable[k] = 0;
+      for (uword j : added) {
+        if (inSet[k][j]) continue;
+        sets[k].push_back(j);
+        inSet[k][j] = 1;
+      }
+    }
+    return any;
+  }
+
+  // L0Learn's swap rounds across the studies: each round gives every study
+  // one swap, then a fresh solve of all of them.
+  int swap_phase(const PointPenalty& pp, double value, double prev) {
+    int conv = 1;
+    for (int round = 0; round < st_.maxSwaps; round++) {
+      bool swapped = false;
+      for (uword k = 0; k < solvers_.size(); k++) {
+        refresh_shift(k);
+        if (solvers_[k]->swap_once(pp)) swapped = true;
+      }
+      if (!swapped) break;
+      conv = std::min(conv, solve(pp, value, prev));
+    }
+    return conv;
+  }
+};
+
 // ---- Registered entry points ---------------------------------------------
 
 // The path against the LD matrix R, fitted as R_s = (1 - s) R + s I with s =
@@ -828,4 +1110,127 @@ cpp11::writable::list penalizedRssFactorCpp(
   FactorLd ld(F, shrink, vec(z.n_elem, fill::zeros));
   PathSolver<FactorLd> solver(st, ld, z);
   return path_result(solver.run(path), z.n_elem);
+}
+
+// ---- Coupled entry points --------------------------------------------------
+
+// The studies' z vectors.
+static std::vector<vec> coupled_z(const list& zList) {
+  std::vector<vec> zs;
+  for (R_xlen_t k = 0; k < zList.size(); k++)
+    zs.push_back(as_Col(doubles(zList[k])));
+  return zs;
+}
+
+// The studies' LD matrices or factors, each checked against its z-scores:
+// a matrix square over them, a factor with a column for each.
+static std::vector<mat> coupled_mats(const list& matList,
+                                     const std::vector<vec>& zs,
+                                     bool factor) {
+  if (matList.size() != static_cast<R_xlen_t>(zs.size()))
+    cpp11::stop("There are %d LD sources for %d studies.",
+                (int)matList.size(), (int)zs.size());
+  std::vector<mat> out;
+  for (uword k = 0; k < zs.size(); k++) {
+    mat M = as_Mat(doubles_matrix<>(matList[static_cast<R_xlen_t>(k)]));
+    bool fits = factor ? M.n_cols == zs[k].n_elem
+                       : M.n_rows == zs[k].n_elem && M.n_cols == zs[k].n_elem;
+    if (!fits)
+      cpp11::stop("Study %d's LD is %d x %d but it has %d z-scores.",
+                  (int)k + 1, (int)M.n_rows, (int)M.n_cols,
+                  (int)zs[k].n_elem);
+    out.push_back(M);
+  }
+  return out;
+}
+
+// The coupled path on `mats` held as Ld. The matrices outlive the solver,
+// which reads them by reference.
+template <class Ld>
+static cpp11::writable::list run_coupled(const PathSettings& st,
+                                         const std::vector<mat>& mats,
+                                         const std::vector<vec>& zs,
+                                         const std::vector<uvec>& idx,
+                                         int nUnion, double strength,
+                                         double shrink, const vec& path) {
+  std::vector<std::unique_ptr<Ld>> lds;
+  for (uword k = 0; k < mats.size(); k++)
+    lds.emplace_back(new Ld(mats[k], shrink, vec(zs[k].n_elem, fill::zeros)));
+  CoupledPathSolver<Ld> solver(st, lds, zs, idx, nUnion, strength);
+  solver.run(path);
+  return solver.result();
+}
+
+// The path of K studies coupled at `strength` (CoupledPathSolver), each
+// against its own LD matrix (DenseLd), shrunk to (1 - s) R + s I with s =
+// `shrink`. `unionIdxList` gives each study's variants' 1-based indices into
+// the union of the studies' variants, of size `nUnion`, in one allele frame.
+// The path is shared, and must be given for LASSO, MCP and SCAD; the L0
+// family's default is geometric from the joint pathMax. Returns each study's
+// path (`studies`, as penalizedRssCpp() returns one), the path values and the
+// coupling term at each.
+[[cpp11::register]]
+cpp11::writable::list penalizedRssCoupledCpp(
+    const list& zList,
+    const list& ldList,
+    const list& unionIdxList,
+    int nUnion,
+    double strength,
+    double shrink,
+    const doubles& pathR,
+    const std::string& penaltyStr,
+    const std::string& strategyStr,
+    double gamma,
+    double alpha,
+    double lambda1,
+    double lambda2,
+    double thr,
+    int maxiter,
+    int maxSwaps,
+    const list& control) {
+
+  PathSettings st = parse_settings(penaltyStr, strategyStr, gamma, alpha,
+                                   lambda1, lambda2, thr, maxiter, maxSwaps,
+                                   control);
+  std::vector<vec> zs = coupled_z(zList);
+  std::vector<uvec> idx = union_index(unionIdxList, zs, nUnion, "z-scores");
+  std::vector<mat> Rs = coupled_mats(ldList, zs, false);
+  vec path = as_Col(pathR);
+  check_path(path, st.pen);
+  return run_coupled<DenseLd>(st, Rs, zs, idx, nUnion, strength, shrink,
+                              path);
+}
+
+// penalizedRssCoupledCpp() with each study's LD given by a factor F of
+// R = F'F / (m - 1) (FactorLd).
+[[cpp11::register]]
+cpp11::writable::list penalizedRssCoupledFactorCpp(
+    const list& zList,
+    const list& factorList,
+    const list& unionIdxList,
+    int nUnion,
+    double strength,
+    double shrink,
+    const doubles& pathR,
+    const std::string& penaltyStr,
+    const std::string& strategyStr,
+    double gamma,
+    double alpha,
+    double lambda1,
+    double lambda2,
+    double thr,
+    int maxiter,
+    int maxSwaps,
+    const list& control) {
+
+  PathSettings st = parse_settings(penaltyStr, strategyStr, gamma, alpha,
+                                   lambda1, lambda2, thr, maxiter, maxSwaps,
+                                   control);
+  std::vector<vec> zs = coupled_z(zList);
+  std::vector<uvec> idx = union_index(unionIdxList, zs, nUnion, "z-scores");
+  std::vector<mat> Fs = coupled_mats(factorList, zs, true);
+  vec path = as_Col(pathR);
+  check_path(path, st.pen);
+  return run_coupled<FactorLd>(st, Fs, zs, idx, nUnion, strength, shrink,
+                               path);
 }

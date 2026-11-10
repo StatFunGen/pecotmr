@@ -1,14 +1,18 @@
-// rss_mcmc.cpp -- SDPR's likelihood and chain, and the cpp11 entry points of
-// every summary-statistics sampler in rss_mcmc.h.
+// rss_mcmc.cpp -- SDPR's likelihood and chain, for one study or across
+// studies as SDPRX, and the cpp11 entry points of every summary-statistics
+// sampler in rss_mcmc.h.
 //
-// Derived from PRS-CS, SDPR, qgg, hibayes and bigsnpr, each under its own
+// Derived from PRS-CS, PRS-CSx, JointPRS, SDPR and SDPRX, each under its own
 // license; rss_mcmc.h lists what each part comes from, and inst/COPYRIGHTS
 // has the notices.
 
 #include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
 #include <algorithm>
+#include <bitset>
 #include <cmath>
+#include <cstdint>
+#include <map>
 #include <numeric>
 #include <random>
 #include <string>
@@ -17,7 +21,8 @@
 
 // ==== SDPR: likelihood and chain ================================================
 
-// SDPR's likelihood and chain. The "Original:" notes point to SDPR's
+// SDPR's likelihood and chain, across studies with SDPRX's kinds of
+// components (rss_mcmc.h). The "Original:" notes point to SDPR's
 // mcmc.cpp. The original used GSL and x86 SSE intrinsics. Here GSL's BLAS
 // and Cholesky calls are Armadillo products, solves and chol(), its random
 // variates are <random>'s (and beta_distribution, a ratio of gammas), and
@@ -36,156 +41,368 @@ inline double square(double x) { return x * x; }
 // The precision of eta's prior, N(1, 1 / eta_prior_precision) (sample_eta()).
 constexpr double eta_prior_precision = 1.0;
 
-// The sampler's state over `blocks`.
+// The grid a learned correlation is drawn on: 0, 0.01, ..., 0.99
+// (sample_rho()).
+constexpr int rho_grid_points = 100;
+constexpr double rho_grid_step = 0.01;
+
+// A set of studies, bit k for study k.
+using StudySet = std::uint64_t;
+
+inline int set_size(StudySet s) {
+    return static_cast<int>(std::bitset<64>(s).count());
+}
+
+inline bool set_holds(StudySet s, arma::uword k) {
+    return ((s >> k) & 1U) != 0;
+}
+
+// The first study of a nonempty `s`.
+inline arma::uword set_first(StudySet s) {
+    arma::uword k = 0;
+    while (!set_holds(s, k)) {
+        k++;
+    }
+    return k;
+}
+
+// The studies of `s`, in order.
+inline arma::uvec set_studies(StudySet s) {
+    std::vector<arma::uword> out;
+    for (arma::uword k = 0; k < 64; k++) {
+        if (set_holds(s, k)) {
+            out.push_back(k);
+        }
+    }
+    return arma::conv_to<arma::uvec>::from(out);
+}
+
+// The correlations of a set of two or more studies, Sigma (rho's submatrix):
+// its symmetric square root and inverse.
+struct SetCorr {
+    arma::uvec studies;
+    arma::mat root;
+    arma::mat inv;
+};
+
+// The sampler's state over each study's `blocks`, its variants placed in the
+// union by `union_idx`. A union variant's component is t: 0 for the null,
+// else 1 + q (M - 1) + c for component c of kind q. Its effects in the
+// studies `o` that both carry it and belong to t's kind are the ones t draws;
+// it has none elsewhere.
 template <class LdBlock>
 class SdprChain {
 public:
-    SdprChain(const std::vector<SdprBlock<LdBlock>> &blocks, size_t M,
-              double a0k, double b0k, unsigned int seed,
-              const ChainOptions &opts, double gap0);
+    SdprChain(const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
+              const std::vector<arma::uvec> &union_idx, arma::uword n_union,
+              const SdprSharing &sharing, size_t M, double a0k, double b0k,
+              unsigned int seed, const ChainOptions &opts,
+              const std::vector<double> &gap0);
 
-    // Original: mcmc.cpp lines 434-513, one iteration of the main loop.
+    // Original: mcmc.cpp lines 434-513, one iteration of the main loop. The
+    // kinds' shares and a learned rho are drawn only across studies.
     void sweep() {
         sample_sigma2();
-        for (size_t j = 0; j < blocks_.size(); j++) {
+        for (size_t j = 0; j < n_blocks_; j++) {
             calc_b(j);
         }
-        for (size_t j = 0; j < blocks_.size(); j++) {
+        for (size_t j = 0; j < n_blocks_; j++) {
             sample_assignment(j);
         }
         update_suffstats();
+        sample_kind_weights();
         sample_V();
         update_p();
         sample_alpha();
         eta_beta = eta;
-        for (size_t j = 0; j < blocks_.size(); j++) {
+        for (size_t j = 0; j < n_blocks_; j++) {
             sample_beta(j);
+        }
+        if (learn_rho_) {
+            sample_rho();
         }
         sample_eta();
     }
 
-    // The reported effects are eta beta, and the heritability eta^2 beta'R beta.
-    // Rao-Blackwellized, an effect is the conditional mean of beta given the
-    // rest of the state when it was drawn, times eta at that time.
+    // The reported effects are eta beta, and each study's heritability
+    // eta^2 beta'R beta. Rao-Blackwellized, an effect is the conditional mean
+    // of beta given the rest of the state when it was drawn, times eta at
+    // that time. None is kept once any study's draws diverge.
     void keep(int n_kept) {
-        if (check_divergence(est_, opts_, eta * beta, gap0_)) {
+        bool diverged = false;
+        for (size_t k = 0; k < K_; k++) {
+            diverged = check_divergence(est_.study[k], opts_, eta * beta_[k],
+                                        gap0_[k]) ||
+                       diverged;
+        }
+        if (diverged) {
             return;
         }
         compute_h2();
-        est_.h2 += h2 * square(eta) / n_kept;
-        keep_effects(est_, opts_, eta * beta, eta_beta * beta_mean, n_kept);
-        if (opts_.track) {
-            for (size_t j = 0; j < blocks_.size(); j++) {
-                arma::span blk = layout_.span(j);
-                est_.corr(blk) += blocks_[j].R.times(eta * beta(blk)) / n_kept;
+        for (size_t k = 0; k < K_; k++) {
+            est_.h2(k) += h2_[k] * square(eta) / n_kept;
+            keep_effects(est_.study[k], opts_, eta * beta_[k],
+                         eta_beta * beta_mean_[k], n_kept);
+            if (opts_.track) {
+                keep_fitted(k, n_kept);
             }
         }
+        est_.rho += rho_ / n_kept;
     }
 
     void report(int itr, int /* n_iter */) {
         compute_h2();
-        Rprintf("%d iter. h2: %g max beta: %g\n",
-                itr, h2 * square(eta), arma::max(beta) * eta);
+        Rprintf("%d iter. h2:", itr);
+        for (size_t k = 0; k < K_; k++) {
+            Rprintf(" %g", h2_[k] * square(eta));
+        }
+        Rprintf(" max beta: %g\n", max_beta() * eta);
     }
 
-    bool stopped() const { return est_.diverged; }
+    bool stopped() const { return est_.diverged(); }
 
     const SdprEstimates &estimates() const { return est_; }
 
 private:
-    const std::vector<SdprBlock<LdBlock>> &blocks_;
-    BlockLayout layout_;
-    size_t M, n_snp;
+    const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks_;
+    const std::vector<arma::uvec> &union_idx_;
+    size_t K_;
+    size_t n_blocks_;
+    arma::uword n_union_;
+    std::vector<BlockLayout> layouts_;
+    size_t M;
+    size_t n_kinds_;
+    size_t T_;
     double a0k;
     double b0k;
     std::mt19937 r;
 
+    // Each kind's studies; the distinct sets of studies carrying a variant.
+    std::vector<StudySet> kind_set_;
+    std::vector<StudySet> patterns_;
+    arma::mat rho_;
+    bool learn_rho_ = false;
+    // Whether some kind holds both of a pair of studies.
+    arma::umat paired_;
+    // The correlations of each set of studies a variant's effects can span.
+    std::map<StudySet, SetCorr> corr_;
+    // Each union variant's studies, its place in each, and each block's union
+    // variants in order.
+    std::vector<StudySet> present_;
+    arma::umat local_;
+    std::vector<std::vector<arma::uword>> block_union_;
+
     double alpha;
     double eta;
-    double h2;
     double N;
-    arma::vec beta;
-    arma::vec b;
+    std::vector<double> h2_;
+    std::vector<arma::vec> beta_;
+    std::vector<arma::vec> b_;
     std::vector<int> cls_assgn;
     std::vector<double> V;
     std::vector<double> p;
     std::vector<double> log_p;
     std::vector<double> cluster_var;
+    std::vector<double> kind_weight_;
     std::vector<unsigned> suff_stats;
+    // Each component's effects and their prior quadratic form,
+    // beta' Sigma^-1 beta over each variant's effects (beta^2 for one).
+    std::vector<unsigned> n_effects;
     std::vector<double> sumsq;
     // Each block's terms of the eta update, from sample_beta().
     std::vector<double> num;
     std::vector<double> denom;
     ChainOptions opts_;
-    double gap0_;
-    arma::vec beta_mean;  // the conditional means of beta, for Rao-Blackwell
+    std::vector<double> gap0_;
+    std::vector<arma::vec> beta_mean_;  // the conditional means, for Rao-Blackwell
     double eta_beta = 1.0;  // eta when beta was drawn
     SdprEstimates est_;
 
+    size_t kind_of(size_t t) const { return (t - 1) / (M - 1); }
+
+    // The set of studies in which component t draws variant u's effects.
+    StudySet drawn_set(arma::uword u, size_t t) const {
+        return kind_set_[kind_of(t)] & present_[u];
+    }
+
+    // Variant u's effects in `studies`.
+    arma::vec effects(arma::uword u, const arma::uvec &studies) const {
+        arma::vec x(studies.n_elem);
+        for (arma::uword a = 0; a < studies.n_elem; a++) {
+            x(a) = beta_[studies(a)](local_(u, studies(a)));
+        }
+        return x;
+    }
+
+    double max_beta() const {
+        double top = -arma::datum::inf;
+        for (const arma::vec &beta : beta_) {
+            top = std::max(top, arma::max(beta));
+        }
+        return top;
+    }
+
+    void place_variants();
+    void refresh_corr();
     void sample_sigma2();
     void calc_b(size_t j);
     void sample_assignment(size_t j);
+    void spanning_probs(arma::uword u, size_t j, StudySet o, size_t lo, size_t hi,
+                        const arma::fvec &cvar, const arma::fvec &log_p_fvec,
+                        arma::fvec &prob) const;
     void update_suffstats();
+    void sample_kind_weights();
     void sample_V();
     void update_p();
     void sample_alpha();
     void sample_beta(size_t j);
     void compute_h2();
+    void sample_rho();
+    double rho_log_target(const arma::mat &trial,
+                          const std::vector<arma::uword> &spanning,
+                          arma::uword k1, arma::uword k2) const;
     void sample_eta();
+    void keep_fitted(size_t k, int n_kept);
 };
 
 template <class LdBlock>
-SdprChain<LdBlock>::SdprChain(const std::vector<SdprBlock<LdBlock>> &blocks,
-                              size_t M, double a0k, double b0k,
-                              unsigned int seed, const ChainOptions &opts,
-                              double gap0)
-    : blocks_(blocks), layout_(block_sizes(blocks)), M(M), a0k(a0k),
-      b0k(b0k), r(seed), opts_(opts), gap0_(gap0) {
-    n_snp = 0;
-    for (size_t j = 0; j < layout_.n_blocks(); j++) {
-        n_snp += layout_.size(j);
+SdprChain<LdBlock>::SdprChain(
+    const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
+    const std::vector<arma::uvec> &union_idx, arma::uword n_union,
+    const SdprSharing &sharing, size_t M, double a0k, double b0k,
+    unsigned int seed, const ChainOptions &opts, const std::vector<double> &gap0)
+    : blocks_(blocks), union_idx_(union_idx), K_(blocks.size()),
+      n_blocks_(blocks[0].size()), n_union_(n_union), M(M),
+      n_kinds_(sharing.kinds.size()), T_(1 + sharing.kinds.size() * (M - 1)),
+      a0k(a0k), b0k(b0k), r(seed), rho_(sharing.rho), opts_(opts), gap0_(gap0) {
+    for (size_t k = 0; k < K_; k++) {
+        layouts_.emplace_back(block_sizes(blocks[k]));
+        arma::uword p_k = union_idx[k].n_elem;
+        beta_.emplace_back(p_k, arma::fill::zeros);
+        b_.emplace_back(p_k, arma::fill::zeros);
+        beta_mean_.emplace_back(p_k, arma::fill::zeros);
+        ChainEstimates est;
+        est.beta.zeros(p_k);
+        est.corr.zeros(p_k);
+        est_.study.push_back(est);
     }
+    place_variants();
+    paired_.zeros(K_, K_);
+    for (const arma::uvec &kind : sharing.kinds) {
+        StudySet s = 0;
+        for (arma::uword k : kind) {
+            s |= StudySet(1) << k;
+            for (arma::uword k2 : kind) {
+                paired_(k, k2) = k != k2;
+            }
+        }
+        kind_set_.push_back(s);
+        learn_rho_ = learn_rho_ || (sharing.learn_rho && kind.n_elem >= 2);
+    }
+    refresh_corr();
     // N (sz) is absorbed into A and B (SDPR, May 20 2021), so it is 1.
     N = 1.0;
     alpha = 1;
     eta = 1;
-    h2 = 0;
-    beta = arma::vec(n_snp, arma::fill::zeros);
-    b = arma::vec(n_snp, arma::fill::zeros);
-    p.assign(M, 1.0 / M);
-    log_p.assign(M, 0);
-    for (size_t i = 0; i < M; i++) {
+    h2_.assign(K_, 0.0);
+    p.assign(T_, 1.0 / T_);
+    log_p.assign(T_, 0);
+    for (size_t i = 0; i < T_; i++) {
         log_p[i] = std::log(static_cast<float>(p[i] + 1e-40));
     }
 
-    cluster_var.assign(M, 0.0);
-    suff_stats.assign(M, 0);
-    sumsq.assign(M, 0.0);
-    V.assign(M, 0.0);
-    num.assign(blocks.size(), 0.0);
-    denom.assign(blocks.size(), 0.0);
+    cluster_var.assign(T_, 0.0);
+    kind_weight_.assign(n_kinds_, 1.0 / n_kinds_);
+    suff_stats.assign(T_, 0);
+    n_effects.assign(T_, 0);
+    sumsq.assign(T_, 0.0);
+    V.assign(T_, 0.0);
+    num.assign(n_blocks_, 0.0);
+    denom.assign(n_blocks_, 0.0);
     // Every variant starts in the null component (k = 0). The original
     // started from a uniform draw over 0..M-1, which makes nearly every
     // variant causal, so the first sample_beta() factors a matrix the size
     // of the block; starting from null lets the sampler find the causal
     // assignments.
-    cls_assgn.assign(n_snp, 0);
-    est_.beta = arma::vec(n_snp, arma::fill::zeros);
-    est_.corr = arma::vec(n_snp, arma::fill::zeros);
-    beta_mean = arma::vec(n_snp, arma::fill::zeros);
+    cls_assgn.assign(n_union_, 0);
+    est_.h2.zeros(K_);
+    est_.rho.zeros(K_, K_);
     update_suffstats();
+}
+
+// Each union variant's studies and its place in each, and each block's union
+// variants in order; a variant lies in the same block in every study
+// carrying it.
+template <class LdBlock>
+void SdprChain<LdBlock>::place_variants() {
+    present_.assign(n_union_, 0);
+    local_.zeros(n_union_, K_);
+    block_union_.assign(n_blocks_, std::vector<arma::uword>());
+    std::vector<size_t> block_of(n_union_, n_blocks_);
+    for (size_t k = 0; k < K_; k++) {
+        for (size_t j = 0; j < n_blocks_; j++) {
+            arma::uword start = layouts_[k].start(j);
+            for (arma::uword i = start; i < start + layouts_[k].size(j); i++) {
+                arma::uword u = union_idx_[k](i);
+                present_[u] |= StudySet(1) << k;
+                local_(u, k) = i;
+                if (block_of[u] == n_blocks_) {
+                    block_of[u] = j;
+                    block_union_[j].push_back(u);
+                } else if (block_of[u] != j) {
+                    cpp11::stop("Union variant %d lies in different LD blocks "
+                                "across the studies.", (int)u + 1);
+                }
+            }
+        }
+    }
+    for (arma::uword u = 0; u < n_union_; u++) {
+        if (present_[u] == 0) {
+            cpp11::stop("Union variant %d is in no study.", (int)u + 1);
+        }
+    }
+    for (std::vector<arma::uword> &members : block_union_) {
+        std::sort(members.begin(), members.end());
+    }
+    patterns_ = present_;
+    std::sort(patterns_.begin(), patterns_.end());
+    patterns_.erase(std::unique(patterns_.begin(), patterns_.end()),
+                    patterns_.end());
+}
+
+// The correlations at the current rho of every set of two or more studies
+// a variant's effects can span: a kind's studies that carry it.
+template <class LdBlock>
+void SdprChain<LdBlock>::refresh_corr() {
+    corr_.clear();
+    for (StudySet kind : kind_set_) {
+        for (StudySet pattern : patterns_) {
+            StudySet o = kind & pattern;
+            if (set_size(o) < 2 || corr_.count(o) > 0) {
+                continue;
+            }
+            SetCorr c;
+            c.studies = set_studies(o);
+            arma::mat S = rho_.submat(c.studies, c.studies);
+            c.root = arma::sqrtmat_sympd(S);
+            c.inv = arma::inv_sympd(S);
+            corr_.emplace(o, c);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
 // sample_sigma2: Sample cluster variances from inverse-gamma posterior
-//   var_k ~ InvGamma(suff_stats[k]/2 + a0k, sumsq[k]/2 + b0k)
-// Original: mcmc.cpp lines 25-40
+//   var_k ~ InvGamma(n_effects[k]/2 + a0k, sumsq[k]/2 + b0k)
+// Original: mcmc.cpp lines 25-40, where a component's effects are its
+// variants (n_effects = suff_stats); across studies, each variant counts
+// the effects it has in the component's studies.
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::sample_sigma2() {
     std::gamma_distribution<double> dist;
-    for (size_t i = 1; i < M; i++) {
-        double a = suff_stats[i] / 2.0 + a0k;
+    for (size_t i = 1; i < T_; i++) {
+        double a = n_effects[i] / 2.0 + a0k;
         double b = 1.0 / (sumsq[i] / 2.0 + b0k);
         dist = std::gamma_distribution<double>(a, b);
         cluster_var[i] = 1.0 / dist(r);
@@ -201,60 +418,78 @@ void SdprChain<LdBlock>::sample_sigma2() {
 }
 
 // ---------------------------------------------------------------------------
-// calc_b: Compute the b vector for block j
+// calc_b: Compute the b vector for block j of each study
 //   b_j = eta^2 * (diag(B)*beta - B*beta) + eta * A^T * beta_mrg
 // Original: mcmc.cpp lines 42-62
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::calc_b(size_t j) {
-    const SdprBlock<LdBlock> &blk = blocks_[j];
-    arma::vec beta_j = beta(layout_.span(j));
-    b(layout_.span(j)) = eta * eta * (blk.B.diag() % beta_j - blk.B.times(beta_j))
-                         + eta * blk.calc_b_tmp;
+    for (size_t k = 0; k < K_; k++) {
+        if (layouts_[k].size(j) == 0) {
+            continue;
+        }
+        const SdprBlock<LdBlock> &blk = blocks_[k][j];
+        arma::span span = layouts_[k].span(j);
+        arma::vec beta_j = beta_[k](span);
+        b_[k](span) = eta * eta * (blk.B.diag() % beta_j - blk.B.times(beta_j))
+                      + eta * blk.calc_b_tmp;
+    }
 }
 
 // ---------------------------------------------------------------------------
-// sample_assignment: Sample cluster assignments for each SNP in block j
-//   For each SNP i, compute log P(z_i = k) for k = 0..M-1, then sample.
+// sample_assignment: Sample cluster assignments for each union variant in
+// block j
+//   For each variant i, compute log P(z_i = k) for k = 0..T-1, then sample.
 //
 // Original: mcmc.cpp lines 64-165, which vectorized log/exp over the M
 // clusters with SSE intrinsics in single precision; Armadillo's float
 // vectors do the same.
 //
-// Math for cluster k >= 1:
+// Math for cluster k >= 1 whose effects on i lie in one study:
 //   C_k = eta^2 * N * B[i,i] * var_k + 1
 //   log P(z_i=k) = -0.5*log(C_k) + log(p_k) + (N*b_i)^2 * var_k / (2*C_k)
+// In none, log P(z_i=k) = log(p_k); in several, spanning_probs().
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::sample_assignment(size_t j) {
-    size_t start_i   = layout_.start(j);
-    size_t n_snp_blk = layout_.size(j);
-    const arma::vec &diag_B = blocks_[j].B.diag();
-
     std::uniform_real_distribution<float> unif(0.0f, 1.0f);
 
     // N = 1.0 after May 21 2021 (absorbed into A, B in solve_ldmat)
     float C = static_cast<float>(eta * eta * N);
 
-    arma::fvec cvar(M);
-    arma::fvec log_p_fvec(M);
-    for (size_t k = 0; k < M; k++) {
+    arma::fvec cvar(T_);
+    arma::fvec log_p_fvec(T_);
+    for (size_t k = 0; k < T_; k++) {
         cvar(k)       = static_cast<float>(cluster_var[k]);
         log_p_fvec(k) = static_cast<float>(log_p[k]);
     }
 
-    for (size_t i = 0; i < n_snp_blk; i++) {
-        float Bjj_i = static_cast<float>(diag_B(i));
-        float bj_i  = static_cast<float>(b(start_i + i));
+    for (arma::uword u : block_union_[j]) {
         float rnd_i = unif(r);
 
-        arma::fvec prob(M);
+        arma::fvec prob(T_);
         prob(0) = log_p_fvec(0);
 
-        arma::fvec Ck = C * Bjj_i * cvar.subvec(1, M - 1) + 1.0f;
-
-        prob.subvec(1, M - 1) = -0.5f * arma::log(Ck) + log_p_fvec.subvec(1, M - 1)
-            + square(N * bj_i) * cvar.subvec(1, M - 1) / (2.0f * Ck);
+        for (size_t q = 0; q < n_kinds_; q++) {
+            size_t lo = 1 + q * (M - 1);
+            size_t hi = lo + M - 2;
+            StudySet o = kind_set_[q] & present_[u];
+            int n_o = set_size(o);
+            if (n_o == 0) {
+                prob.subvec(lo, hi) = log_p_fvec.subvec(lo, hi);
+            } else if (n_o == 1) {
+                arma::uword k = set_first(o);
+                arma::uword i = local_(u, k);
+                float Bjj_i = static_cast<float>(
+                    blocks_[k][j].B.diag()(i - layouts_[k].start(j)));
+                float bj_i  = static_cast<float>(b_[k](i));
+                arma::fvec Ck = C * Bjj_i * cvar.subvec(lo, hi) + 1.0f;
+                prob.subvec(lo, hi) = -0.5f * arma::log(Ck) + log_p_fvec.subvec(lo, hi)
+                    + square(N * bj_i) * cvar.subvec(lo, hi) / (2.0f * Ck);
+            } else {
+                spanning_probs(u, j, o, lo, hi, cvar, log_p_fvec, prob);
+            }
+        }
 
         // Log-sum-exp for numerical stability
         float max_elem    = prob.max();
@@ -263,78 +498,162 @@ void SdprChain<LdBlock>::sample_assignment(size_t j) {
 
         // Categorical sampling via inverse CDF
         // Original: mcmc.cpp lines 155-163
-        cls_assgn[i + start_i] = M - 1;
-        for (size_t k = 0; k < M - 1; k++) {
+        cls_assgn[u] = T_ - 1;
+        for (size_t k = 0; k < T_ - 1; k++) {
             rnd_i -= std::exp(prob(k) - log_exp_sum);
             if (rnd_i < 0) {
-                cls_assgn[i + start_i] = k;
+                cls_assgn[u] = k;
                 break;
             }
         }
     }
 }
 
+// The log weights of components lo..hi, of a kind whose effects on union
+// variant u lie in the studies `o`, two or more, drawn N(0, var_k Sigma):
+// with D = diag(eta^2 N B_ii) and h = N b_i over those studies and
+// Sigma^1/2 D Sigma^1/2 = Q diag(lambda) Q', g = Q' Sigma^1/2 h,
+//   log P(z_i=k) = log(p_k) - 0.5 * sum_a log(1 + var_k lambda_a)
+//                  + 0.5 * var_k * sum_a g_a^2 / (1 + var_k lambda_a),
+// SDPRX's closed forms for its shared component, in any number of studies.
+template <class LdBlock>
+void SdprChain<LdBlock>::spanning_probs(arma::uword u, size_t j, StudySet o,
+                                        size_t lo, size_t hi,
+                                        const arma::fvec &cvar,
+                                        const arma::fvec &log_p_fvec,
+                                        arma::fvec &prob) const {
+    const SetCorr &c = corr_.at(o);
+    arma::uword n_o = c.studies.n_elem;
+    arma::vec d(n_o);
+    arma::vec h(n_o);
+    for (arma::uword a = 0; a < n_o; a++) {
+        arma::uword k = c.studies(a);
+        arma::uword i = local_(u, k);
+        d(a) = eta * eta * N * blocks_[k][j].B.diag()(i - layouts_[k].start(j));
+        h(a) = N * b_[k](i);
+    }
+    arma::vec lambda;
+    arma::mat Q;
+    arma::eig_sym(lambda, Q,
+                  arma::mat(arma::symmatu(c.root * arma::diagmat(d) * c.root)));
+    arma::vec g = Q.t() * (c.root * h);
+    arma::fvec cv = cvar.subvec(lo, hi);
+    arma::fvec logdet(cv.n_elem, arma::fill::zeros);
+    arma::fvec quad(cv.n_elem, arma::fill::zeros);
+    for (arma::uword a = 0; a < n_o; a++) {
+        arma::fvec t = 1.0f + static_cast<float>(std::max(lambda(a), 0.0)) * cv;
+        logdet += arma::log(t);
+        quad += static_cast<float>(square(g(a))) * cv / t;
+    }
+    prob.subvec(lo, hi) = log_p_fvec.subvec(lo, hi) - 0.5f * logdet + 0.5f * quad;
+}
+
 // ---------------------------------------------------------------------------
-// update_suffstats: Count SNPs per cluster and sum of squared effects
+// update_suffstats: Count variants per cluster, and the effects each
+// component draws and their quadratic form
 // Original: mcmc.cpp lines 167-175
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::update_suffstats() {
     std::fill(suff_stats.begin(), suff_stats.end(), 0);
+    std::fill(n_effects.begin(), n_effects.end(), 0);
     std::fill(sumsq.begin(), sumsq.end(), 0.0);
-    for (size_t i = 0; i < n_snp; i++) {
-        suff_stats[cls_assgn[i]]++;
-        double tmp = beta(i);
-        sumsq[cls_assgn[i]] += square(tmp);
+    for (arma::uword u = 0; u < n_union_; u++) {
+        size_t t = cls_assgn[u];
+        suff_stats[t]++;
+        if (t == 0) {
+            continue;
+        }
+        StudySet o = drawn_set(u, t);
+        int n_o = set_size(o);
+        if (n_o == 1) {
+            arma::uword k = set_first(o);
+            double tmp = beta_[k](local_(u, k));
+            sumsq[t] += square(tmp);
+        } else if (n_o >= 2) {
+            const SetCorr &c = corr_.at(o);
+            arma::vec x = effects(u, c.studies);
+            sumsq[t] += arma::dot(x, c.inv * x);
+        }
+        n_effects[t] += static_cast<unsigned>(n_o);
     }
+}
+
+// ---------------------------------------------------------------------------
+// sample_kind_weights: Sample the non-null kinds' shares of the weight
+//   from the Dirichlet given the kinds' counts (SDPRX's sample_pi_pop(),
+//   without the null, which is the first stick here). One kind has it all.
+// ---------------------------------------------------------------------------
+template <class LdBlock>
+void SdprChain<LdBlock>::sample_kind_weights() {
+    if (n_kinds_ == 1) {
+        return;
+    }
+    std::vector<double> counts(n_kinds_, 0.0);
+    for (size_t t = 1; t < T_; t++) {
+        counts[kind_of(t)] += suff_stats[t];
+    }
+    kind_weight_ = dirichlet_plus_one(counts, r);
 }
 
 // ---------------------------------------------------------------------------
 // sample_V: Sample stick-breaking fractions from Beta posterior
 //   V[k] ~ Beta(1 + suff_stats[k], alpha + sum_{k'>k} suff_stats[k'])
+//   over the null's stick against every other component, then over each
+//   kind's components, its last taking the remainder.
 // Original: mcmc.cpp lines 177-189
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::sample_V() {
-    std::vector<double> a(M - 1);
-    a[M - 2] = suff_stats[M - 1];
-    for (int i = static_cast<int>(M) - 3; i >= 0; i--) {
-        a[i] = suff_stats[i + 1] + a[i + 1];
+    double rest = 0;
+    for (size_t t = 1; t < T_; t++) {
+        rest += suff_stats[t];
     }
+    beta_distribution first(1 + suff_stats[0], alpha + rest);
+    V[0] = first(r);
 
-    for (size_t i = 0; i < M - 1; i++) {
-        beta_distribution dist(1 + suff_stats[i], alpha + a[i]);
-        V[i] = dist(r);
+    for (size_t q = 0; q < n_kinds_; q++) {
+        size_t lo = 1 + q * (M - 1);
+        size_t hi = lo + M - 2;
+        std::vector<double> a(M - 2);
+        a[M - 3] = suff_stats[hi];
+        for (int i = static_cast<int>(M) - 4; i >= 0; i--) {
+            a[i] = suff_stats[lo + i + 1] + a[i + 1];
+        }
+        for (size_t i = 0; i < M - 2; i++) {
+            beta_distribution dist(1 + suff_stats[lo + i], alpha + a[i]);
+            V[lo + i] = dist(r);
+        }
+        V[hi] = 1;
     }
-    V[M - 1] = 1;
 }
 
 // ---------------------------------------------------------------------------
 // update_p: Convert stick-breaking fractions V to cluster probabilities p
-//   p[0] = V[0]; p[k] = V[k] * prod_{j<k}(1-V[j])
+//   p[0] = V[0]; each kind's share of (1 - V[0]) broken over its components,
+//   p[k] = share * V[k] * prod_{j<k}(1-V[j]) within the kind. The last
+//   component takes what the others leave.
 // Original: mcmc.cpp lines 191-222
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::update_p() {
-    std::vector<double> cumprod(M - 1);
-    cumprod[0] = 1 - V[0];
-    for (size_t i = 1; i < M - 1; i++) {
-        cumprod[i] = cumprod[i - 1] * (1 - V[i]);
-        if (V[i] == 1) {
-            std::fill(cumprod.begin() + i + 1, cumprod.end(), 0.0);
-            break;
-        }
-    }
-
     p[0] = V[0];
-    for (size_t i = 1; i < M - 1; i++) {
-        p[i] = cumprod[i - 1] * V[i];
+    double rest = 1 - V[0];
+    for (size_t q = 0; q < n_kinds_; q++) {
+        size_t lo = 1 + q * (M - 1);
+        size_t hi = lo + M - 2;
+        double cumprod = rest * kind_weight_[q];
+        for (size_t t = lo; t < hi; t++) {
+            p[t] = cumprod * V[t];
+            cumprod *= (1 - V[t]);
+        }
+        p[hi] = cumprod;
     }
 
     double sum = std::accumulate(p.begin(), p.end() - 1, 0.0);
-    p[M - 1] = (1 - sum > 0) ? (1 - sum) : 0;
+    p[T_ - 1] = (1 - sum > 0) ? (1 - sum) : 0;
 
-    for (size_t i = 0; i < M; i++) {
+    for (size_t i = 0; i < T_; i++) {
         log_p[i] = std::log(static_cast<float>(p[i]) + 1e-40f);
     }
 }
@@ -347,7 +666,7 @@ void SdprChain<LdBlock>::update_p() {
 template <class LdBlock>
 void SdprChain<LdBlock>::sample_alpha() {
     double sum = 0, m = 0;
-    for (size_t i = 0; i < M; i++) {
+    for (size_t i = 0; i < T_; i++) {
         if (V[i] != 1) {
             sum += std::log(1 - V[i]);
             m++;
@@ -365,6 +684,9 @@ void SdprChain<LdBlock>::sample_alpha() {
 //   with A_vec = N*eta*A^T*beta_mrg over the causal SNPs (gaussian_draw()).
 //   The block's other effects are zero, so eta's terms are
 //   num = N beta'A^T beta_mrg and denom = N beta'B beta.
+//   Across studies the causal effects are each study's, stacked: B_gamma is
+//   block diagonal over the studies, and a variant's effects in several
+//   studies have the prior precision Sigma^-1 / var_k between them.
 //
 // Original: mcmc.cpp lines 239-329. The original drew a lone causal SNP in
 // closed form from its b_j instead, which carries the residuals of the
@@ -376,41 +698,73 @@ void SdprChain<LdBlock>::sample_alpha() {
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::sample_beta(size_t j) {
-    const SdprBlock<LdBlock> &blk = blocks_[j];
-    size_t start_i = layout_.start(j);
-    size_t end_i   = start_i + layout_.size(j);
-
-    // Build causal list (SNPs not in null cluster)
-    std::vector<size_t> causal_list;
-    for (size_t i = start_i; i < end_i; i++) {
-        if (cls_assgn[i] != 0) {
-            causal_list.push_back(i);
+    // Each study's causal SNPs in the block: those whose cluster draws an
+    // effect in that study. Zero out the block's betas.
+    std::vector<arma::uvec> causal(K_);
+    arma::uword nc = 0;
+    for (size_t k = 0; k < K_; k++) {
+        if (layouts_[k].size(j) == 0) {
+            continue;
         }
+        arma::span span = layouts_[k].span(j);
+        beta_[k](span).zeros();
+        beta_mean_[k](span).zeros();
+        arma::uword start = layouts_[k].start(j);
+        std::vector<arma::uword> causal_list;
+        for (arma::uword i = 0; i < layouts_[k].size(j); i++) {
+            int t = cls_assgn[union_idx_[k](start + i)];
+            if (t != 0 && set_holds(kind_set_[kind_of(t)], k)) {
+                causal_list.push_back(i);
+            }
+        }
+        causal[k] = arma::conv_to<arma::uvec>::from(causal_list);
+        nc += causal[k].n_elem;
     }
 
-    // Zero out this block's betas
-    beta(layout_.span(j)).zeros();
-    beta_mean(layout_.span(j)).zeros();
-
-    if (causal_list.empty()) {
+    if (nc == 0) {
         num[j]   = 0;
         denom[j] = 0;
         return;
     }
 
-    size_t nc = causal_list.size();
-    arma::uvec causal_idx(nc);
-    arma::vec var_c(nc);
-    for (size_t i = 0; i < nc; i++) {
-        causal_idx(i) = causal_list[i] - start_i;
-        var_c(i) = cluster_var[cls_assgn[causal_list[i]]];
-    }
-
-    // Original: mcmc.cpp lines 273-289
+    // Original: mcmc.cpp lines 273-289. B_eta is eta^2 * N * B over the
+    // causal SNPs, with B's diagonal as the original reads it for eta's
+    // terms (lines 312-321).
     double C_coeff = square(eta) * N;
-    arma::vec A_vec = N * eta * blk.calc_b_tmp(causal_idx);
-    arma::mat B_gamma = C_coeff * blk.B.sub(causal_idx);
-    B_gamma.diag() += 1.0 / var_c;
+    arma::vec A_vec(nc);
+    arma::mat B_gamma(nc, nc, arma::fill::zeros);
+    arma::mat B_eta(nc, nc, arma::fill::zeros);
+    std::map<arma::uword, std::vector<arma::uword>> spanning;
+    arma::uword at = 0;
+    for (size_t k = 0; k < K_; k++) {
+        if (causal[k].is_empty()) {
+            continue;
+        }
+        const SdprBlock<LdBlock> &blk = blocks_[k][j];
+        arma::span stacked(at, at + causal[k].n_elem - 1);
+        A_vec(stacked) = N * eta * blk.calc_b_tmp(causal[k]);
+        arma::mat B_k = C_coeff * blk.B.sub(causal[k]);
+        B_gamma(stacked, stacked) = B_k;
+        B_k.diag() = C_coeff * blk.B.diag()(causal[k]);
+        B_eta(stacked, stacked) = B_k;
+        arma::uword start = layouts_[k].start(j);
+        for (arma::uword i : causal[k]) {
+            arma::uword u = union_idx_[k](start + i);
+            int t = cls_assgn[u];
+            if (set_size(drawn_set(u, t)) == 1) {
+                B_gamma(at, at) += 1.0 / cluster_var[t];
+            } else {
+                spanning[u].push_back(at);
+            }
+            at++;
+        }
+    }
+    for (const auto &entry : spanning) {
+        int t = cls_assgn[entry.first];
+        const SetCorr &c = corr_.at(drawn_set(entry.first, t));
+        arma::uvec places = arma::conv_to<arma::uvec>::from(entry.second);
+        B_gamma.submat(places, places) += c.inv / cluster_var[t];
+    }
 
     std::normal_distribution<double> dist(0.0, 1.0);
     arma::vec z = standard_normals(nc, dist, r);
@@ -418,33 +772,118 @@ void SdprChain<LdBlock>::sample_beta(size_t j) {
     arma::vec beta_c = opts_.rao_blackwell ? gaussian_draw(B_gamma, A_vec, z, 1.0, mean_c)
                                            : gaussian_draw(B_gamma, A_vec, z);
 
-    // Compute eta-related terms for sample_eta(): B_gamma's diagonal back to
-    // eta^2 * N * B[i,i], without 1/var_k.
-    // Original: mcmc.cpp lines 312-321
-    B_gamma.diag() = C_coeff * blk.B.diag()(causal_idx);
     num[j] = arma::dot(A_vec, beta_c) / eta;
-    arma::vec tmp = B_gamma * beta_c;
+    arma::vec tmp = B_eta * beta_c;
     denom[j] = arma::dot(beta_c, tmp) / square(eta);
 
-    for (size_t i = 0; i < nc; i++) {
-        beta(causal_list[i]) = beta_c(i);
-        if (opts_.rao_blackwell) {
-            beta_mean(causal_list[i]) = mean_c(i);
+    at = 0;
+    for (size_t k = 0; k < K_; k++) {
+        arma::uword start = layouts_[k].start(j);
+        for (arma::uword i : causal[k]) {
+            beta_[k](start + i) = beta_c(at);
+            if (opts_.rao_blackwell) {
+                beta_mean_[k](start + i) = mean_c(at);
+            }
+            at++;
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// compute_h2: Compute heritability h2 = sum_j beta_j^T * R_j * beta_j
+// compute_h2: Compute each study's heritability h2 = sum_j beta_j^T R_j beta_j
 // Original: mcmc.cpp lines 331-343
 // ---------------------------------------------------------------------------
 template <class LdBlock>
 void SdprChain<LdBlock>::compute_h2() {
-    h2 = 0;
-    for (size_t j = 0; j < blocks_.size(); j++) {
-        arma::vec beta_j = beta(layout_.span(j));
-        h2 += blocks_[j].R.quad(beta_j);
+    for (size_t k = 0; k < K_; k++) {
+        h2_[k] = 0;
+        for (size_t j = 0; j < n_blocks_; j++) {
+            if (layouts_[k].size(j) == 0) {
+                continue;
+            }
+            arma::vec beta_j = beta_[k](layouts_[k].span(j));
+            h2_[k] += blocks_[k][j].R.quad(beta_j);
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// sample_rho: Draw each pair of studies' correlation given the rest
+//   On the grid 0, 0.01, ..., 0.99, the conditional is the density of the
+//   effects of every variant whose cluster spans both studies,
+//   N(0, var_k Sigma) over the studies it spans, at the grid values that
+//   keep rho positive definite. A random walk from 0, as JointPRS takes, moves
+//   little in a chain's length when few effects inform rho.
+// ---------------------------------------------------------------------------
+template <class LdBlock>
+void SdprChain<LdBlock>::sample_rho() {
+    std::vector<arma::uword> spanning;
+    for (arma::uword u = 0; u < n_union_; u++) {
+        int t = cls_assgn[u];
+        if (t != 0 && set_size(drawn_set(u, t)) >= 2) {
+            spanning.push_back(u);
+        }
+    }
+    std::uniform_real_distribution<double> unif(0.0, 1.0);
+    for (arma::uword k1 = 0; k1 < K_; k1++) {
+        for (arma::uword k2 = k1 + 1; k2 < K_; k2++) {
+            if (!paired_(k1, k2)) {
+                continue;
+            }
+            arma::vec log_w(rho_grid_points);
+            for (int g = 0; g < rho_grid_points; g++) {
+                arma::mat trial = rho_;
+                trial(k1, k2) = g * rho_grid_step;
+                trial(k2, k1) = g * rho_grid_step;
+                log_w(g) = rho_log_target(trial, spanning, k1, k2);
+            }
+            double top = log_w.max();
+            if (!std::isfinite(top)) {
+                continue;
+            }
+            arma::vec w = arma::exp(log_w - top);
+            double rnd = unif(r) * arma::accu(w);
+            int pick = rho_grid_points - 1;
+            for (int g = 0; g < rho_grid_points - 1; g++) {
+                rnd -= w(g);
+                if (rnd < 0) {
+                    pick = g;
+                    break;
+                }
+            }
+            rho_(k1, k2) = pick * rho_grid_step;
+            rho_(k2, k1) = pick * rho_grid_step;
+        }
+    }
+    refresh_corr();
+}
+
+// The log density, up to a constant, of the effects of the variants in
+// `spanning` whose clusters span studies k1 and k2, at the correlations
+// `trial`; -inf where `trial` is not positive definite.
+template <class LdBlock>
+double SdprChain<LdBlock>::rho_log_target(const arma::mat &trial,
+                                          const std::vector<arma::uword> &spanning,
+                                          arma::uword k1, arma::uword k2) const {
+    if (K_ > 2 && arma::eig_sym(trial).min() <= 0.0) {
+        return -arma::datum::inf;
+    }
+    double total = 0.0;
+    for (arma::uword u : spanning) {
+        int t = cls_assgn[u];
+        StudySet o = drawn_set(u, t);
+        if (!set_holds(o, k1) || !set_holds(o, k2)) {
+            continue;
+        }
+        arma::uvec studies = set_studies(o);
+        arma::mat L;
+        if (!arma::chol(L, arma::mat(trial.submat(studies, studies)), "lower")) {
+            return -arma::datum::inf;
+        }
+        arma::vec w = arma::solve(arma::trimatl(L), effects(u, studies));
+        total -= arma::accu(arma::log(L.diag())) + 0.5 * arma::dot(w, w) / cluster_var[t];
+    }
+    return total;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +906,18 @@ void SdprChain<LdBlock>::sample_eta() {
         (num_sum + eta_prior_precision) / precision,
         std::sqrt(1.0 / precision));
     eta = dist(r);
+}
+
+// Study k's fitted correlations, R eta beta, added block by block.
+template <class LdBlock>
+void SdprChain<LdBlock>::keep_fitted(size_t k, int n_kept) {
+    for (size_t j = 0; j < n_blocks_; j++) {
+        if (layouts_[k].size(j) == 0) {
+            continue;
+        }
+        arma::span blk = layouts_[k].span(j);
+        est_.study[k].corr(blk) += blocks_[k][j].R.times(eta * beta_[k](blk)) / n_kept;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +1084,15 @@ std::vector<SdprBlock<DenseLdBlock>> sdpr_dense_blocks(const SdprData &dat,
         const arma::mat &R = ref_ld_mat[i];
         size_t blk_size = R.n_rows;
 
+        // A block holding no variant has nothing to solve; the chain skips
+        // it, as PRS-CS's does.
+        if (blk_size == 0) {
+            blocks.push_back(SdprBlock<DenseLdBlock>{
+                DenseLdBlock(arma::mat()), DenseLdBlock(arma::mat()), arma::vec()
+            });
+            continue;
+        }
+
         arma::mat B0;
         if (opt_llk == 1) {
             // B0 = R + a*I  (diagonal shrinkage)
@@ -713,26 +1173,87 @@ SdprBlock<FactorLdBlock> sdpr_factor_block(const SdprData &dat, const arma::mat 
     };
 }
 
+namespace {
+
+// The inputs sdpr_mcmc() reads, checked before the chain is built.
 template <class LdBlock>
-SdprEstimates sdpr_mcmc(const std::vector<SdprBlock<LdBlock>> &blocks, size_t M,
-                        double a0k, double b0k, const ChainSchedule &schedule,
-                        bool verbose, unsigned int seed, const ChainOptions &opts,
-                        double gap0) {
-    SdprChain<LdBlock> chain(blocks, M, a0k, b0k, seed, opts, gap0);
+void check_sdpr_inputs(const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
+                       const std::vector<arma::uvec> &union_idx,
+                       const SdprSharing &sharing, size_t M,
+                       const std::vector<double> &gap0) {
+    size_t K = blocks.size();
+    if (K == 0 || K > 64) {
+        cpp11::stop("SDPR runs on 1 to 64 studies, not %d.", (int)K);
+    }
+    if (union_idx.size() != K || gap0.size() != K) {
+        cpp11::stop("Each study needs its places in the union and its bound "
+                    "of divergence.");
+    }
+    if (M < 4) {
+        cpp11::stop("'M' must be at least 4.");
+    }
+    for (size_t k = 0; k < K; k++) {
+        if (blocks[k].size() != blocks[0].size()) {
+            cpp11::stop("Every study needs the same number of LD blocks.");
+        }
+        arma::uword p = 0;
+        for (const SdprBlock<LdBlock> &blk : blocks[k]) {
+            p += blk.size();
+        }
+        if (p != union_idx[k].n_elem) {
+            cpp11::stop("Study %d has %d variants in its LD blocks but %d "
+                        "places in the union.", (int)k + 1, (int)p,
+                        (int)union_idx[k].n_elem);
+        }
+    }
+    if (sharing.kinds.empty()) {
+        cpp11::stop("SDPR needs at least one kind of component.");
+    }
+    for (const arma::uvec &kind : sharing.kinds) {
+        if (kind.is_empty() || kind.max() >= K) {
+            cpp11::stop("Each kind must hold some of the %d studies.", (int)K);
+        }
+    }
+    if (sharing.rho.n_rows != K || sharing.rho.n_cols != K) {
+        cpp11::stop("rho must be %d x %d.", (int)K, (int)K);
+    }
+}
+
+}  // namespace
+
+template <class LdBlock>
+SdprEstimates sdpr_mcmc(const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
+                        const std::vector<arma::uvec> &union_idx, arma::uword n_union,
+                        const SdprSharing &sharing, size_t M, double a0k, double b0k,
+                        const ChainSchedule &schedule, bool verbose, unsigned int seed,
+                        const ChainOptions &opts, const std::vector<double> &gap0) {
+    check_sdpr_inputs(blocks, union_idx, sharing, M, gap0);
+    SdprChain<LdBlock> chain(blocks, union_idx, n_union, sharing, M, a0k, b0k, seed,
+                             opts, gap0);
     run_chain(chain, schedule, verbose);
     const SdprEstimates &est = chain.estimates();
     if (verbose) {
-        Rprintf("h2: %g max: %g\n", est.h2, arma::max(est.beta));
+        Rprintf("h2:");
+        double top = -arma::datum::inf;
+        for (size_t k = 0; k < est.study.size(); k++) {
+            Rprintf(" %g", est.h2(k));
+            top = std::max(top, arma::max(est.study[k].beta));
+        }
+        Rprintf(" max: %g\n", top);
     }
     return est;
 }
 
 template SdprEstimates sdpr_mcmc<DenseLdBlock>(
-    const std::vector<SdprBlock<DenseLdBlock>> &, size_t, double, double,
-    const ChainSchedule &, bool, unsigned int, const ChainOptions &, double);
+    const std::vector<std::vector<SdprBlock<DenseLdBlock>>> &,
+    const std::vector<arma::uvec> &, arma::uword, const SdprSharing &, size_t, double,
+    double, const ChainSchedule &, bool, unsigned int, const ChainOptions &,
+    const std::vector<double> &);
 template SdprEstimates sdpr_mcmc<FactorLdBlock>(
-    const std::vector<SdprBlock<FactorLdBlock>> &, size_t, double, double,
-    const ChainSchedule &, bool, unsigned int, const ChainOptions &, double);
+    const std::vector<std::vector<SdprBlock<FactorLdBlock>>> &,
+    const std::vector<arma::uvec> &, arma::uword, const SdprSharing &, size_t, double,
+    double, const ChainSchedule &, bool, unsigned int, const ChainOptions &,
+    const std::vector<double> &);
 
 // ==== Entry points ==============================================================
 
@@ -783,30 +1304,117 @@ writable::list chain_report(const ChainEstimates& est, Fields... own) {
 
 }  // namespace
 
-// ==== PRS-CS ====================================================================
+// ==== PRS-CS, PRS-CSx and JointPRS ============================================
 
 namespace {
 
-// Run the sampler on `blocks` with the arguments as R passes them: a NULL
-// `maf` is a vector of zeros, a NULL `phi` is learned from the data, and a
-// NULL `seed` draws one.
+// An LD matrix as the PRS-CS chain reads it: c R + (1 - c) I for the LD
+// shrinkage c = `shrinkCorr`.
+DenseLdBlock shrunk_dense_block(mat S, double shrinkCorr) {
+	if (shrinkCorr != 1.0) {
+		S *= shrinkCorr;
+		S.diag() += 1.0 - shrinkCorr;
+	}
+	return DenseLdBlock(std::move(S));
+}
+
+// A factor F of R = F'F / (m - 1) as the chain reads it: the factor of c R,
+// and the ridge 1 - c.
+FactorLdBlock shrunk_factor_block(const mat& F, double shrinkCorr) {
+	mat W = F / std::sqrt(static_cast<double>(F.n_rows) - 1.0);
+	if (shrinkCorr != 1.0) {
+		W *= std::sqrt(shrinkCorr);
+	}
+	return FactorLdBlock(std::move(W), 1.0 - shrinkCorr);
+}
+
+// One study's places in a union of its own variants: 0, ..., p - 1.
+uvec own_places(uword p) {
+	uvec idx(p);
+	for (uword i = 0; i < p; ++i) {
+		idx(i) = i;
+	}
+	return idx;
+}
+
+// One study's chain with the arguments as R passes them: a NULL `maf` keeps
+// the effects standardized, else they are returned per allele; a NULL `phi`
+// is learned from the data, and a NULL `seed` draws one.
 template <class LdBlock>
 cpp11::writable::list prs_cs_run(double a, double b, sexp phi, doubles bhat, sexp maf, int n,
-                                 const std::vector<LdBlock>& blocks, int nIter, int nBurnin,
-                                 int thin, bool verbose, sexp seed,
-                                 const ChainOptions& opts) {
+                                 const std::vector<std::vector<LdBlock>>& blocks,
+                                 int nIter, int nBurnin, int thin, bool verbose,
+                                 sexp seed, const ChainOptions& opts) {
 	vec beta_mrg = as_Col(bhat);
 	vec maf_vec = maf == R_NilValue ? vec(beta_mrg.n_elem, fill::zeros)
 	                                : as_Col(doubles(maf));
 	bool learn_phi = phi == R_NilValue;
 	double phi_val = learn_phi ? 0.0 : cpp11::as_cpp<double>(phi);
 	ChainSchedule schedule(nIter, nBurnin, thin);
-	PrsCsEstimates est = prs_cs_mcmc(a, b, learn_phi, phi_val, beta_mrg, maf_vec, n,
-	                                 blocks, schedule, verbose, seed_from(seed), opts);
+	vec one_constraint = {1.0};
+	vec one_n = {static_cast<double>(n)};
+	PrsCsEstimates est = prs_cs_mcmc(a, b, learn_phi, phi_val, one_constraint, {beta_mrg},
+	                                 one_n, blocks, {own_places(beta_mrg.n_elem)},
+	                                 beta_mrg.n_elem, schedule, verbose, seed_from(seed),
+	                                 opts);
+	ChainEstimates one = est.study[0];
+	if (arma::max(maf_vec) > 0) {
+		one.beta /= arma::sqrt(2.0 * maf_vec % (1.0 - maf_vec));
+	}
 	using namespace cpp11::literals;
-	return chain_report(est, "psiEst"_nm = as_doubles(est.psi),
-	                    "sigmaEst"_nm = cpp11::as_sexp(est.sigma),
+	return chain_report(one, "psiEst"_nm = as_doubles(est.psi),
+	                    "sigmaEst"_nm = cpp11::as_sexp(est.sigma(0)),
 	                    "phiEst"_nm = cpp11::as_sexp(est.phi));
+}
+
+// The studies' marginal effects.
+std::vector<vec> study_effects(const list& bhatList) {
+	std::vector<vec> out;
+	for (R_xlen_t k = 0; k < bhatList.size(); ++k) {
+		out.push_back(as_Col(doubles(bhatList[k])));
+	}
+	return out;
+}
+
+// Several studies' chain with the arguments as R passes them, each study's
+// effects and fitted correlations reported over the union, zero where it
+// lacks a variant.
+template <class LdBlock>
+cpp11::writable::list joint_prs_run(double a, double b, sexp phi,
+                                    const doubles& constraint,
+                                    const std::vector<vec>& beta_mrg,
+                                    const doubles& n,
+                                    const std::vector<std::vector<LdBlock>>& blocks,
+                                    const std::vector<uvec>& union_idx, int nUnion,
+                                    int nIter, int nBurnin, int thin, bool verbose,
+                                    sexp seed, const ChainOptions& opts) {
+	if (constraint.size() != static_cast<R_xlen_t>(beta_mrg.size()) ||
+	    n.size() != static_cast<R_xlen_t>(beta_mrg.size())) {
+		cpp11::stop("Each study needs one sample size and one constraint.");
+	}
+	bool learn_phi = phi == R_NilValue;
+	double phi_val = learn_phi ? 0.0 : cpp11::as_cpp<double>(phi);
+	ChainSchedule schedule(nIter, nBurnin, thin);
+	PrsCsEstimates est = prs_cs_mcmc(
+	    a, b, learn_phi, phi_val, as_Col(constraint), beta_mrg, as_Col(n), blocks,
+	    union_idx, static_cast<uword>(nUnion), schedule, verbose, seed_from(seed), opts);
+	mat beta(nUnion, beta_mrg.size(), fill::zeros);
+	mat corr(nUnion, beta_mrg.size(), fill::zeros);
+	for (uword k = 0; k < beta_mrg.size(); ++k) {
+		uvec col = {k};
+		beta.submat(union_idx[k], col) = est.study[k].beta;
+		corr.submat(union_idx[k], col) = est.study[k].corr;
+	}
+	using namespace cpp11::literals;
+	return writable::list({
+		"betaEst"_nm = as_doubles_matrix(beta),
+		"psiEst"_nm = as_doubles(est.psi),
+		"sigmaEst"_nm = as_doubles(est.sigma),
+		"phiEst"_nm = cpp11::as_sexp(est.phi),
+		"rhoEst"_nm = as_doubles_matrix(est.rho),
+		"corrEst"_nm = as_doubles_matrix(corr),
+		"diverged"_nm = cpp11::as_sexp(est.diverged())
+	});
 }
 
 }  // namespace
@@ -840,14 +1448,10 @@ cpp11::writable::list prsCsCpp(double a, double b, sexp phi,
                        int nIter, int nBurnin, int thin,
                        bool verbose, sexp seed, double shrinkCorr,
                        bool raoBlackwell, bool track) {
-	std::vector<DenseLdBlock> blocks;
+	std::vector<std::vector<DenseLdBlock>> blocks(1);
 	for (int i = 0; i < ldBlk.size(); ++i) {
-		mat S = as_Mat(doubles_matrix<>(ldBlk[i]));
-		if (shrinkCorr != 1.0) {
-			S *= shrinkCorr;
-			S.diag() += 1.0 - shrinkCorr;
-		}
-		blocks.emplace_back(S);
+		blocks[0].push_back(shrunk_dense_block(as_Mat(doubles_matrix<>(ldBlk[i])),
+		                                       shrinkCorr));
 	}
 	return prs_cs_run(a, b, phi, bhat, maf, n, blocks, nIter, nBurnin, thin, verbose, seed,
 	                  chain_options(raoBlackwell, track));
@@ -866,19 +1470,88 @@ cpp11::writable::list prsCsFactorCpp(double a, double b, sexp phi,
                              int nIter, int nBurnin, int thin,
                              bool verbose, sexp seed, double shrinkCorr,
                              bool raoBlackwell, bool track) {
-	mat F = checked_factor(factorR, bhat.size());
-	mat W = F / std::sqrt(static_cast<double>(F.n_rows) - 1.0);
-	// c R + (1 - c) I: the factor of c R, and the ridge 1 - c.
-	if (shrinkCorr != 1.0) {
-		W *= std::sqrt(shrinkCorr);
-	}
-	std::vector<FactorLdBlock> blocks;
-	blocks.emplace_back(W, 1.0 - shrinkCorr);
+	std::vector<std::vector<FactorLdBlock>> blocks(1);
+	blocks[0].push_back(shrunk_factor_block(checked_factor(factorR, bhat.size()),
+	                                        shrinkCorr));
 	return prs_cs_run(a, b, phi, bhat, maf, n, blocks, nIter, nBurnin, thin, verbose, seed,
 	                  chain_options(raoBlackwell, track));
 }
 
-// ==== SDPR ======================================================================
+/**
+ * @brief PRS-CSx / JointPRS from each study's LD matrix.
+ *
+ * K studies' PRS-CS chain sharing the local and global scales, their effects
+ * correlated by rho (PrsCsChain). `bhatList` holds each study's marginal
+ * effects, `n` its sample size, `ldList` its LD matrix (one block, shrunk to
+ * c R + (1 - c) I by `shrinkCorr` as prsCsCpp() shrinks it) and
+ * `unionIdxList` its variants' 1-based places in the union of the studies'
+ * variants, of size `nUnion`, in one allele frame. `constraint` bounds each
+ * study's correlations: 1 learns them on [0, 0.99], 0 holds them at 0, which is
+ * PRS-CSx. The rest are prsCsCpp()'s. Returns the posterior means: each
+ * study's effects over the union (`betaEst`, union x studies, zero where a
+ * study lacks a variant), the shared `psiEst` and `phiEst`, each study's
+ * `sigmaEst`, the correlations `rhoEst`, and the fitted correlations and
+ * divergence every chain tracks.
+ */
+[[cpp11::register]]
+cpp11::writable::list jointPrsCpp(double a, double b, sexp phi, doubles constraint,
+                                  list bhatList, doubles n, list ldList,
+                                  list unionIdxList, int nUnion, int nIter,
+                                  int nBurnin, int thin, bool verbose, sexp seed,
+                                  double shrinkCorr, bool raoBlackwell, bool track) {
+	std::vector<vec> beta_mrg = study_effects(bhatList);
+	std::vector<uvec> union_idx = union_index(unionIdxList, beta_mrg, nUnion, "effects");
+	if (ldList.size() != static_cast<R_xlen_t>(beta_mrg.size())) {
+		cpp11::stop("There are %d LD matrices for %d studies.", (int)ldList.size(),
+		            (int)beta_mrg.size());
+	}
+	std::vector<std::vector<DenseLdBlock>> blocks(beta_mrg.size());
+	for (uword k = 0; k < beta_mrg.size(); ++k) {
+		mat S = as_Mat(doubles_matrix<>(ldList[static_cast<R_xlen_t>(k)]));
+		if (S.n_rows != beta_mrg[k].n_elem || S.n_cols != beta_mrg[k].n_elem) {
+			cpp11::stop("Study %d's LD is %d x %d but it has %d effects.", (int)k + 1,
+			            (int)S.n_rows, (int)S.n_cols, (int)beta_mrg[k].n_elem);
+		}
+		blocks[k].push_back(shrunk_dense_block(std::move(S), shrinkCorr));
+	}
+	return joint_prs_run(a, b, phi, constraint, beta_mrg, n, blocks, union_idx, nUnion,
+	                     nIter, nBurnin, thin, verbose, seed,
+	                     chain_options(raoBlackwell, track));
+}
+
+/**
+ * @brief PRS-CSx / JointPRS from a factor F of each study's LD, R = F'F / (m - 1),
+ * never forming R.
+ *
+ * The arguments are jointPrsCpp()'s with `factorList` in place of the LD
+ * matrices; each study's chain draws as prsCsFactorCpp()'s does.
+ */
+[[cpp11::register]]
+cpp11::writable::list jointPrsFactorCpp(double a, double b, sexp phi,
+                                        doubles constraint, list bhatList, doubles n,
+                                        list factorList, list unionIdxList, int nUnion,
+                                        int nIter, int nBurnin, int thin, bool verbose,
+                                        sexp seed, double shrinkCorr, bool raoBlackwell,
+                                        bool track) {
+	std::vector<vec> beta_mrg = study_effects(bhatList);
+	std::vector<uvec> union_idx = union_index(unionIdxList, beta_mrg, nUnion, "effects");
+	if (factorList.size() != static_cast<R_xlen_t>(beta_mrg.size())) {
+		cpp11::stop("There are %d LD factors for %d studies.", (int)factorList.size(),
+		            (int)beta_mrg.size());
+	}
+	std::vector<std::vector<FactorLdBlock>> blocks(beta_mrg.size());
+	for (uword k = 0; k < beta_mrg.size(); ++k) {
+		blocks[k].push_back(shrunk_factor_block(
+		    checked_factor(doubles_matrix<>(factorList[static_cast<R_xlen_t>(k)]),
+		                   static_cast<R_xlen_t>(beta_mrg[k].n_elem)),
+		    shrinkCorr));
+	}
+	return joint_prs_run(a, b, phi, constraint, beta_mrg, n, blocks, union_idx, nUnion,
+	                     nIter, nBurnin, thin, verbose, seed,
+	                     chain_options(raoBlackwell, track));
+}
+
+// ==== SDPR and SDPRX ============================================================
 
 namespace {
 
@@ -906,9 +1579,120 @@ SdprData sdpr_data(const doubles& bhatR, int n, sexp perVariantSampleSize, sexp 
 	return dat;
 }
 
-cpp11::writable::list sdpr_output(const SdprEstimates& est) {
+// One study's chain over its blocks: SDPR, with the one kind {0}.
+template <class LdBlock>
+cpp11::writable::list sdpr_one(const std::vector<std::vector<SdprBlock<LdBlock>>>& blocks,
+                               const doubles& bhatR, int M, double a0k, double b0k,
+                               const ChainSchedule& schedule, bool verbose, sexp seed,
+                               const ChainOptions& opts) {
+	SdprSharing sharing;
+	sharing.kinds = {uvec{0}};
+	sharing.rho = mat(1, 1, fill::eye);
+	SdprEstimates est = sdpr_mcmc(blocks, {own_places(bhatR.size())}, bhatR.size(),
+	                              sharing, M, a0k, b0k, schedule, verbose,
+	                              seed_from(seed), opts, {divergence_gap(as_Col(bhatR))});
 	using namespace cpp11::literals;
-	return chain_report(est, "h2"_nm = cpp11::as_sexp(est.h2));
+	return chain_report(est.study[0], "h2"_nm = cpp11::as_sexp(est.h2(0)));
+}
+
+// The kinds and rho as R passes them: each kind's 1-based studies, and rho a
+// K x K correlation matrix, or NULL to learn it starting from the identity.
+SdprSharing sdprx_sharing(const list& kinds, sexp rho, uword K) {
+	SdprSharing sharing;
+	std::vector<std::vector<uword>> seen;
+	for (R_xlen_t q = 0; q < kinds.size(); ++q) {
+		integers studies(kinds[q]);
+		std::vector<uword> kind;
+		for (int v : studies) {
+			if (v < 1 || v > static_cast<int>(K)) {
+				cpp11::stop("Kind %d's studies must lie in 1..%d.", (int)q + 1, (int)K);
+			}
+			kind.push_back(static_cast<uword>(v - 1));
+		}
+		std::sort(kind.begin(), kind.end());
+		if (kind.empty() || std::adjacent_find(kind.begin(), kind.end()) != kind.end() ||
+		    std::find(seen.begin(), seen.end(), kind) != seen.end()) {
+			cpp11::stop("Kind %d must name distinct studies, and differ from the other "
+			            "kinds.", (int)q + 1);
+		}
+		seen.push_back(kind);
+		sharing.kinds.push_back(conv_to<uvec>::from(kind));
+	}
+	if (rho == R_NilValue) {
+		sharing.rho = mat(K, K, fill::eye);
+		sharing.learn_rho = true;
+		return sharing;
+	}
+	sharing.rho = as_Mat(doubles_matrix<>(rho));
+	mat L;
+	if (sharing.rho.n_rows != K || sharing.rho.n_cols != K ||
+	    !sharing.rho.is_symmetric() || arma::any(sharing.rho.diag() != 1.0) ||
+	    !arma::chol(L, sharing.rho)) {
+		cpp11::stop("rho must be a %d x %d positive-definite correlation matrix.",
+		            (int)K, (int)K);
+	}
+	return sharing;
+}
+
+// Several studies' chain with the arguments as R passes them, each study's
+// effects and fitted correlations reported over the union, zero where it
+// lacks a variant.
+template <class LdBlock>
+cpp11::writable::list sdprx_run(const std::vector<std::vector<SdprBlock<LdBlock>>>& blocks,
+                                const std::vector<vec>& beta_mrg,
+                                const std::vector<uvec>& union_idx, int nUnion,
+                                const SdprSharing& sharing, int M, double a0k, double b0k,
+                                const ChainSchedule& schedule, bool verbose, sexp seed,
+                                const ChainOptions& opts) {
+	std::vector<double> gap0;
+	for (const vec& b : beta_mrg) {
+		gap0.push_back(divergence_gap(b));
+	}
+	SdprEstimates est = sdpr_mcmc(blocks, union_idx, static_cast<uword>(nUnion), sharing,
+	                              M, a0k, b0k, schedule, verbose, seed_from(seed), opts,
+	                              gap0);
+	mat beta(nUnion, beta_mrg.size(), fill::zeros);
+	mat corr(nUnion, beta_mrg.size(), fill::zeros);
+	for (uword k = 0; k < beta_mrg.size(); ++k) {
+		uvec col = {k};
+		beta.submat(union_idx[k], col) = est.study[k].beta;
+		corr.submat(union_idx[k], col) = est.study[k].corr;
+	}
+	using namespace cpp11::literals;
+	return writable::list({
+		"betaEst"_nm = as_doubles_matrix(beta),
+		"h2"_nm = as_doubles(est.h2),
+		"rhoEst"_nm = as_doubles_matrix(est.rho),
+		"corrEst"_nm = as_doubles_matrix(corr),
+		"diverged"_nm = cpp11::as_sexp(est.diverged())
+	});
+}
+
+// The studies' marginal effects, union places, sample sizes and kinds as R
+// passes them, checked against each other.
+struct SdprxInputs {
+	std::vector<vec> beta_mrg;
+	std::vector<uvec> union_idx;
+	SdprSharing sharing;
+};
+
+SdprxInputs sdprx_inputs(const list& bhatList, const list& ldList, const integers& n,
+                         const list& unionIdxList, int nUnion, const list& kinds,
+                         sexp rho) {
+	SdprxInputs in;
+	in.beta_mrg = study_effects(bhatList);
+	in.union_idx = union_index(unionIdxList, in.beta_mrg, nUnion, "effects");
+	uword K = in.beta_mrg.size();
+	if (ldList.size() != static_cast<R_xlen_t>(K) || n.size() != static_cast<R_xlen_t>(K)) {
+		cpp11::stop("Each of the %d studies needs one LD and one sample size.", (int)K);
+	}
+	for (int nk : n) {
+		if (nk < 1) {
+			cpp11::stop("Each study's sample size must be positive.");
+		}
+	}
+	in.sharing = sdprx_sharing(kinds, rho, K);
+	return in;
 }
 
 }  // namespace
@@ -942,11 +1726,11 @@ cpp11::writable::list sdprCpp(
 	}
 
 	SdprData data = sdpr_data(bhatR, n, perVariantSampleSize, array, c);
-	std::vector<SdprBlock<DenseLdBlock>> blocks =
-		sdpr_dense_blocks(data, std::move(ref_ld_mat), a, n, optLlk);
-	return sdpr_output(sdpr_mcmc(blocks, M, a0k, b0k, schedule, verbose, seed_from(seed),
-	                             chain_options(raoBlackwell, track),
-	                             divergence_gap(as_Col(bhatR))));
+	std::vector<std::vector<SdprBlock<DenseLdBlock>>> blocks = {
+		sdpr_dense_blocks(data, std::move(ref_ld_mat), a, n, optLlk)
+	};
+	return sdpr_one(blocks, bhatR, M, a0k, b0k, schedule, verbose, seed,
+	                chain_options(raoBlackwell, track));
 }
 
 /**
@@ -982,157 +1766,78 @@ cpp11::writable::list sdprFactorCpp(
 	mat F = checked_factor(factorR, bhatR.size());
 
 	SdprData data = sdpr_data(bhatR, n, perVariantSampleSize, array, c);
-	std::vector<SdprBlock<FactorLdBlock>> blocks = {
-		sdpr_factor_block(data, F, a, n, optLlk)
+	std::vector<std::vector<SdprBlock<FactorLdBlock>>> blocks = {
+		{sdpr_factor_block(data, F, a, n, optLlk)}
 	};
-	return sdpr_output(sdpr_mcmc(blocks, M, a0k, b0k, schedule, verbose, seed_from(seed),
-	                             chain_options(raoBlackwell, track),
-	                             divergence_gap(as_Col(bhatR))));
+	return sdpr_one(blocks, bhatR, M, a0k, b0k, schedule, verbose, seed,
+	                chain_options(raoBlackwell, track));
 }
-
-// ==== The Bayesian alphabet =====================================================
-
-namespace {
-
-template <class Chain>
-cpp11::writable::list alphabet_run(Chain& chain, const ChainSchedule& schedule,
-                                   bool verbose) {
-	run_chain(chain, schedule, verbose);
-	const AlphabetEstimates& est = chain.estimates();
-	using namespace cpp11::literals;
-	return chain_report(est, "pip"_nm = as_doubles(est.pip),
-	                    "pi"_nm = cpp11::as_sexp(est.pi),
-	                    "residualVariance"_nm = cpp11::as_sexp(est.ve));
-}
-
-// qgg's family of priors for every method but bayesB and Park and Casella's
-// bayesL.
-QggFormChain::Method qgg_method(const std::string& method) {
-	if (method == "bayesN") return QggFormChain::N;
-	if (method == "bayesA") return QggFormChain::A;
-	if (method == "bayesL") return QggFormChain::L;
-	if (method == "bayesC") return QggFormChain::C;
-	if (method == "bayesR") return QggFormChain::R;
-	cpp11::stop("Unknown Bayesian alphabet method '%s'.", method.c_str());
-}
-
-}  // namespace
 
 /**
- * @brief The Bayesian alphabet's posterior means from a factor F of the LD,
- * R = F'F / (k - 1), never forming R.
+ * @brief SDPRX: SDPR across studies from each study's LD matrix.
  *
- * @param bhat The standardized marginal effects.
- * @param factorR The factor F (k x p).
- * @param weights The per-variant weights w: X'X = W^1/2 R W^1/2 and
- *   X'y = w % bhat.
- * @param n The sample size.
- * @param method "bayesA", "bayesB", "bayesC", "bayesL", "bayesN" or "bayesR".
- * @param legarra For bayesL, Legarra et al.'s form (qgg's) rather than Park
- *   and Casella's (hibayes').
- * @param pi For bayesB and bayesC, the starting proportion of non-null
- *   effects.
- * @param h2 The prior guess of the heritability that sets the starting
- *   variances.
- * @param nIter The chain's iterations, burn-in included.
- * @param nBurnin The burn-in.
- * @param thin The thinning interval.
- * @param verbose Whether to report progress.
- * @param seed Seed of the sampler's random number generator.
- * @param shrinkCorr The LD shrinkage c: X'X = W^1/2 (c R + (1 - c) I) W^1/2.
- * @param allowJumpSign Keep a drawn effect whose sign differs from the
- *   current one, rather than setting it to zero.
- * @param raoBlackwell Report the effects' conditional means rather than the
- *   draws' average.
- * @param track Stop a diverging chain and report the mean fitted
- *   correlations, for combining several chains.
+ * K studies' SDPR chain whose non-null components each belong to a kind, a
+ * set of the studies (sdpr_mcmc()). `bhatList` holds each study's marginal
+ * effects, `ldList` its LD matrix (one block), `n` its sample size and
+ * `unionIdxList` its variants' 1-based places in the union of the studies'
+ * variants, of size `nUnion`, in one allele frame. `kinds` lists each kind's
+ * 1-based studies, and `rho` is the studies' K x K correlation matrix, or
+ * NULL to learn it. The likelihood is SDPR's optLlk = 1; the rest are
+ * sdprCpp()'s. Returns the posterior means: each study's effects over the
+ * union (`betaEst`, union x studies, zero where a study lacks a variant), its
+ * heritability `h2`, the correlations `rhoEst`, and the fitted correlations
+ * and divergence every chain tracks.
  */
 [[cpp11::register]]
-cpp11::writable::list bayesAlphabetFactorCpp(
-	const doubles& bhat, const doubles_matrix<>& factorR, const doubles& weights,
-	int n, std::string method, bool legarra, double pi, double h2,
-	int nIter, int nBurnin, int thin, bool verbose, int seed,
-	double shrinkCorr, bool allowJumpSign, bool raoBlackwell, bool track) {
-	ChainSchedule schedule(nIter, nBurnin, thin);
-	mat F = checked_factor(factorR, bhat.size());
-	AlphabetData data;
-	data.w = as_Col(weights);
-	data.bhat = as_Col(bhat);
-	data.Fw = F.each_row() % arma::sqrt(data.w).t();
-	data.wy = data.w % data.bhat;
-	data.n = n;
-	data.shrink = shrinkCorr;
-	data.allow_jump_sign = allowJumpSign;
-	data.opts.rao_blackwell = raoBlackwell;
-	data.opts.track = track;
-	unsigned int s = static_cast<unsigned int>(seed);
-	if (method == "bayesB" || (method == "bayesL" && !legarra)) {
-		HibayesFormChain chain(data,
-		                       method == "bayesB" ? HibayesFormChain::B : HibayesFormChain::L,
-		                       pi, h2, s);
-		return alphabet_run(chain, schedule, verbose);
+cpp11::writable::list sdprxCpp(list bhatList, list ldList, integers n, list unionIdxList,
+                               int nUnion, list kinds, sexp rho, double a, double c,
+                               int M, double a0k, double b0k, int iter, int burn,
+                               int thin, bool verbose, sexp seed, bool raoBlackwell,
+                               bool track) {
+	ChainSchedule schedule(iter, burn, thin);
+	SdprxInputs in = sdprx_inputs(bhatList, ldList, n, unionIdxList, nUnion, kinds, rho);
+	std::vector<std::vector<SdprBlock<DenseLdBlock>>> blocks;
+	for (uword k = 0; k < in.beta_mrg.size(); ++k) {
+		R_xlen_t at = static_cast<R_xlen_t>(k);
+		mat R = as_Mat(doubles_matrix<>(ldList[at]));
+		if (R.n_rows != in.beta_mrg[k].n_elem || R.n_cols != in.beta_mrg[k].n_elem) {
+			cpp11::stop("Study %d's LD is %d x %d but it has %d effects.", (int)k + 1,
+			            (int)R.n_rows, (int)R.n_cols, (int)in.beta_mrg[k].n_elem);
+		}
+		std::vector<mat> one;
+		one.push_back(std::move(R));
+		SdprData data = sdpr_data(doubles(bhatList[at]), n[at], R_NilValue, R_NilValue, c);
+		blocks.push_back(sdpr_dense_blocks(data, std::move(one), a, n[at], 1));
 	}
-	QggFormChain chain(data, qgg_method(method), pi, h2, s);
-	return alphabet_run(chain, schedule, verbose);
+	return sdprx_run(blocks, in.beta_mrg, in.union_idx, nUnion, in.sharing, M, a0k, b0k,
+	                 schedule, verbose, seed, chain_options(raoBlackwell, track));
 }
 
-// ==== LDpred2 ===================================================================
-
 /**
- * @brief One LDpred2 chain from a factor F of the LD, R = F'F / (k - 1),
- * never forming R.
+ * @brief SDPRX from a factor F of each study's LD, R = F'F / (m - 1), never
+ * forming R.
  *
- * @param bhat The standardized marginal effects.
- * @param factorR The factor F (k x p).
- * @param n The per-variant sample sizes.
- * @param automatic LDpred2-auto rather than LDpred2-grid.
- * @param p The proportion of causal variants: fixed for the grid, the
- *   starting value for auto.
- * @param h2 The heritability: fixed for the grid, the starting value for
- *   auto.
- * @param sparse For the grid, set an effect to zero when its inclusion
- *   probability falls below p.
- * @param shrinkCorr The LD shrinkage c in R_s = c R + (1 - c) I.
- * @param allowJumpSign Keep a drawn effect whose sign differs from the
- *   current one, rather than setting it to zero.
- * @param pLower,pUpper For auto, the bounds on p.
- * @param meanLd For auto, the mean LD score that divides the counts of p's
- *   Beta full conditional.
- * @param nIter The chain's iterations, burn-in included.
- * @param nBurnin The burn-in.
- * @param verbose Whether to report progress.
- * @param seed Seed of the sampler's random number generator.
+ * The arguments are sdprxCpp()'s with `factorList` in place of the LD
+ * matrices; each study's matrices take the low-rank form sdprFactorCpp()
+ * reads.
  */
 [[cpp11::register]]
-cpp11::writable::list ldpred2FactorCpp(
-	const doubles& bhat, const doubles_matrix<>& factorR, const doubles& n,
-	bool automatic, double p, double h2, bool sparse, double shrinkCorr,
-	bool allowJumpSign, double pLower, double pUpper, double meanLd,
-	int nIter, int nBurnin, bool verbose, int seed) {
-	ChainSchedule schedule(nIter, nBurnin, 1);
-	mat F = checked_factor(factorR, bhat.size());
-	vec b = as_Col(bhat);
-	vec nv = as_Col(n);
-	if (nv.n_elem != b.n_elem) {
-		cpp11::stop("There are %d sample sizes but %d effects.", (int)nv.n_elem,
-		            (int)b.n_elem);
+cpp11::writable::list sdprxFactorCpp(list bhatList, list factorList, integers n,
+                                     list unionIdxList, int nUnion, list kinds, sexp rho,
+                                     double a, double c, int M, double a0k, double b0k,
+                                     int iter, int burn, int thin, bool verbose,
+                                     sexp seed, bool raoBlackwell, bool track) {
+	ChainSchedule schedule(iter, burn, thin);
+	SdprxInputs in = sdprx_inputs(bhatList, factorList, n, unionIdxList, nUnion, kinds,
+	                              rho);
+	std::vector<std::vector<SdprBlock<FactorLdBlock>>> blocks;
+	for (uword k = 0; k < in.beta_mrg.size(); ++k) {
+		R_xlen_t at = static_cast<R_xlen_t>(k);
+		mat F = checked_factor(doubles_matrix<>(factorList[at]),
+		                       static_cast<R_xlen_t>(in.beta_mrg[k].n_elem));
+		SdprData data = sdpr_data(doubles(bhatList[at]), n[at], R_NilValue, R_NilValue, c);
+		blocks.push_back({sdpr_factor_block(data, F, a, n[at], 1)});
 	}
-	Ldpred2Settings settings;
-	settings.automatic = automatic;
-	settings.p = p;
-	settings.h2 = h2;
-	settings.sparse = sparse;
-	settings.shrink = shrinkCorr;
-	settings.allow_jump_sign = allowJumpSign;
-	settings.p_lower = pLower;
-	settings.p_upper = pUpper;
-	settings.mean_ld = meanLd;
-	Ldpred2Chain chain(F, b, nv, settings, static_cast<unsigned int>(seed));
-	run_chain(chain, schedule, verbose);
-	const Ldpred2Estimates& est = chain.estimates();
-	using namespace cpp11::literals;
-	return chain_report(
-		est, "postp"_nm = as_doubles(est.postp),
-		"pathP"_nm = writable::doubles(est.path_p.begin(), est.path_p.end()),
-		"pathH2"_nm = writable::doubles(est.path_h2.begin(), est.path_h2.end()));
+	return sdprx_run(blocks, in.beta_mrg, in.union_idx, nUnion, in.sharing, M, a0k, b0k,
+	                 schedule, verbose, seed, chain_options(raoBlackwell, track));
 }

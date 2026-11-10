@@ -1807,15 +1807,25 @@ test_that("fineMappingPipeline refuses fsusie on a single trait", {
 # shape so the test can assert it was constructed as expected.
 .fmp_mockMvsusie <- function() {
     # L / L_greedy are refused by MvsusieOptions as pipeline-owned, so record
-    # what arrives for a test to assert.
-    function(X, Y, prior_variance, coverage, L = NULL, L_greedy = NULL) {
+    # what arrives for a test to assert. `standardize` is the pipeline's
+    # default the user may override, recorded likewise.
+    function(
+        X,
+        Y,
+        prior_variance,
+        coverage,
+        L = NULL,
+        L_greedy = NULL,
+        standardize = TRUE
+    ) {
         list(
             token = "mvsusie",
             n_X_cols = ncol(X),
             n_Y_cols = ncol(Y),
             coverage = coverage,
             L = L,
-            L_greedy = L_greedy
+            L_greedy = L_greedy,
+            standardize = standardize
         )
     }
 }
@@ -2096,12 +2106,14 @@ test_that("the mvsusie resume cache short-circuits the joint fitter", {
             )
         )
     }
+    # A cached row of the group's fit records the traits it joined.
     cache <- QtlFineMappingResult(
         studyName = c("study1", "study1"),
         context = c("brain", "brain"),
         trait = c("ENSG_A", "ENSG_B"),
         method = c("mvsusie", "mvsusie"),
-        entry = list(cachedEntry(), cachedEntry())
+        entry = list(cachedEntry(), cachedEntry()),
+        jointTraits = rep("ENSG_A;ENSG_B", 2L)
     )
     mv_calls <- 0
     local_mocked_bindings(
@@ -2127,6 +2139,56 @@ test_that("the mvsusie resume cache short-circuits the joint fitter", {
     )
     expect_equal(mv_calls, 0L) # cache hit -> fitter never called
     expect_equal(nrow(res), 2L)
+})
+
+test_that("the mvsusie resume cache does not borrow another fit's rows", {
+    # Rows of the tuples fitted alone, or of a fit over other traits, are
+    # other fits: the group is fitted afresh.
+    qd <- .fmp_qdAB
+    cachedEntry <- function() {
+        FineMappingRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
+            susieFit = list(token = "mvsusie_cached"),
+            topLoci = data.frame(
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:3)),
+                pip = c(0.9, 0.5, 0.1),
+                stringsAsFactors = FALSE
+            )
+        )
+    }
+    cacheOf <- function(jointTraits) {
+        QtlFineMappingResult(
+            studyName = c("study1", "study1"),
+            context = c("brain", "brain"),
+            trait = c("ENSG_A", "ENSG_B"),
+            method = c("mvsusie", "mvsusie"),
+            entry = list(cachedEntry(), cachedEntry()),
+            jointTraits = jointTraits
+        )
+    }
+    mv_calls <- 0
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        mvsusie = function(...) {
+            mv_calls <<- mv_calls + 1L
+            list()
+        },
+        create_mixture_prior = .fmp_mockMixturePrior(),
+        .package = "mvsusieR"
+    )
+    for (joint in list(NULL, rep("ENSG_A;ENSG_B;ENSG_C", 2L))) {
+        suppressMessages(fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            cisWindow = 1000L,
+            fineMappingResult = cacheOf(joint)
+        ))
+    }
+    expect_equal(mv_calls, 2L)
 })
 
 test_that("jointSpec = 'context' gives one joint row per trait", {
@@ -2421,6 +2483,57 @@ test_that("multi-study fine-mapping aggregates its QtlDatasets' results", {
     expect_setequal(studyName(res), c("s1", "s2"))
     # Pure individual-level -> ldReference should be NULL.
     expect_identical(ldReference(res), list())
+})
+
+test_that("a study-axis spec fits the individual-level studies jointly", {
+    msd <- .fm_disjointStudies()
+    run <- function(data, methods, jointSpecification = NULL) {
+        suppressMessages(fineMappingPipeline(
+            data,
+            methods = methods,
+            jointSpecification = jointSpecification,
+            cisWindow = 50000L,
+            initializeWithSusieInf = FALSE,
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+            verbose = 0
+        ))
+    }
+    quiet <- FineMappingMethodsParam(
+        qtlDatasetMethods = list(mvsusie = list(verbose = FALSE))
+    )
+    res <- run(msd, quiet, "study")
+    expect_s4_class(res, "QtlFineMappingResult")
+    expect_equal(as.character(res$study), c("study1", "study2"))
+    expect_equal(as.character(res$jointStudies), rep("study1;study2", 2L))
+    expect_setequal(methodNames(res), "mvsusie")
+    expect_false("package:susieR" %in% search())
+    # Each study's row reports its own samples' allele frequencies, as that
+    # study's own fit reports them.
+    for (i in 1:2) {
+        joint <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        own <- run(msd[[i]], "susie")
+        alone <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(own, 1L))
+        shared <- intersect(joint$variant_id, alone$variant_id)
+        expect_gt(length(shared), 10L)
+        expect_equal(
+            joint$af[match(shared, joint$variant_id)],
+            alone$af[match(shared, alone$variant_id)]
+        )
+    }
+})
+
+test_that("a study-axis spec refuses studies sharing samples", {
+    data(multiStudyQtlDatasetExample, envir = environment())
+    expect_error(
+        suppressMessages(fineMappingPipeline(
+            multiStudyQtlDatasetExample,
+            methods = "mvsusie",
+            jointSpecification = "study",
+            cisWindow = 50000L,
+            verbose = 0
+        )),
+        "share 165 sample"
+    )
 })
 
 # A study measured in brain and liver, on the synthetic genotypes.

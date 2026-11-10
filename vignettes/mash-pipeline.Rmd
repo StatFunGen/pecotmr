@@ -233,6 +233,29 @@ are fixed structural hypotheses -- identity, singletons, equal effects -- and
 reach the prior unmodified, matching mashr's own workflow. `engine = "none"`
 uses the data-driven components as generated, without refinement.
 
+mashr's canonical set has an effect in one condition or in all of them. With
+three or more conditions, such as studies of several ancestries, add
+`"subsets"` for effects shared by some conditions but not others. For every
+subset of two or more conditions short of all of them, it adds equal effects
+within the subset and, by default, mashr's `simple_het` correlations (0.25,
+0.5, 0.75), with no effect outside it. These are fixed hypotheses too. Their
+number grows quickly: 12 matrices for three conditions, 40 for four.
+`CovSubsetsOptions(corr = )` sets the correlations:
+
+```{r mash-subsets, eval=FALSE}
+mashPriorCovariances(
+    sumStatsList,
+    alpha = 0,
+    vhat = vhat,
+    components = MashComponentParam(
+        canonical = list(),
+        subsets = CovSubsetsOptions(corr = c(1, 0.5)),
+        pca = list(),
+        flash = list()
+    )
+)
+```
+
 To bypass the covariance chain entirely and fit weights against a prior you
 already have:
 

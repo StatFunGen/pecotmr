@@ -3636,6 +3636,12 @@ test_that("an LD source answers the same in every form", {
             label = nm
         )
         expect_equal(
+            unname(pecotmr:::.ldCrossForms(ld, B)),
+            unname(crossprod(B, R %*% B)),
+            tolerance = 1e-10,
+            label = nm
+        )
+        expect_equal(
             unname(pecotmr:::.ldSourceRows(ld, c(5L, 2L))),
             unname(R[c(5, 2), ]),
             tolerance = 1e-10,

@@ -28,6 +28,14 @@ penalizedRssFactorCpp <- function(zR, factorR, shrink, pathR, penaltyStr, strate
   .Call(`_pecotmr_penalizedRssFactorCpp`, zR, factorR, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control)
 }
 
+penalizedRssCoupledCpp <- function(zList, ldList, unionIdxList, nUnion, strength, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control) {
+  .Call(`_pecotmr_penalizedRssCoupledCpp`, zList, ldList, unionIdxList, nUnion, strength, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control)
+}
+
+penalizedRssCoupledFactorCpp <- function(zList, factorList, unionIdxList, nUnion, strength, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control) {
+  .Call(`_pecotmr_penalizedRssCoupledFactorCpp`, zList, factorList, unionIdxList, nUnion, strength, shrink, pathR, penaltyStr, strategyStr, gamma, alpha, lambda1, lambda2, thr, maxiter, maxSwaps, control)
+}
+
 qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed) {
   .Call(`_pecotmr_qtlEnrichmentCpp`, rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed)
 }
@@ -40,6 +48,14 @@ prsCsFactorCpp <- function(a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thi
   .Call(`_pecotmr_prsCsFactorCpp`, a, b, phi, bhat, maf, n, factorR, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
 }
 
+jointPrsCpp <- function(a, b, phi, constraint, bhatList, n, ldList, unionIdxList, nUnion, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track) {
+  .Call(`_pecotmr_jointPrsCpp`, a, b, phi, constraint, bhatList, n, ldList, unionIdxList, nUnion, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
+}
+
+jointPrsFactorCpp <- function(a, b, phi, constraint, bhatList, n, factorList, unionIdxList, nUnion, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track) {
+  .Call(`_pecotmr_jointPrsFactorCpp`, a, b, phi, constraint, bhatList, n, factorList, unionIdxList, nUnion, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
+}
+
 sdprCpp <- function(bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track) {
   .Call(`_pecotmr_sdprCpp`, bhatR, LD, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track)
 }
@@ -48,12 +64,12 @@ sdprFactorCpp <- function(bhatR, factorR, n, perVariantSampleSize, array, a, c, 
   .Call(`_pecotmr_sdprFactorCpp`, bhatR, factorR, n, perVariantSampleSize, array, a, c, M, a0k, b0k, iter, burn, thin, optLlk, verbose, seed, raoBlackwell, track)
 }
 
-bayesAlphabetFactorCpp <- function(bhat, factorR, weights, n, method, legarra, pi, h2, nIter, nBurnin, thin, verbose, seed, shrinkCorr, allowJumpSign, raoBlackwell, track) {
-  .Call(`_pecotmr_bayesAlphabetFactorCpp`, bhat, factorR, weights, n, method, legarra, pi, h2, nIter, nBurnin, thin, verbose, seed, shrinkCorr, allowJumpSign, raoBlackwell, track)
+sdprxCpp <- function(bhatList, ldList, n, unionIdxList, nUnion, kinds, rho, a, c, M, a0k, b0k, iter, burn, thin, verbose, seed, raoBlackwell, track) {
+  .Call(`_pecotmr_sdprxCpp`, bhatList, ldList, n, unionIdxList, nUnion, kinds, rho, a, c, M, a0k, b0k, iter, burn, thin, verbose, seed, raoBlackwell, track)
 }
 
-ldpred2FactorCpp <- function(bhat, factorR, n, automatic, p, h2, sparse, shrinkCorr, allowJumpSign, pLower, pUpper, meanLd, nIter, nBurnin, verbose, seed) {
-  .Call(`_pecotmr_ldpred2FactorCpp`, bhat, factorR, n, automatic, p, h2, sparse, shrinkCorr, allowJumpSign, pLower, pUpper, meanLd, nIter, nBurnin, verbose, seed)
+sdprxFactorCpp <- function(bhatList, factorList, n, unionIdxList, nUnion, kinds, rho, a, c, M, a0k, b0k, iter, burn, thin, verbose, seed, raoBlackwell, track) {
+  .Call(`_pecotmr_sdprxFactorCpp`, bhatList, factorList, n, unionIdxList, nUnion, kinds, rho, a, c, M, a0k, b0k, iter, burn, thin, verbose, seed, raoBlackwell, track)
 }
 
 vcfGtDosageCpp <- function(gt, alleles) {

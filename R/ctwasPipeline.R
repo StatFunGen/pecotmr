@@ -90,13 +90,16 @@ setClass(
 #'   \code{|weight| < weightCutoff}. Default \code{0} (no filter).
 #' @param csMinCor Numeric. Variants in a 95\% credible set whose purity
 #'   (\code{min_abs_corr}) is at least this are must-keep. Default
-#'   \code{0.8}. Requires a \code{fineMappingResult}; ignored without one.
+#'   \code{0.8}. Applies to a fine-mapping method's weights, read off the
+#'   fit they came from (\code{ctwasPipeline}'s \code{fineMappingResult});
+#'   ignored for other weights.
 #' @param pipRescue Numeric. Variants with PIP above this are must-keep.
-#'   Default \code{0} (no PIP rescue). Requires a \code{fineMappingResult}.
+#'   Default \code{0} (no PIP rescue). Applies as \code{csMinCor} does.
 #' @param maxVariants Numeric. Cap on the per-gene variant count. Above it,
 #'   all must-keep variants are retained and the remaining slots filled by
-#'   descending PIP (when available) or descending \code{|weight|}. Default
-#'   \code{Inf} (no cap).
+#'   descending PIP for a fine-mapping method's weights, read off their own
+#'   fit, and by descending \code{|weight|} for every other method's, as
+#'   cTWAS's own \code{top_n_snps} does. Default \code{Inf} (no cap).
 #' @return A \code{VariantPruningParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' VariantPruningParam(weightCutoff = 1e-4, maxVariants = 5000)
@@ -232,16 +235,25 @@ BoundaryMergeParam <- function(
 #'   \code{CtwasEstParamOptions(logfile = "est_param.log")}.
 #'
 #' @section LD reference compatibility check: Per block: the block's GWAS
-#'   rows must share one LD reference (a block's LD is one matrix), and every
-#'   weight row placed in the block that carries a reference must be the same
-#'   LD reference as theirs. Blocks may sit on different references.
-#'   The two must be the same kind of reference. Two genotype panels must
-#'   share their samples and allele orientation; two \code{LdMatrix} objects
-#'   must agree on the LD they share; two \code{GenotypeMixture} objects must
-#'   average the same panels with the same weights. The two need NOT carry the
-#'   same variants; a partial overlap, which is what QC-ing the two sides
-#'   separately produces, only warns. A mismatch of any of those, or no shared
-#'   variant at all, is a hard error.
+#'   rows must share one LD reference (a block's LD is one matrix). Blocks
+#'   may sit on different references.
+#'
+#'   Every gene z-score and every correlation is computed on that GWAS LD,
+#'   never on the panel a weight was trained on, so weights are not checked
+#'   against it: weights from another panel -- another study's, or another
+#'   ancestry's -- are used as they are. Each weight variant is matched to
+#'   the GWAS panel by position and alleles, its sign flipped where the two
+#'   spell the alleles the other way round. A variant the panel lacks, or a
+#'   strand-ambiguous one, is dropped, as cTWAS's own weight preparation
+#'   drops it, and a message reports the share of the genes' sum |w| lost
+#'   that way. A gene left with no variant on the panel is dropped with a
+#'   warning naming it. Each group of weights gets its own prior and effect
+#'   size, so weights that carry over less well to the GWAS's ancestry are
+#'   weighed accordingly.
+#'
+#'   A GWAS meta-analysed across ancestries is modelled against the mixture
+#'   of their panels: give its blocks a \code{GenotypeMixture} as their LD
+#'   reference.
 #'
 #' @param gwasSumStats A \code{\link{GwasSumStats}} whose elements are LD
 #'   blocks (at least two), keyed by its \code{blockId} column, with
@@ -266,38 +278,49 @@ BoundaryMergeParam <- function(
 #' @param twasZ Optional \code{GRanges} of TWAS Z-scores (output of
 #'   \code{\link{causalInferencePipeline}}). When supplied, each weighted
 #'   gene's Z -- the TWAS row of its \code{(qtlStudy, context, trait,
-#'   method)} for the GWAS study of \code{gwasSumStats} -- is used as the
-#'   \code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
-#'   Every weighted gene needs exactly one, so \code{twasZ} must hold the
+#'   method)} and joint group (\code{jointStudies}, \code{jointContexts},
+#'   \code{jointTraits}) for the GWAS study of \code{gwasSumStats} -- is used
+#'   as the \code{z_gene} input to \code{ctwas_sumstats} so it is not
+#'   recomputed. A gene whose weights the pipeline then changes -- dropping
+#'   variants the GWAS LD panel lacks (renormalizing a SuSiE fit's weights
+#'   over the rest), or through \code{variantPruningParam} -- gets its Z
+#'   recomputed from the weights cTWAS models instead, with a message naming
+#'   it, since \code{twasZ} scored the weights before they changed. Every
+#'   other weighted gene needs exactly one, so \code{twasZ} must hold the
 #'   method each gene is run with: chosen with the same
 #'   \code{weightSelectionParam}, or a superset such as \code{methods =
 #'   "all"}. Rows for other genes, methods or GWAS studies, and MR rows, are
 #'   ignored.
-#' @param fineMappingResult Optional \code{QtlFineMappingResult}: the genes'
-#'   own fine-mapping, whose per-variant PIP and credible-set membership the
-#'   CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
-#'   Each gene is looked up by its weights' \code{(study, context, trait)} in
-#'   the fits of \code{fineMappingMethod}; a gene with no fit there gets no
-#'   rescue. When \code{NULL} (default) the smart filters are no-ops; only the
-#'   magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
-#'   (\code{maxNumVariants}, ordered by \code{|weight|}) apply.
-#' @param fineMappingMethod Character (length 1): the method of
-#'   \code{fineMappingResult} whose fits the rescues read, e.g.
-#'   \code{"susie"}. Required with a \code{fineMappingResult}, since the
-#'   weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
-#'   names no fine-mapping fit. Default \code{NULL}.
-#' @param weightSelectionParam Which method's weights each gene (each
+#' @param fineMappingResult Optional \code{QtlFineMappingResult}: the fits a
+#'   fine-mapping method's weights came from (\code{susie}, \code{mvsusie}
+#'   and the like, read off them by \code{\link{twasWeightsPipeline}}). Each
+#'   such weight reads the row of its own method, \code{(study, context,
+#'   trait)} and joint group (\code{jointStudies}, \code{jointContexts},
+#'   \code{jointTraits}). Its fit renormalizes the weights over the variants
+#'   kept, and its per-variant PIPs and credible sets order the variants under
+#'   the per-gene cap (\code{variantPruningParam}'s \code{csMinCor},
+#'   \code{pipRescue} and \code{maxVariants}). Every other method's weights,
+#'   and a fine-mapping weight with no row here, are capped by
+#'   \code{|weight|}: another model's PIPs say nothing about which of a
+#'   regression's variants carry its prediction. A \code{QtlFineMappingResult}
+#'   passed as \code{twasWeights} is its own fit. When \code{NULL} (default)
+#'   only the magnitude filter and the cap by \code{|weight|} apply.
+#' @param weightSelectionParam Which weight set each gene (each
 #'   \code{(study, context, trait)}) is modelled with, built with
 #'   \code{\link{WeightSelectionParam}}, as in
-#'   \code{\link{causalInferencePipeline}}. A cTWAS run models one weight per
-#'   gene. By default (\code{methods = "best"}) one run takes each gene's
-#'   best method by cross-validated r-squared, the genes' methods mixed, and
+#'   \code{\link{causalInferencePipeline}}: a method, and, where the gene
+#'   holds that method's weights from several kinds of joint fit, which one
+#'   (its \code{jointAxes}). A cTWAS run models one weight set per gene. By
+#'   default (\code{methods = "best"}) one run takes each gene's best weight
+#'   set by cross-validated r-squared, the genes' methods and kinds mixed, and
 #'   its results are labelled \code{method = "best"}; the gene ids keep each
-#'   gene's own method. A gene whose methods carry no r-squared to pick one
-#'   by is then refused, unless it has just one. \code{methods = "all"}, or
-#'   several named methods, runs cTWAS once per method, one after another,
-#'   the results labelled by method in one \code{CtwasResult}; a single
-#'   named method is one run.
+#'   gene's own method, and its result rows its weights' joint members
+#'   (\code{joint_twas_studies} and so on). A gene whose weight sets carry no
+#'   r-squared to pick one by is then refused, unless it has just one.
+#'   \code{methods = "all"}, or several named methods, runs cTWAS once per
+#'   method and kind of joint fit, one after another, the results labelled by
+#'   method and, when some weights are of a joint fit, \code{jointTwasAxes} in
+#'   one \code{CtwasResult}; a single named method of one kind is one run.
 #' @param maxNumSingleEffects Integer. Max number of single effects in cTWAS
 #'   fine-mapping. Default \code{5}. Pass-through to
 #'   \code{ctwas::ctwas_sumstats}.
@@ -382,7 +405,6 @@ ctwasPipeline <- function(
     twasWeights,
     twasZ = NULL,
     fineMappingResult = NULL,
-    fineMappingMethod = NULL,
     weightSelectionParam = WeightSelectionParam(),
     maxNumSingleEffects = 5L,
     BPPARAM = SerialParam(),
@@ -406,7 +428,6 @@ ctwasPipeline <- function(
         twasWeights,
         twasZ,
         fineMappingResult,
-        fineMappingMethod,
         weightSelectionParam
     )
     rows <- list_c(map(
@@ -434,7 +455,6 @@ ctwasPipeline <- function(
     twasWeights,
     twasZ,
     fineMappingResult,
-    fineMappingMethod,
     weightSelectionParam
 ) {
     build <- .inputsBuild(
@@ -445,8 +465,7 @@ ctwasPipeline <- function(
         gwasSumStats,
         twasWeights,
         twasZ,
-        fineMappingResult,
-        fineMappingMethod
+        fineMappingResult
     )
     list(
         build = build,
@@ -602,8 +621,9 @@ ctwasPipeline <- function(
 #' @param weightSelectionParam Which method's weights each gene is modelled
 #'   with, built with \code{\link{WeightSelectionParam}}, as in
 #'   \code{\link{ctwasPipeline}}. These are one cTWAS run's inputs, so the
-#'   choice must make one run: \code{"best"}, or a single method;
-#'   \code{ctwasPipeline} runs one per method for several.
+#'   choice must make one run: \code{"best"}, or a single method of one kind
+#'   of joint fit; \code{ctwasPipeline} runs one per method and kind for
+#'   several.
 #' @return A list with elements \code{z_snp}, \code{z_gene} (NULL when no
 #'   \code{twasZ}), \code{weights}, \code{region_info}, \code{snp_map},
 #'   \code{LD_map}, \code{LD_loader_fun}, \code{snpinfo_loader_fun},
@@ -636,7 +656,6 @@ assembleCtwasInputs <- function(
     twasWeights,
     twasZ = NULL,
     fineMappingResult = NULL,
-    fineMappingMethod = NULL,
     weightSelectionParam = WeightSelectionParam(),
     variantPruningParam = VariantPruningParam()
 ) {
@@ -649,8 +668,7 @@ assembleCtwasInputs <- function(
         gwasSumStats,
         twasWeights,
         twasZ,
-        fineMappingResult,
-        fineMappingMethod
+        fineMappingResult
     )
     runs <- .ctwasRunPlan(
         inp$twasWeights,
@@ -698,7 +716,6 @@ assembleCtwasInputs <- function(
     .ctwasFirstPass(
         names(inp$gwasSumStats),
         inp$gwasSumStats,
-        inp$twasWeights,
         inp$globalPanelInfo
     )
 }
@@ -712,15 +729,26 @@ assembleCtwasInputs <- function(
     abort(c(
         glue(
             "assembleCtwasInputs: the weight choice makes {length(runs)} ",
-            "cTWAS runs, one per method ",
-            "({str_flatten(map_chr(runs, 'label'), ', ')}), and these are one ",
-            "run's inputs."
+            "cTWAS runs, one per method and kind of joint fit ",
+            "({str_flatten(map_chr(runs, .ctwasRunName), ', ')}), and these ",
+            "are one run's inputs."
         ),
         i = str_c(
-            "Name one method, use methods = \"best\", or let ctwasPipeline() ",
-            "run one per method."
+            "Name one method (and jointAxes, for a method fitted several ",
+            "ways), use methods = \"best\", or let ctwasPipeline() run one ",
+            "per method and kind."
         )
     ))
+}
+
+# A run as text: its label, with its kind of joint fit when it is one.
+# @noRd
+.ctwasRunName <- function(run) {
+    kind <- run$jointTwasAxes %||% NA_character_
+    if (is.na(kind) || kind == "none") {
+        return(run$label)
+    }
+    str_c(run$label, " (", kind, ")")
 }
 
 # The inputs of assembleCtwasInputs(), checked and resolved in the order a bad
@@ -731,8 +759,7 @@ assembleCtwasInputs <- function(
     gwasSumStats,
     twasWeights,
     twasZ,
-    fineMappingResult,
-    fineMappingMethod
+    fineMappingResult
 ) {
     .ctwasValidateGwasList(gwasSumStats)
     globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
@@ -750,10 +777,7 @@ assembleCtwasInputs <- function(
         twasWeights = placed,
         globalPanelInfo = globalPanelInfo,
         gwasStudy = gwasStudy,
-        fineMappingResult = .ctwasRescueSource(
-            fineMappingResult,
-            fineMappingMethod
-        )
+        fineMappingResult = fineMappingResult
     )
 }
 
@@ -937,39 +961,6 @@ assembleCtwasInputs <- function(
     }
 }
 
-# The fine-mapping the rescues read: `fineMappingResult` narrowed to the one
-# method `fineMappingMethod` names. The weights' own method cannot pick it --
-# an "ensemble", "lasso" or "mrash" weight has no fine-mapping fit of that
-# name -- so the method is named separately, and is required with a result.
-# @noRd
-.ctwasRescueSource <- function(fineMappingResult, fineMappingMethod) {
-    assertString(fineMappingMethod, null.ok = TRUE)
-    if (is.null(fineMappingResult)) {
-        if (!is.null(fineMappingMethod)) {
-            abort(glue(
-                "`fineMappingMethod` names a method of `fineMappingResult`, ",
-                "which was not given."
-            ))
-        }
-        return(NULL)
-    }
-    available <- unique(as.character(fineMappingResult$method))
-    if (is.null(fineMappingMethod)) {
-        abort(glue(
-            "`fineMappingResult` is given, so `fineMappingMethod` must name ",
-            "the method of it whose PIPs and credible sets the rescues read ",
-            "(available: {str_flatten(available, ', ')})."
-        ))
-    }
-    if (!is_in(fineMappingMethod, available)) {
-        abort(glue(
-            "`fineMappingMethod` '{fineMappingMethod}' is not a method of ",
-            "`fineMappingResult` (available: {str_flatten(available, ', ')})."
-        ))
-    }
-    fineMappingResult[fineMappingResult$method == fineMappingMethod]
-}
-
 # The ctwas-shaped snpInfo for the whole collection's panel, captured BEFORE
 # .ctwasGwasByBlock() narrows each block's sketch to its own variants. A
 # gene's cis SPAN has to cover every block it reaches or
@@ -989,11 +980,13 @@ assembleCtwasInputs <- function(
     filter(info, !duplicated(.data$id))
 }
 
-# One region's GWAS LD sketch, checked against the region's weights. A
-# region's LD is one matrix, so its GWAS rows must share one reference, and
-# every weight row in the region is combined with them.
+# One region's GWAS LD sketch. A region's LD is one matrix, so its GWAS rows
+# must share one reference. The weights' own references are not checked
+# against it: no gene z or correlation is computed on the panel a weight was
+# trained on, so a weight from another panel is placed on this one by the
+# variants the two share (.ctwasAlignGeneWeights()).
 # @noRd
-.ctwasRegionGwasLd <- function(rid, gwasSumStats, twasWeights) {
+.ctwasRegionGwasLd <- function(rid, gwasSumStats) {
     gwas <- gwasSumStats[[rid]]
     refs <- ldReference(gwas)
     if (length(refs) == 0L) {
@@ -1010,10 +1003,6 @@ assembleCtwasInputs <- function(
             "matrix."
         )
         abort(msg)
-    }
-    tw <- twasWeights[[rid]]
-    if (!is.null(tw)) {
-        .ctwasRequireMatchingLdRefs(tw, gwas)
     }
     refs[[1L]]
 }
@@ -1046,18 +1035,8 @@ assembleCtwasInputs <- function(
 # variants too, and the blocks partition the panel, so their union is exactly
 # the global vector. It costs nothing beyond the panels themselves.
 # @noRd
-.ctwasFirstPass <- function(
-    regionIds,
-    gwasSumStats,
-    twasWeights,
-    globalPanelInfo = NULL
-) {
-    sketches <- map(
-        regionIds,
-        .ctwasRegionGwasLd,
-        gwasSumStats = gwasSumStats,
-        twasWeights = twasWeights
-    )
+.ctwasFirstPass <- function(regionIds, gwasSumStats, globalPanelInfo = NULL) {
+    sketches <- map(regionIds, .ctwasRegionGwasLd, gwasSumStats = gwasSumStats)
     ldTokens <- .ctwasRegionLdTokens(regionIds, sketches)
     ldPanelsByRegion <- set_names(
         map(sketches, .ctwasPanelFor),
@@ -1172,11 +1151,7 @@ assembleCtwasInputs <- function(
     )
     list(
         z_snp = zSnp,
-        z_gene = if (!is.null(supplied$twasZ)) {
-            .ctwasBuildZGene(supplied$twasZ, weightsList, supplied$gwasStudy)
-        } else {
-            .ctwasGeneZ(weightsList, zSnp)
-        },
+        z_gene = .ctwasZGeneFor(weightsList, zSnp, supplied),
         weights = weightsList,
         region_info = regionInfo,
         snp_map = fp$snpMap,
@@ -1186,6 +1161,48 @@ assembleCtwasInputs <- function(
         resolvedMethod = resolvedMethod,
         gwas_n = .ctwasGwasN(zSnp)
     )
+}
+
+# The genes' z-scores. A supplied `twasZ` gives those of the genes whose
+# weights the pipeline kept as given; every other gene gets its own w'z /
+# sqrt(w'Rw) from the weights cTWAS models (.ctwasGeneZ()) -- a SuSiE fit's
+# renormalized first, then trimmed -- since twasZ scored them before they
+# changed (.ctwasGeneTrimmed()). Without twasZ, every gene gets its own. Rows
+# follow the genes' order.
+# @noRd
+.ctwasZGeneFor <- function(weightsList, zSnp, supplied) {
+    if (is.null(supplied$twasZ) || length(weightsList) == 0L) {
+        return(.ctwasGeneZ(weightsList, zSnp))
+    }
+    trimmed <- map_lgl(weightsList, .ctwasEntryTrimmed)
+    .ctwasInformRecomputedZ(names(weightsList)[trimmed])
+    zGene <- bind_rows(
+        .ctwasBuildZGene(
+            supplied$twasZ,
+            weightsList[!trimmed],
+            supplied$gwasStudy
+        ),
+        .ctwasGeneZ(weightsList[trimmed], zSnp)
+    )
+    as.data.frame(zGene[order(match(zGene$id, names(weightsList))), ])
+}
+
+# @noRd
+.ctwasEntryTrimmed <- function(entry) {
+    isTRUE(entry$trimmed)
+}
+
+# Say which genes' z-scores were recomputed rather than read off `twasZ`.
+# @noRd
+.ctwasInformRecomputedZ <- function(ids) {
+    if (length(ids) == 0L) {
+        return(invisible(NULL))
+    }
+    inform(glue(
+        "ctwasPipeline: {length(ids)} gene(s) had their weights trimmed after ",
+        "`twasZ` scored them ({.ctwasGeneList(ids)}); their z-scores are ",
+        "recomputed from the weights cTWAS models."
+    ))
 }
 
 # The GWAS's sample size, one number as cTWAS's summaries read it: the median
@@ -1733,26 +1750,12 @@ mergeCtwasBoundaryRegions <- function(
 # Internal helpers
 # =============================================================================
 
-# LD-sketch compatibility check for one region: every weight row in it is
-# combined with every one of its GWAS rows. Thin wrapper over the shared
-# `.requireMatchingRowLdRefs` helper (R/ld.R).
-.ctwasRequireMatchingLdRefs <- function(tw, gwas) {
-    nTw <- length(tw)
-    nGwas <- length(gwas)
-    .requireMatchingRowLdRefs(
-        tw,
-        gwas,
-        qtlRows = rep(seq_len(nTw), each = nGwas),
-        gwasRows = rep(seq_len(nGwas), times = nTw),
-        pipelineName = "ctwasPipeline",
-        label = "twasWeights"
-    )
-}
-
 # The cTWAS runs `weightSelectionParam` asks of `twasWeights` (a flat weight
-# source or a list of them), each modelling one weight per gene: under "best"
-# one run, labelled "best", each gene on its own best method; under "all" or
-# named methods one run per method, labelled by it. Each run holds its `label`
+# source or a list of them), each modelling one weight set per gene: under
+# "best" one run, labelled "best", each gene on its own best weight set;
+# under "all" or named methods one run per method and kind of joint fit
+# (.jointKinds()), labelled by the method. Each run holds its `label`, its
+# kind (`jointTwasAxes`, NA for a "best" run, whose genes' kinds may differ)
 # and its chosen `cells` (.selectWeightCells()). The rows narrowed since the
 # fits the choice and the runs read are warned about once.
 # @noRd
@@ -1760,11 +1763,25 @@ mergeCtwasBoundaryRegions <- function(
     sources <- .ctwasWeightSources(twasWeights)
     chosen <- .ctwasChosenCells(sources, weightSelectionParam, caller)
     .ctwasCheckFitCoverage(sources, chosen, weightSelectionParam, caller)
+    kinds <- .jointKinds(.cellsJointColumns(chosen))
     if (identical(weightSelectionParam$methods, "best")) {
-        .ctwasAssertOnePerGene(chosen, caller)
-        return(list(list(label = "best", cells = chosen)))
+        .ctwasAssertOnePerGene(chosen, kinds, caller)
+        return(list(.ctwasRun("best", NA_character_, chosen)))
     }
-    map(unique(chosen$method), .ctwasMethodRun, chosen = chosen)
+    runs <- distinct(tibble(method = chosen$method, kind = kinds))
+    map2(
+        runs$method,
+        runs$kind,
+        .ctwasMethodRun,
+        chosen = chosen,
+        kinds = kinds
+    )
+}
+
+# One run of the plan (.ctwasRunPlan()).
+# @noRd
+.ctwasRun <- function(label, jointTwasAxes, cells) {
+    list(label = label, jointTwasAxes = jointTwasAxes, cells = cells)
 }
 
 # The weight sets of every source that `weightSelectionParam` keeps.
@@ -1789,19 +1806,22 @@ mergeCtwasBoundaryRegions <- function(
     chosen
 }
 
-# The run of method `m`: its weight sets of `chosen`.
+# The run of method `m` on its weight sets of kind `kind` among `chosen`.
 # @noRd
-.ctwasMethodRun <- function(m, chosen) {
-    list(label = m, cells = chosen[chosen$method == m, ])
+.ctwasMethodRun <- function(m, kind, chosen, kinds) {
+    held <- chosen$method == m & kinds == kind
+    .ctwasRun(m, kind, chosen[held, ])
 }
 
-# A "best" run models one weight per gene, so a gene left with several -- its
-# methods carrying no CV metric to pick one by -- is refused.
+# A "best" run models one weight set per gene, so a gene left with several --
+# its methods, or its kinds of joint fit, carrying no CV metric to pick one by
+# -- is refused.
 # @noRd
-.ctwasAssertOnePerGene <- function(chosen, caller) {
+.ctwasAssertOnePerGene <- function(chosen, kinds, caller) {
     gene <- str_c(chosen$study, chosen$context, chosen$trait, sep = "\r")
-    nMethods <- map_int(split(chosen$method, gene), n_distinct)
-    several <- names(nMethods)[nMethods > 1L]
+    sets <- str_c(chosen$method, kinds, sep = "\r")
+    nSets <- map_int(split(sets, gene), n_distinct)
+    several <- names(nSets)[nSets > 1L]
     if (length(several) == 0L) {
         return(invisible(NULL))
     }
@@ -1810,14 +1830,14 @@ mergeCtwasBoundaryRegions <- function(
         glue(
             "{caller}: {length(several)} gene(s), such as ",
             "{chosen$trait[[first]]} ({chosen$study[[first]]}, ",
-            "{chosen$context[[first]]}), hold several methods with no CV ",
-            "metric to pick the best by, and a cTWAS run models one weight ",
-            "per gene."
+            "{chosen$context[[first]]}), hold several weight sets (methods ",
+            "or kinds of joint fit) with no CV metric to pick the best by, ",
+            "and a cTWAS run models one weight set per gene."
         ),
         i = str_c(
-            "Name the method to use, WeightSelectionParam(methods = ",
-            "\"<method>\"), or run cTWAS once per method with ",
-            "methods = \"all\"."
+            "Name the method and kind to use, WeightSelectionParam(methods ",
+            "= \"<method>\", jointAxes = \"<kind>\"), or run cTWAS once per ",
+            "method and kind with methods = \"all\"."
         )
     ))
 }
@@ -2126,7 +2146,6 @@ mergeCtwasBoundaryRegions <- function(
     .ctwasBucketWeights(twasWeights, gwasSumStats)
 }
 
-
 # The single GWAS (disease) study a cTWAS run models. cTWAS solves one disease
 # per run (the z_snp carries a single z per SNP), so the input blocks must all
 # reference the same GWAS study.
@@ -2346,12 +2365,80 @@ mergeCtwasBoundaryRegions <- function(
 # run's param + region_info on it.
 # @noRd
 .ctwasMkEntry <- function(fm, sa, runResult) {
-    geneCoords <- .ctwasGeneCoords(runResult$weights)
+    weights <- runResult$weights
+    geneCoords <- .ctwasGeneCoords(weights)
     CtwasResultEntry(
-        posteriors = .ctwasRangePayload(.ctwasReportGroups(fm), geneCoords),
-        susieAlpha = .ctwasRangePayload(.ctwasReportGroups(sa), geneCoords),
+        posteriors = .ctwasRangePayload(
+            .ctwasWithJointTwas(.ctwasReportGroups(fm), weights),
+            geneCoords
+        ),
+        susieAlpha = .ctwasRangePayload(
+            .ctwasWithJointTwas(.ctwasReportGroups(sa), weights),
+            geneCoords
+        ),
         groupPriors = runResult$param,
         regionInfo = .ctwasRangeRegionInfo(runResult$region_info)
+    )
+}
+
+# The fields of a gene's weight entry naming the joint group its weights'
+# fit joined (.ctwasGeneEntry()), which its result rows carry too.
+# @noRd
+.CTWAS_JOINT_TWAS_FIELDS <- c(
+    "joint_twas_studies",
+    "joint_twas_contexts",
+    "joint_twas_traits"
+)
+
+# A result table (gene posteriors, susie alphas) with each gene's weights'
+# joint members beside it -- NA for a SNP, or for weights of a fit of the gene
+# alone -- when any of the run's weights came from a joint fit. A run's genes
+# can come from different fits (a "best" run's from different kinds, or fits
+# joining different members), so the members are kept gene by gene.
+# @noRd
+.ctwasWithJointTwas <- function(df, weights) {
+    if (is.null(df) || !.ctwasWeightsAnyJoint(weights)) {
+        return(df)
+    }
+    columns <- set_names(
+        map(
+            .CTWAS_JOINT_TWAS_FIELDS,
+            .ctwasJointTwasColumn,
+            weights = weights,
+            ids = as.character(df$id)
+        ),
+        .CTWAS_JOINT_TWAS_FIELDS
+    )
+    mutate(df, !!!columns)
+}
+
+# Field `field` of the weight entry of each of `ids`, NA for an id with none.
+# @noRd
+.ctwasJointTwasColumn <- function(field, weights, ids) {
+    values <- set_names(
+        map_chr(unname(weights), field, .default = NA_character_),
+        names(weights)
+    )
+    unname(values[ids])
+}
+
+# Whether any of a run's weight entries came from a joint fit.
+# @noRd
+.ctwasWeightsAnyJoint <- function(weights) {
+    any(.jointKinds(.ctwasEntryJoint(weights)) != "none")
+}
+
+# The joint key (.JOINT_COLUMNS) of each of a run's weight entries.
+# @noRd
+.ctwasEntryJoint <- function(weights) {
+    set_names(
+        map(
+            .CTWAS_JOINT_TWAS_FIELDS,
+            .ctwasJointTwasColumn,
+            weights = weights,
+            ids = names(weights)
+        ),
+        .JOINT_COLUMNS
     )
 }
 
@@ -2420,7 +2507,9 @@ mergeCtwasBoundaryRegions <- function(
     runs <- distinct(genes, .data$study, .data$context)
     joint <- list(
         studies = .ctwasJointLabel(runs$study),
-        contexts = .ctwasJointLabel(runs$context)
+        contexts = .ctwasJointLabel(runs$context),
+        twasAxes = .ctwasRunJointTwasAxes(runResult$weights, method),
+        modelsJoint = .ctwasWeightsAnyJoint(runResult$weights)
     )
     fmDf <- .ctwasAsDf(runResult$finemap_res)
     saDf <- .ctwasAsDf(runResult$susie_alpha_res)
@@ -2443,6 +2532,15 @@ mergeCtwasBoundaryRegions <- function(
         .ctwasSnpRow(gwasStudy, method, joint, fmDf, saDf, scored)
     }
     c(contextRows, compact(list(snpRow)))
+}
+
+# The kind of joint fit (.jointKinds()) a run's weights are, which each of
+# its rows carries: the one kind its genes' weights share, NA for a "best"
+# run, whose genes' kinds may differ.
+# @noRd
+.ctwasRunJointTwasAxes <- function(weights, method) {
+    kinds <- unique(.jointKinds(.ctwasEntryJoint(weights)))
+    if (method == "best" || length(kinds) != 1L) NA_character_ else kinds
 }
 
 # The studies or contexts a joint run spans, NA for a run over one.
@@ -2512,6 +2610,8 @@ mergeCtwasBoundaryRegions <- function(
         method = method,
         jointStudies = joint$studies,
         jointContexts = joint$contexts,
+        jointTwasAxes = joint$twasAxes,
+        modelsJoint = joint$modelsJoint,
         entry = .ctwasMkEntry(
             .ctwasSubsetById(fmDf, ids),
             .ctwasSubsetById(saDf, ids),
@@ -2536,6 +2636,8 @@ mergeCtwasBoundaryRegions <- function(
         method = method,
         jointStudies = joint$studies,
         jointContexts = joint$contexts,
+        jointTwasAxes = joint$twasAxes,
+        modelsJoint = joint$modelsJoint,
         entry = .ctwasMkEntry(snpFm, snpSa, runResult)
     )
 }
@@ -2554,6 +2656,10 @@ mergeCtwasBoundaryRegions <- function(
     }
     jointStudies <- map_chr(rows, "jointStudies")
     jointContexts <- map_chr(rows, "jointContexts")
+    # The kind of joint fit each run's weights are, kept only when some run
+    # modelled weights of a joint fit.
+    jointTwasAxes <- map_chr(rows, "jointTwasAxes")
+    modelsJoint <- any(map_lgl(rows, "modelsJoint"))
     CtwasResult(
         gwasStudy = map_chr(rows, "gwasStudy"),
         studyName = map_chr(rows, "study"),
@@ -2561,7 +2667,8 @@ mergeCtwasBoundaryRegions <- function(
         method = map_chr(rows, "method"),
         entry = map(rows, "entry"),
         jointStudies = if (any(!is.na(jointStudies))) jointStudies else NULL,
-        jointContexts = if (any(!is.na(jointContexts))) jointContexts else NULL
+        jointContexts = if (any(!is.na(jointContexts))) jointContexts else NULL,
+        jointTwasAxes = if (modelsJoint) jointTwasAxes else NULL
     )
 }
 
@@ -2618,10 +2725,11 @@ mergeCtwasBoundaryRegions <- function(
 #'   \code{\link{ctwasPipeline}} applies to its one-shot output, exposed for the
 #'   granular \code{assembleCtwasInputs} \eqn{\to} \code{estCtwasGroupPriors}
 #'   \eqn{\to} \code{screenCtwasRegions} \eqn{\to} \code{finemapCtwasRegions}
-#'   path. The GWAS study is read from \code{z_snp$study}, and the method
-#'   label from the run's \code{resolvedMethod} (\code{"best"}, or its one
-#'   method; for a result made before that was carried, the one method of its
-#'   weights).
+#'   path. The GWAS study is read from \code{z_snp$study}, the method label
+#'   from the run's \code{resolvedMethod} (\code{"best"}, or its one method;
+#'   for a result made before that was carried, the one method of its
+#'   weights), and, when some of its weights are of a joint fit, the run's
+#'   \code{jointTwasAxes} from its weights, as \code{ctwasPipeline} reads it.
 #' @param finemapResult A list from \code{\link{finemapCtwasRegions}} or
 #'   \code{\link{mergeCtwasBoundaryRegions}}.
 #' @param keepSnps Logical (length 1). Retain the context-agnostic SNP
@@ -3125,20 +3233,76 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 }
 
 # The prepared genes' ctwas weight entries, keyed by gene id, with their weight
-# variances from `panels`, the blocks' LD panels.
+# variances from `panels`, the blocks' LD panels. What the genes lost to the
+# GWAS LD panel is reported first, and a gene left with no variant on it is
+# dropped (.ctwasReportWeightLoss()).
 # @noRd
 .ctwasGeneEntries <- function(prepared, panels) {
-    keys <- map_chr(prepared, "key")
+    .ctwasReportWeightLoss(prepared)
+    placed <- keep(prepared, .ctwasPreparedHasVariants)
+    keys <- map_chr(placed, "key")
     .ctwasRequireUniqueGenes(keys)
-    .ctwasRequireDistinctGroups(prepared)
+    .ctwasRequireDistinctGroups(placed)
     set_names(
         map2(
-            prepared,
-            .ctwasWeightVariances(panels, prepared),
+            placed,
+            .ctwasWeightVariances(panels, placed),
             .ctwasGeneEntry
         ),
         keys
     )
+}
+
+# @noRd
+.ctwasPreparedHasVariants <- function(gene) {
+    length(gene$vids) > 0L
+}
+
+# Say what weight the genes lost in harmonizing with the GWAS LD panel. Every
+# gene z and correlation is computed on that panel, never on the one a weight
+# was trained on, so weights from another panel are placed by the variants the
+# two share, as ctwas's own weight preparation places them: a variant the GWAS
+# panel lacks, or a strand-ambiguous one, is dropped. Genes that kept part of
+# their weight are summarized by the share of their sum |w| lost; a gene left
+# with none is dropped, with a warning naming it.
+# @noRd
+.ctwasReportWeightLoss <- function(prepared) {
+    lost <- map_dbl(prepared, "lost", .default = 0)
+    keys <- map_chr(prepared, "key")
+    dropped <- !map_lgl(prepared, .ctwasPreparedHasVariants)
+    if (any(dropped)) {
+        warn(glue(
+            "ctwasPipeline: dropped {sum(dropped)} gene(s) with no weight ",
+            "variant on the GWAS LD panel: {.ctwasGeneList(keys[dropped])}."
+        ))
+    }
+    partial <- !dropped & lost > 0
+    if (any(partial)) {
+        worst <- which(partial)[which.max(lost[partial])]
+        inform(glue(
+            "ctwasPipeline: {sum(partial)} gene(s) lost weight variants the ",
+            "GWAS LD panel lacks, or that are strand-ambiguous: a median ",
+            "{.ctwasPercent(stats::median(lost[partial]))} of a gene's ",
+            "sum |w|, at most {.ctwasPercent(lost[[worst]])} ",
+            "({keys[[worst]]})."
+        ))
+    }
+    invisible(NULL)
+}
+
+# A gene list for a message: the first five, then how many more.
+# @noRd
+.ctwasGeneList <- function(keys) {
+    shown <- str_flatten(head(keys, 5L), ", ")
+    if (length(keys) <= 5L) {
+        return(shown)
+    }
+    str_c(shown, " and ", length(keys) - 5L, " more")
+}
+
+# @noRd
+.ctwasPercent <- function(share) {
+    str_c(format(round(100 * share, 1), nsmall = 1), "%")
 }
 
 # One unit per weight vector a source holds: each (row, method) entry of a
@@ -3233,7 +3397,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # @noRd
 .CTWAS_NO_TYPE <- "QTL"
 
-# One unit's identity (.ctwasWeightUnits()) and the names cTWAS knows it by: its
+# One unit's identity (.ctwasWeightUnits()) -- with its row's joint key, the
+# group whose fit it came from -- and the names cTWAS knows it by: its
 # context, keeping two studies' contexts of one name apart as cTWAS's own FAQ
 # suggests, its weight_name, as cTWAS's default forms it but for the study and
 # the method, and its id, whose first "|" field cTWAS reads as the molecular id.
@@ -3252,6 +3417,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         context = context,
         trait = trait,
         method = method,
+        joint = .jointKeyAt(twasWeights, i),
         type = type,
         engineContext = engineContext,
         weightName = weightName,
@@ -3282,13 +3448,15 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # Steps 1-2: allele-harmonize a gene's (variantIds, weights) against the LD
 # panel (matching by chrom/pos with sign/strand-flip detection; weights
 # sign-flipped for swapped frames), then restrict to the panel variant set.
-# Returns list(vids, w, keptIdx, origVids, origW), or NULL when nothing
-# survives.
+# Returns list(vids, w, keptIdx, origVids, origW, lost), `lost` the share of
+# the gene's sum |w| its dropped variants held, or NULL when the row holds no
+# single weight per variant. A gene none of whose variants survives comes back
+# with none, and `lost` 1.
 # @noRd
 .ctwasAlignGeneWeights <- function(parts, refVariants, panelSnps) {
     wr <- .rowResolveWeights(parts)
-    single <- .singleWeightColumn(wr$weights)
-    if (is.null(single)) {
+    weights <- .singleWeightColumn(wr$weights)
+    if (is.null(weights)) {
         inform(
             str_c(
                 "ctwasPipeline: weights with several columns (one per ",
@@ -3300,42 +3468,48 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         )
         return(NULL)
     }
-    wr$weights <- single
     if (length(wr$variantIds) == 0L) {
         return(NULL)
     }
-    harm <- .ctwasHarmonizeWeights(wr$variantIds, wr$weights, refVariants)
-    if (is.null(harm) || nrow(harm) == 0L) {
-        return(NULL)
-    }
-    vids <- as.character(harm$variant_id)
-    w <- as.numeric(harm$w)
-    keptIdx <- as.integer(harm$origIdx)
-    keep <- is_in(vids, panelSnps)
-    if (!any(keep)) {
-        return(NULL)
-    }
+    harm <- .ctwasHarmonizeWeights(wr$variantIds, weights, refVariants) %||%
+        tibble(variant_id = character(0), w = numeric(0), origIdx = integer(0))
+    keep <- is_in(as.character(harm$variant_id), panelSnps)
+    keptIdx <- as.integer(harm$origIdx)[keep]
     list(
-        vids = vids[keep],
-        w = w[keep],
-        keptIdx = keptIdx[keep],
+        vids = as.character(harm$variant_id)[keep],
+        w = as.numeric(harm$w)[keep],
+        keptIdx = keptIdx,
         origVids = wr$variantIds,
-        origW = wr$weights
+        origW = weights,
+        lost = .ctwasLostWeightShare(weights, keptIdx)
     )
 }
 
+# The share of a gene's weight, as sum |w| -- what ctwas places a gene by --
+# held by the variants at `keptIdx`'s complement: those the GWAS LD panel
+# lacks, or that harmonizing drops as strand-ambiguous.
+# @noRd
+.ctwasLostWeightShare <- function(w, keptIdx) {
+    total <- sum(abs(w))
+    if (total == 0) {
+        return(0)
+    }
+    1 - sum(abs(w[keptIdx])) / total
+}
+
 # The fit a gene's weights are renormalized with: the TWAS row's own, else --
-# a fine-mapping method's rows keep none (.twasRowRetention()) -- that
-# method's fit for the gene in `fmr`, the fine-mapping result the run was
-# given, cut to the gene's own condition when it is one of a joint fit's
-# (.ctwasConditionFit()). A fine-mapping row as the weight source has none
-# by design (.rowFits()).
+# a fine-mapping method's rows keep none (.twasRowRetention()) -- the fit
+# they came from in `fmr`, the fine-mapping result the run was given
+# (.ctwasOwnFmRow()), cut to the gene's own condition when it is one of a
+# joint fit's (.ctwasConditionFit()). A fine-mapping row as the weight source
+# has none by design (.rowFits()).
 # @noRd
 .ctwasRenormFit <- function(parts, fmr, meta) {
     own <- .rowFits(parts)
-    token <- .twasFmTokenFor(meta$method)
     if (
-        !is.null(own) || is.na(token) || !methods::is(parts, "TwasWeightsRow")
+        !is.null(own) ||
+            is.na(.twasFmTokenFor(meta$method)) ||
+            !methods::is(parts, "TwasWeightsRow")
     ) {
         return(own)
     }
@@ -3352,19 +3526,35 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         )
         return(NULL)
     }
-    idx <- .matchTupleRows(
-        fmr,
-        list(study = meta$study, context = meta$context, trait = meta$trait)
-    )
-    fmTokens <- map_chr(as.character(fmr$method)[idx], .twasFmTokenFor)
-    hit <- idx[is_in(fmTokens, token)]
-    if (length(hit) == 0L) {
+    i <- .ctwasOwnFmRow(fmr, meta)
+    if (is.na(i)) {
         return(NULL)
     }
     .ctwasConditionFit(
-        .fmrPartsSusieFit(.fmrRowParts(fmr, hit[[1L]])),
-        .fmrJointIndexAt(fmr, hit[[1L]])
+        .fmrPartsSusieFit(.fmrRowParts(fmr, i)),
+        .fmrJointIndexAt(fmr, i)
     )
+}
+
+# The row of fine-mapping result `fmr` a fine-mapping method's weights came
+# from: the first of their method, (study, context, trait) and joint group
+# (`meta`, .ctwasGeneMeta()). NA for another method's weights, without a
+# result, or with no such row.
+# @noRd
+.ctwasOwnFmRow <- function(fmr, meta) {
+    token <- .twasFmTokenFor(meta$method)
+    if (is.null(fmr) || is.na(token)) {
+        return(NA_integer_)
+    }
+    rows <- .twasFmTokenRows(
+        fmr,
+        token,
+        meta$study,
+        meta$context,
+        meta$trait,
+        meta$joint
+    )
+    if (length(rows) == 0L) NA_integer_ else rows[[1L]]
 }
 
 # A joint fit cut to one of its conditions: an mvSuSiE mu is L x p x R, and
@@ -3379,14 +3569,6 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     d <- dim(mu)
     own <- array(mu[,, r], dim = d[1:2], dimnames = dimnames(mu)[1:2])
     list_assign(fit, mu = own)
-}
-
-# Row `i`'s position in its joint fit's condition axis, NA for a row from no
-# joint fit (or one that records none).
-# @noRd
-.fmrJointIndexAt <- function(x, i) {
-    jointIndex <- mcols(x, use.names = FALSE)$jointIndex
-    if (is.null(jointIndex)) NA_integer_ else jointIndex[[i]]
 }
 
 # Steps 3-4: SuSiE alpha renormalization (when the kept variant set shrank the
@@ -3451,7 +3633,15 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         # The GENE's own coordinate, carried alongside the weight-variant span
         # (chrom/p0/p1) so the result payloads can be ranged on the gene rather
         # than on wherever its weight variants happen to fall.
-        trait_pos = meta$traitPos
+        trait_pos = meta$traitPos,
+        # The joint group the weights' fit joined (NA for none), which tells
+        # a gene's TWAS z apart from another group's (.ctwasEntryKey()) and
+        # goes on its result rows (.ctwasWithJointTwas()), and whether the
+        # pipeline trimmed the weights (.ctwasGeneTrimmed()).
+        joint_twas_studies = meta$joint$jointStudies,
+        joint_twas_contexts = meta$joint$jointContexts,
+        joint_twas_traits = meta$joint$jointTraits,
+        trimmed = isTRUE(g$trimmed)
     )
 }
 
@@ -3488,8 +3678,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 }
 
 # Build one gene's ctwas weight record: align -> adjust -> smart-filter
-# (PIP/CS + magnitude + cap) -> entry. Returns list(key, entry), or NULL when
-# the gene contributes no usable variants.
+# (PIP/CS + magnitude + cap) -> entry. Returns list(key, vids, w, span, meta,
+# lost), or NULL when the gene contributes no usable variants. A gene none of
+# whose variants is on the GWAS LD panel comes back with its key, no
+# variants, and `lost` 1, for .ctwasGeneEntries() to report and drop.
 # @noRd
 .ctwasGenePrepared <- function(unit, twasWeights, ctx) {
     # Polymorphic: the weight source may be a TwasWeights or a
@@ -3501,13 +3693,16 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(NULL)
     }
     meta <- .ctwasGeneMeta(twasWeights, unit)
+    if (length(aligned$vids) == 0L) {
+        return(list(key = meta$key, vids = character(0), lost = 1))
+    }
     w <- .ctwasAdjustGeneWeights(
         parts,
         aligned,
         near$spanVariance,
         .ctwasRenormFit(parts, ctx$fineMappingResult, meta)
     )
-    kept <- .ctwasGeneKept(aligned$vids, w, meta, ctx)
+    kept <- .ctwasGeneKept(aligned$vids, w, meta, ctx, parts)
     if (length(kept) < 1L) {
         return(NULL)
     }
@@ -3518,21 +3713,30 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         vids = kept$vids,
         w = kept$w,
         span = .ctwasGeneSpan(kept$vids, near$spanInfo),
-        meta = meta
+        meta = meta,
+        lost = aligned$lost,
+        trimmed = .ctwasGeneTrimmed(aligned, kept)
     )
 }
 
-# The gene's variants `vids` that pass the smart filter -- fine-mapping PIP
-# and credible-set membership, weight magnitude, the cap -- with their
-# weights (.ctwasFilterVariants()).
+# Whether the pipeline changed a gene's weights from the ones it was given:
+# it dropped variants the GWAS LD panel lacks (renormalizing a SuSiE fit's
+# weights over the rest first, .ctwasAdjustGeneWeights()), or the magnitude
+# filter or the cap dropped some. A z-score computed before then
+# (causalInferencePipeline()'s, supplied as `twasZ`) describes other weights.
 # @noRd
-.ctwasGeneKept <- function(vids, w, meta, ctx) {
-    finemapAux <- .ctwasGetFinemapAux(
-        ctx$fineMappingResult,
-        meta$study,
-        meta$context,
-        meta$trait
-    )
+.ctwasGeneTrimmed <- function(aligned, kept) {
+    length(aligned$keptIdx) < length(aligned$origVids) ||
+        length(kept$vids) < length(aligned$vids)
+}
+
+# The gene's variants `vids` that pass the smart filter -- weight magnitude,
+# then the cap, ordered for a fine-mapping method's weights by their own
+# fit's PIPs and credible sets (.ctwasFinemapAux()) -- with their weights
+# (.ctwasFilterVariants()).
+# @noRd
+.ctwasGeneKept <- function(vids, w, meta, ctx, parts) {
+    finemapAux <- .ctwasFinemapAux(parts, ctx$fineMappingResult, meta)
     .ctwasFilterVariants(
         vids = vids,
         w = w,
@@ -3715,28 +3919,34 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )
 }
 
-# Look up one gene's PIP vector and 95% credible-set membership / purity in
-# the rescues' fine-mapping result, which .ctwasRescueSource() narrowed to the
-# one method they read, so the gene's (study, context, trait) picks its fit.
-# Returns NULL when no result was passed or the gene has no fit in it. Output
-# is a list with:
+# One gene's PIP vector and 95% credible-set membership / purity, from the
+# fit its weights came from: a fine-mapping row as the weight source is its
+# own, and a fine-mapping method's TWAS weights read theirs off `fmr`
+# (.ctwasOwnFmRow()). NULL for every other method's weights -- another
+# model's PIPs say nothing about which of a regression's variants carry its
+# prediction, so those are capped by |weight| -- and for a fine-mapping weight
+# with no fit to read. Output is a list with:
 #   pip       : named numeric vector keyed by variant_id
 #   csMembers : list of character vectors (one per CS at 95% coverage)
 #   csPurity  : numeric vector aligned with csMembers
 # @noRd
-.ctwasGetFinemapAux <- function(fmr, studyName, context, trait) {
-    if (is.null(fmr)) {
+.ctwasFinemapAux <- function(parts, fmr, meta) {
+    if (!methods::is(parts, "TwasWeightsRow")) {
+        return(.ctwasFinemapAuxOf(parts))
+    }
+    i <- .ctwasOwnFmRow(fmr, meta)
+    if (is.na(i)) {
         return(NULL)
     }
-    idx <- .matchTupleRows(
-        fmr,
-        list(study = studyName, context = context, trait = trait)
-    )
-    if (length(idx) == 0L) {
-        return(NULL)
-    }
+    .ctwasFinemapAuxOf(.fmrRowParts(fmr, i))
+}
+
+# A fine-mapping row's PIPs and credible sets (.ctwasFinemapAux()); NULL for
+# a row with no variants.
+# @noRd
+.ctwasFinemapAuxOf <- function(fmrParts) {
     # The stored table verbatim: every variant, no posterior projection.
-    tl <- .fmrPartsTopLoci(.fmrRowParts(fmr, idx[[1L]]))
+    tl <- .fmrPartsTopLoci(fmrParts)
     if (nrow(tl) == 0L) {
         return(NULL)
     }
@@ -3970,14 +4180,12 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         .ctwasTwasRowsOnly(as_tibble(as.data.frame(S4Vectors::mcols(twasZ)))),
         gwasStudy
     )
-    keys <- str_c(
+    keys <- .ctwasZKey(
         rows$qtlStudy,
-        "|",
         rows$context,
-        "|",
         rows$trait,
-        "|",
-        rows$method
+        rows$method,
+        .cellsJointColumns(rows)
     )
     geneKeys <- map_chr(unname(weightsList), .ctwasEntryKey)
     .ctwasRequireOneZ(names(weightsList), geneKeys, keys)
@@ -3991,18 +4199,38 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     )))
 }
 
-# A gene's (study, context, trait, method) key, as twasZ identifies it.
+# A gene's key (.ctwasZKey()), as twasZ identifies it: its weights' (study,
+# context, trait, method) and joint group.
 # @noRd
 .ctwasEntryKey <- function(entry) {
-    str_c(
+    .ctwasZKey(
         entry$study,
-        "|",
         entry$qtl_context,
-        "|",
         entry$gene_name,
-        "|",
-        entry$method
+        entry$method,
+        list(
+            jointStudies = entry$joint_twas_studies %||% NA_character_,
+            jointContexts = entry$joint_twas_contexts %||% NA_character_,
+            jointTraits = entry$joint_twas_traits %||% NA_character_
+        )
     )
+}
+
+# A TWAS z's key: its (study, context, trait, method), then the joint group
+# its weights' fit joined when there is one, so weights of one gene and
+# method fitted in different groups are told apart.
+# @noRd
+.ctwasZKey <- function(study, context, trait, method, joint) {
+    exec(
+        str_c,
+        str_c(study, "|", context, "|", trait, "|", method),
+        !!!map2(joint, names(joint), .ctwasJointKeyPart)
+    )
+}
+
+# @noRd
+.ctwasJointKeyPart <- function(values, name) {
+    if_else(is.na(values), "", str_c("|", name, "=", values))
 }
 
 # The TWAS rows of a twasZ table: its MR rows carry no Z, and may share a

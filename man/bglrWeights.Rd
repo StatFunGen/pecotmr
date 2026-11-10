@@ -19,7 +19,8 @@ bglrWeights(
 \arguments{
 \item{X}{A numeric matrix of predictors.}
 
-\item{y}{A numeric response vector.}
+\item{y}{A numeric response vector, or a matrix with one column per
+condition (missing values allowed).}
 
 \item{model}{A BGLR marker-effect model name (e.g. "BayesB" or "BL").}
 
@@ -30,7 +31,9 @@ bglrWeights(
 \item{thin}{Thinning interval.}
 
 \item{etaArgs}{Optional named list of additional arguments included in the
-`ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).}
+`ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).
+For a matrix `y`, a `probIn` starts every condition's inclusion
+probability.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
@@ -38,20 +41,26 @@ nothing, \code{"slim"} and \code{"full"} the fitted \code{BGLR} object,
 which keeps no copy of the data, so the two retaining levels behave
 alike here.}
 
-\item{methodArgs}{Options forwarded to \code{BGLR::BGLR}, built
-with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{methodArgs}{Options for \code{BGLR::BGLR} or
+\code{BGLR::Multitrait}, built with \code{\link{BglrOptions}}; each call
+receives the options it takes, and \code{Cov} goes into Multitrait()'s
+linear term. A bare list is refused: it cannot be checked against the
+engine, so a misspelled option would be silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights, with the
+A numeric vector of length `ncol(X)` of variant weights, or for a
+  matrix `y` a matrix of them with one column per condition, with the
   fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
 Internal helper that fits a `BGLR::BGLR` linear regression with a single
 linear term whose `model` is one of BGLR's marker-effect priors (e.g.
-"BayesB", "BL"), then returns the posterior mean of the marker effects. BGLR
+"BayesB", "BL"), then returns the posterior mean of the marker effects.
+Given a matrix `y`, one column per condition, it fits the conditions
+jointly with `BGLR::Multitrait` instead, under the multivariate form of
+`model`: "SpikeSlab" for "BayesC" and "BRR" for "BRR", the only two
+Multitrait() has. A missing phenotype is drawn within its sampler. BGLR
 writes per-call temporary files to disk; this helper sandboxes them in a
 fresh `tempdir()` that is cleaned up on exit.
 }

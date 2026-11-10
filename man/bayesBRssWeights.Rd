@@ -7,13 +7,14 @@
 bayesBRssWeights(
   stat,
   ldReference,
-  backend = NULL,
   pi = 0.2,
   h2 = NULL,
   nIter = 5000,
   nBurnin = 1000,
   thin = 5,
   shrinkCorr = 0.95,
+  ldProjection = 0.1,
+  nChains = 1,
   fitRetention = c("none", "slim", "full"),
   methodArgs = NULL
 )
@@ -30,10 +31,7 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 \code{\link{LdMatrix}}.}
 
-\item{backend}{\code{"hibayes"} or \code{"pecotmr"}; \code{NULL} picks
-the default for the LD reference.}
-
-\item{pi}{The prior proportion of non-null effects, where each engine's
+\item{pi}{The prior proportion of non-null effects, where hibayes'
 estimate of it starts. Default \code{0.2}.}
 
 \item{h2}{The trait's heritability in the window, which sets every
@@ -44,10 +42,10 @@ estimator to estimate it with first, on \code{stat} and
 (see \code{\link{estimateH2}}), taking the reference to share no
 samples with the study. It is used floored at 0.001 and capped at 0.99,
 and an estimate that cannot be made leaves the engine's default, with a
-warning. qgg and pecotmr's sampler read it as \code{h2}; hibayes, which
-fixes its own at 0.5, gets the genetic and residual variances
-(\code{vg}, \code{ve}) its defaults would give at \code{h2}. Setting
-that engine's spelling through \code{methodArgs} as well is an error.}
+warning. qgg reads it as \code{h2}; hibayes, which fixes its own at
+0.5, gets the genetic and residual variances (\code{vg}, \code{ve}) its
+defaults would give at \code{h2}. Setting that engine's spelling
+through \code{methodArgs} as well is an error.}
 
 \item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
 on every engine. Default \code{5000}.}
@@ -58,38 +56,49 @@ on every engine. Default \code{5000}.}
 \item{thin}{Integer. Thinning interval for retained MCMC samples. Default
 \code{5}.}
 
-\item{shrinkCorr}{The LD shrinkage \eqn{c}: every engine reads
-\eqn{cR + (1 - c)I}, qgg and hibayes as the matrix they are given,
-pecotmr's sampler through the factor. Default 0.95, the LDpred2
-vignette's. A reference with fewer samples than the window has variants
-lacks directions the statistics have, and without shrinkage the
-samplers' effects can grow without bound along them (pecotmr's sampler
-also drops those directions by default, through SDPR's likelihood; see
-\code{\link{bayesAlphabetRssWeights}}). A small or
-mismatched reference does better with less, down to 0.4 as the LDpred2
-vignette advises; the study's own genotypes as the reference need none,
-up to 1.}
+\item{shrinkCorr}{The LD shrinkage \eqn{c}: both engines read
+\eqn{cR + (1 - c)I}. Default 0.95, the LDpred2 vignette's. A reference
+with fewer samples than the window has variants lacks directions the
+statistics have, and without shrinkage the samplers' effects can grow
+without bound along them. A small or mismatched reference does better
+with less, down to 0.4 as the LDpred2 vignette advises; the study's own
+genotypes as the reference need none, up to 1.}
+
+\item{ldProjection}{The ridge \eqn{a} of SDPR's likelihood (Zhou and Zhao
+2021), under which both engines read the LD as
+\eqn{R (R + aI)^{-1} R} and the marginal effects as
+\eqn{R (R + aI)^{-1} \hat\beta}, before the shrinkage. Each of R's
+eigen-directions keeps \eqn{\lambda / (\lambda + a)} of the effects, so
+their part outside the reference LD's span, which a reference smaller
+than the window or unlike the study leaves, never enters; that part
+can make the statistics claim more of the trait's variance than any
+phenotype has, which sends the samplers' residual variance negative.
+Default 0.1, SDPR's; \code{NULL} reads the LD and the statistics as
+they are.}
+
+\item{nChains}{The number of chains, each the engine run once from its
+own seed and combined as Description says. Default 1.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing, \code{"slim"} and \code{"full"} attach the engine's estimates
-(\code{betaEst}, and where the engine gives them the inclusion
-probabilities \code{pip}, the non-null proportion \code{pi} and the
-residual variance), \code{backend} and the \code{shrinkCorr} used. No
-engine keeps trimmable intermediates, so the two retaining levels
-behave alike.}
+(\code{betaEst}, and qgg's inclusion probabilities \code{pip}),
+\code{backend}, the \code{shrinkCorr} and \code{ldProjection} used and,
+with several chains, \code{chains}: each chain's seed, whether it
+diverged and whether it was kept. No engine keeps trimmable
+intermediates, so the two retaining levels behave alike.}
 
 \item{methodArgs}{Options for the backend's engine, built with its
 constructor: \code{\link{QggOptions}} for qgg,
-\code{\link{HibayesRssOptions}} for hibayes,
-\code{\link{BayesAlphabetRssOptions}} for pecotmr's sampler. \code{NULL}
-keeps the engine's defaults.}
+\code{\link{HibayesRssOptions}} for hibayes. \code{NULL} keeps the
+engine's defaults.}
 }
 \value{
 A numeric vector of the posterior mean effects, one per variant.
 }
 \description{
-\code{\link{bayesAlphabetRssWeights}} with the BayesB prior.
+\code{\link{bayesAlphabetRssWeights}} with the BayesB prior,
+  which hibayes fits.
 }
 \examples{
 data(eqtlRegionExample)

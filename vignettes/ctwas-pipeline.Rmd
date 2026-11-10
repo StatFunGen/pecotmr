@@ -181,10 +181,12 @@ scales with them. Four arguments trim each gene before cTWAS sees it:
 | `pipRescue` | keep variants with PIP above this |
 
 `csMinCor` and `pipRescue` mark variants as must-keep, so they survive
-the `maxVariants` cap. Both need a `fineMappingResult`; without one they
-are no-ops and the cap falls back to ordering by `abs(weight)`. With one,
-`fineMappingMethod` names which of its fine-mapping methods they read: a
-weight's own method, such as an ensemble, names no fine-mapping fit.
+the `maxVariants` cap. They apply to a fine-mapping method's weights
+(`susie`, `mvsusie` and the like), read off the fit those weights came from
+in `fineMappingResult`: the same method, gene and joint group. Every other
+method's weights are capped by `abs(weight)`, as cTWAS's own `top_n_snps`
+caps them: another model's PIPs say nothing about which of a regression's
+variants carry its prediction.
 
 ```{r ctwas-filters, eval=FALSE}
 ctwasPipeline(
@@ -192,7 +194,6 @@ ctwasPipeline(
     twasWeights = list(ctwasWeightsExample),
     weightSelectionParam = WeightSelectionParam(methods = "susie"),
     fineMappingResult = fmr,
-    fineMappingMethod = "susie",
     variantPruningParam = VariantPruningParam(
         weightCutoff = 1e-4,
         maxVariants = 1000,

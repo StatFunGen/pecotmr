@@ -23,8 +23,9 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 
 \item{vhat}{Residual correlation matrix (\code{V}); \code{NULL} -> identity.}
 
-\item{components}{Any of \code{"canonical"}, \code{"pca"}, \code{"flash"},
-\code{"flashNonneg"}. Built in that fixed order.}
+\item{components}{Any of \code{"canonical"}, \code{"subsets"}
+(\code{\link{CovSubsetsOptions}}, at its defaults), \code{"pca"},
+\code{"flash"}, \code{"flashNonneg"}. Built in that fixed order.}
 
 \item{nPcs}{PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.}
 
@@ -44,10 +45,11 @@ to leave the ambient RNG untouched.}
 A named list of covariance matrices (the concatenated components).
 }
 \description{
-Build the raw per-method data-driven covariance components
-  (\code{cov_canonical} / \code{cov_pca} / \code{cov_flash} /
-  \code{cov_flash(factors = "nonneg")}) for a \code{"strong"} SumStats set --
-  the reusable building block \code{\link{mashPriorCovariances}} then refines
+Build the raw per-method covariance components
+  (\code{cov_canonical} / the subset-shared matrices / \code{cov_pca} /
+  \code{cov_flash} / \code{cov_flash(factors = "nonneg")}) for a
+  \code{"strong"} SumStats set -- the reusable building block
+  \code{\link{mashPriorCovariances}} then refines
   with an ED / udr engine. Exposed on its own so a workflow can build or
   inspect a single component (the mixture-prior notebook's per-method steps)
   without running the full prior.

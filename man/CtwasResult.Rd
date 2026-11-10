@@ -12,6 +12,7 @@ CtwasResult(
   entry,
   jointStudies = NULL,
   jointContexts = NULL,
+  jointTwasAxes = NULL,
   metadata = list()
 )
 }
@@ -34,6 +35,16 @@ one per run; their posteriors and susie alpha tables must be
 
 \item{jointContexts}{Optional character vector for multi-context runs. Same
 shape as \code{jointStudies}.}
+
+\item{jointTwasAxes}{Optional character vector, one value per run: the kind
+of joint fit the run's TWAS weights are -- \code{"none"} for weights of
+a fit of each gene alone, or the axes the fits joined, such as
+\code{"study"} or \code{"context+trait"} (see
+\code{\link{WeightSelectionParam}}'s \code{jointAxes}) -- and
+\code{NA_character_} for a run whose genes' weights are of different
+kinds (a \code{"best"} run). Part of the run identity, so two runs of
+one method on weights of different kinds stay apart. \code{NULL}
+(default) omits the column.}
 
 \item{metadata}{A list of free-form metadata about the collection,
 as \code{metadata()} holds on any Bioconductor vector. Default

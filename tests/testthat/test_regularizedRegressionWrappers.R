@@ -1156,9 +1156,17 @@ test_that("a QTL past r^2 = 0.5 reaches the engines as a correlation", {
     )
     expect_gt(max(abs(stat$z)) / sqrt(n), 1)
     ld <- LdMatrix(cor(X), nSamples = n)
-    dense <- pecotmr:::.alphabetRssDense(stat, ld, 0.95)
-    expect_equal(dense$bhat, r)
-    expect_true(all(is.finite(dense$seb)))
+    # As given and through SDPR's projection alike.
+    for (a in list(NULL, 0.1)) {
+        dense <- pecotmr:::.alphabetRssDense(
+            stat,
+            ld,
+            list(shrinkCorr = 0.95, ldProjection = a),
+            "qgg"
+        )
+        expect_equal(dense$bhat, r)
+        expect_true(all(is.finite(dense$seb)))
+    }
     skip_if_not_installed("qgg")
     w <- bayesCRssWeights(stat, ld, "qgg", nIter = 200, nBurnin = 50)
     expect_true(all(is.finite(w)))
@@ -1918,4 +1926,620 @@ test_that("each weight function holding X rejects retainX unless full", {
     rejects(dprVbWeights)
     rejects(dprGibbsWeights)
     rejects(dprAdaptiveGibbsWeights)
+})
+
+# ---------------------------------------------------------------------------
+# Fits across studies (difference penalty)
+# ---------------------------------------------------------------------------
+
+# Two studies on disjoint halves of eqtlRegionExample's people, stacked as
+# .xsStack() stacks them: X over both studies' rows, Y one column per study,
+# missing outside its own rows. The variants are kept at |r| < 0.95 to one
+# another, as perfect-LD copies leave the lasso's optimum unique only up to
+# how it splits an effect between them. The last variant is absent from the
+# second study, a column of zeros in its rows.
+.rrw_coupledStack <- function(nVariants = 40L) {
+    data(eqtlRegionExample, envir = environment())
+    X0 <- eqtlRegionExample$X
+    p <- colMeans(X0) / 2
+    cand <- which(pmin(p, 1 - p) >= 0.05)[301:500]
+    R <- abs(stats::cor(X0[, cand]))
+    kept <- Reduce(
+        function(held, j) if (all(R[j, held] < 0.95)) c(held, j) else held,
+        seq_along(cand),
+        integer(0)
+    )
+    cols <- cand[kept][seq_len(nVariants)]
+    withr::local_seed(7L)
+    Xs <- map(list(1:250, 251:415), function(r) scale(X0[r, cols]))
+    ys <- map(Xs, function(X) {
+        g <- drop(X[, c(5, 20)] %*% c(0.4, -0.3))
+        as.numeric(scale(g + stats::rnorm(nrow(X))))
+    })
+    X <- `colnames<-`(
+        rbind(Xs[[1L]], Xs[[2L]]),
+        sprintf("chr1:%d:A:G", 100L * seq_len(nVariants))
+    )
+    X[251:415, nVariants] <- 0
+    list(
+        X = X,
+        Y = cbind(
+            A = c(ys[[1L]], rep(NA, 165L)),
+            B = c(rep(NA, 250L), ys[[2L]])
+        )
+    )
+}
+
+# glmnet's fit of one study alone, at each of `lambda`.
+.rrw_separateGlmnet <- function(X, y, lambda, alpha) {
+    map(lambda, function(l) {
+        fit <- glmnet::glmnet(
+            X,
+            y,
+            alpha = alpha,
+            lambda = l,
+            standardize = FALSE,
+            thresh = 1e-14
+        )
+        as.numeric(stats::coef(fit))[-1L]
+    })
+}
+
+test_that("a fit across studies at c = 0 is the studies' separate fits", {
+    skip_if_not_installed("glmnet")
+    s <- .rrw_coupledStack()
+    studies <- pecotmr:::.coupledStudies(s$X, s$Y, 0)
+    design <- pecotmr:::.coupledDesign(studies, studies$rows, 0)
+    expect_equal(
+        map_int(design$blocks, function(b) length(b$carried)),
+        c(40L, 39L)
+    )
+    for (alpha in c(1, 0.5, 0)) {
+        engine <- list(
+            alpha = alpha,
+            lambda = c(0.2, 0.05),
+            args = list(thresh = 1e-14)
+        )
+        beta <- suppressWarnings(pecotmr:::.coupledGlmnetPath(design, engine))
+        for (k in 1:2) {
+            block <- design$blocks[[k]]
+            rows <- studies$rows[[k]]
+            # glmnet divides only its L2 term by the phenotype's SD, so the
+            # separate fit matching lambda is the one at lambda * sigma_k.
+            sep <- suppressWarnings(.rrw_separateGlmnet(
+                s$X[rows, block$carried],
+                s$Y[rows, k],
+                engine$lambda * block$sigma,
+                alpha
+            ))
+            joint <- block$sigma * beta[block$cols, , drop = FALSE]
+            expect_equal(
+                unname(joint),
+                exec(cbind, !!!sep),
+                tolerance = 1e-5,
+                info = paste("alpha", alpha, "study", k)
+            )
+        }
+    }
+})
+
+test_that("a strong coupling gives the studies one pooled fit", {
+    skip_if_not_installed("glmnet")
+    s <- .rrw_coupledStack()
+    keep <- 1:39 # the variants both studies carry
+    stack <- list(X = s$X[, keep], Y = s$Y)
+    studies <- pecotmr:::.coupledStudies(stack$X, stack$Y, 1000)
+    design <- pecotmr:::.coupledDesign(studies, studies$rows, 1000)
+    # glmnet's own tolerance: the coupled pairs' steps shrink as c grows, so a
+    # far tighter one takes more passes than glmnet allows.
+    engine <- list(alpha = 1, lambda = 0.01, args = list())
+    beta <- pecotmr:::.coupledGlmnetPath(design, engine)
+    # The penalty couples each variant's per-SD effect, its coefficient
+    # times its SD in the study's own rows.
+    perSd <- map2(design$blocks, studies$rows, function(b, rows) {
+        Xk <- stack$X[rows, b$carried]
+        sqrt(colMeans(sweep(Xk, 2L, colMeans(Xk))^2)) * beta[b$cols, 1L]
+    })
+    expect_lt(max(abs(perSd[[1L]] - perSd[[2L]])), 1e-3)
+    expect_gt(sum(perSd[[1L]] != 0), 0L)
+})
+
+test_that("each study takes its own grid point, its absent variants at 0", {
+    skip_if_not_installed("glmnet")
+    s <- .rrw_coupledStack()
+    withr::local_seed(1L)
+    W <- suppressWarnings(pecotmr:::.lassoCoupledWeights(
+        s$X,
+        s$Y,
+        strengths = c(0.1, 1, 10),
+        fitRetention = "slim"
+    ))
+    expect_equal(dimnames(W), list(colnames(s$X), c("A", "B")))
+    expect_equal(W[40L, "B"], 0)
+    fit <- attr(W, "fit")
+    expect_named(fit, c("strength", "lambda", "cvm", "cvsd", "variantIds"))
+    expect_named(fit$strength, c("A", "B"))
+    expect_true(all(fit$strength %in% c(0.1, 1, 10)))
+    expect_equal(fit$variantIds, colnames(s$X))
+    none <- suppressWarnings(pecotmr:::.lassoCoupledWeights(
+        s$X,
+        s$Y,
+        strengths = 1
+    ))
+    expect_null(attr(none, "fit"))
+    full <- attr(
+        suppressWarnings(pecotmr:::.ridgeCoupledWeights(
+            s$X,
+            s$Y,
+            strengths = c(0.1, 1),
+            fitRetention = "full"
+        )),
+        "fit"
+    )
+    expect_length(full$paths, 2L)
+    expect_equal(dim(full$cvmPath$A), c(100L, 2L))
+})
+
+test_that("L0Learn fits across studies with the L0 penalty only", {
+    skip_if_not_installed("L0Learn")
+    s <- .rrw_coupledStack()
+    withr::local_seed(1L)
+    W <- pecotmr:::.l0learnCoupledWeights(s$X, s$Y, strengths = c(0.1, 1))
+    expect_equal(dim(W), c(40L, 2L))
+    expect_equal(W[40L, "B"], 0)
+    expect_error(
+        pecotmr:::.l0learnCoupledWeights(s$X, s$Y, 1, penalty = "L0L2"),
+        "fits penalty = \"L0\" only, not \"L0L2\""
+    )
+    expect_error(
+        pecotmr:::.l0learnCoupledWeights(
+            s$X,
+            s$Y,
+            1,
+            methodArgs = L0learnOptions(excludeFirstK = 1L)
+        ),
+        "L0learnOptions\\(excludeFirstK\\) does not apply"
+    )
+})
+
+test_that("a fit across studies refuses what it cannot honour", {
+    skip_if_not_installed("glmnet")
+    s <- .rrw_coupledStack()
+    expect_error(
+        pecotmr:::.lassoCoupledWeights(
+            s$X,
+            s$Y,
+            1,
+            methodArgs = GlmnetOptions(penalty.factor = rep(1, 40L))
+        ),
+        "GlmnetOptions\\(penalty.factor\\) does not apply"
+    )
+    expect_error(
+        pecotmr:::.lassoCoupledWeights(
+            s$X,
+            s$Y,
+            1,
+            methodArgs = GlmnetOptions(type.measure = "mae")
+        ),
+        "chooses its \\(lambda, c\\) by mean squared error"
+    )
+    shared <- `[<-`(s$Y, 1L, "B", 0.5)
+    expect_error(
+        pecotmr:::.lassoCoupledWeights(s$X, shared, 1),
+        "needs each sample in one study"
+    )
+    expect_error(
+        pecotmr:::.lassoCoupledWeights(s$X, s$Y, -1),
+        "strengths"
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Penalized RSS across studies (difference penalty)
+# ---------------------------------------------------------------------------
+
+# The two studies of .rrw_coupledStack() as summary statistics: each one's
+# marginal correlations and in-sample LD over the variants it carries, on
+# population-scaled genotypes and phenotype, so that the RSS objective is
+# exactly twice the individual-level one.
+.rrw_coupledRss <- function() {
+    s <- .rrw_coupledStack()
+    popScale <- function(v) {
+        centred <- v - mean(v)
+        centred / sqrt(mean(centred^2))
+    }
+    map(1:2, function(k) {
+        rows <- which(!is.na(s$Y[, k]))
+        X <- apply(s$X[rows, ], 2L, popScale)
+        X <- X[, apply(X, 2L, function(v) all(is.finite(v))), drop = FALSE]
+        y <- popScale(s$Y[rows, k])
+        list(
+            X = X,
+            y = y,
+            z = as.numeric(crossprod(X, y)) / nrow(X),
+            R = crossprod(X) / nrow(X)
+        )
+    })
+}
+
+.rrw_coupledRssPath <- function(fit, strength, lambda, penalty = "lasso") {
+    penalizedRssCoupledCpp(
+        map(fit, "z"),
+        map(fit, "R"),
+        map(fit, function(f) match(colnames(f$X), colnames(fit[[1L]]$X))),
+        ncol(fit[[1L]]$X),
+        strength,
+        0,
+        lambda,
+        penalty,
+        "strongRule",
+        if (penalty == "SCAD") 3.7 else 3,
+        1,
+        0,
+        0,
+        1e-10,
+        100000L,
+        0L,
+        pecotmr:::.rssPathControl()
+    )
+}
+
+test_that("the coupled RSS path at c = 0 is each study's own", {
+    fit <- .rrw_coupledRss()
+    lambda <- c(0.2, 0.1, 0.05)
+    for (penalty in c("lasso", "MCP", "SCAD")) {
+        joint <- .rrw_coupledRssPath(fit, 0, lambda, penalty)
+        for (k in 1:2) {
+            alone <- penalizedRssCpp(
+                fit[[k]]$z,
+                fit[[k]]$R,
+                0,
+                lambda,
+                penalty,
+                "strongRule",
+                if (penalty == "SCAD") 3.7 else 3,
+                1,
+                0,
+                0,
+                1e-10,
+                100000L,
+                0L,
+                pecotmr:::.rssPathControl()
+            )
+            expect_equal(
+                joint$studies[[k]]$beta,
+                alone$beta,
+                tolerance = 1e-8,
+                info = paste(penalty, k)
+            )
+        }
+    }
+})
+
+test_that("coupled RSS on in-sample LD is the coupled individual-level fit", {
+    skip_if_not_installed("glmnet")
+    # On standardized data the RSS objective is twice the individual-level
+    # one, so the same (lambda, c) gives the same coefficients.
+    fit <- .rrw_coupledRss()
+    s <- .rrw_coupledStack()
+    keep <- colnames(fit[[2L]]$X)
+    stack <- list(
+        X = rbind(fit[[1L]]$X[, keep], fit[[2L]]$X),
+        Y = cbind(
+            A = c(fit[[1L]]$y, rep(NA, nrow(fit[[2L]]$X))),
+            B = c(rep(NA, nrow(fit[[1L]]$X)), fit[[2L]]$y)
+        )
+    )
+    shared <- map(fit, function(f) {
+        list(X = f$X[, keep], z = f$z[match(keep, colnames(f$X))])
+    })
+    rss <- map(shared, function(f) {
+        list(X = f$X, z = f$z, R = crossprod(f$X) / nrow(f$X))
+    })
+    lambda <- c(0.2, 0.1, 0.05)
+    studies <- pecotmr:::.coupledStudies(stack$X, stack$Y, 1)
+    for (strength in c(0.1, 1)) {
+        joint <- .rrw_coupledRssPath(rss, strength, lambda)
+        design <- pecotmr:::.coupledDesign(studies, studies$rows, strength)
+        beta <- suppressWarnings(pecotmr:::.coupledGlmnetPath(
+            design,
+            list(alpha = 1, lambda = lambda, args = list(thresh = 1e-14))
+        ))
+        for (k in 1:2) {
+            expect_equal(
+                joint$studies[[k]]$beta,
+                beta[design$blocks[[k]]$cols, , drop = FALSE],
+                tolerance = 1e-5,
+                check.attributes = FALSE,
+                info = paste(strength, k)
+            )
+        }
+    }
+})
+
+test_that("the coupled RSS path reads a factor of each study's LD as it", {
+    fit <- .rrw_coupledRss()
+    union <- map(fit, function(f) match(colnames(f$X), colnames(fit[[1L]]$X)))
+    rest <- list(
+        unionIdxList = union,
+        nUnion = ncol(fit[[1L]]$X),
+        strength = 1,
+        shrink = 0,
+        pathR = c(0.2, 0.1, 0.05),
+        penaltyStr = "lasso",
+        strategyStr = "strongRule",
+        gamma = 3,
+        alpha = 1,
+        lambda1 = 0,
+        lambda2 = 0,
+        thr = 1e-10,
+        maxiter = 100000L,
+        maxSwaps = 0L,
+        control = pecotmr:::.rssPathControl()
+    )
+    dense <- exec(
+        penalizedRssCoupledCpp,
+        zList = map(fit, "z"),
+        ldList = map(fit, "R"),
+        !!!rest
+    )
+    # R = F'F / (m - 1) for F = X sqrt((m - 1) / m), X population-scaled.
+    factors <- map(fit, function(f) f$X * sqrt((nrow(f$X) - 1) / nrow(f$X)))
+    viaFactor <- exec(
+        penalizedRssCoupledFactorCpp,
+        zList = map(fit, "z"),
+        factorList = factors,
+        !!!rest
+    )
+    for (k in 1:2) {
+        expect_equal(
+            viaFactor$studies[[k]]$beta,
+            dense$studies[[k]]$beta,
+            tolerance = 1e-8,
+            info = k
+        )
+    }
+})
+
+test_that("the coupled L0 path swaps as each study's own does at c = 0", {
+    fit <- .rrw_coupledRss()
+    union <- map(fit, function(f) match(colnames(f$X), colnames(fit[[1L]]$X)))
+    path <- c(0.02, 0.01, 0.005)
+    joint <- penalizedRssCoupledCpp(
+        map(fit, "z"),
+        map(fit, "R"),
+        union,
+        ncol(fit[[1L]]$X),
+        0,
+        0,
+        path,
+        "L0",
+        "gradientRanked",
+        0,
+        1,
+        0,
+        0,
+        1e-10,
+        100000L,
+        3L,
+        pecotmr:::.rssPathControl()
+    )
+    for (k in 1:2) {
+        alone <- penalizedRssCpp(
+            fit[[k]]$z,
+            fit[[k]]$R,
+            0,
+            path,
+            "L0",
+            "gradientRanked",
+            0,
+            1,
+            0,
+            0,
+            1e-10,
+            100000L,
+            3L,
+            pecotmr:::.rssPathControl()
+        )
+        expect_equal(
+            joint$studies[[k]]$beta,
+            alone$beta,
+            tolerance = 1e-8,
+            info = k
+        )
+    }
+})
+
+test_that("the coupled path flags a point it ran out of passes on", {
+    fit <- .rrw_coupledRss()
+    union <- map(fit, function(f) match(colnames(f$X), colnames(fit[[1L]]$X)))
+    for (strategy in c("strongRule", "gradientRanked")) {
+        joint <- penalizedRssCoupledCpp(
+            map(fit, "z"),
+            map(fit, "R"),
+            union,
+            ncol(fit[[1L]]$X),
+            1,
+            0,
+            c(0.05, 0.01),
+            "lasso",
+            strategy,
+            3,
+            1,
+            0,
+            0,
+            1e-14,
+            1L,
+            0L,
+            pecotmr:::.rssPathControl()
+        )
+        expect_true(any(joint$studies[[1L]]$conv == 0L), info = strategy)
+    }
+})
+
+test_that("the coupled path's helpers pad, skip and pair as asked", {
+    B <- matrix(1:4, 2L)
+    # An engine that stopped early stands for the grid's rest.
+    expect_equal(pecotmr:::.coupledPadPath(B, 4L), cbind(B, B[, c(2L, 2L)]))
+    expect_equal(pecotmr:::.coupledPadPath(B, 1L), B[, 1L, drop = FALSE])
+    # A study with no held-out rows in a fold adds nothing there.
+    expect_equal(
+        pecotmr:::.coupledHeldOutSse(
+            1L,
+            integer(0),
+            NULL,
+            matrix(0, 3, 5),
+            NULL
+        ),
+        numeric(5)
+    )
+    # Studies sharing no variant are not coupled.
+    blocks <- list(list(carried = c("a", "b")), list(carried = c("c", "d")))
+    expect_null(pecotmr:::.coupledPair(c(1L, 2L), blocks))
+})
+
+test_that("fits across studies read genotype panels through their factors", {
+    d <- .rrwPanelStatLd()
+    ids <- d$stat$variantNames
+    stats <- list(d$stat, list_modify(d$stat, z = 0.8 * d$stat$z))
+    refs <- list(d$panel, d$panel)
+    withr::local_seed(1L)
+    W <- pecotmr:::.rssCoupledWeights(
+        stats,
+        refs,
+        ids,
+        pecotmr:::.rssPenalty("lasso"),
+        c(0.5, 0.9),
+        c(0.1, 1),
+        list(),
+        "full",
+        "test"
+    )
+    expect_equal(dim(W), c(length(ids), 2L))
+    expect_false(is.null(attr(W, "fit")$beta))
+    prs <- pecotmr:::.prsCsCoupledWeights(
+        stats,
+        refs,
+        ids,
+        list(nIter = 30L, nBurnin = 10L, thin = 2L, seed = 2L),
+        "none",
+        "test"
+    )
+    expect_equal(dim(prs), c(length(ids), 2L))
+    expect_null(attr(prs, "fit"))
+    sdpr <- function(rho) {
+        pecotmr:::.sdprCoupledWeights(
+            stats,
+            refs,
+            ids,
+            list(
+                iter = 30L,
+                burn = 10L,
+                thin = 2L,
+                M = 10L,
+                verbose = FALSE,
+                seed = 3L,
+                rho = rho
+            ),
+            "slim",
+            "test"
+        )
+    }
+    learned <- attr(sdpr(NULL), "fit")$rhoEst[1L, 2L]
+    expect_true(learned >= 0 && learned <= 0.99)
+    given <- matrix(c(1, 0.5, 0.5, 1), 2L)
+    expect_equal(attr(sdpr(given), "fit")$rhoEst, given)
+})
+
+test_that("the coupled RSS solver checks each study's inputs", {
+    fit <- .rrw_coupledRss()
+    expect_error(
+        penalizedRssCoupledCpp(
+            map(fit, "z"),
+            map(fit, "R"),
+            list(1:3, 1:3),
+            40L,
+            1,
+            0,
+            0.1,
+            "lasso",
+            "strongRule",
+            3,
+            1,
+            0,
+            0,
+            1e-8,
+            1000L,
+            0L,
+            pecotmr:::.rssPathControl()
+        ),
+        "union indices but"
+    )
+    expect_error(
+        penalizedRssCoupledCpp(
+            map(fit, "z"),
+            map(fit, "R"),
+            map(fit, function(f) rep(1L, ncol(f$X))),
+            40L,
+            1,
+            0,
+            0.1,
+            "lasso",
+            "strongRule",
+            3,
+            1,
+            0,
+            0,
+            1e-8,
+            1000L,
+            0L,
+            pecotmr:::.rssPathControl()
+        ),
+        "must be distinct"
+    )
+})
+
+test_that("each study picks its own (s, c, lambda) from summary statistics", {
+    fit <- .rrw_coupledRss()
+    ids <- colnames(fit[[1L]]$X)
+    stats <- map(fit, function(f) {
+        list(
+            z = f$z * sqrt(nrow(f$X)),
+            n = rep(nrow(f$X), ncol(f$X)),
+            variantNames = colnames(f$X)
+        )
+    })
+    refs <- map(fit, function(f) LdMatrix(f$R, nSamples = nrow(f$X)))
+    withr::local_seed(1L)
+    W <- pecotmr:::.rssCoupledWeights(
+        stats,
+        refs,
+        ids,
+        pecotmr:::.rssPenalty("lasso"),
+        c(0.2, 0.9),
+        c(0.1, 1),
+        list(),
+        "slim",
+        "test"
+    )
+    expect_equal(dim(W), c(length(ids), 2L))
+    expect_equal(rownames(W), ids)
+    expect_equal(unname(W[setdiff(ids, colnames(fit[[2L]]$X)), 2L]), 0)
+    chosen <- attr(W, "fit")$selection
+    expect_equal(nrow(chosen), 2L)
+    expect_true(all(chosen$strength %in% c(0.1, 1)))
+    expect_true(all(chosen$s %in% c(0.2, 0.9)))
+    l0 <- pecotmr:::.rssCoupledWeights(
+        stats,
+        refs,
+        ids,
+        pecotmr:::.rssPenalty("L0"),
+        0.9,
+        1,
+        list(),
+        "none",
+        "test"
+    )
+    expect_null(attr(l0, "fit"))
+    expect_equal(dim(l0), c(length(ids), 2L))
 })

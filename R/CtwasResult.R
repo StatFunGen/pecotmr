@@ -18,7 +18,8 @@
 # so genes live inside the elements. Optional joint columns (jointStudies,
 # jointContexts) tag rows born from a multi-study / multi-context cTWAS run and
 # participate in the uniqueness key, exactly as in the TwasWeights /
-# FineMappingResultBase families.
+# FineMappingResultBase families; so does jointTwasAxes, the kind of joint fit
+# a run's TWAS weights are, whose members its genes carry one by one.
 # =============================================================================
 
 #' @include AllGenerics.R tupleSelectors.R RangedTupleList.R CtwasResultEntry.R
@@ -40,7 +41,17 @@ NULL
 #'   \code{jointStudies} / \code{jointContexts} columns tag rows born from a
 #'   multi-study or multi-context run and participate in the uniqueness key,
 #'   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
-#'   families. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
+#'   families. The optional \code{jointTwasAxes} column, present when a run
+#'   modelled weights of a joint fit, is the kind of joint fit the run's
+#'   weights are (\code{"none"}, \code{"study"}, \code{"context"},
+#'   \code{"context+trait"} and so on; \code{NA} for a \code{"best"} run,
+#'   whose genes' weights can be of different kinds), and joins the key too,
+#'   so two runs of one method on weights of different kinds stay apart. A
+#'   gene's own fit can join members its neighbours' do not, so the members
+#'   are kept gene by gene: in such a run each gene's posteriors and susie
+#'   alphas carry \code{joint_twas_studies}, \code{joint_twas_contexts} and
+#'   \code{joint_twas_traits}, NA for a SNP or for weights of a fit of the
+#'   gene alone. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
 #'   stack every region back into one \code{GRanges}. The group priors are
 #'   the run's one genome-wide estimate, fitted across all its regions, so a
 #'   run's rows must carry the same priors: rows of one identity whose
@@ -58,6 +69,11 @@ setClass(
 # The run identity every row carries, and the per-region payload columns.
 # @noRd
 .CTWAS_ID_COLS <- c("gwasStudy", "study", "context", "method")
+
+# The optional run-identity columns: the studies or contexts a joint cTWAS run
+# modelled together, and the kind of joint fit the run's TWAS weights are.
+# @noRd
+.CTWAS_JOINT_COLS <- c("jointStudies", "jointContexts", "jointTwasAxes")
 
 # @noRd
 .CTWAS_PAYLOAD_COLS <- c("susieAlpha", "regionInfo", "groupPriors")
@@ -83,7 +99,7 @@ setClass(
     if (!coll$isEmpty()) {
         return(coll$getMessages())
     }
-    jointCols <- intersect(c("jointStudies", "jointContexts"), cols)
+    jointCols <- intersect(.CTWAS_JOINT_COLS, cols)
     problems <- c(
         .ctwasResCheckJointCols(object, jointCols),
         .ctwasResCheckTupleUniqueness(object, jointCols),
@@ -103,6 +119,13 @@ setClass(
     if (!is.character(value)) {
         return(glue(
             "'{jc}' column must be character (got {class(value)[[1L]]})"
+        ))
+    }
+    unknown <- setdiff(value, c(.JOINT_KINDS, NA_character_))
+    if (jc == "jointTwasAxes" && length(unknown) > 0L) {
+        return(glue(
+            "'jointTwasAxes' holds {str_flatten(unknown, ', ')}, which is ",
+            "no kind of joint fit ({str_flatten(.JOINT_KINDS, ', ')})"
         ))
     }
     NULL
@@ -195,6 +218,15 @@ setClass(
 #'   \code{NA_character_} otherwise. \code{NULL} (default) omits the column.
 #' @param jointContexts Optional character vector for multi-context runs. Same
 #'   shape as \code{jointStudies}.
+#' @param jointTwasAxes Optional character vector, one value per run: the kind
+#'   of joint fit the run's TWAS weights are -- \code{"none"} for weights of
+#'   a fit of each gene alone, or the axes the fits joined, such as
+#'   \code{"study"} or \code{"context+trait"} (see
+#'   \code{\link{WeightSelectionParam}}'s \code{jointAxes}) -- and
+#'   \code{NA_character_} for a run whose genes' weights are of different
+#'   kinds (a \code{"best"} run). Part of the run identity, so two runs of
+#'   one method on weights of different kinds stay apart. \code{NULL}
+#'   (default) omits the column.
 #' @param metadata A list of free-form metadata about the collection,
 #'   as \code{metadata()} holds on any Bioconductor vector. Default
 #'   \code{list()}.
@@ -220,13 +252,15 @@ CtwasResult <- function(
     entry,
     jointStudies = NULL,
     jointContexts = NULL,
+    jointTwasAxes = NULL,
     metadata = list()
 ) {
     n <- length(gwasStudy)
     .ctwasCheckRunLengths(n, studyName, context, method, entry)
     supplied <- compact(list(
         jointStudies = jointStudies,
-        jointContexts = jointContexts
+        jointContexts = jointContexts,
+        jointTwasAxes = jointTwasAxes
     ))
     walk2(names(supplied), supplied, .ctwasCheckJointColLength, n = n)
     entries <- as.list(entry)
@@ -411,7 +445,8 @@ setMethod(
             method = old$method,
             entry = as.list(old$entry),
             jointStudies = old$jointStudies,
-            jointContexts = old$jointContexts
+            jointContexts = old$jointContexts,
+            jointTwasAxes = old$jointTwasAxes
         )
     }
 )
@@ -472,10 +507,7 @@ setMethod("susieAlpha", "CtwasResult", function(x) {
 #' @export
 setMethod("ctwasGroupPriors", "CtwasResult", function(x) {
     md <- mcols(x, use.names = FALSE)
-    idCols <- c(
-        .CTWAS_ID_COLS,
-        intersect(c("jointStudies", "jointContexts"), colnames(md))
-    )
+    idCols <- c(.CTWAS_ID_COLS, intersect(.CTWAS_JOINT_COLS, colnames(md)))
     runs <- unique(.ctwasRunFirstRows(md, idCols))
     ids <- as_tibble(as.data.frame(md[runs, idCols, drop = FALSE]))
     priors <- as.list(md$groupPriors)[runs]
@@ -555,9 +587,9 @@ setMethod("ctwasGroupPriors", "CtwasResult", function(x) {
 #' @rdname show-methods
 #' @export
 setMethod("show", "CtwasResult", function(object) {
-    runs <- distinct(as_tibble(
-        as.data.frame(mcols(object, use.names = FALSE)[, .CTWAS_ID_COLS])
-    ))
+    md <- mcols(object, use.names = FALSE)
+    idCols <- c(.CTWAS_ID_COLS, intersect(.CTWAS_JOINT_COLS, colnames(md)))
+    runs <- distinct(as_tibble(as.data.frame(md[, idCols, drop = FALSE])))
     cat(glue(
         "CtwasResult: {nrow(runs)} run(s) over {length(object)} region ",
         "row(s)\n",
@@ -575,8 +607,8 @@ setMethod("show", "CtwasResult", function(object) {
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
-# One row's payload with its run identity attached, ranges and all; NULL when
-# the row has none.
+# One row's payload with its run identity attached -- the joint columns the
+# collection carries too -- ranges and all; NULL when the row has none.
 # @noRd
 .ctwasAggregateRow <- function(i, x, payloads) {
     payload <- payloads[[i]]
@@ -584,11 +616,13 @@ setMethod("show", "CtwasResult", function(object) {
         return(NULL)
     }
     md <- mcols(x, use.names = FALSE)
+    present <- intersect(.CTWAS_JOINT_COLS, colnames(md))
     identity <- tibble(
         gwasStudy = as.character(md$gwasStudy)[[i]],
         study = as.character(md$study)[[i]],
         context = as.character(md$context)[[i]],
-        method = as.character(md$method)[[i]]
+        method = as.character(md$method)[[i]],
+        !!!set_names(map(present, .ctwasRowValueAt, md = md, i = i), present)
     )
     # The row identity is authoritative: a payload column of the same name
     # (cTWAS's own `context`) gives way to it rather than being duplicated.
@@ -612,4 +646,10 @@ setMethod("show", "CtwasResult", function(object) {
         as.data.frame(mcols(part), optional = TRUE),
         .name_repair = "minimal"
     )
+}
+
+# Column `cn` of run identity `md` at row `i`, as character.
+# @noRd
+.ctwasRowValueAt <- function(cn, md, i) {
+    as.character(md[[cn]])[[i]]
 }

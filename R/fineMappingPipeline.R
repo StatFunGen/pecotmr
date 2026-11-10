@@ -73,6 +73,11 @@
 #'   existing fine-mapping result skips re-fitting any \code{(study,
 #'   context, trait, method)} tuple that already has a matching row; cached
 #'   entries are merged with the newly-fit entries in the returned collection.
+#'   A row matches only when it comes from a fit like the one to be made: a
+#'   tuple fitted alone by a row of no joint group, a joint group's
+#'   conditions only all together and by rows of that same group (their
+#'   \code{jointStudies} / \code{jointContexts} / \code{jointTraits}), so a
+#'   fit of the tuple in another group is refit rather than borrowed.
 #'
 #' @section Intentional behaviours dropped from the pre-stub pipelines:
 #' The four pre-stub pipelines (\code{univariateAnalysisPipeline} /
@@ -262,9 +267,24 @@
 #'   listed values, each of which must exist in \code{data}. A list-form
 #'   spec always goes inside the outer list, even on its own. Other methods
 #'   run per (study, context, trait) as usual. The \code{"study"} axis needs
-#'   summary statistics: it is rejected on a \code{QtlDataset}, and on a
-#'   \code{MultiStudyQtlDataset} only the summary-statistics studies take
-#'   part.
+#'   more than one study, so it is rejected on a \code{QtlDataset}. On a
+#'   \code{MultiStudyQtlDataset}, the summary-statistics studies are fitted
+#'   with one another, and so are the individual-level ones: one
+#'   \code{mvsusie} fit per (context, trait) that two or more of them carry,
+#'   for instance the same gene measured in several ancestries. Their samples
+#'   must be disjoint. The fit stacks them, each study's phenotype observed
+#'   on its own samples only, over the union of the studies' variants, which
+#'   are matched by allele; a variant a study lacks carries no evidence for
+#'   it. Each study keeps its own residualization, genotype filters and
+#'   scaling, and its row reports its own samples' allele frequencies and
+#'   credible-set purity. While the residualizer scales X and Y
+#'   (\code{ResidualizationParam(scaleResiduals = TRUE)}, the default), every
+#'   joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so its
+#'   prior describes per-SD effects and a component shared across studies
+#'   means effects equal per SD whatever the studies' sizes;
+#'   \code{MvsusieOptions(standardize = TRUE)} restores mvsusieR's own
+#'   scaling. \code{fsusie} has no cross-study fit, and a composed spec
+#'   including \code{"study"} runs on summary statistics only.
 #' @section Panel filters on the RSS path: On \code{QtlSumStats} /
 #'   \code{GwasSumStats} input there is no genotype matrix to filter, so
 #'   \code{panelFilterParam}'s \code{mafCutoff} / \code{macCutoff} /
@@ -821,16 +841,18 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 }
 
 # Optional resume-cache lookup. Returns the matching FineMappingRow from
-# `fineMappingResult` for the tuple (study, context, trait, method), or
-# NULL when there is no hit. Returns NULL silently when fineMappingResult
-# is NULL or not a QtlFineMappingResult.
+# `fineMappingResult` for the tuple (study, context, trait, method) fitted in
+# joint group `joint` (.noJointKey() for a fit of the tuple alone), or NULL
+# when there is no hit: a row of another group's fit is another fit. Returns
+# NULL silently when fineMappingResult is NULL or not a QtlFineMappingResult.
 # @noRd
 .fmCacheLookup <- function(
     fineMappingResult,
     studyName,
     context,
     trait,
-    method
+    method,
+    joint = .noJointKey()
 ) {
     if (is.null(fineMappingResult)) {
         return(NULL)
@@ -840,11 +862,14 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
     idx <- .matchTupleRows(
         fineMappingResult,
-        list(
-            study = studyName,
-            context = context,
-            trait = trait,
-            method = method
+        c(
+            list(
+                study = studyName,
+                context = context,
+                trait = trait,
+                method = method
+            ),
+            joint
         )
     )
     if (length(idx) == 0L) {
@@ -1846,12 +1871,18 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # context) with trait = NULL (see .jointPriorKey). Returns NULL when no
 # TwasWeights is supplied or it carries no matching mr.mash fit (caller falls
 # back to the canonical prior).
+#
+# The axes alone do not say what a fit is over: a cross-study group keys on
+# (context, trait), which one study's own fit across its contexts also
+# carries. So a fit is taken only when it covers `conditionNames`, the
+# conditions the group fits.
 # @noRd
 .fmLookupMrmashFit <- function(
     mrmashPrior,
     studyName = NULL,
     trait = NULL,
-    context = NULL
+    context = NULL,
+    conditionNames = NULL
 ) {
     if (is.null(mrmashPrior)) {
         return(NULL)
@@ -1862,9 +1893,23 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
     for (row in cells$row) {
         f <- methodFits(.twrCellParts(mrmashPrior, row, "mrmash"))
-        if (!is.null(f)) return(f)
+        if (!is.null(f) && .fmMrmashFitCovers(f, conditionNames)) return(f)
     }
     NULL
+}
+
+# Whether a stored mr.mash fit (or fold fit) is over every one of
+# `conditionNames`. Its covariances are indexed by condition, so a fit over
+# other conditions -- one study's contexts, for a group over studies --
+# describes none of the group's. A fit whose conditions are unnamed, or a
+# lookup naming none, is taken as it is.
+# @noRd
+.fmMrmashFitCovers <- function(fitParts, conditionNames) {
+    named <- rownames(fitParts$V) %||%
+        rownames(pluck(fitParts, "dataDrivenPriorMatrices", "U", 1L))
+    is.null(conditionNames) ||
+        is.null(named) ||
+        all(is_in(conditionNames, named))
 }
 
 # Locate the retained per-fold mr.mash CV payload for one (study, trait[,
@@ -1872,13 +1917,15 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # carrying `foldFits` (per-fold lean payloads) + `samplePartition` (the folds
 # the per-fold priors were computed on). These let the mvSuSiE CV use an honest
 # per-fold prior instead of reusing the full-data prior on every fold. Returns
-# NULL when no TwasWeights / no matching mr.mash CV result with fold fits.
+# NULL when no TwasWeights / no matching mr.mash CV result with fold fits, or
+# none whose fold fits cover `conditionNames` (.fmLookupMrmashFit()).
 # @noRd
 .fmLookupMrmashCv <- function(
     mrmashPrior,
     studyName = NULL,
     trait = NULL,
-    context = NULL
+    context = NULL,
+    conditionNames = NULL
 ) {
     if (is.null(mrmashPrior)) {
         return(NULL)
@@ -1886,9 +1933,20 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
     for (row in cells$row) {
         cv <- cvResult(.twrCellParts(mrmashPrior, row, "mrmash"))
-        if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
+        if (.fmMrmashCvCovers(cv, conditionNames)) return(cv)
     }
     NULL
+}
+
+# Whether a mr.mash CV payload carries fold fits, over `conditionNames` when
+# any of them holds a fit to read its conditions from.
+# @noRd
+.fmMrmashCvCovers <- function(cv, conditionNames) {
+    if (is.null(cv) || is.null(cv$foldFits)) {
+        return(FALSE)
+    }
+    folds <- compact(cv$foldFits)
+    length(folds) == 0L || .fmMrmashFitCovers(folds[[1L]], conditionNames)
 }
 
 # Build the per-fold mvSuSiE reweighted priors for cross-validation from a
@@ -3258,7 +3316,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         return(jointWork)
     }
     .fmJointSpecsWork(
-        .fmSynthesizeJointSpec(nCtx, nTraits),
+        .defaultJointSpec(nCtx, nTraits),
         c(mvTokens, fsTokens),
         methodArgs,
         cfg
@@ -4300,7 +4358,7 @@ NULL
         return(jointResult)
     }
     .fmDispatchJointSpecsQtlSumStats(
-        list(list(axes = "context", scope = NULL)),
+        .defaultSumStatsJointSpec(),
         mvTokens,
         methodArgs,
         cfg

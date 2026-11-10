@@ -17,7 +17,6 @@ export("maf<-")
 export("sampleSize<-")
 export(AnnotationMatrix)
 export(AspuOptions)
-export(BayesAlphabetRssOptions)
 export(BglrOptions)
 export(BigsnprOptions)
 export(BoundaryMergeParam)
@@ -33,6 +32,7 @@ export(CovEdOptions)
 export(CovFlashOptions)
 export(CovMcdOptions)
 export(CovPcaOptions)
+export(CovSubsetsOptions)
 export(CovUdrOptions)
 export(CredibleSetParam)
 export(CrossValidationParam)
@@ -642,8 +642,11 @@ importFrom(IRanges,
 )
 importFrom(MASS,ginv)
 importFrom(Matrix,
+  Matrix,
+  bdiag,
   colSums,
-  rowSums
+  rowSums,
+  sparseMatrix
 )
 importFrom(MultiAssayExperiment,
   ExperimentList,
@@ -809,6 +812,7 @@ importFrom(purrr,
   partial,
   pluck,
   pmap,
+  pmap_chr,
   possibly,
   pwalk,
   reduce,
@@ -842,6 +846,7 @@ importFrom(rlang,
   eval_bare,
   fn_env,
   fn_fmls,
+  fn_fmls_names,
   has_name,
   hash,
   inform,
@@ -925,8 +930,7 @@ importFrom(tools,file_ext)
 importFrom(utils,
   combn,
   head,
-  removeSource,
-  tail
+  removeSource
 )
 importFrom(vctrs,
   vec_chop,

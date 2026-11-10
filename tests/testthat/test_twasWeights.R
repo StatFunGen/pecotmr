@@ -334,6 +334,37 @@ test_that("learnTwasWeights fits sparsevb, its options from a plain list", {
     expect_setequal(order(-abs(w[, 1]))[1:3], 1:3)
 })
 
+test_that("an outcome missing on some samples is fitted on the rest alone", {
+    skip_if_not_installed("glmnet")
+    # Two studies stacked as a group across studies: the second lacks the
+    # last variant (zeros in its rows), and each outcome is observed on its
+    # own study's samples.
+    a <- makeData(n = 60, p = 6, seed = 1)
+    b <- makeData(n = 60, p = 6, seed = 2)
+    rownames(b$X) <- rownames(b$Y) <- paste0("b_", seq_len(60))
+    b$X[, 6] <- 0
+    X <- rbind(a$X, b$X)
+    Y <- cbind(
+        c(a$Y[, 1], rep(NA, 60)),
+        c(rep(NA, 60), b$Y[, 1])
+    )
+    rownames(Y) <- rownames(X)
+    fit <- function(X, Y) {
+        .weightsByMethod(
+            learnTwasWeights(X, Y, weightMethods = "lasso", seed = 5L),
+            "lassoWeights"
+        )
+    }
+    together <- fit(X, Y[, 1L, drop = FALSE])
+    expect_equal(together[, 1L], fit(a$X, a$Y)[, 1L])
+    second <- fit(X, Y[, 2L, drop = FALSE])
+    expect_equal(unname(second[6L, 1L]), 0)
+    expect_equal(
+        unname(second[1:5, 1L]),
+        unname(fit(b$X[, 1:5], b$Y)[, 1L])
+    )
+})
+
 test_that("learnTwasWeights: zero-variance columns are filtered, weighted 0", {
     d <- makeData(n = 50, p = 10, add_zero_var_col = TRUE)
     p_with_extra <- ncol(d$X) # 11 columns, last is zero-var
@@ -2217,6 +2248,12 @@ test_that("an RSS method accepts its own penalty settings and no other's", {
     expect_false(any(is_in(c("alpha", "gamma"), accepted("l0learn"))))
 })
 
+test_that("dprGibbs accepts SDPR's settings across studies", {
+    accepted <- pecotmr:::.twasChainAccepted("dprGibbs", "QtlSumStats")
+    expect_true(all(is_in(c("sharing", "rho", "M", "iter"), accepted)))
+    expect_false(any(is_in(c("bhat", "R"), accepted)))
+})
+
 test_that("mr.ash's update order is accepted on both input kinds", {
     for (kind in c("QtlDataset", "QtlSumStats")) {
         expect_true(
@@ -3044,4 +3081,40 @@ test_that("learnTwasWeights keeps a fit's X only at full, and only if asked", {
         "requires `fitRetention",
         fixed = TRUE
     )
+})
+
+test_that(".twasCellIndex narrows to a joint group when one is named", {
+    row <- function(w) TwasWeightsRow(variantIds = "chr1:100:A:G", weights = w)
+    # One gene and method fitted across contexts and across studies.
+    tw <- TwasWeights(
+        studyName = c("s1", "s1"),
+        context = c("brain", "brain"),
+        trait = c("g", "g"),
+        method = c("mvsusie", "mvsusie"),
+        entry = list(row(0.1), row(0.2)),
+        jointStudies = c(NA, "s1;s2"),
+        jointContexts = c("brain;liver", NA)
+    )
+    cells <- pecotmr:::.twasCells(tw)
+    idx <- function(joint) {
+        pecotmr:::.twasCellIndex(cells, "s1", "brain", "g", "mvsusie", joint)
+    }
+    expect_length(idx(NULL), 2L)
+    across <- list(
+        jointStudies = "s2;s1",
+        jointContexts = NA_character_,
+        jointTraits = NA_character_
+    )
+    expect_equal(cells$jointStudies[[idx(across)]], "s1;s2")
+    expect_length(idx(pecotmr:::.noJointKey()), 0L)
+})
+
+test_that("a weight function that takes Y is fitted on all of Y", {
+    # Multivariate methods, and the univariate ones fitted across a group's
+    # studies, take Y; the rest are fitted one column at a time.
+    expect_true(pecotmr:::.twasFitsWholeY("mvsusieWeights"))
+    expect_true(pecotmr:::.twasFitsWholeY(".lassoCoupledWeights"))
+    expect_true(pecotmr:::.twasFitsWholeY(".l0learnCoupledWeights"))
+    expect_false(pecotmr:::.twasFitsWholeY("lassoWeights"))
+    expect_false(pecotmr:::.twasFitsWholeY("l0learnWeights"))
 })

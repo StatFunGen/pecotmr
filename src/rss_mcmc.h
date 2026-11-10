@@ -12,8 +12,7 @@
 //   * ChainOptions are what every sampler can do beyond its prior:
 //     Rao-Blackwellized means, and tracking for combining several chains;
 //   * ChainEstimates are what every chain reports, which keep_effects()
-//     and check_divergence() update; ChainRandom is the generator of the
-//     single-site samplers;
+//     and check_divergence() update;
 //   * BlockLayout places the variants in contiguous LD blocks;
 //   * DenseLdBlock and FactorLdBlock hold a block's matrix S -- the LD R, or
 //     a matrix a likelihood derives from it -- whole or as a factor W with
@@ -21,15 +20,13 @@
 //     products, quadratic forms, principal submatrices and the joint
 //     Gaussian draw of the block's effects;
 //   * gaussian_draw() draws from a Gaussian given its precision, and
-//     standard_normals(), gigrnd(), rinvgauss(), dirichlet_plus_one() and
+//     standard_normals(), gigrnd(), dirichlet_plus_one() and
 //     beta_distribution add the variates <random> lacks.
 // Then the priors, each a chain on the above:
-//   * PRS-CS's continuous shrinkage prior (PrsCsChain);
+//   * PRS-CS's continuous shrinkage prior (PrsCsChain), and across studies
+//     as PRS-CSx and JointPRS share it;
 //   * SDPR's Dirichlet process prior (SdprData and SdprBlock here; its
-//     chain is in rss_mcmc.cpp);
-//   * the Bayesian alphabet in qgg's and hibayes' forms, on a factor of the
-//     LD (QggFormChain, HibayesFormChain);
-//   * LDpred2's point-normal prior, on a factor of the LD (Ldpred2Chain).
+//     chain is in rss_mcmc.cpp), and across studies as SDPRX shares it.
 // rss_mcmc.cpp has every sampler's cpp11 entry points.
 //
 // Derived from these projects, each under its own license (the notices are
@@ -38,16 +35,17 @@
 //     Ge, distributed under the MIT License: PrsCsChain, gigrnd(), and
 //     DenseLdBlock::draw(), which follows PRS-CS's draw of a block's
 //     effects;
+//   * PRS-CSx (https://github.com/getian107/PRScsx), Copyright (c) 2019 Tian
+//     Ge, and JointPRS (https://github.com/LeqiXu/JointPRS), Copyright (c)
+//     2024 Leqi Xu, both distributed under the MIT License: PrsCsChain's
+//     coupling across studies;
 //   * SDPR (https://github.com/eldronzhou/SDPR), Copyright (C) the SDPR
 //     authors (Geyu Zhou and Hongyu Zhao), distributed under the GNU General
 //     Public License, version 3: the SDPR section, and gaussian_draw(),
 //     which follows the joint draw of SDPR's sample_beta();
-//   * qgg (https://github.com/psoerensen/qgg) and hibayes
-//     (https://github.com/YinLiLin/hibayes), both distributed under the GNU
-//     General Public License, version 3: the Bayesian alphabet section;
-//   * bigsnpr (https://github.com/privefl/bigsnpr), Copyright (c) Florian
-//     Prive, distributed under the GNU General Public License, version 3:
-//     the LDpred2 section, from its ldpred2.cpp and ldpred2-auto.cpp.
+//   * SDPRX (https://github.com/eldronzhou/SDPRX), Copyright (c) 2022 Geyu
+//     Zhou, distributed under the MIT License: the SDPR chain's kinds of
+//     components across studies.
 #pragma once
 
 #include <cpp11.hpp>
@@ -55,6 +53,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <random>
 #include <string>
@@ -211,21 +210,6 @@ inline double gigrnd(double p, double a, double b, std::mt19937& rng) {
 	return result;
 }
 
-// A draw from the inverse Gaussian with mean mu and shape lambda, by Michael,
-// Schucany and Haas's (1976) transformation, as qgg and hibayes draw it.
-inline double rinvgauss(double mu, double lambda, std::mt19937& rng) {
-	std::normal_distribution<double> normal(0.0, 1.0);
-	double z = normal(rng);
-	double z2 = z * z;
-	double x = mu + 0.5 * mu * mu * z2 / lambda -
-	           0.5 * (mu / lambda) * std::sqrt(4.0 * mu * lambda * z2 + mu * mu * z2 * z2);
-	std::uniform_real_distribution<double> unif(0.0, 1.0);
-	if (unif(rng) <= mu / (mu + x)) {
-		return x;
-	}
-	return mu * mu / x;
-}
-
 // A draw from the Dirichlet with parameters counts + 1, through gamma draws.
 inline std::vector<double> dirichlet_plus_one(const std::vector<double>& counts,
                                               std::mt19937& rng) {
@@ -335,33 +319,6 @@ std::vector<arma::uword> block_sizes(const std::vector<Block>& blocks) {
 	}
 	return sizes;
 }
-
-// The single-site samplers' generator, each variate from a fresh
-// distribution.
-class ChainRandom {
-public:
-	explicit ChainRandom(unsigned int seed) : rng_(seed) {}
-
-	double normal(double mean, double sd) {
-		std::normal_distribution<double> dist(mean, sd);
-		return dist(rng_);
-	}
-
-	double chisq(double df) {
-		std::chi_squared_distribution<double> dist(df);
-		return dist(rng_);
-	}
-
-	double unif() {
-		std::uniform_real_distribution<double> dist(0.0, 1.0);
-		return dist(rng_);
-	}
-
-	std::mt19937& engine() { return rng_; }
-
-private:
-	std::mt19937 rng_;
-};
 
 // ---- The chain --------------------------------------------------------------
 
@@ -551,111 +508,126 @@ private:
 	}
 };
 
-// ==== PRS-CS ====================================================================
+// ==== PRS-CS, PRS-CSx and JointPRS ============================================
 
 // PRS-CS's prior is beta_j ~ N(0, sigma / n psi_j) with the
 // Strawderman-Berger local scales psi_j ~ G(a, delta_j), delta_j ~ G(b, phi),
 // and the global scale phi either fixed or learned under a half-Cauchy
-// prior. A sweep draws each block's beta jointly given psi (the block's
-// draw()), then sigma, delta, psi and, when it is learned, phi.
+// prior. One chain runs it for one study, or for K studies coupled as JointPRS
+// couples them: the effects b_u = (sqrt(n_k) beta_uk) of the studies carrying
+// variant u are drawn from N(0, psi_u C), C's diagonal the studies' residual
+// variances sigma_k and its off-diagonal rho_kk' sqrt(sigma_k sigma_k'). The
+// local scale psi_u, over the union of the studies' variants, and the global
+// scale phi are shared, as PRS-CSx shares them; at rho = 0 the chain is
+// PRS-CSx's, and for one study PRS-CS's. Each study's prior on a variant is
+// read through the inverse of the correlation matrix of the studies carrying
+// it, R_g^-1, the identity at rho = 0, so that no term the coupling adds moves
+// a value there.
+// A sweep draws each study's blocks jointly given psi and the others' current
+// effects (the block's draw(); the prior's conditional is a precision and a
+// shift of the marginal effects) and its sigma, as JointPRS draws them; then
+// rho by JointPRS's random-walk Metropolis step on [0, min(c_k c_k', 0.99)]
+// for the studies' constraints c, keeping the correlation matrix positive
+// definite (a constraint of 0 holds a study's correlations at 0); then the
+// shared delta, psi and, when it is learned, phi.
 
-// The posterior means, besides the effects every chain reports.
-struct PrsCsEstimates : ChainEstimates {
+// The posterior means: each study's effects over its own variants, with the
+// fitted correlations and divergence every chain reports; the shared local
+// scales over the union; the studies' residual variances and correlation; and
+// the global scale.
+struct PrsCsEstimates {
+	std::vector<ChainEstimates> study;
 	arma::vec psi;
-	double sigma = 0.0;
+	arma::vec sigma;
+	arma::mat rho;
 	double phi = 0.0;
+
+	bool diverged() const {
+		for (const ChainEstimates& s : study) {
+			if (s.diverged) {
+				return true;
+			}
+		}
+		return false;
+	}
 };
 
-// The sampler's state on the marginal effects `beta_mrg` of the variants in
-// `blocks` (each a DenseLdBlock of R or each a FactorLdBlock with R = W'W).
+// The chain on study k's marginal effects `beta_mrg[k]` of the variants in
+// `blocks[k]` (each a DenseLdBlock of R or each a FactorLdBlock with
+// R = W'W), placed in the union by `union_idx[k]`.
 template <class LdBlock>
 class PrsCsChain {
 public:
 	PrsCsChain(double a, double b, bool learn_phi, double phi,
-	           const arma::vec& beta_mrg, int n,
-	           const std::vector<LdBlock>& blocks, unsigned int seed,
-	           const ChainOptions& opts = ChainOptions())
-	    : a_(a), b_(b), learn_phi_(learn_phi), n_(n),
-	      p_(static_cast<int>(beta_mrg.n_elem)), beta_mrg_(beta_mrg),
-	      blocks_(blocks), layout_(block_sizes(blocks)), rng_(seed),
-	      normal_(0.0, 1.0), gamma_sigma_((n + p_) / 2.0, 1.0),
-	      beta_(p_, arma::fill::zeros), psi_(p_, arma::fill::ones),
-	      sigma_(1.0), phi_(learn_phi ? 1.0 : phi), opts_(opts),
-	      beta_mean_(p_, arma::fill::zeros),
-	      gap0_(divergence_gap(beta_mrg)) {
-		est_.beta.zeros(p_);
-		est_.psi.zeros(p_);
-		est_.corr.zeros(p_);
+	           const arma::vec& constraint,
+	           const std::vector<arma::vec>& beta_mrg, const arma::vec& n,
+	           const std::vector<std::vector<LdBlock>>& blocks,
+	           const std::vector<arma::uvec>& union_idx, arma::uword n_union,
+	           unsigned int seed, const ChainOptions& opts = ChainOptions())
+	    : a_(a), b_(b), learn_phi_(learn_phi), constraint_(constraint),
+	      beta_mrg_(beta_mrg), n_(n), blocks_(blocks), union_idx_(union_idx),
+	      n_union_(n_union), k_(beta_mrg.size()), rng_(seed),
+	      normal_(0.0, 1.0), psi_(n_union, arma::fill::ones),
+	      phi_(learn_phi ? 1.0 : phi), sigma_(k_, arma::fill::ones),
+	      rho_(k_, k_, arma::fill::eye),
+	      beta_union_(n_union, k_, arma::fill::zeros), opts_(opts) {
+		for (arma::uword k = 0; k < k_; ++k) {
+			arma::uword p = beta_mrg[k].n_elem;
+			layouts_.emplace_back(block_sizes(blocks[k]));
+			beta_.emplace_back(p, arma::fill::zeros);
+			beta_mean_.emplace_back(p, arma::fill::zeros);
+			gamma_sigma_.emplace_back((n(k) + p) / 2.0, 1.0);
+			gap0_.push_back(divergence_gap(beta_mrg[k]));
+			ChainEstimates est;
+			est.beta.zeros(p);
+			est.corr.zeros(p);
+			est_.study.push_back(est);
+		}
+		build_patterns();
+		refresh_rinv();
+		est_.psi.zeros(n_union);
+		est_.sigma.zeros(k_);
+		est_.rho.zeros(k_, k_);
 	}
 
 	void sweep() {
-		double quad = 0.0;
-		for (arma::uword k = 0; k < layout_.n_blocks(); ++k) {
-			if (layout_.size(k) == 0) {
-				continue;
-			}
-			arma::span blk = layout_.span(k);
-			arma::vec beta_blk;
-			arma::vec mean_blk;
-			quad += blocks_[k].draw(psi_(blk), beta_mrg_(blk), sigma_ / n_,
-			                        normal_, rng_, beta_blk,
-			                        opts_.rao_blackwell ? &mean_blk : nullptr);
-			beta_(blk) = beta_blk;
-			if (opts_.rao_blackwell) {
-				beta_mean_(blk) = mean_blk;
-			}
+		for (arma::uword k = 0; k < k_; ++k) {
+			draw_study(k);
 		}
-		double err = std::max(n_ / 2.0 * (1.0 - 2.0 * arma::dot(beta_, beta_mrg_) + quad),
-		                      n_ / 2.0 * arma::sum(arma::pow(beta_, 2) / psi_));
-
-		// sigma ~ InvGamma((n + p) / 2, rate = err), as err / Gamma((n + p) / 2, 1).
-		sigma_ = err / gamma_sigma_(rng_);
-
-		arma::vec delta(p_);
-		for (int j = 0; j < p_; ++j) {
-			std::gamma_distribution<double> gamma_delta(a_ + b_, 1.0 / (psi_(j) + phi_));
-			delta(j) = gamma_delta(rng_);
+		if (update_rho()) {
+			refresh_rinv();
 		}
-
-		for (int j = 0; j < p_; ++j) {
-			psi_(j) = gigrnd(a_ - 0.5, 2.0 * delta(j), n_ * std::pow(beta_(j), 2) / sigma_,
-			                 rng_);
-		}
-		// psi is capped at 1, as in PRS-CS, against explosive local shrinkage.
-		psi_ = arma::clamp(psi_, 0.0, 1.0);
-
-		if (learn_phi_) {
-			std::gamma_distribution<double> gamma_w(1.0, 1.0 / (phi_ + 1.0));
-			double w = gamma_w(rng_);
-			std::gamma_distribution<double> gamma_phi(p_ * b_ + 0.5,
-			                                          1.0 / (arma::sum(delta) + w));
-			phi_ = gamma_phi(rng_);
-		}
+		update_scales();
 	}
 
+	// A kept iteration: none is kept once any study's draws diverge, which
+	// stops the chain.
 	void keep(int n_kept) {
-		if (check_divergence(est_, opts_, beta_, gap0_)) {
+		bool diverged = false;
+		for (arma::uword k = 0; k < k_; ++k) {
+			diverged = check_divergence(est_.study[k], opts_, beta_[k], gap0_[k]) ||
+			           diverged;
+		}
+		if (diverged) {
 			return;
 		}
-		keep_effects(est_, opts_, beta_, beta_mean_, n_kept);
-		est_.psi += psi_ / n_kept;
-		est_.sigma += sigma_ / n_kept;
-		est_.phi += phi_ / n_kept;
-		if (opts_.track) {
-			for (arma::uword k = 0; k < layout_.n_blocks(); ++k) {
-				if (layout_.size(k) > 0) {
-					arma::span blk = layout_.span(k);
-					est_.corr(blk) += blocks_[k].times(beta_(blk)) / n_kept;
-				}
+		for (arma::uword k = 0; k < k_; ++k) {
+			keep_effects(est_.study[k], opts_, beta_[k], beta_mean_[k], n_kept);
+			if (opts_.track) {
+				keep_fitted(k, n_kept);
 			}
 		}
+		est_.psi += psi_ / n_kept;
+		est_.sigma += sigma_ / n_kept;
+		est_.rho += rho_ / n_kept;
+		est_.phi += phi_ / n_kept;
 	}
 
 	void report(int itr, int n_iter) const {
 		Rprintf("Iteration %4d of %d\n", itr, n_iter);
 	}
 
-	bool stopped() const { return est_.diverged; }
+	bool stopped() const { return est_.diverged(); }
 
 	const PrsCsEstimates& estimates() const { return est_; }
 
@@ -663,52 +635,296 @@ private:
 	double a_;
 	double b_;
 	bool learn_phi_;
-	int n_;
-	int p_;
-	arma::vec beta_mrg_;
-	const std::vector<LdBlock>& blocks_;
-	BlockLayout layout_;
+	arma::vec constraint_;
+	std::vector<arma::vec> beta_mrg_;
+	arma::vec n_;
+	const std::vector<std::vector<LdBlock>>& blocks_;
+	std::vector<arma::uvec> union_idx_;
+	arma::uword n_union_;
+	arma::uword k_;
 	std::mt19937 rng_;
 	std::normal_distribution<double> normal_;
-	std::gamma_distribution<double> gamma_sigma_;
-	arma::vec beta_;
 	arma::vec psi_;
-	double sigma_;
 	double phi_;
+	arma::vec sigma_;
+	arma::mat rho_;
+	arma::mat beta_union_;  // each study's current effects over the union
 	ChainOptions opts_;
-	arma::vec beta_mean_;  // the blocks' conditional means, for Rao-Blackwell
-	double gap0_;
+	std::vector<BlockLayout> layouts_;
+	std::vector<arma::vec> beta_;
+	std::vector<arma::vec> beta_mean_;  // the conditional means, for Rao-Blackwell
+	std::vector<std::gamma_distribution<double>> gamma_sigma_;
+	std::vector<double> gap0_;
+	// Each union variant's pattern: the studies carrying it, in order.
+	std::vector<arma::uvec> pattern_studies_;
+	arma::uvec pattern_of_;
+	// Each study's place in the pattern of each of its variants.
+	std::vector<arma::uvec> self_;
+	// Each pattern's inverse correlation matrix, the identity at rho = 0.
+	std::vector<arma::mat> rinv_;
+	// The pairs of studies sharing variants, and the variants they share.
+	std::vector<std::pair<arma::uword, arma::uword>> pairs_;
+	std::vector<arma::uvec> shared_;
 	PrsCsEstimates est_;
+
+	// JointPRS's step for the random walk on a correlation.
+	static constexpr double rho_step = 0.02;
+
+	void build_patterns() {
+		std::vector<std::vector<arma::uword>> carriers(n_union_);
+		for (arma::uword k = 0; k < k_; ++k) {
+			for (arma::uword u : union_idx_[k]) {
+				carriers[u].push_back(k);
+			}
+		}
+		std::map<std::vector<arma::uword>, arma::uword> seen;
+		pattern_of_.set_size(n_union_);
+		for (arma::uword u = 0; u < n_union_; ++u) {
+			auto it = seen.find(carriers[u]);
+			if (it == seen.end()) {
+				it = seen.emplace(carriers[u], pattern_studies_.size()).first;
+				pattern_studies_.push_back(
+				    arma::conv_to<arma::uvec>::from(carriers[u]));
+			}
+			pattern_of_(u) = it->second;
+		}
+		for (arma::uword k = 0; k < k_; ++k) {
+			arma::uvec self(union_idx_[k].n_elem);
+			for (arma::uword i = 0; i < self.n_elem; ++i) {
+				const arma::uvec& s = pattern_studies_[pattern_of_(union_idx_[k](i))];
+				self(i) = arma::as_scalar(arma::find(s == k, 1));
+			}
+			self_.push_back(self);
+		}
+		for (arma::uword k1 = 0; k1 < k_; ++k1) {
+			for (arma::uword k2 = k1 + 1; k2 < k_; ++k2) {
+				std::vector<arma::uword> both;
+				for (arma::uword u = 0; u < n_union_; ++u) {
+					const std::vector<arma::uword>& c = carriers[u];
+					bool has1 = std::find(c.begin(), c.end(), k1) != c.end();
+					bool has2 = std::find(c.begin(), c.end(), k2) != c.end();
+					if (has1 && has2) {
+						both.push_back(u);
+					}
+				}
+				if (!both.empty()) {
+					pairs_.emplace_back(k1, k2);
+					shared_.push_back(arma::conv_to<arma::uvec>::from(both));
+				}
+			}
+		}
+	}
+
+	// Each pattern's R_g^-1 from the current rho.
+	void refresh_rinv() {
+		rinv_.clear();
+		for (const arma::uvec& s : pattern_studies_) {
+			arma::mat R = rho_.submat(s, s);
+			rinv_.push_back(s.n_elem == 1 ? arma::mat(1, 1, arma::fill::ones)
+			                              : arma::mat(arma::inv_sympd(R)));
+		}
+	}
+
+	// Study k's blocks drawn given the others' current effects, then its
+	// sigma. The prior's conditional for variant u has precision
+	// (R_g^-1)_kk / psi_u in PRS-CS's units, and shifts the marginal effect
+	// by sqrt(sigma_k / n_k) sum_t (R_g^-1)_kt sqrt(n_t / sigma_t) beta_ut /
+	// psi_u over the other studies t carrying u.
+	void draw_study(arma::uword k) {
+		const arma::uvec& u = union_idx_[k];
+		arma::uword p = u.n_elem;
+		arma::vec v(p);
+		arma::vec shifted(p);
+		for (arma::uword i = 0; i < p; ++i) {
+			arma::uword g = pattern_of_(u(i));
+			const arma::uvec& s = pattern_studies_[g];
+			const arma::mat& ri = rinv_[g];
+			double shift = 0.0;
+			for (arma::uword t = 0; t < s.n_elem; ++t) {
+				if (t != self_[k](i)) {
+					shift += ri(self_[k](i), t) * std::sqrt(n_(s(t)) / sigma_(s(t))) *
+					         beta_union_(u(i), s(t));
+				}
+			}
+			v(i) = psi_(u(i)) / ri(self_[k](i), self_[k](i));
+			shifted(i) = beta_mrg_[k](i) -
+			             std::sqrt(sigma_(k) / n_(k)) * shift / psi_(u(i));
+		}
+		double quad = 0.0;
+		const BlockLayout& layout = layouts_[k];
+		for (arma::uword b = 0; b < layout.n_blocks(); ++b) {
+			if (layout.size(b) == 0) {
+				continue;
+			}
+			arma::span blk = layout.span(b);
+			arma::vec beta_blk;
+			arma::vec mean_blk;
+			quad += blocks_[k][b].draw(v(blk), shifted(blk), sigma_(k) / n_(k),
+			                           normal_, rng_, beta_blk,
+			                           opts_.rao_blackwell ? &mean_blk : nullptr);
+			beta_[k](blk) = beta_blk;
+			if (opts_.rao_blackwell) {
+				beta_mean_[k](blk) = mean_blk;
+			}
+		}
+		arma::uvec col = {k};
+		beta_union_.submat(u, col) = beta_[k];
+		arma::vec psi_k = psi_(u);
+		double prior_psi = arma::sum(arma::pow(beta_[k], 2) / psi_k);
+		double prior_v = arma::sum(arma::pow(beta_[k], 2) / v);
+		// JointPRS reads sigma's quadratic with the prior's diagonal beta'
+		// beta / psi; the draws' was beta'beta / v. Their difference is
+		// exactly 0 at rho = 0, where this is PRS-CS's update.
+		double err = std::max(
+		    n_(k) / 2.0 *
+		        (1.0 - 2.0 * arma::dot(beta_[k], beta_mrg_[k]) +
+		         (quad + (prior_psi - prior_v))),
+		    n_(k) / 2.0 * prior_psi);
+		sigma_(k) = err / gamma_sigma_[k](rng_);
+	}
+
+	// JointPRS's Metropolis step on each pair's correlation. Whether any
+	// moved.
+	bool update_rho() {
+		bool moved = false;
+		std::uniform_real_distribution<double> unif(0.0, 1.0);
+		for (std::size_t r = 0; r < pairs_.size(); ++r) {
+			arma::uword k1 = pairs_[r].first;
+			arma::uword k2 = pairs_[r].second;
+			double current = rho_(k1, k2);
+			std::uniform_real_distribution<double> proposal(current - rho_step,
+			                                                current + rho_step);
+			double star = proposal(rng_);
+			double bound = std::min(constraint_(k1) * constraint_(k2), 0.99);
+			if (star < 0.0 || star > bound) {
+				continue;
+			}
+			arma::mat trial = rho_;
+			trial(k1, k2) = star;
+			trial(k2, k1) = star;
+			if (arma::eig_sym(trial).min() <= 0.0) {
+				continue;
+			}
+			double log_ratio = rho_log_target(r, star) - rho_log_target(r, current);
+			if (log_ratio >= 0.0 || std::exp(log_ratio) >= unif(rng_)) {
+				rho_ = trial;
+				moved = true;
+			}
+		}
+		return moved;
+	}
+
+	// The log density, up to a constant, of the effects pair r's studies share
+	// at correlation `value`: their scaled effects bivariate normal given psi.
+	double rho_log_target(std::size_t r, double value) const {
+		arma::uword k1 = pairs_[r].first;
+		arma::uword k2 = pairs_[r].second;
+		const arma::uvec& sh = shared_[r];
+		double s1 = sigma_(k1);
+		double s2 = sigma_(k2);
+		double n1 = n_(k1);
+		double n2 = n_(k2);
+		double c = value * std::sqrt(s1 * s2);
+		double det = s1 * s2 - c * c;
+		arma::vec col1 = beta_union_.col(k1);
+		arma::vec col2 = beta_union_.col(k2);
+		arma::vec b1 = col1(sh);
+		arma::vec b2 = col2(sh);
+		arma::vec ps = psi_(sh);
+		double q11 = arma::sum(arma::square(b1) / ps);
+		double q12 = arma::sum(b1 % b2 / ps);
+		double q22 = arma::sum(arma::square(b2) / ps);
+		return -0.5 * sh.n_elem * std::log(det) -
+		       0.5 * n1 * n2 / det *
+		           (q11 * s2 / n2 - 2.0 * q12 * c / std::sqrt(n1 * n2) + q22 * s1 / n1);
+	}
+
+	// The shared scales: delta, then psi from each variant's effects in the
+	// studies carrying it, b_u'(psi_u C)^-1 b_u's quadratic, then phi.
+	void update_scales() {
+		arma::vec delta(n_union_);
+		for (arma::uword u = 0; u < n_union_; ++u) {
+			std::gamma_distribution<double> gamma_delta(a_ + b_, 1.0 / (psi_(u) + phi_));
+			delta(u) = gamma_delta(rng_);
+		}
+		for (arma::uword u = 0; u < n_union_; ++u) {
+			const arma::uvec& s = pattern_studies_[pattern_of_(u)];
+			psi_(u) = gigrnd(a_ - 0.5 * s.n_elem, 2.0 * delta(u), scaled_quad(u), rng_);
+		}
+		// psi is capped at 1, as in PRS-CS, against explosive local shrinkage.
+		psi_ = arma::clamp(psi_, 0.0, 1.0);
+		if (learn_phi_) {
+			std::gamma_distribution<double> gamma_w(1.0, 1.0 / (phi_ + 1.0));
+			double w = gamma_w(rng_);
+			std::gamma_distribution<double> gamma_phi(n_union_ * b_ + 0.5,
+			                                          1.0 / (arma::sum(delta) + w));
+			phi_ = gamma_phi(rng_);
+		}
+	}
+
+	// sum_st (R_g^-1)_st sqrt(n_s n_t / (sigma_s sigma_t)) beta_us beta_ut
+	// over the studies carrying u, its diagonal terms written as PRS-CS
+	// writes n beta^2 / sigma.
+	double scaled_quad(arma::uword u) const {
+		const arma::uvec& s = pattern_studies_[pattern_of_(u)];
+		const arma::mat& ri = rinv_[pattern_of_(u)];
+		double xx = 0.0;
+		for (arma::uword i = 0; i < s.n_elem; ++i) {
+			double bi = beta_union_(u, s(i));
+			xx += ri(i, i) * (n_(s(i)) * std::pow(bi, 2) / sigma_(s(i)));
+			for (arma::uword j = 0; j < s.n_elem; ++j) {
+				if (j != i) {
+					xx += ri(i, j) *
+					      std::sqrt(n_(s(i)) * n_(s(j)) / (sigma_(s(i)) * sigma_(s(j)))) *
+					      bi * beta_union_(u, s(j));
+				}
+			}
+		}
+		return xx;
+	}
+
+	// Study k's fitted correlations, R beta, added block by block.
+	void keep_fitted(arma::uword k, int n_kept) {
+		const BlockLayout& layout = layouts_[k];
+		for (arma::uword b = 0; b < layout.n_blocks(); ++b) {
+			if (layout.size(b) > 0) {
+				arma::span blk = layout.span(b);
+				est_.study[k].corr(blk) += blocks_[k][b].times(beta_[k](blk)) / n_kept;
+			}
+		}
+	}
 };
 
 /**
- * @brief The PRS-CS posterior means of the effects.
+ * @brief The PRS-CS posterior means of one or more studies' effects.
  *
  * @param a,b The shapes of the local scales' prior.
  * @param learn_phi Whether the global scale is learned; if not, it is `phi`.
- * @param beta_mrg The marginal effects.
- * @param maf The minor allele frequencies, all zero to keep the effects
- *   standardized; otherwise beta is returned per allele.
- * @param n The sample size.
- * @param blocks The LD blocks, each a DenseLdBlock or each a FactorLdBlock.
+ * @param constraint Each study's bound on its correlations: 1 lets them be
+ *   learned on [0, 0.99], 0 holds them at 0 (PRS-CSx).
+ * @param beta_mrg Each study's marginal effects.
+ * @param n Each study's sample size.
+ * @param blocks Each study's LD blocks, each a DenseLdBlock or each a
+ *   FactorLdBlock.
+ * @param union_idx Each study's variants' 0-based places in the union.
  */
 template <class LdBlock>
 PrsCsEstimates prs_cs_mcmc(double a, double b, bool learn_phi, double phi,
-                           const arma::vec& beta_mrg, const arma::vec& maf, int n,
-                           const std::vector<LdBlock>& blocks,
-                           const ChainSchedule& schedule, bool verbose,
-                           unsigned int seed,
+                           const arma::vec& constraint,
+                           const std::vector<arma::vec>& beta_mrg,
+                           const arma::vec& n,
+                           const std::vector<std::vector<LdBlock>>& blocks,
+                           const std::vector<arma::uvec>& union_idx,
+                           arma::uword n_union, const ChainSchedule& schedule,
+                           bool verbose, unsigned int seed,
                            const ChainOptions& opts = ChainOptions()) {
 	if (verbose) {
 		Rprintf("Running Markov Chain Monte Carlo (MCMC) sampler...\n");
 	}
-	PrsCsChain<LdBlock> chain(a, b, learn_phi, phi, beta_mrg, n, blocks, seed, opts);
+	PrsCsChain<LdBlock> chain(a, b, learn_phi, phi, constraint, beta_mrg, n, blocks,
+	                          union_idx, n_union, seed, opts);
 	run_chain(chain, schedule, verbose);
 	PrsCsEstimates est = chain.estimates();
-
-	if (arma::max(maf) > 0) {
-		est.beta /= arma::sqrt(2.0 * maf % (1.0 - maf));
-	}
 	if (verbose && learn_phi) {
 		Rprintf("Estimated global shrinkage parameter: %g\n", est.phi);
 	}
@@ -718,7 +934,7 @@ PrsCsEstimates prs_cs_mcmc(double a, double b, bool learn_phi, double phi,
 	return est;
 }
 
-// ==== SDPR ======================================================================
+// ==== SDPR and SDPRX ============================================================
 
 // SDPR's prior on each effect is a Dirichlet process mixture of normals, the
 // first component a point mass at zero, and its likelihood is SDPR's
@@ -727,6 +943,19 @@ PrsCsEstimates prs_cs_mcmc(double a, double b, bool learn_phi, double phi,
 // the stick-breaking weights and the concentration, the causal variants'
 // effects jointly per block, and the effects' global scale eta, which has an
 // N(1, 1) prior (the original's is flat).
+//
+// One chain runs it for one study, or for K studies as SDPRX runs two. Each
+// non-null component then belongs to a kind, a set of the studies, and a
+// variant in it has effects in those studies drawn from N(0, var Sigma), with
+// Sigma the studies' correlations rho restricted to the kind: SDPRX's
+// population-specific and shared components. Each kind holds M - 1
+// components. The null is the process's first stick, as in SDPR; the rest of
+// the weight is split over the kinds by a Dirichlet (SDPRX's over the kinds),
+// and each kind's share is broken over its components with the one
+// concentration. A variant a study lacks may take any kind, its effect in
+// that study integrated out. The studies share eta. rho is given, or each
+// pair's is drawn from its conditional on a grid over [0, 0.99]. For one
+// study there is one kind, and the chain is SDPR's draw for draw.
 
 // The per-variant data SDPR's likelihood reads.
 //
@@ -755,10 +984,31 @@ struct SdprBlock {
 	arma::uword size() const { return B.size(); }
 };
 
-// The posterior mean of the heritability, besides the effects every chain
-// reports.
-struct SdprEstimates : ChainEstimates {
-	double h2 = 0.0;
+// The posterior means: each study's effects over its own variants, with the
+// fitted correlations and divergence every chain reports, and its
+// heritability; and the studies' correlations.
+struct SdprEstimates {
+	std::vector<ChainEstimates> study;
+	arma::vec h2;
+	arma::mat rho;
+
+	bool diverged() const {
+		for (const ChainEstimates& s : study) {
+			if (s.diverged) {
+				return true;
+			}
+		}
+		return false;
+	}
+};
+
+// How K studies' effects are shared: each non-null kind's studies (0-based,
+// in order), their correlations rho (K x K), and whether rho is learned,
+// starting from the given matrix. One study has the one kind {0}.
+struct SdprSharing {
+	std::vector<arma::uvec> kinds;
+	arma::mat rho;
+	bool learn_rho = false;
 };
 
 /**
@@ -791,659 +1041,28 @@ SdprBlock<FactorLdBlock> sdpr_factor_block(const SdprData &dat, const arma::mat 
                                            double a, unsigned sz, int opt_llk);
 
 /**
- * @brief The SDPR posterior means of the effects and the heritability.
+ * @brief The SDPR posterior means of one or more studies' effects and
+ * heritabilities.
  *
- * @param blocks The LD blocks (sdpr_dense_blocks() or sdpr_factor_block()).
- * @param M Max number of variance components.
+ * @param blocks Each study's LD blocks (sdpr_dense_blocks() or
+ *   sdpr_factor_block()), the same number for every study; a variant the
+ *   studies share lies in the same block in each.
+ * @param union_idx Each study's variants' 0-based places in the union.
+ * @param n_union The size of the union.
+ * @param sharing The kinds of the non-null components and rho.
+ * @param M Max number of variance components of each kind, the null's
+ *   among them: SDPR's M for one study.
  * @param a0k,b0k The inverse gamma prior of the components' variances.
  * @param schedule The chain's iterations, burn-in and thinning.
  * @param verbose Whether to report progress.
  * @param seed Seed of the sampler's random number generator.
  * @param opts Rao-Blackwellized means, and tracking for several chains.
- * @param gap0 Twice the squared marginal effects' sum, past which the
- *   effects' squares mark a tracked chain diverged.
+ * @param gap0 Each study's twice its squared marginal effects' sum, past
+ *   which the effects' squares mark a tracked chain diverged.
  */
 template <class LdBlock>
-SdprEstimates sdpr_mcmc(const std::vector<SdprBlock<LdBlock>> &blocks, size_t M,
-                        double a0k, double b0k, const ChainSchedule &schedule,
-                        bool verbose, unsigned int seed, const ChainOptions &opts,
-                        double gap0);
-
-// ==== The Bayesian alphabet =====================================================
-
-// qgg's and hibayes' summary-statistics samplers read the LD as a matrix.
-// This one reads it as a factor F (k x p) of R = F'F / (k - 1), keeping
-// u = F_w b for the current effects b through rss_ld.h's FactorLd, so a
-// single-site update costs O(k) and nothing p x p is formed. The likelihood
-// is SBayes's: with per-variant weights w (the sample size n, or qgg's
-// w = 1 / (se^2 + b^2 / n)), X'X = W^1/2 R W^1/2 and X'y = w % bhat, both
-// held through F_w = F diag(sqrt(w)).
-//
-// Two families of priors, each sampled as its package samples it:
-//   * qgg's (CRAN 1.1.6): bayesA, bayesC, bayesN and bayesR as its
-//     summary-statistics sampler sbayes() has them, and bayesL in Legarra et
-//     al.'s (2011) form, as its individual-level sampler has it. Scaled
-//     inverse chi-square priors with nu = 4 on the marker and residual
-//     variances; pi drawn from a Dirichlet.
-//   * hibayes': bayesB as BayesBpi, and bayesL in Park and Casella's (2008)
-//     form, as its SBayesD() has them. A scaled inverse chi-square prior on
-//     the genetic variance and an improper one on the residual variance.
-
-// What every alphabet sampler reads, and the options every sampler shares:
-// the LD shrinkage c, under which X'X is W^1/2 (c R + (1 - c) I) W^1/2, so
-// only its off-diagonal part is scaled; whether a drawn effect may change
-// sign (without, it is zero instead, and leaves its class); and
-// ChainOptions.
-struct AlphabetData {
-	arma::mat Fw;  // F diag(sqrt(w)), k x p: X'X = Fw'Fw / (k - 1)
-	arma::vec w;  // the per-variant weights
-	arma::vec wy;  // X'y = w % bhat
-	arma::vec bhat;
-	int n;
-	double shrink = 1.0;
-	bool allow_jump_sign = true;
-	ChainOptions opts;
-};
-
-// The posterior means, and when the chain is tracked its mean fitted
-// correlations and whether it diverged.
-struct AlphabetEstimates : ChainEstimates {
-	arma::vec pip;  // share of kept draws with a non-null effect
-	double pi = 0.0;  // proportion of non-null effects
-	double ve = 0.0;  // residual variance
-};
-
-// What the two families share: the effects, the factor that keeps X'X b, the
-// generator and the posterior means.
-class AlphabetChainBase : protected ChainRandom {
-public:
-	const AlphabetEstimates& estimates() const { return est_; }
-
-	void report(int itr, int n_iter) const {
-		Rprintf("Iteration %4d of %d: residual variance %g\n", itr, n_iter, ve_);
-	}
-
-	bool stopped() const { return est_.diverged; }
-
-protected:
-	AlphabetChainBase(const AlphabetData& data, unsigned int seed)
-	    : ChainRandom(seed), data_(data), p_(data.wy.n_elem),
-	      b_(p_, arma::fill::zeros), ld_(data.Fw, 0.0, b_), ve_(0.0),
-	      cond_mean_(p_, arma::fill::zeros), gap0_(divergence_gap(data.bhat)) {
-		est_.beta.zeros(p_);
-		est_.pip.zeros(p_);
-		est_.corr.zeros(p_);
-	}
-
-	// (X'X)_jj under the LD shrinkage.
-	double xx(arma::uword j) const {
-		const double c = data_.shrink;
-		return c * ld_.diag(j) + (1.0 - c) * data_.w(j);
-	}
-
-	// X'y_j - (X'X b)_j + (X'X)_jj b_j: variant j's statistic net of the
-	// other effects, whose LD the shrinkage scales.
-	double rhs(arma::uword j) const {
-		const double c = data_.shrink;
-		return data_.wy(j) - c * ld_.row(j, b_) + c * ld_.diag(j) * b_(j);
-	}
-
-	// Sets b_j, which without sign jumps is zero where the draw's sign
-	// differs from the current effect's; returns what was set.
-	double set(arma::uword j, double bn) {
-		if (!data_.allow_jump_sign && bn * b_(j) < 0.0) {
-			bn = 0.0;
-		}
-		double diff = bn - b_(j);
-		if (diff != 0.0) {
-			ld_.update(j, diff);
-			b_(j) = bn;
-		}
-		return bn;
-	}
-
-	// X'y - X'X b.
-	arma::vec residuals() const {
-		arma::vec r = data_.wy - data_.shrink * ld_.product(b_);
-		if (data_.shrink != 1.0) {
-			r -= (1.0 - data_.shrink) * (data_.w % b_);
-		}
-		return r;
-	}
-
-	// Kept draws add to the means of the effects (Rao-Blackwellized: their
-	// conditional means), the inclusions, pi and ve, and when tracked to the
-	// fitted correlations X'X b / w.
-	void keep_common(int n_kept, const std::vector<int>& d, double pi) {
-		if (check_divergence(est_, data_.opts, b_, gap0_)) {
-			return;
-		}
-		keep_effects(est_, data_.opts, b_, cond_mean_, n_kept);
-		if (data_.opts.track) {
-			est_.corr += (data_.wy - residuals()) / data_.w / n_kept;
-		}
-		for (arma::uword j = 0; j < d.size(); ++j) {
-			if (d[j] != 0) {
-				est_.pip(j) += 1.0 / n_kept;
-			}
-		}
-		est_.pi += pi / n_kept;
-		est_.ve += ve_ / n_kept;
-	}
-
-	const AlphabetData& data_;
-	arma::uword p_;
-	arma::vec b_;
-	FactorLd ld_;
-	double ve_;
-	arma::vec cond_mean_;  // each effect's conditional mean, for Rao-Blackwell
-	double gap0_;
-	AlphabetEstimates est_;
-};
-
-// qgg's priors: bayesN, bayesA, bayesC, bayesR and Legarra's bayesL.
-class QggFormChain : public AlphabetChainBase {
-public:
-	enum Method { N, A, L, C, R };
-
-	QggFormChain(const AlphabetData& data, Method method, double pi, double h2,
-	             unsigned int seed)
-	    : AlphabetChainBase(data, seed), method_(method), d_(p_, 1) {
-		init_priors(pi, h2);
-		// qgg enters the variants with the largest marginal effects first.
-		order_.resize(p_);
-		std::iota(order_.begin(), order_.end(), 0);
-		const arma::vec& bhat = data_.bhat;
-		std::stable_sort(order_.begin(), order_.end(), [&](arma::uword i, arma::uword j) {
-			return bhat(i) * bhat(i) > bhat(j) * bhat(j);
-		});
-	}
-
-	void sweep() {
-		for (arma::uword j : order_) {
-			sweep_one(j);
-		}
-		if (method_ == L) {
-			update_lasso_precisions();
-		} else {
-			update_marker_variance();
-		}
-		if (method_ == C || method_ == R) {
-			pi_ = dirichlet_plus_one(class_counts(), engine());
-		}
-		update_residual_variance();
-	}
-
-	void keep(int n_kept) {
-		keep_common(n_kept, d_, 1.0 - pi_[0]);
-	}
-
-private:
-	Method method_;
-	std::vector<arma::uword> order_;
-	std::vector<int> d_;  // each effect's variance class; 0 is null
-	std::vector<double> pi_;
-	std::vector<double> gamma_;
-	double vb_ = 0.0;
-	double ssb_prior_ = 0.0;
-	double sse_prior_ = 0.0;
-	const double nub_ = 4.0;
-	const double nue_ = 4.0;
-	arma::vec vbi_;  // bayesA: each effect's variance
-	arma::vec lambda_;  // bayesL: each effect's prior precision
-	double lambda2_ = 0.0;
-
-	// qgg's sbayes_sparse() defaults; bayesR's classes ignore `pi`, which
-	// then sets the slab variance at qgg's default of 0.001. qgg's y'y,
-	// median((b^2 + (n - 2) se^2) w), is median(w) for standardized
-	// statistics.
-	void init_priors(double pi, double h2) {
-		double vy = arma::median(data_.w) / (data_.n - 1.0);
-		ve_ = vy * (1.0 - h2);
-		double vg = vy * h2;
-		double m = static_cast<double>(p_);
-		pi_ = {1.0 - pi, pi};
-		gamma_ = {0.0, 1.0};
-		if (method_ == R) {
-			pi = 0.001;
-			pi_ = {0.95, 0.02, 0.02, 0.01};
-			gamma_ = {0.0, 0.01, 0.1, 1.0};
-		}
-		vb_ = (method_ == C || method_ == R) ? vg / (m * pi) : vg / m;
-		ssb_prior_ = ((nub_ - 2.0) / nub_) * vb_;
-		sse_prior_ = ((nue_ - 2.0) / nue_) * ve_;
-		vbi_ = arma::vec(p_, arma::fill::value(vb_));
-		lambda_ = arma::vec(p_, arma::fill::value(ve_ / vb_));
-		lambda2_ = m;
-		if (method_ == N || method_ == A || method_ == L) {
-			std::fill(d_.begin(), d_.end(), 1);
-		} else {
-			std::fill(d_.begin(), d_.end(), 0);
-		}
-	}
-
-	void sweep_one(arma::uword j) {
-		double dj = xx(j);
-		double rhs_j = rhs(j);
-		switch (method_) {
-		case N:
-			cond_mean_(j) = slab_mean(rhs_j, dj, vb_);
-			set(j, slab_draw(rhs_j, dj, vb_));
-			break;
-		case A:
-			vbi_(j) = (b_(j) * b_(j) + ssb_prior_ * nub_) / chisq(1.0 + nub_);
-			cond_mean_(j) = slab_mean(rhs_j, dj, vbi_(j));
-			set(j, slab_draw(rhs_j, dj, vbi_(j)));
-			break;
-		case L: {
-			double lhs = dj / ve_ + lambda_(j);
-			cond_mean_(j) = (rhs_j / ve_) / lhs;
-			set(j, normal((rhs_j / ve_) / lhs, std::sqrt(1.0 / lhs)));
-			break;
-		}
-		case C:
-		case R:
-			sweep_mixture(j, rhs_j, dj);
-			break;
-		}
-	}
-
-	// b_j's conditional under a normal prior of variance v, and its mean.
-	double slab_draw(double rhs_j, double dj, double v) {
-		double lhs = dj + ve_ / v;
-		return normal(rhs_j / lhs, std::sqrt(ve_ / lhs));
-	}
-
-	double slab_mean(double rhs_j, double dj, double v) const {
-		return rhs_j / (dj + ve_ / v);
-	}
-
-	// b_j's conditional mean over the variance classes, weighted by their
-	// posterior probabilities.
-	double mixture_mean(const std::vector<double>& loglik, double rhs_j, double dj) const {
-		double top = *std::max_element(loglik.begin(), loglik.end());
-		double total = 0.0;
-		double mean = 0.0;
-		for (std::size_t c = 0; c < loglik.size(); ++c) {
-			double weight = std::exp(loglik[c] - top);
-			total += weight;
-			if (c > 0) {
-				mean += weight * slab_mean(rhs_j, dj, vb_ * gamma_[c]);
-			}
-		}
-		return mean / total;
-	}
-
-	// bayesC and bayesR: the variance class from its marginal likelihood,
-	// then the effect within it.
-	void sweep_mixture(arma::uword j, double rhs_j, double dj) {
-		std::size_t nc = pi_.size();
-		std::vector<double> loglik(nc);
-		double v0 = dj * ve_;
-		loglik[0] = -0.5 * std::log(v0) - 0.5 * rhs_j * rhs_j / v0 + std::log(pi_[0]);
-		for (std::size_t c = 1; c < nc; ++c) {
-			double v1 = dj * ve_ + dj * dj * vb_ * gamma_[c];
-			loglik[c] = -0.5 * std::log(v1) - 0.5 * rhs_j * rhs_j / v1 + std::log(pi_[c]);
-		}
-		double u = unif();
-		double cum = 0.0;
-		int cls = 0;
-		for (std::size_t c = 0; c < nc; ++c) {
-			double denom = 0.0;
-			for (std::size_t k = 0; k < nc; ++k) {
-				denom += std::exp(loglik[k] - loglik[c]);
-			}
-			cum += 1.0 / denom;
-			if (u < cum) {
-				cls = static_cast<int>(c);
-				break;
-			}
-		}
-		d_[j] = cls;
-		if (data_.opts.rao_blackwell) {
-			cond_mean_(j) = mixture_mean(loglik, rhs_j, dj);
-		}
-		if (set(j, cls == 0 ? 0.0 : slab_draw(rhs_j, dj, vb_ * gamma_[cls])) == 0.0) {
-			d_[j] = 0;
-		}
-	}
-
-	std::vector<double> class_counts() const {
-		std::vector<double> counts(pi_.size(), 0.0);
-		for (int cls : d_) {
-			counts[cls] += 1.0;
-		}
-		return counts;
-	}
-
-	// The slab variance from the effects in the slab, each scaled by its
-	// class (bayesN and bayesA have every effect in class 1, of scale 1).
-	void update_marker_variance() {
-		double ssb = 0.0;
-		double dfb = 0.0;
-		for (arma::uword j = 0; j < p_; ++j) {
-			if (d_[j] != 0) {
-				ssb += b_(j) * b_(j) / gamma_[d_[j]];
-				dfb += 1.0;
-			}
-		}
-		vb_ = (ssb + ssb_prior_ * nub_) / chisq(dfb + nub_);
-	}
-
-	// Legarra et al.: each effect's prior precision from its inverse-Gaussian
-	// conditional, then lambda^2 from its gamma conditional, kept in [1, 1e6].
-	void update_lasso_precisions() {
-		const double eps = 1e-8;
-		double rate = std::max(lambda2_, eps);
-		double sum_tau = 0.0;
-		for (arma::uword j = 0; j < p_; ++j) {
-			double abs_b = std::max(std::abs(b_(j)), eps);
-			double mu = std::max(std::sqrt(rate) / abs_b, eps);
-			lambda_(j) = rinvgauss(mu, rate, engine());
-			sum_tau += 1.0 / lambda_(j);
-		}
-		std::gamma_distribution<double> gamma(static_cast<double>(p_) + 1.0, 2.0 / sum_tau);
-		lambda2_ = std::max(1.0, std::min(gamma(engine()), 1e6));
-	}
-
-	// y'y - 2 b'X'y + b'X'X b is the residual sum of squares only while the
-	// statistics agree with the LD; where they disagree (an LD reference
-	// unlike the study's) it can turn negative, which qgg does not guard
-	// and which makes its chain NaN. The residual variance then keeps its
-	// last value, as hibayes falls back on one too.
-	void update_residual_variance() {
-		arma::vec r = residuals();
-		double sse = arma::median(data_.w) - arma::dot(b_, r + data_.wy);
-		double scale = sse + sse_prior_ * nue_;
-		if (scale > 0.0) {
-			ve_ = scale / chisq(data_.n + nue_);
-		}
-	}
-};
-
-// hibayes' priors: bayesB as BayesBpi and Park and Casella's bayesL.
-class HibayesFormChain : public AlphabetChainBase {
-public:
-	enum Method { B, L };
-
-	HibayesFormChain(const AlphabetData& data, Method method, double pi, double h2,
-	                 unsigned int seed)
-	    : AlphabetChainBase(data, seed), method_(method), d_(p_, method == L ? 1 : 0) {
-		init_priors(pi, h2);
-	}
-
-	void sweep() {
-		if (method_ == B) {
-			for (arma::uword j = 0; j < p_; ++j) {
-				sweep_spike_slab(j);
-			}
-			std::vector<double> counts = {0.0, 0.0};
-			for (int flag : d_) {
-				counts[flag] += 1.0;
-			}
-			pi_ = dirichlet_plus_one(counts, engine());
-		} else {
-			for (arma::uword j = 0; j < p_; ++j) {
-				sweep_lasso(j);
-			}
-			std::gamma_distribution<double> gamma(shape0_ + p_, 1.0 / (rate0_ + arma::sum(vargL_) / 2.0));
-			lambda2_ = gamma(engine());
-		}
-		update_variances();
-	}
-
-	void keep(int n_kept) {
-		keep_common(n_kept, d_, pi_[1]);
-	}
-
-private:
-	Method method_;
-	std::vector<int> d_;
-	std::vector<double> pi_;
-	double dfvara_ = 4.0;
-	double dfvare_ = -2.0;
-	double vara_ = 0.0;
-	double s2vara_ = 0.0;
-	double s2varg_ = 0.0;
-	double yy_ = 0.0;
-	double lambda2_ = 0.0;
-	double shape0_ = 1.1;
-	double rate0_ = 0.0;
-	arma::vec vargL_;
-
-	// SBayesD()'s defaults. Its genotype variances vx are R's diagonal,
-	// (X'X)_jj / w_j, and its y'y, the mean of (X'X)_jj (b^2 + (n - 2) se^2),
-	// is the mean of (X'X)_jj for standardized statistics.
-	void init_priors(double pi, double h2) {
-		double sumvx = 0.0;
-		yy_ = 0.0;
-		for (arma::uword j = 0; j < p_; ++j) {
-			yy_ += ld_.diag(j);
-			sumvx += ld_.diag(j) / data_.w(j);
-		}
-		yy_ /= static_cast<double>(p_);
-		double vary = yy_ / (data_.n - 1.0);
-		vara_ = ((dfvara_ - 2.0) / dfvara_) * vary * h2;
-		ve_ = vary * (1.0 - h2);
-		s2vara_ = vara_ * (dfvara_ - 2.0) / dfvara_;
-		pi_ = (method_ == L) ? std::vector<double>{0.0, 1.0} : std::vector<double>{1.0 - pi, pi};
-		double scale = (1.0 - pi_[0]) * sumvx;
-		s2varg_ = s2vara_ / scale;
-		double R2 = (dfvara_ - 2.0) / dfvara_;
-		lambda2_ = 2.0 * (1.0 - R2) / R2 * sumvx;
-		rate0_ = (shape0_ - 1.0) / lambda2_;
-		vargL_ = arma::vec(p_, arma::fill::value(vara_ / scale));
-	}
-
-	void sweep_spike_slab(arma::uword j) {
-		double xx = this->xx(j);
-		double rhs_j = rhs(j);
-		double gi = b_(j);
-		double varg = (gi * gi + s2varg_ * dfvara_) / chisq(dfvara_ + 1.0);
-		double logdetV = std::log(varg * xx / ve_ + 1.0);
-		double uhat = rhs_j / (xx + ve_ / varg);
-		double s1 = -0.5 * (logdetV - rhs_j * uhat / ve_) + std::log(pi_[1]);
-		double accept = 1.0 / (1.0 + std::exp(s1 - std::log(pi_[0])));
-		double v = xx + ve_ / varg;
-		cond_mean_(j) = (1.0 - accept) * rhs_j / v;
-		d_[j] = unif() < accept ? 0 : 1;
-		if (d_[j] == 0) {
-			set(j, 0.0);
-			return;
-		}
-		if (set(j, normal(rhs_j / v, std::sqrt(ve_ / v))) == 0.0) {
-			d_[j] = 0;
-		}
-	}
-
-	// Park and Casella: b_j's prior variance is ve * tau_j^2, and 1 / tau_j^2
-	// has an inverse-Gaussian conditional.
-	void sweep_lasso(arma::uword j) {
-		double xx = this->xx(j);
-		double rhs_j = rhs(j);
-		double v = xx + 1.0 / vargL_(j);
-		cond_mean_(j) = rhs_j / v;
-		double gi = normal(rhs_j / v, std::sqrt(ve_ / v));
-		if (std::abs(gi) < 1e-6) {
-			gi = 1e-6;
-		}
-		double lambda = std::sqrt(lambda2_);
-		double vargi = 1.0 / rinvgauss(std::sqrt(ve_) * lambda / std::abs(gi), lambda2_, engine());
-		if (vargi > 0.0) {
-			vargL_(j) = vargi;
-		}
-		set(j, gi);
-	}
-
-	void update_variances() {
-		arma::vec r = residuals();
-		vara_ = (arma::dot(b_, data_.wy - r) + s2vara_ * dfvara_) / chisq(data_.n + dfvara_);
-		ve_ = (yy_ - arma::dot(b_, data_.wy + r)) / chisq(data_.n + dfvare_);
-		if (ve_ < 0.0) {
-			ve_ = vara_ * 0.5;
-		}
-	}
-};
-
-// ==== LDpred2 ===================================================================
-
-// The point-normal prior of LDpred2's Gibbs samplers in bigsnpr, read from a
-// factor F (k x p) of R = F'F / (k - 1) through rss_ld.h's FactorLd, so a
-// single-site update costs O(k) and nothing p x p is formed:
-//   * LDpred2-grid holds the proportion p of causal variants and the
-//     heritability h2 fixed; with `sparse`, an effect whose posterior
-//     inclusion probability falls below p is set to zero;
-//   * LDpred2-auto draws p from its Beta full conditional, with the counts
-//     divided by the mean LD score, and takes h2 = b'R_s b after each sweep,
-//     for R_s = c R + (1 - c) I at the LD shrinkage c.
-// Either reads R_s, and with no sign jumps sets a drawn effect whose sign
-// differs from the current one to zero; bigsnpr's grid has neither, which
-// is c = 1 with sign jumps allowed. Both report what bigsnpr does:
-// Rao-Blackwellized effects, the average over the kept sweeps of each
-// variant's conditional posterior mean, with the inclusion probabilities and
-// the fitted correlations R_s b. A chain whose squared effects sum past
-// twice the squared marginal effects has diverged and stops.
-
-// How a chain runs: LDpred2-auto's starting p and h2, or LDpred2-grid's fixed
-// ones.
-struct Ldpred2Settings {
-	bool automatic = false;
-	double p = 0.1;
-	double h2 = 0.1;
-	bool sparse = false;  // grid only
-	double shrink = 1.0;  // the LD shrinkage c
-	bool allow_jump_sign = true;
-	double p_lower = 1e-5;  // auto only: the bounds on p
-	double p_upper = 1.0;
-	double mean_ld = 1.0;  // auto only: the mean LD score
-};
-
-// The chain's report besides the effects every chain reports: those are
-// Rao-Blackwellized and the fitted correlations are R_s b, as bigsnpr has
-// them.
-struct Ldpred2Estimates : ChainEstimates {
-	arma::vec postp;  // inclusion probabilities
-	std::vector<double> path_p;  // auto: p after each sweep
-	std::vector<double> path_h2;  // auto: h2 after each sweep
-};
-
-// The LD is FactorLd's R_s, its shrinkage s = 1 - c, so (R_s b)_j is its
-// row(); the chain always Rao-Blackwellizes and tracks, as bigsnpr does.
-class Ldpred2Chain : private ChainRandom {
-public:
-	Ldpred2Chain(const arma::mat& F, const arma::vec& bhat, const arma::vec& n,
-	             const Ldpred2Settings& settings, unsigned int seed)
-	    : ChainRandom(seed), bhat_(bhat), n_(n), s_(settings), m_(bhat.n_elem),
-	      b_(m_, arma::fill::zeros), ld_(F, 1.0 - settings.shrink, b_),
-	      cond_mean_(m_, arma::fill::zeros), cond_postp_(m_, arma::fill::zeros),
-	      cond_corr_(m_, arma::fill::zeros), gap0_(divergence_gap(bhat)) {
-		opts_.rao_blackwell = true;
-		opts_.track = true;
-		est_.beta.zeros(m_);
-		est_.postp.zeros(m_);
-		est_.corr.zeros(m_);
-		if (s_.automatic) {
-			s_.h2 = std::max(s_.h2, kMinH2);
-			s_.p = std::min(std::max(s_.p, s_.p_lower), s_.p_upper);
-		}
-	}
-
-	// One pass over the variants; LDpred2-auto then draws p and sets h2.
-	void sweep() {
-		const double inv_odd_p = (1.0 - s_.p) / s_.p;
-		const double sigma2 = s_.h2 / (static_cast<double>(m_) * s_.p);
-		arma::uword causal = 0;
-		for (arma::uword j = 0; j < m_; ++j) {
-			if (update(j, inv_odd_p, sigma2)) {
-				++causal;
-			}
-		}
-		if (s_.automatic) {
-			draw_parameters(causal);
-		}
-	}
-
-	// A kept sweep adds its conditional means to the posterior means. Every
-	// effect was just redrawn, so b'b is bigsnpr's gap.
-	void keep(int n_kept) {
-		if (check_divergence(est_, opts_, b_, gap0_)) {
-			return;
-		}
-		keep_effects(est_, opts_, b_, cond_mean_, n_kept);
-		est_.postp += cond_postp_ / n_kept;
-		est_.corr += cond_corr_ / n_kept;
-	}
-
-	void report(int itr, int n_iter) const {
-		Rprintf("Iteration %4d of %d: p %g, h2 %g\n", itr, n_iter, s_.p, s_.h2);
-	}
-
-	bool stopped() const { return est_.diverged; }
-
-	const Ldpred2Estimates& estimates() const { return est_; }
-
-private:
-	static constexpr double kMinH2 = 1e-3;
-
-	// Variant j's update; true when it draws a non-zero effect. The fitted
-	// correlation (R_s b)_j net of b_j's own term is the other effects' share
-	// of the statistic.
-	bool update(arma::uword j, double inv_odd_p, double sigma2) {
-		const double fitted = ld_.row(j, b_);
-		const double prev = b_(j);
-		const double res = bhat_(j) - (fitted - ld_.diag(j) * prev);
-		const double C1 = sigma2 * n_(j);
-		const double C2 = 1.0 / (1.0 + 1.0 / C1);
-		const double C3 = C2 * res;
-		const double C4 = C2 / n_(j);
-		const double postp =
-		    1.0 / (1.0 + inv_odd_p * std::sqrt(1.0 + C1) * std::exp(-C3 * C3 / C4 / 2.0));
-		cond_mean_(j) = C3 * postp;
-		cond_postp_(j) = postp;
-		cond_corr_(j) = fitted;
-		double next = 0.0;
-		bool drawn = false;
-		if (s_.sparse && postp < s_.p) {
-			cond_mean_(j) = 0.0;
-		} else if (postp > unif()) {
-			const double draw = normal(C3, std::sqrt(C4));
-			if (s_.allow_jump_sign || draw * prev >= 0.0) {
-				next = draw;
-				drawn = true;
-			}
-		}
-		const double diff = next - prev;
-		if (diff != 0.0) {
-			cur_h2_ += diff * (2.0 * fitted + diff * ld_.diag(j));
-			ld_.update(j, diff);
-			b_(j) = next;
-		}
-		return drawn;
-	}
-
-	// LDpred2-auto's p from its Beta full conditional, within its bounds, and
-	// h2 = b'R_s b, floored as bigsnpr floors it.
-	void draw_parameters(arma::uword causal) {
-		const double k = static_cast<double>(causal);
-		const double m = static_cast<double>(m_);
-		beta_distribution beta(1.0 + k / s_.mean_ld, 1.0 + (m - k) / s_.mean_ld);
-		s_.p = std::min(std::max(beta(engine()), s_.p_lower), s_.p_upper);
-		s_.h2 = std::max(cur_h2_, kMinH2);
-		est_.path_p.push_back(s_.p);
-		est_.path_h2.push_back(s_.h2);
-	}
-
-	const arma::vec& bhat_;
-	const arma::vec& n_;
-	Ldpred2Settings s_;
-	arma::uword m_;
-	arma::vec b_;
-	FactorLd ld_;
-	ChainOptions opts_;
-	arma::vec cond_mean_;
-	arma::vec cond_postp_;
-	arma::vec cond_corr_;
-	double gap0_;
-	double cur_h2_ = 0.0;
-	Ldpred2Estimates est_;
-};
+SdprEstimates sdpr_mcmc(const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
+                        const std::vector<arma::uvec> &union_idx, arma::uword n_union,
+                        const SdprSharing &sharing, size_t M, double a0k, double b0k,
+                        const ChainSchedule &schedule, bool verbose, unsigned int seed,
+                        const ChainOptions &opts, const std::vector<double> &gap0);

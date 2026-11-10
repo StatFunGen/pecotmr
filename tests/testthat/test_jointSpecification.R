@@ -568,7 +568,7 @@ test_that("fineMappingPipeline(QtlDataset): study axis on individual errors", {
             cisWindow = 1000L,
             jointSpecification = "study"
         ),
-        "requires sumstats input"
+        "needs more than one study"
     )
 })
 
@@ -598,7 +598,7 @@ test_that("twasWeightsPipeline(QtlDataset): study axis on individual errors", {
             cisWindow = 1000L,
             jointSpecification = "study"
         ),
-        "requires sumstats input"
+        "needs more than one study"
     )
 })
 
@@ -698,7 +698,7 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 # -----------------------------------------------------------------------------
 
 .jd_mockMvsusie <- function() {
-    function(X, Y, prior_variance, coverage) {
+    function(X, Y, prior_variance, coverage, standardize = TRUE) {
         list(token = "mvsusie", n_X_cols = ncol(X), n_Y_cols = ncol(Y))
     }
 }
@@ -1923,13 +1923,13 @@ test_that(".enumerateComposedSumstatGroups: empty scope and no complement", {
 })
 
 # -----------------------------------------------------------------------------
-# .fmSynthesizeJointSpec
+# .defaultJointSpec
 # -----------------------------------------------------------------------------
 
-test_that(".fmSynthesizeJointSpec: trait beats context; single axes -> empty", {
-    expect_equal(pecotmr:::.fmSynthesizeJointSpec(3L, 2L)[[1L]]$axes, "trait")
-    expect_equal(pecotmr:::.fmSynthesizeJointSpec(2L, 1L)[[1L]]$axes, "context")
-    expect_equal(pecotmr:::.fmSynthesizeJointSpec(1L, 1L), list())
+test_that(".defaultJointSpec: trait beats context; single axes -> empty", {
+    expect_equal(pecotmr:::.defaultJointSpec(3L, 2L)[[1L]]$axes, "trait")
+    expect_equal(pecotmr:::.defaultJointSpec(2L, 1L)[[1L]]$axes, "context")
+    expect_equal(pecotmr:::.defaultJointSpec(1L, 1L), list())
 })
 
 # -----------------------------------------------------------------------------
@@ -1974,6 +1974,51 @@ test_that(".fmMergeResultsByKey: merges per-region entries by (s,c,t,method)", {
         entry = list()
     )
     expect_equal(nrow(pecotmr:::.fmMergeResultsByKey(list(empty, empty))), 0L)
+})
+
+test_that(".fmMergeResultsByKey keeps joint groups apart, and their places", {
+    # One tuple in two joint fits per region; the regions agree on the first
+    # fit's position for it and disagree on the second's.
+    region <- function(jointIndex) {
+        fm <- QtlFineMappingResult(
+            studyName = c("S", "S"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            method = c("mvsusie", "mvsusie"),
+            entry = list(.js_fmEntry(), .js_fmEntry()),
+            jointStudies = c(NA, "S;T"),
+            jointContexts = c("c1;c2", NA)
+        )
+        fm$jointIndex <- jointIndex
+        fm
+    }
+    seen <- list()
+    local_mocked_bindings(
+        .fmMergeEntries = function(entries) {
+            seen[[length(seen) + 1L]] <<- length(entries)
+            entries[[1L]]
+        },
+        .package = "pecotmr"
+    )
+    out <- pecotmr:::.fmMergeResultsByKey(list(region(1:2), region(c(1L, 1L))))
+    expect_equal(nrow(out), 2L)
+    expect_equal(as.character(out$jointStudies), c(NA, "S;T"))
+    # Each row merged its own group's two regions.
+    expect_equal(unlist(seen), c(2L, 2L))
+    expect_equal(out$jointIndex, c(1L, NA))
+    # No region records one: no column.
+    plain <- function() {
+        QtlFineMappingResult(
+            studyName = "S",
+            context = "c1",
+            trait = "t1",
+            method = "mvsusie",
+            entry = list(.js_fmEntry()),
+            jointContexts = "c1;c2"
+        )
+    }
+    merged <- pecotmr:::.fmMergeResultsByKey(list(plain(), plain()))
+    expect_false("jointIndex" %in% colnames(S4Vectors::mcols(merged)))
 })
 
 test_that(".twasMergeResultsByKey: merges per-region TwasWeights entries", {
@@ -2106,7 +2151,7 @@ test_that(".fmDispatchJointSpecsMultiStudy: study specs go to sumstats", {
     expect_equal(nrow(out), 2L) # indA row + ssC row
 })
 
-test_that(".fmDispatchJointSpecsMultiStudy: study spec, no sumStats: message", {
+test_that(".fmDispatchJointSpecsMultiStudy: a study spec joins the studies", {
     qdA <- .js_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -2117,9 +2162,27 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec, no sumStats: message", {
         contexts = c("c1", "c2"),
         traits = "t1"
     )
-    # No sumstats.
+    # No sumstats: the individual-level studies are the cross-study fit.
     mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
-    parsed <- list(list(axes = "study", scope = NULL))
+    acrossStudies <- QtlFineMappingResult(
+        studyName = c("indA", "indB"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        method = c("mvsusie", "mvsusie"),
+        entry = list(.js_fmEntry(), .js_fmEntry())
+    )
+    seen <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .fmDispatchStudySpecsIndividual = function(studySpecs, ...) {
+            seen$axes <- map(studySpecs, "axes")
+            acrossStudies
+        },
+        .package = "pecotmr"
+    )
+    parsed <- list(
+        list(axes = "study", scope = NULL),
+        list(axes = c("study", "context"), scope = NULL)
+    )
     expect_message(
         out <- pecotmr:::.fmDispatchJointSpecsMultiStudy(
             parsed,
@@ -2127,7 +2190,39 @@ test_that(".fmDispatchJointSpecsMultiStudy: study spec, no sumStats: message", {
             list(),
             list(data = mt, verbose = 1, xRegions = list(NULL))
         ),
-        "no sumStats slot"
+        "composed specs including the study axis produce no result"
+    )
+    # Only the study-axis-only spec reaches the individual-level studies.
+    expect_equal(seen$axes, list("study"))
+    expect_identical(out, acrossStudies)
+})
+
+test_that(".fmDispatchStudySpecsIndividual: one study, or no mvsusie: NULL", {
+    qdA <- .js_makeQtlDataset(studyName = "indA", traits = "t1")
+    ss <- .js_makeQtlSumStats(studies = "ssC", contexts = "c1", traits = "t1")
+    oneStudy <- MultiStudyQtlDataset(
+        qtlDatasets = list(indA = qdA),
+        sumStats = ss
+    )
+    spec <- list(list(axes = "study", scope = NULL))
+    expect_null(pecotmr:::.fmDispatchStudySpecsIndividual(
+        spec,
+        "mvsusie",
+        list(),
+        list(data = oneStudy, verbose = 0)
+    ))
+    qdB <- .js_makeQtlDataset(studyName = "indB", traits = "t1")
+    twoStudies <- MultiStudyQtlDataset(
+        qtlDatasets = list(indA = qdA, indB = qdB)
+    )
+    expect_message(
+        out <- pecotmr:::.fmDispatchStudySpecsIndividual(
+            spec,
+            "fsusie",
+            list(),
+            list(data = twoStudies, verbose = 1)
+        ),
+        "fsusie has no cross-study fit"
     )
     expect_null(out)
 })
@@ -2909,4 +3004,32 @@ test_that(".twasMergeResultsByKey keeps a position its regions agree on", {
         c("rA", "rB")
     )
     expect_null(S4Vectors::mcols(out)$jointIndex)
+})
+
+test_that("a merged row's joint position is NA where no result holds it", {
+    local_mocked_bindings(.mergeResultKeyOf = function(r) "a")
+    expect_true(is.na(pecotmr:::.fmJointIndexForKey(NULL, "b")))
+})
+
+test_that("a composed spec with the study axis says which studies sit out", {
+    composed <- list(list(axes = c("study", "context")))
+    expect_message(
+        pecotmr:::.twasMultiStudyWarnExcluded(
+            composed,
+            list(A = NULL, B = NULL),
+            1L
+        ),
+        "excluding individual-level studies \\(A, B\\)"
+    )
+    # The study axis alone, or a quiet run, says nothing.
+    expect_silent(pecotmr:::.twasMultiStudyWarnExcluded(
+        list(list(axes = "study")),
+        list(A = NULL),
+        1L
+    ))
+    expect_silent(pecotmr:::.twasMultiStudyWarnExcluded(
+        composed,
+        list(A = NULL),
+        0L
+    ))
 })

@@ -168,10 +168,11 @@
 # vignette draws exactly this line -- cov_ed sees only the data-driven set.
 #
 # The components are built off a prepared mashr data object in a fixed order
-# (canonical, pca, flash, flashNonneg), so a given `components` set
-# reproduces the same ordering everywhere. RNG is consumed only by cov_flash
-# / cov_flash(nonneg). Shared by mashPriorCovariances and the exported
-# mashCovarianceComponents.
+# (canonical, subsets, pca, flash, flashNonneg), so a given `components` set
+# reproduces the same ordering everywhere. The subset-shared matrices are
+# fixed hypotheses too, so they join the canonical set. RNG is consumed only
+# by cov_flash / cov_flash(nonneg). Shared by mashPriorCovariances and the
+# exported mashCovarianceComponents.
 # @noRd
 .mashBuildComponents <- function(
     mashData,
@@ -183,6 +184,10 @@
     canonical <- if (is_in("canonical", components)) {
         canonicalArgs <- compact(.mashComponentArgs("canonical", componentArgs))
         exec(mashr::cov_canonical, mashData, !!!canonicalArgs)
+    }
+    subsets <- if (is_in("subsets", components)) {
+        subsetArgs <- compact(.mashComponentArgs("subsets", componentArgs))
+        exec(.mashCovSubsets, mashData, !!!subsetArgs)
     }
     pca <- if (is_in("pca", components)) {
         pcaArgs <- compact(.mashComponentArgs("pca", componentArgs))
@@ -200,7 +205,7 @@
         exec(mashr::cov_flash, mashData, factors = "nonneg", !!!flashNonnegArgs)
     }
     list(
-        canonical = canonical,
+        canonical = c(canonical, subsets),
         dataDriven = c(pca, flash, flashNonneg)
     )
 }
@@ -209,6 +214,88 @@
 # @noRd
 .mashComponentArgs <- function(key, componentArgs) {
     as.list(componentArgs[[key]] %||% list())
+}
+
+# The subset-shared components (CovSubsetsOptions()): for every subset of two
+# or more conditions short of all of them, and every correlation in `corr`,
+# effects with that correlation within the subset and none outside it --
+# mashr's equal_effects (`corr` 1) and simple_het applied to each subset.
+# Each is named "subset_<members>_corr<value>". NULL, with a message, for
+# fewer than three conditions, which have no such subset; too many to fit is
+# refused.
+# @noRd
+.mashCovSubsets <- function(mashData, corr = c(1, 0.25, 0.5, 0.75)) {
+    k <- ncol(mashData$Bhat)
+    if (k < 3L) {
+        inform(glue(
+            "mashPriorCovariances: the \"subsets\" component needs three or ",
+            "more conditions (got {k}); it adds no matrix."
+        ))
+        return(NULL)
+    }
+    conditions <- colnames(mashData$Bhat) %||% as.character(seq_len(k))
+    subsets <- list_flatten(map(seq(2L, k - 1L), .mashSubsetsOfSize, k = k))
+    .mashRequireFewSubsets(length(subsets) * length(corr), k)
+    list_flatten(map(
+        subsets,
+        .mashSharedSubsetMatrices,
+        corr = corr,
+        conditions = conditions
+    ))
+}
+
+# Every subset of 1..k of `size` conditions, as index vectors.
+# @noRd
+#' @importFrom utils combn
+.mashSubsetsOfSize <- function(size, k) {
+    combn(k, size, simplify = FALSE)
+}
+
+# The most subset-shared matrices one prior takes: 2^k - k - 2 subsets of k
+# conditions, times the correlations, grows past what a mash fit can weigh.
+# @noRd
+.MASH_SUBSETS_MAX <- 1000L
+
+# @noRd
+.mashRequireFewSubsets <- function(n, k) {
+    if (n <= .MASH_SUBSETS_MAX) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "mashPriorCovariances: the \"subsets\" component would build {n} ",
+            "matrices for {k} conditions ({2^k - k - 2} subsets, one matrix ",
+            "per subset and correlation); more than {.MASH_SUBSETS_MAX} is ",
+            "refused."
+        ),
+        i = str_c(
+            "Fit fewer conditions together, or pass a shorter ",
+            "CovSubsetsOptions(corr = )."
+        )
+    ))
+}
+
+# One subset's matrices, one per correlation, named by its members.
+# @noRd
+.mashSharedSubsetMatrices <- function(members, corr, conditions) {
+    label <- str_c("subset_", str_flatten(conditions[members], "_"))
+    set_names(
+        map(
+            corr,
+            .mashSharedSubsetMatrix,
+            members = members,
+            k = length(conditions)
+        ),
+        str_c(label, "_corr", corr)
+    )
+}
+
+# Effects with correlation `rho` within conditions `members` of `k` (unit
+# variance) and none elsewhere.
+# @noRd
+.mashSharedSubsetMatrix <- function(rho, members, k) {
+    inSubset <- is_in(seq_len(k), members)
+    outer(inSubset, inSubset) * (matrix(rho, k, k) + diag(1 - rho, k))
 }
 
 # The covariance list and its mixture weights. A supplied `priorCovariances`
@@ -279,6 +366,43 @@ CovCanonicalOptions <- function(cov_methods = NULL, ...) {
         extra = list(...),
         label = "CovCanonicalOptions",
         engine = "canonical"
+    )
+}
+
+#' @title Arguments For The Subset-Shared Covariance Components
+#' @description Options for the \code{"subsets"} component of
+#'   \code{\link{mashPriorCovariances}}: for every subset of two or more
+#'   conditions short of all of them, effects shared within the subset and
+#'   absent outside it -- mashr's \code{equal_effects} and \code{simple_het}
+#'   applied to each subset. They let an effect be shared by some studies or
+#'   contexts but not all, which needs three or more; with fewer the
+#'   component adds nothing. \eqn{k} conditions have \eqn{2^k - k - 2} such
+#'   subsets, each taking one matrix per correlation, and more than 1000
+#'   matrices in all are refused. These are hypotheses about shape, so they
+#'   go to the mash fit unrefined, beside the canonical set.
+#' @param corr Numeric vector of distinct values in \code{[0, 1]}: the
+#'   correlations of the effects within a subset, one matrix per subset and
+#'   value. Default \code{c(1, 0.25, 0.5, 0.75)}: equal effects, then the
+#'   correlations of mashr's \code{simple_het}.
+#' @return A \code{\link{MethodOptions}} object.
+#' @examples
+#' CovSubsetsOptions(corr = 1)
+#' @export
+CovSubsetsOptions <- function(corr = c(1, 0.25, 0.5, 0.75)) {
+    assertNumeric(
+        corr,
+        lower = 0,
+        upper = 1,
+        any.missing = FALSE,
+        min.len = 1L,
+        unique = TRUE
+    )
+    .newMethodOptions(
+        NULL,
+        defaults = list(corr = corr),
+        extra = list(),
+        label = "CovSubsetsOptions",
+        engine = "subsets"
     )
 }
 

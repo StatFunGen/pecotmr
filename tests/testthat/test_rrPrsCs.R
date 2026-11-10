@@ -449,3 +449,169 @@ test_that("a diverged PRS-CS chain warns, and chains that all diverge error", {
     expect_warning(run(1), "prsCs: the posterior mean effects' squares")
     expect_error(run(2), "prsCs: every chain diverged")
 })
+
+# ---- PRS-CSx / JointPRS across studies ----
+
+.prs_joint <- function(studies, constraint, union, seed = 11L) {
+    jointPrsCpp(
+        1,
+        0.5,
+        NULL,
+        constraint,
+        map(studies, "z"),
+        map_dbl(studies, "n"),
+        map(studies, "R"),
+        union,
+        30L,
+        200L,
+        100L,
+        5L,
+        FALSE,
+        seed,
+        1,
+        FALSE,
+        FALSE
+    )
+}
+
+test_that("PRS-CS across one study is PRS-CS, draw for draw", {
+    one <- .rrwTwoStudies()[1L]
+    joint <- .prs_joint(one, 1, list(1:30))
+    alone <- prsCsCpp(
+        1,
+        0.5,
+        NULL,
+        one[[1L]]$z,
+        NULL,
+        250L,
+        list(one[[1L]]$R),
+        200L,
+        100L,
+        5L,
+        FALSE,
+        11L,
+        1,
+        FALSE,
+        FALSE
+    )
+    expect_identical(as.numeric(joint$betaEst), alone$betaEst)
+    expect_identical(joint$psiEst, alone$psiEst)
+    expect_identical(joint$sigmaEst, alone$sigmaEst)
+    expect_identical(joint$phiEst, alone$phiEst)
+    # And off a factor of the LD, as prsCsFactorCpp() draws.
+    factor <- one[[1L]]$X * sqrt((250 - 1) / 250)
+    jointF <- jointPrsFactorCpp(
+        1,
+        0.5,
+        NULL,
+        1,
+        list(one[[1L]]$z),
+        250,
+        list(factor),
+        list(1:30),
+        30L,
+        200L,
+        100L,
+        5L,
+        FALSE,
+        11L,
+        1,
+        FALSE,
+        FALSE
+    )
+    aloneF <- prsCsFactorCpp(
+        1,
+        0.5,
+        NULL,
+        one[[1L]]$z,
+        NULL,
+        250L,
+        factor,
+        200L,
+        100L,
+        5L,
+        FALSE,
+        11L,
+        1,
+        FALSE,
+        FALSE
+    )
+    expect_identical(as.numeric(jointF$betaEst), aloneF$betaEst)
+})
+
+test_that("a constraint of 0 holds the studies' correlation at 0 (PRS-CSx)", {
+    studies <- .rrwTwoStudies()
+    # The second study lacks the last variant.
+    studies[[2L]] <- list_modify(
+        studies[[2L]],
+        z = studies[[2L]]$z[-30L],
+        R = studies[[2L]]$R[-30L, -30L]
+    )
+    union <- list(1:30, 1:29)
+    held <- .prs_joint(studies, c(0, 0), union)
+    expect_equal(held$rhoEst, diag(2))
+    expect_equal(dim(held$betaEst), c(30L, 2L))
+    expect_equal(held$betaEst[30L, 2L], 0)
+    expect_length(held$psiEst, 30L)
+    expect_length(held$sigmaEst, 2L)
+    learned <- .prs_joint(studies, c(1, 1), union)
+    expect_true(learned$rhoEst[1L, 2L] >= 0 && learned$rhoEst[1L, 2L] <= 0.99)
+})
+
+test_that("JointPRS across three studies keeps rho positive definite", {
+    # Three copies of one study: the learned correlations run high, and a
+    # proposal for one pair can leave rho indefinite given the others.
+    one <- .rrwTwoStudies()[[1L]]
+    fit <- .prs_joint(rep(list(one), 3L), c(1, 1, 1), rep(list(1:30), 3L))
+    expect_equal(dim(fit$rhoEst), c(3L, 3L))
+    expect_gt(min(eigen(fit$rhoEst, symmetric = TRUE)$values), 0)
+})
+
+test_that("the sampler across studies checks each study's inputs", {
+    studies <- .rrwTwoStudies()
+    expect_error(
+        .prs_joint(studies, c(1, 1), list(1:30, 1:3)),
+        "Study 2 has 3 union indices but 30 effects"
+    )
+    expect_error(
+        .prs_joint(studies, c(1, 1), list(1:30, rep(1L, 30L))),
+        "must be distinct"
+    )
+    expect_error(
+        .prs_joint(studies, 1, list(1:30, 1:30)),
+        "one sample size and one constraint"
+    )
+})
+
+test_that("PRS-CS weights across studies sit over the union of variants", {
+    inputs <- .rrwStudyInputs(.rrwTwoStudies())
+    ids <- inputs$ids
+    stats <- inputs$stats
+    refs <- inputs$refs
+    W <- pecotmr:::.prsCsCoupledWeights(
+        stats,
+        refs,
+        ids,
+        list(nIter = 60L, nBurnin = 30L, seed = 3L, nChains = 2L),
+        "slim",
+        "test"
+    )
+    expect_equal(dim(W), c(30L, 2L))
+    expect_equal(rownames(W), ids)
+    expect_equal(unname(W[30L, 2L]), 0)
+    fit <- attr(W, "fit")
+    expect_equal(dim(fit$rhoEst), c(2L, 2L))
+    expect_length(fit$sigmaEst, 2L)
+    expect_equal(nrow(fit$chains), 2L)
+    expect_error(
+        pecotmr:::.prsCsCoupledWeights(
+            stats,
+            refs,
+            ids,
+            list(maf = rep(0.3, 30L)),
+            "none",
+            "test"
+        ),
+        "the weights across studies stay standardized"
+    )
+})

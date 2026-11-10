@@ -7,7 +7,6 @@
 \alias{BglrOptions}
 \alias{HibayesOptions}
 \alias{HibayesRssOptions}
-\alias{BayesAlphabetRssOptions}
 \alias{DprOptions}
 \alias{NcvregOptions}
 \alias{L0learnOptions}
@@ -32,8 +31,6 @@ BglrOptions(...)
 HibayesOptions(...)
 
 HibayesRssOptions(...)
-
-BayesAlphabetRssOptions(...)
 
 DprOptions(...)
 
@@ -92,18 +89,35 @@ Options forwarded to the engine behind a TWAS weight method,
   their \code{backend}, and each engine takes its own constructor:
   \code{QggOptions} for qgg on either path, \code{BglrOptions} for BGLR,
   \code{HibayesOptions} for hibayes on individual-level data and
-  \code{HibayesRssOptions} on summary statistics, and
-  \code{BayesAlphabetRssOptions} for pecotmr's own summary-statistics
-  sampler. Their wrappers set the iterations, burn-in, thinning and prior
-  inclusion probability themselves (\code{nIter}, \code{nBurnin},
-  \code{thin}, \code{pi}), so every constructor refuses its engine's
-  spelling of them, and hibayes' \code{seed} (drawn from R's random
-  number generator) and \code{threads} (one). A wrapper's \code{h2}
-  reaches its engine in that engine's spelling: \code{h2} for qgg and
-  pecotmr's sampler, \code{R2} for BGLR, and for hibayes, which fixes its
-  own at 0.5, the variances \code{vg} and \code{ve}. The constructors
+  \code{HibayesRssOptions} on summary statistics. Their wrappers set the
+  iterations, burn-in, thinning and prior inclusion probability
+  themselves (\code{nIter}, \code{nBurnin}, \code{thin}, \code{pi}), so
+  every constructor refuses its engine's spelling of them, and hibayes'
+  \code{seed} (drawn from R's random number generator) and
+  \code{threads} (one). A wrapper's \code{h2} reaches its engine in that
+  engine's spelling: \code{h2} for qgg, \code{R2} for BGLR, and for
+  hibayes, which fixes its own at 0.5, the variances \code{vg} and
+  \code{ve}. The constructors
   still take those, for a run that does not set \code{h2}; setting both
   is an error.
+
+  \code{BglrOptions} serves both of BGLR's functions: \code{BGLR()}, which
+  fits one phenotype, and \code{Multitrait()}, which \code{bayesC} and
+  \code{bayesN} run on several conditions at once (see
+  \code{\link{bayesAlphabetWeights}}). It takes any option either one
+  takes, and each call receives those it has, so a fit of one phenotype
+  ignores \code{Multitrait()}'s \code{resCov} and \code{intercept}, and a
+  joint fit ignores \code{BGLR()}'s \code{S0}, \code{df0} and the rest.
+  It also takes \code{Cov}, the covariance of the effects across
+  conditions, which goes into \code{Multitrait()}'s linear term as BGLR
+  spells it there: \code{list(type = "UN")} (the default, with an
+  inverse-Wishart prior), \code{"DIAG"}, \code{"FA"} or \code{"REC"}, with
+  the prior settings that type takes (\code{df0}, \code{S0}, and the
+  logical pattern \code{M} for \code{"FA"} and \code{"REC"}). BGLR draws
+  the covariance afresh every iteration under that prior; it has no way
+  to hold one fixed, so a large \code{df0} with \code{S0} set to the
+  matrix it should stay near is the closest to supplying it. A matrix
+  given there must have a row and a column per condition fitted.
 
   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
@@ -150,6 +164,12 @@ Options forwarded to the engine behind a TWAS weight method,
   its spectral norm. Default \code{1e-3}. Below it, as near-duplicate
   contexts make it, the eigenvalues are raised to the floor, the covariance
   is not updated during the fit, and a warning says so.
+
+  \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
+  only when \code{dprGibbs} is fitted across studies as SDPRX fits
+  ancestries (\code{\link{twasWeightsPipeline}}'s \code{studyCoupling}):
+  which sets of the studies a component's effects lie in, and their
+  correlation (see \code{\link{sdpr}}). A single study ignores them.
 }
 \examples{
 GlmnetOptions(nfolds = 10)

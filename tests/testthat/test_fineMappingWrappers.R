@@ -2557,6 +2557,25 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
     )
 })
 
+test_that("fitMvsusie fits missing Y with susieR left unattached", {
+    # mvsusieR 0.3.0's missing-Y fit calls susieR's block_coordinate_ascent()
+    # without importing it; fitMvsusie() attaches susieR for that call alone.
+    skip_if_not_installed("mvsusieR")
+    skip_if("package:susieR" %in% search(), "susieR is attached already")
+    data(multiTraitData, envir = environment())
+    Y <- multiTraitData$Y
+    expect_true(anyNA(Y))
+    fit <- fitMvsusie(
+        multiTraitData$X[, 1:30],
+        Y,
+        prior_variance = buildMvsusieMixturePrior(conditionNames = colnames(Y)),
+        L = 2L,
+        methodArgs = MvsusieOptions(verbose = FALSE)
+    )
+    expect_length(fit$pip, 30L)
+    expect_false("package:susieR" %in% search())
+})
+
 test_that(".fmFitSusieRss rejects a non-named-list rssControl", {
     z <- c(0.5, -1.2, 2.0)
     R <- diag(3)

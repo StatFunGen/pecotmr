@@ -13,6 +13,7 @@ setClass(
     contains = "MethodParam",
     slots = c(
         canonical = "MethodOptions_OR_NULL",
+        subsets = "MethodOptions_OR_NULL",
         pca = "MethodOptions_OR_NULL",
         flash = "MethodOptions_OR_NULL",
         flashNonneg = "MethodOptions_OR_NULL"
@@ -120,9 +121,11 @@ setClass(
 #' @param priorCovariances Optional named list of square covariance matrices,
 #'   or a \code{\link{MashPrior}}. \code{NULL} (default) builds them.
 #' @param components Which prior-covariance components to build: any of
-#'   \code{"canonical"}, \code{"pca"}, \code{"flash"},
-#'   \code{"flashNonneg"}, or a \code{\link{MashComponentParam}} record to
-#'   configure them. Ignored when \code{priorCovariances} is supplied.
+#'   \code{"canonical"}, \code{"subsets"} (\code{\link{CovSubsetsOptions}}:
+#'   effects shared by some conditions but not all), \code{"pca"},
+#'   \code{"flash"}, \code{"flashNonneg"}, or a
+#'   \code{\link{MashComponentParam}} record to configure them. Ignored when
+#'   \code{priorCovariances} is supplied.
 #' @param engine How the data-driven components are refined:
 #'   \code{"covEd"} (default), \code{"covUdr"} or \code{"none"}, or the
 #'   matching constructor --- \code{\link{CovEdOptions}} /
@@ -587,10 +590,11 @@ mashResidualCorrelation <- function(
 }
 
 #' @title Build mash Data-Driven Covariance Components
-#' @description Build the raw per-method data-driven covariance components
-#'   (\code{cov_canonical} / \code{cov_pca} / \code{cov_flash} /
-#'   \code{cov_flash(factors = "nonneg")}) for a \code{"strong"} SumStats set --
-#'   the reusable building block \code{\link{mashPriorCovariances}} then refines
+#' @description Build the raw per-method covariance components
+#'   (\code{cov_canonical} / the subset-shared matrices / \code{cov_pca} /
+#'   \code{cov_flash} / \code{cov_flash(factors = "nonneg")}) for a
+#'   \code{"strong"} SumStats set -- the reusable building block
+#'   \code{\link{mashPriorCovariances}} then refines
 #'   with an ED / udr engine. Exposed on its own so a workflow can build or
 #'   inspect a single component (the mixture-prior notebook's per-method steps)
 #'   without running the full prior.
@@ -598,8 +602,9 @@ mashResidualCorrelation <- function(
 #'   least \code{"strong"} (the discovery set the covariances are learned on).
 #' @param alpha mash \code{alpha}.
 #' @param vhat Residual correlation matrix (\code{V}); \code{NULL} -> identity.
-#' @param components Any of \code{"canonical"}, \code{"pca"}, \code{"flash"},
-#'   \code{"flashNonneg"}. Built in that fixed order.
+#' @param components Any of \code{"canonical"}, \code{"subsets"}
+#'   (\code{\link{CovSubsetsOptions}}, at its defaults), \code{"pca"},
+#'   \code{"flash"}, \code{"flashNonneg"}. Built in that fixed order.
 #' @param nPcs PCs seeded into \code{cov_pca}. Default \code{ncol(Bhat) - 1}.
 #' @param inputScale SumStats -> matrix conversion scale.
 #' @param mashDataArgs Extra arguments for
@@ -688,10 +693,13 @@ mashCovarianceComponents <- function(
 #' @param alpha mash \code{alpha}.
 #' @param vhat Residual correlation matrix (\code{V}); typically from
 #'   \code{\link{mashResidualCorrelation}}. \code{NULL} -> identity.
-#' @param components Data-driven covariance components, any of
-#'   \code{"canonical"}, \code{"pca"}, \code{"flash"} (default
-#'   \code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-#'   "nonneg")}). Built in that fixed order. May instead be a
+#' @param components Covariance components, any of \code{"canonical"},
+#'   \code{"subsets"} (\code{\link{CovSubsetsOptions}}: effects shared by
+#'   some conditions but not all, needing three or more), \code{"pca"},
+#'   \code{"flash"} (default \code{cov_flash}), \code{"flashNonneg"}
+#'   (\code{cov_flash(factors = "nonneg")}). Built in that fixed order; the
+#'   canonical and subset-shared ones are fixed hypotheses, which the engine
+#'   does not refine. May instead be a
 #'   \code{\link{MashComponentParam}} record, which names the components and
 #'   carries each one's options.
 #' @param engine Covariance-refinement engine, either a name or the matching
@@ -842,6 +850,7 @@ mashPriorCovariances <- function(
 .mashComponentCtors <- function() {
     list(
         canonical = CovCanonicalOptions,
+        subsets = CovSubsetsOptions,
         pca = CovPcaOptions,
         flash = CovFlashOptions,
         flashNonneg = CovFlashOptions
@@ -880,6 +889,9 @@ mashPriorCovariances <- function(
 #'   Naming a component here also selects it, so \code{components} need not
 #'   be given separately.
 #' @param canonical Options for \code{\link{CovCanonicalOptions}}.
+#' @param subsets Options for \code{\link{CovSubsetsOptions}}: the
+#'   subset-shared matrices, for effects shared by some conditions but not
+#'   all.
 #' @param pca Options for \code{\link{CovPcaOptions}}.
 #' @param flash,flashNonneg Options for \code{\link{CovFlashOptions}}.
 #' @return A \code{MashComponentParam} object, a \code{\link{MethodParam}}.
@@ -893,6 +905,7 @@ mashPriorCovariances <- function(
 #' @export
 MashComponentParam <- function(
     canonical = NULL,
+    subsets = NULL,
     pca = NULL,
     flash = NULL,
     flashNonneg = NULL
@@ -903,6 +916,7 @@ MashComponentParam <- function(
     given <- discard(
         list(
             canonical = canonical,
+            subsets = subsets,
             pca = pca,
             flash = flash,
             flashNonneg = flashNonneg
@@ -922,7 +936,7 @@ MashComponentParam <- function(
 # one built by the WRONG constructor is refused.
 #
 # There is no "unknown component" check because it cannot fail any more: the
-# four components are now formals, so R rejects a misspelled one as an
+# components are now formals, so R rejects a misspelled one as an
 # unused argument before this is reached.
 # @noRd
 .mashComponentEntries <- function(given) {
@@ -940,7 +954,7 @@ MashComponentParam <- function(
     components,
     caller = "mashPriorCovariances"
 ) {
-    valid <- c("canonical", "pca", "flash", "flashNonneg")
+    valid <- c("canonical", "subsets", "pca", "flash", "flashNonneg")
     bad <- setdiff(as.character(components), valid)
     if (length(bad) > 0L) {
         msg <- glue(
