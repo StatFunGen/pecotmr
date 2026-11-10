@@ -47,6 +47,7 @@ twasWeightsPipeline(data, ...)
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
+  mashPrior = NULL,
   h2 = NULL,
   fitRetention = c("slim", "none", "full"),
   verbose = 1L,
@@ -248,8 +249,10 @@ that same group (its \code{jointStudies} / \code{jointContexts} /
 \code{jointTraits}); otherwise the whole group is refit. A method fitted
 per tuple resumes only from the tuple's own fit.}
 
-\item{mashPrior}{Optional \code{\link{MashPrior}} (or coercible) supplying
-data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
+\item{mashPrior}{Optional \code{\link{MashPrior}} supplying data-driven
+prior matrices for mr.mash weight methods; \code{NULL} to skip. On a
+\code{QtlSumStats}, which is not cross-validated, mr.mash takes its
+full-data prior, and one that holds per-fold priors alone is an error.}
 
 \item{crossValidationParam}{Cross-validation settings, built with
   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no

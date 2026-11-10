@@ -2583,7 +2583,11 @@ parseTraitIds <- function(traitId, data) {
     ssRes <- .twasDispatchJointSpecsQtlSumStats(
         parsedJointSpec,
         tokens,
-        .twasSumStatsMethodTokens(methods)$methodArgs,
+        .twasQssSetMrmashPrior(
+            .twasSumStatsMethodTokens(methods)$methodArgs,
+            cfg$mashPrior,
+            tokens
+        ),
         list_assign(
             cfg,
             data = ssData,

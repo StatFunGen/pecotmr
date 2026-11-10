@@ -3604,6 +3604,82 @@ test_that("a full mashPrior reaches mr.mash's arguments", {
     expect_identical(captured, ddpm)
 })
 
+test_that("a full mashPrior reaches mr.mash.rss's arguments", {
+    ss <- .tp_makeQtlSumStats(n_entries = 2L)
+    ddpm <- list(U = list(comp = diag(2)))
+    captured <- NULL
+    local_mocked_bindings(
+        .handleDosage = .tp_mockExtractor(),
+        mrmashRssWeights = function(stat, ldReference, ...) {
+            captured <<- list(...)$dataDrivenPriorMatrices
+            matrix(
+                0,
+                length(stat$variantNames),
+                ncol(stat$z),
+                dimnames = list(stat$variantNames, colnames(stat$z))
+            )
+        },
+        .package = "pecotmr"
+    )
+    suppressMessages(suppressWarnings(twasWeightsPipeline(
+        ss,
+        methods = "mrmash",
+        mashPrior = MashPrior(fullFit = ddpm),
+        verbose = 0
+    )))
+    expect_identical(captured, ddpm)
+})
+
+test_that("summary statistics take a mashPrior's full-data prior alone", {
+    ss <- .tp_makeQtlSumStats(n_entries = 2L)
+    U <- list(comp = diag(2))
+    # Not cross-validated, they have no use for per-fold priors.
+    expect_error(
+        twasWeightsPipeline(
+            ss,
+            methods = "mrmash",
+            mashPrior = MashPrior(
+                cvFits = list(perFoldFits = list(list(U = U)))
+            ),
+            verbose = 0
+        ),
+        "holds per-fold priors only"
+    )
+    # A prior no requested method takes is ignored, and said to be.
+    mockArgs <- c(
+        list(.handleDosage = .tp_mockExtractor()),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
+    )
+    exec(local_mocked_bindings, !!!mockArgs)
+    expect_warning(
+        suppressMessages(twasWeightsPipeline(
+            ss,
+            methods = "lasso",
+            mashPrior = MashPrior(fullFit = list(U = U)),
+            verbose = 0
+        )),
+        "not among `methods`"
+    )
+})
+
+test_that("a MultiStudyQtlDataset's summary statistics take its mashPrior", {
+    seen <- NULL
+    local_mocked_bindings(
+        twasWeightsPipeline = function(data, ..., mashPrior = NULL) {
+            seen <<- mashPrior
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    mp <- MashPrior(fullFit = list(U = list(comp = diag(2))))
+    pecotmr:::.twasSumStats(
+        .tp_makeQtlSumStats(n_entries = 2L),
+        list(mashPrior = mp)
+    )
+    expect_identical(seen, mp)
+})
+
 test_that("jointSpec mr.mash and univariate lasso both run", {
     qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
     jointRes <- .tp_tw(

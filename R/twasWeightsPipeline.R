@@ -1372,8 +1372,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   that same group (its \code{jointStudies} / \code{jointContexts} /
 #'   \code{jointTraits}); otherwise the whole group is refit. A method fitted
 #'   per tuple resumes only from the tuple's own fit.
-#' @param mashPrior Optional \code{\link{MashPrior}} (or coercible) supplying
-#'   data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.
+#' @param mashPrior Optional \code{\link{MashPrior}} supplying data-driven
+#'   prior matrices for mr.mash weight methods; \code{NULL} to skip. On a
+#'   \code{QtlSumStats}, which is not cross-validated, mr.mash takes its
+#'   full-data prior, and one that holds per-fold priors alone is an error.
 #' @param usePCA Logical (length 1). Individual-level data only: a
 #'   \code{QtlDataset}, or the \code{QtlDataset} components of a
 #'   \code{MultiStudyQtlDataset}. When
@@ -1923,13 +1925,7 @@ setMethod(
     norm
 ) {
     mp <- .unpackMashPrior(mashPrior, samplePartition)
-    if (!is.null(mashPrior) && !is_in("mrmash", norm$tokens)) {
-        msg <- glue(
-            "`mashPrior` was supplied but 'mrmash' is not among `methods`; ",
-            "the data-driven prior is ignored."
-        )
-        warn(msg)
-    }
+    .twasWarnUnusedMashPrior(mashPrior, norm$tokens)
     withPrior <- if (
         !is.null(mp$fullPrior) &&
             is_in("mrmash_weights", names(norm$methodList))
@@ -1956,6 +1952,44 @@ setMethod(
     list_assign(
         norm,
         methodList = list_assign(norm$methodList, mrmash_weights = updated)
+    )
+}
+
+# A mashPrior no requested method takes is ignored, and said to be.
+# @noRd
+.twasWarnUnusedMashPrior <- function(mashPrior, tokens) {
+    if (!is.null(mashPrior) && !is_in("mrmash", tokens)) {
+        msg <- glue(
+            "`mashPrior` was supplied but 'mrmash' is not among `methods`; ",
+            "the data-driven prior is ignored."
+        )
+        warn(msg)
+    }
+}
+
+# The summary-statistics methods' arguments, keyed by method, with mr.mash's
+# data-driven prior set from `mashPrior`: its full-data prior, as on the
+# individual-level path (.twasQdsSetMrmashPrior()). Summary statistics are
+# not cross-validated, so per-fold priors alone give mr.mash none.
+# @noRd
+.twasQssSetMrmashPrior <- function(methodArgs, mashPrior, tokens) {
+    if (is.null(mashPrior) || !is_in("mrmash", tokens)) {
+        return(methodArgs)
+    }
+    prior <- .unpackMashPrior(mashPrior)$fullPrior
+    if (is.null(prior)) {
+        abort(glue(
+            "twasWeightsPipeline(QtlSumStats): `mashPrior` holds per-fold ",
+            "priors only. Summary statistics are not cross-validated, so ",
+            "mr.mash needs its full-data prior (`fullFit`)."
+        ))
+    }
+    list_assign(
+        methodArgs,
+        mrmash = list_assign(
+            as.list(methodArgs$mrmash %||% list()),
+            dataDrivenPriorMatrices = prior
+        )
     )
 }
 
@@ -2537,6 +2571,7 @@ setMethod(
         jointSpecification = NULL,
         fineMappingResult = NULL,
         twasWeights = NULL,
+        mashPrior = NULL,
         h2 = NULL,
         fitRetention = c("slim", "none", "full"),
         verbose = 1L,
@@ -2571,6 +2606,7 @@ setMethod(
             jointSpecification = jointSpecification,
             fineMappingResult = fineMappingResult,
             twasWeights = twasWeights,
+            mashPrior = mashPrior,
             fitRetention = fitRetention,
             verbose = verbose,
             panelFilterParam = panelFilterParam,
@@ -2628,6 +2664,7 @@ setMethod(
     jointSpecification,
     fineMappingResult,
     twasWeights,
+    mashPrior = NULL,
     fitRetention,
     verbose,
     panelFilterParam,
@@ -2649,6 +2686,7 @@ setMethod(
         panelFilterParam = panelFilterParam,
         fineMappingResult = fineMappingResult,
         twasWeights = twasWeights,
+        mashPrior = mashPrior,
         studyCoupling = studyCoupling,
         ensemble = .ensembleResolve(ensembleParam),
         h2Spec = h2Spec
@@ -2880,7 +2918,12 @@ setMethod(
     .twasCheckMethodArgsForInput(tm$methodArgs, "QtlSumStats")
     .twasCheckBackend(cfg$backend, tm$tokens, "sumstat")
     .twasCheckFineMappingMethods(tm$tokens, fineMappingResult, "QtlSumStats")
-    methodArgs <- .twasInjectTokenBackends(tm$methodArgs, cfg$backend)
+    .twasWarnUnusedMashPrior(cfg$mashPrior, tm$tokens)
+    methodArgs <- .twasQssSetMrmashPrior(
+        .twasInjectTokenBackends(tm$methodArgs, cfg$backend),
+        cfg$mashPrior,
+        tm$tokens
+    )
     .twasQssJointPhase(parsedJointSpec, tm$tokens, methodArgs, cfg)
 }
 
@@ -3655,6 +3698,7 @@ setMethod(
         cisWindow = cfg$cisWindow,
         fineMappingResult = cfg$fineMappingResult,
         twasWeights = cfg$twasWeights,
+        mashPrior = cfg$mashPrior,
         h2 = cfg$h2,
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
