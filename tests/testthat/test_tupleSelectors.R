@@ -1860,3 +1860,86 @@ test_that("every collection answers dataType(), NA where none is recorded", {
     S4Vectors::mcols(typed)$dataType <- "expression"
     expect_equal(dataType(typed), "expression")
 })
+
+# ---------------------------------------------------------------------------
+# Joint groups: a lookup names the group its fit joined
+# ---------------------------------------------------------------------------
+
+# One tuple's own susie fit and its row of an mvsusie fit across contexts,
+# with the fit's other row.
+.ts_jointFmr <- function() {
+    row <- function() {
+        FineMappingRow(
+            variantIds = "chr1:100:A:G",
+            susieFit = list(),
+            topLoci = data.frame(variant_id = "chr1:100:A:G", pip = 0.5)
+        )
+    }
+    QtlFineMappingResult(
+        studyName = c("s1", "s1", "s1"),
+        context = c("brain", "brain", "liver"),
+        trait = c("g", "g", "g"),
+        method = c("susie", "mvsusie", "mvsusie"),
+        entry = list(row(), row(), row()),
+        jointContexts = c(NA, "brain;liver", "brain;liver")
+    )
+}
+
+test_that("a joint key matches no group to no group and members as sets", {
+    fm <- .ts_jointFmr()
+    tuple <- list(study = "s1", context = "brain", trait = "g")
+    expect_equal(
+        pecotmr:::.matchTupleRows(fm, c(tuple, pecotmr:::.noJointKey())),
+        1L
+    )
+    group <- list(
+        jointStudies = NA_character_,
+        jointContexts = "liver;brain",
+        jointTraits = NA_character_
+    )
+    expect_equal(pecotmr:::.matchTupleRows(fm, c(tuple, group)), 2L)
+    # Without a joint key the joint axes do not select.
+    expect_equal(pecotmr:::.matchTupleRows(fm, tuple), 1:2)
+    # A collection without the column has no joint group anywhere.
+    plain <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "brain",
+        trait = "g",
+        method = "susie",
+        entry = list(pecotmr:::.fmrRowParts(fm, 1L))
+    )
+    expect_equal(
+        pecotmr:::.matchTupleRows(plain, c(tuple, pecotmr:::.noJointKey())),
+        1L
+    )
+    expect_length(pecotmr:::.matchTupleRows(plain, c(tuple, group)), 0L)
+    expect_equal(pecotmr:::.jointKeyAt(fm, 3L)$jointContexts, "brain;liver")
+    expect_true(is.na(pecotmr:::.jointKeyAt(plain, 1L)$jointStudies))
+})
+
+test_that("a joint row's position is recorded, or read off its fit's rows", {
+    fm <- .ts_jointFmr()
+    # A result made before rows recorded it: the rank among the fit's rows.
+    expect_true(is.na(pecotmr:::.fmrJointIndexAt(fm, 1L)))
+    expect_equal(pecotmr:::.fmrJointIndexAt(fm, 2L), 1L)
+    expect_equal(pecotmr:::.fmrJointIndexAt(fm, 3L), 2L)
+    # One recorded is read as it is, NA included.
+    fm$jointIndex <- c(NA_integer_, 2L, NA_integer_)
+    expect_equal(pecotmr:::.fmrJointIndexAt(fm, 2L), 2L)
+    expect_true(is.na(pecotmr:::.fmrJointIndexAt(fm, 3L)))
+})
+
+test_that("a fit's kind of joint fit names the axes it joined", {
+    joint <- list(
+        jointStudies = c(NA, "a;b", NA, "a;b"),
+        jointContexts = c(NA, NA, "x;y", "x;y"),
+        jointTraits = c(NA, NA, "t;u", "t;u")
+    )
+    kinds <- pecotmr:::.jointKinds(joint)
+    expect_equal(
+        kinds,
+        c("none", "study", "context+trait", "study+context+trait")
+    )
+    expect_true(all(kinds %in% pecotmr:::.JOINT_KINDS))
+    expect_equal(pecotmr:::.jointKinds(map(joint, head, 0L)), character(0))
+})

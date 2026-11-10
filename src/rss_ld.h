@@ -8,7 +8,9 @@
 // way of holding R_s, so a solver templated on it runs unchanged on either.
 #pragma once
 
+#include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
+#include <vector>
 
 // R held whole, with R_s = (1 - s) R + s I applied on the fly and Rbeta =
 // R beta kept as a running sum (the genotype-free analogue of tracking
@@ -87,3 +89,40 @@ private:
 	arma::vec u_;
 	arma::vec diag_;
 };
+
+// ---- Studies' variants in their union ----------------------------------------
+
+// The solvers across studies -- penalized_rss.cpp's coupled path and the
+// PRS-CS chain of rss_mcmc.h -- match a variant across studies by its place in
+// the union of the studies' variants. Each study's places as R passes them,
+// 1-based, made 0-based: one per value of the study's (`what` names them),
+// each within the union and none twice in a study.
+inline std::vector<arma::uvec> union_index(const cpp11::list& idxList,
+                                           const std::vector<arma::vec>& values,
+                                           int nUnion, const char* what) {
+	if (idxList.size() != static_cast<R_xlen_t>(values.size())) {
+		cpp11::stop("There are %d union indices for %d studies.", (int)idxList.size(),
+		            (int)values.size());
+	}
+	std::vector<arma::uvec> out;
+	for (arma::uword k = 0; k < values.size(); ++k) {
+		cpp11::integers ix(idxList[static_cast<R_xlen_t>(k)]);
+		if (static_cast<arma::uword>(ix.size()) != values[k].n_elem) {
+			cpp11::stop("Study %d has %d union indices but %d %s.", (int)k + 1,
+			            (int)ix.size(), (int)values[k].n_elem, what);
+		}
+		std::vector<unsigned char> seen(nUnion, 0);
+		arma::uvec u(ix.size());
+		for (R_xlen_t i = 0; i < ix.size(); ++i) {
+			int v = ix[i];
+			if (v < 1 || v > nUnion || seen[v - 1]) {
+				cpp11::stop("Study %d's union indices must be distinct, in 1..%d.",
+				            (int)k + 1, nUnion);
+			}
+			seen[v - 1] = 1;
+			u(i) = static_cast<arma::uword>(v - 1);
+		}
+		out.push_back(u);
+	}
+	return out;
+}

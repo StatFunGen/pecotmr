@@ -124,6 +124,38 @@ test_that("CtwasResult: uniqueness includes joint columns", {
     expect_equal(nrow(cr), 2L)
 })
 
+test_that("CtwasResult: a run's kind of joint fit joins the key", {
+    # One method's runs on weights of fits of each gene alone and of a
+    # study-axis joint fit are two runs; a "best" run mixes kinds.
+    prior <- list(group_prior = c(SNP = 1e-4, brain = 0.01))
+    build <- function(jointTwasAxes) {
+        CtwasResult(
+            gwasStudy = rep("D1", 3L),
+            studyName = rep("Q1", 3L),
+            context = rep("brain", 3L),
+            method = c("lasso", "lasso", "best"),
+            entry = rep(list(.cr_entry(prior = prior)), 3L),
+            jointTwasAxes = jointTwasAxes
+        )
+    }
+    cr <- build(c("none", "study", NA))
+    expect_equal(nrow(cr), 3L)
+    expect_output(show(cr), "CtwasResult: 3 run\\(s\\)")
+    expect_equal(
+        ctwasPosteriors(cr)$jointTwasAxes,
+        rep(c("none", "study", NA), each = 2L)
+    )
+    expect_equal(
+        unique(ctwasGroupPriors(cr)$jointTwasAxes),
+        c("none", "study", NA)
+    )
+    expect_error(
+        build(c("none", "studies", NA)),
+        "'jointTwasAxes' holds studies, which is no kind of joint fit"
+    )
+    expect_error(build(c("none", "none", NA)), "uniqueness violated")
+})
+
 test_that("CtwasResult: rejects a non-CtwasResultEntry payload", {
     expect_error(
         CtwasResult(

@@ -197,6 +197,7 @@ reference:
       - CovFlashOptions
       - CovMcdOptions
       - CovPcaOptions
+      - CovSubsetsOptions
       - CovUdrOptions
       - CtwasOptions
       - CtwasBoundaryGenesOptions

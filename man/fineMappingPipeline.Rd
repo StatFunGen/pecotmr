@@ -187,9 +187,24 @@ of specs. A spec is a character vector drawn from \code{"study"},
 listed values, each of which must exist in \code{data}. A list-form
 spec always goes inside the outer list, even on its own. Other methods
 run per (study, context, trait) as usual. The \code{"study"} axis needs
-summary statistics: it is rejected on a \code{QtlDataset}, and on a
-\code{MultiStudyQtlDataset} only the summary-statistics studies take
-part.}
+more than one study, so it is rejected on a \code{QtlDataset}. On a
+\code{MultiStudyQtlDataset}, the summary-statistics studies are fitted
+with one another, and so are the individual-level ones: one
+\code{mvsusie} fit per (context, trait) that two or more of them carry,
+for instance the same gene measured in several ancestries. Their samples
+must be disjoint. The fit stacks them, each study's phenotype observed
+on its own samples only, over the union of the studies' variants, which
+are matched by allele; a variant a study lacks carries no evidence for
+it. Each study keeps its own residualization, genotype filters and
+scaling, and its row reports its own samples' allele frequencies and
+credible-set purity. While the residualizer scales X and Y
+(\code{ResidualizationParam(scaleResiduals = TRUE)}, the default), every
+joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so its
+prior describes per-SD effects and a component shared across studies
+means effects equal per SD whatever the studies' sizes;
+\code{MvsusieOptions(standardize = TRUE)} restores mvsusieR's own
+scaling. \code{fsusie} has no cross-study fit, and a composed spec
+including \code{"study"} runs on summary statistics only.}
 
 \item{initializeWithSusieInf}{Logical. When \code{susieInf} is in
 \code{methods} alongside \code{susie} and/or \code{susieAsh}, whether the
@@ -470,6 +485,11 @@ S4-dispatched per-region fine-mapping entry point that
   existing fine-mapping result skips re-fitting any \code{(study,
   context, trait, method)} tuple that already has a matching row; cached
   entries are merged with the newly-fit entries in the returned collection.
+  A row matches only when it comes from a fit like the one to be made: a
+  tuple fitted alone by a row of no joint group, a joint group's
+  conditions only all together and by rows of that same group (their
+  \code{jointStudies} / \code{jointContexts} / \code{jointTraits}), so a
+  fit of the tuple in another group is refit rather than borrowed.
 }
 
 \section{Intentional behaviours dropped from the pre-stub pipelines}{

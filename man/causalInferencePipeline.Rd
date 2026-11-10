@@ -123,6 +123,14 @@ study, positioned at the span of the fine-mapping row's variants. mcols:
   \item{\code{qtlStudy}, \code{context}, \code{trait},
         \code{method}, \code{gwasStudy}}{Identity columns. On an MR row,
         \code{method} is the fine-mapping method.}
+  \item{\code{jointStudies}, \code{jointContexts},
+        \code{jointTraits}}{Present when a scored weight set came from a
+        joint fit: the studies, contexts or traits the fit joined
+        (\code{";"}-joined), as on its \code{twasWeights} or
+        \code{fineMappingResult} row, \code{NA} for a weight set from no
+        joint fit and on the \code{combined.*} rows. They tell apart the
+        weight sets of one \code{(qtlStudy, context, trait, method)}
+        fitted in different joint groups.}
   \item{\code{analysis}}{\code{"twas"} or \code{"mr"}.}
   \item{\code{twasZ}, \code{twasPval}}{TWAS Z and p-value; \code{NA} on
         MR rows.}

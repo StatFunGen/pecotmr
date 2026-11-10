@@ -18,9 +18,11 @@ MashPriorParam(
 or a \code{\link{MashPrior}}. \code{NULL} (default) builds them.}
 
 \item{components}{Which prior-covariance components to build: any of
-\code{"canonical"}, \code{"pca"}, \code{"flash"},
-\code{"flashNonneg"}, or a \code{\link{MashComponentParam}} record to
-configure them. Ignored when \code{priorCovariances} is supplied.}
+\code{"canonical"}, \code{"subsets"} (\code{\link{CovSubsetsOptions}}:
+effects shared by some conditions but not all), \code{"pca"},
+\code{"flash"}, \code{"flashNonneg"}, or a
+\code{\link{MashComponentParam}} record to configure them. Ignored when
+\code{priorCovariances} is supplied.}
 
 \item{engine}{How the data-driven components are refined:
 \code{"covEd"} (default), \code{"covUdr"} or \code{"none"}, or the

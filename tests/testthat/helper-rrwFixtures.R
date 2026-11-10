@@ -128,3 +128,49 @@
     d$stat$z <- as.vector(signal + noise)
     d
 }
+
+# Two studies on disjoint halves of eqtlRegionExample's people: each one's
+# marginal correlations and in-sample LD over 30 common variants, scaled to
+# population SD, with an effect on four of them.
+.rrwTwoStudies <- function() {
+    data(eqtlRegionExample, envir = environment())
+    X0 <- eqtlRegionExample$X
+    p <- colMeans(X0) / 2
+    cols <- which(pmin(p, 1 - p) >= 0.05)[301:330]
+    withr::local_seed(5L)
+    effects <- stats::rnorm(4L)
+    map(list(1:250, 251:415), function(rows) {
+        X <- scale(X0[rows, cols]) * sqrt(length(rows) / (length(rows) - 1))
+        g <- drop(X[, c(3, 10, 17, 25)] %*% effects)
+        y <- scale(g + stats::rnorm(length(rows)))[, 1L]
+        list(
+            X = X,
+            z = as.numeric(crossprod(X, y)) / length(rows),
+            R = crossprod(X) / length(rows),
+            n = length(rows)
+        )
+    })
+}
+
+# .rrwTwoStudies()'s studies as the samplers across studies take them: each
+# one's statistics (z-scores) and LdMatrix over the variants it keeps, the
+# second lacking the last, with the union's ids.
+.rrwStudyInputs <- function(studies, keep = list(1:30, 1:29)) {
+    ids <- .rrwIds(30L)
+    list(
+        ids = ids,
+        stats = map2(studies, keep, function(s, k) {
+            list(
+                z = (s$z * sqrt(s$n))[k],
+                n = rep(s$n, length(k)),
+                variantNames = ids[k]
+            )
+        }),
+        refs = map2(studies, keep, function(s, k) {
+            LdMatrix(
+                `dimnames<-`(s$R[k, k], list(ids[k], ids[k])),
+                nSamples = s$n
+            )
+        })
+    )
+}

@@ -230,160 +230,184 @@ test_that("bayesAlphabetWeights keeps the posterior or the engine's fit", {
     expect_equal(fits$hibayes$variantIds, colnames(X))
 })
 
-test_that("a summary-statistics fit picks its engine by the LD reference", {
-    d <- .rrwPanelStat()
-    f <- pecotmr:::.rssBackend
-    # A genotype reference runs pecotmr's own sampler on its factor; an LD
-    # matrix runs qgg, or hibayes for bayesB and bayesL.
-    expect_equal(f("bayesA", NULL, d$panel), "pecotmr")
-    expect_equal(f("bayesA", NULL, d$ldMatrix), "qgg")
-    expect_equal(f("bayesB", NULL, d$ldMatrix), "hibayes")
-    expect_equal(f("bayesL", NULL, d$ldMatrix), "hibayes")
-    # The matrix engines also run on a genotype reference, through the
-    # matrix formed from it.
-    expect_equal(f("bayesA", "hibayes", d$panel), "hibayes")
+test_that("a summary-statistics fit picks its engine by method", {
+    f <- pecotmr:::.methodBackend
+    # qgg, or hibayes for bayesB and bayesL, on either kind of LD reference.
+    expect_equal(f("bayesA", NULL, "sumstat"), "qgg")
+    expect_equal(f("bayesB", NULL, "sumstat"), "hibayes")
+    expect_equal(f("bayesL", NULL, "sumstat"), "hibayes")
+    expect_equal(f("bayesA", "hibayes", "sumstat"), "hibayes")
     expect_error(
-        f("bayesA", "pecotmr", d$ldMatrix),
-        "runs on a genotype reference's factor"
+        f("bayesA", "pecotmr", "sumstat"),
+        "must be one of qgg, hibayes"
     )
-    expect_error(
-        f("bayesB", "qgg", d$ldMatrix),
-        "must be one of hibayes, pecotmr"
-    )
-    # LDpred2 defaults as the alphabet does; the lasso's pecotmr engine reads
-    # either LD, so it is the default and is never refused.
-    expect_equal(f("ldpred2Auto", NULL, d$panel), "pecotmr")
-    expect_equal(f("ldpred2Grid", NULL, d$ldMatrix), "bigsnpr")
-    expect_error(
-        f("ldpred2Grid", "pecotmr", d$ldMatrix),
-        "runs on a genotype reference's factor"
-    )
-    expect_equal(f("lasso", NULL, d$ldMatrix), "pecotmr")
-    expect_equal(f("lasso", "pecotmr", d$ldMatrix), "pecotmr")
-    expect_equal(f("lasso", "bigsnpr", d$panel), "bigsnpr")
+    expect_error(f("bayesB", "qgg", "sumstat"), "must be one of hibayes")
+    # bayesB has hibayes alone there, which leaves nothing to choose; LDpred2
+    # has bigsnpr alone; the lasso has two.
+    has <- pecotmr:::.methodHasBackends
+    expect_false(has("bayesB", "sumstat"))
+    expect_true(has("bayesB", "individual"))
+    expect_false(has("ldpred2Auto", "sumstat"))
+    expect_true(has("lasso", "sumstat"))
+    expect_equal(f("lasso", NULL, "sumstat"), "pecotmr")
+    expect_equal(f("lasso", "bigsnpr", "sumstat"), "bigsnpr")
 })
 
-test_that("pecotmr's sampler lands where the matrix engines do", {
+test_that("qgg and hibayes read a genotype reference as its LD matrix", {
     skip_if_not_installed("qgg")
     skip_if_not_installed("hibayes")
     d <- .rrwPanelStatLd()
-    run <- function(method, backend) {
-        native <- identical(backend, "pecotmr")
-        set.seed(1)
-        suppressMessages(bayesAlphabetRssWeights(
+    run <- function(fn, ldReference) {
+        set.seed(2)
+        suppressMessages(fn(
             d$stat,
-            if (native) d$panel else d$ldMatrix,
-            method,
-            backend = backend,
-            nIter = 3000,
-            nBurnin = 500,
-            # Without SDPR's projection, which the matrix engines lack.
-            methodArgs = if (native) {
-                BayesAlphabetRssOptions(ldProjection = NULL)
-            }
+            ldReference,
+            nIter = 300,
+            nBurnin = 50,
+            ldProjection = NULL
         ))
     }
-    # Each method's priors follow one engine's, on the same LD. This LD has
-    # rank 22 of 40, so the effects of variants in perfect LD are not
-    # identified and two runs of one engine split them differently; their
-    # fitted marginal effects R b are what the engines must agree on.
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    fitted <- function(b) as.vector(crossprod(ldFactor, ldFactor %*% b))
-    agree <- function(method, other) {
-        cor(fitted(run(method, "pecotmr")), fitted(run(method, other)))
-    }
-    expect_gt(agree("bayesA", "qgg"), 0.99)
-    expect_gt(agree("bayesC", "qgg"), 0.99)
-    expect_gt(agree("bayesN", "qgg"), 0.99)
-    expect_gt(agree("bayesR", "qgg"), 0.99)
-    expect_gt(agree("bayesB", "hibayes"), 0.99)
-    expect_gt(agree("bayesL", "hibayes"), 0.99)
+    # The matrix formed from the panel is the LdMatrix's, so as given one
+    # seed gives one fit from either.
+    expect_equal(
+        run(bayesCRssWeights, d$panel),
+        run(bayesCRssWeights, d$ldMatrix)
+    )
+    expect_equal(
+        run(bayesBRssWeights, d$panel),
+        run(bayesBRssWeights, d$ldMatrix)
+    )
 })
 
-test_that("pecotmr's Legarra bayesL matches qgg's individual-level fit", {
-    # qgg fits the Bayesian LASSO in Legarra et al.'s form on individual
-    # data; its summary-statistics sampler uses a different update, so the
-    # individual fit is the one the form is checked against.
-    skip_if_not_installed("qgg")
-    set.seed(31)
-    n <- 600
-    p <- 30
-    X <- matrix(rbinom(n * p, 2, 0.3), n, p)
-    for (j in 2:p) {
-        X[, j] <- ifelse(runif(n) < 0.5, X[, j - 1], X[, j])
-    }
-    effects <- replace(numeric(p), c(5, 18), c(0.25, -0.2))
-    Xs <- scale(X)
-    y <- as.vector(Xs %*% effects + rnorm(n, sd = 0.95))
-    ldFactor <- pecotmr:::.ldFactorFromDosage(X)
-    native <- pecotmr:::bayesAlphabetRss(
-        as.vector(cor(Xs, y)),
-        ldFactor,
-        n,
-        "bayesL",
-        nIter = 3000,
-        nBurnin = 500,
-        bayesLForm = "legarra",
-        ldProjection = NULL
-    )$betaEst
-    individual <- suppressMessages(
-        bayesLWeights(Xs, y, nIter = 3000, nBurnin = 500)
-    )
-    expect_gt(cor(native, individual), 0.95)
-})
-
-test_that("pecotmr's sampler is seeded by R's generator", {
-    d <- .rrwPanelStatLd()
-    run <- function() {
-        bayesARssWeights(d$stat, d$panel, nIter = 400, nBurnin = 100)
-    }
-    set.seed(5)
-    a <- run()
-    set.seed(5)
-    expect_identical(run(), a)
-    expect_length(a, length(d$stat$z))
-    expect_true(all(is.finite(a)))
-})
-
-test_that("pecotmr's sampler checks the options only it takes", {
-    d <- .rrwPanelStatLd()
-    expect_error(
-        bayesARssWeights(
-            d$stat,
-            d$panel,
-            methodArgs = BayesAlphabetRssOptions(bayesLForm = "legarra")
-        ),
-        "`bayesLForm` applies to bayesL, not bayesA"
-    )
-    expect_error(BayesAlphabetRssOptions(pi = 0.1), "the wrapper's `pi`")
-    expect_error(
-        BayesAlphabetRssOptions(shrinkCorr = 0.9),
-        "the wrapper's `shrinkCorr`"
-    )
-    # qgg's per-variant weights run in place of n for every variant.
-    w <- bayesNRssWeights(
+# The input the wrapper gives `engine` for .rrwPanelStatLd()'s statistics,
+# at the default shrinkage and, unless given, the default projection.
+.baDense <- function(d, engine, ldReference = d$ldMatrix, ldProjection = 0.1) {
+    pecotmr:::.alphabetRssDense(
         d$stat,
-        d$panel,
-        nIter = 400,
-        nBurnin = 100,
-        fitRetention = "slim",
-        methodArgs = BayesAlphabetRssOptions(perVariantWeights = TRUE)
+        ldReference,
+        list(shrinkCorr = 0.95, ldProjection = ldProjection),
+        engine
     )
-    expect_true(all(is.finite(w)))
-    expect_equal(attr(w, "fit")$backend, "pecotmr")
-    # bayesN has no inclusions to report.
-    expect_null(attr(w, "fit")$pip)
-    pip <- attr(
-        bayesCRssWeights(
-            d$stat,
-            d$panel,
-            nIter = 400,
-            nBurnin = 100,
-            fitRetention = "slim"
+}
+
+# SDPR's likelihood at a = 0.1, shrunk at c = 0.95, from the eigenvectors of
+# the panel's LD: the LD R (R + aI)^-1 R and the effects R (R + aI)^-1 bhat.
+.baProjected <- function(d) {
+    R <- unname(pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test"))
+    bhat <- pecotmr:::.rssMarginalCor(d$stat, n = 500, p = nrow(R))
+    ev <- eigen(R, symmetric = TRUE)
+    kept <- ev$values > sqrt(.Machine$double.eps) * max(ev$values)
+    lambda <- ev$values[kept]
+    V <- ev$vectors[, kept]
+    projected <- V %*% (lambda^2 / (lambda + 0.1) * t(V))
+    list(
+        R = 0.95 * projected + 0.05 * diag(nrow(R)),
+        b = as.vector(V %*% (lambda / (lambda + 0.1) * crossprod(V, bhat))),
+        bhat = bhat
+    )
+}
+
+test_that("the projection gives each engine SDPR's likelihood", {
+    d <- .rrwPanelStatLd()
+    want <- .baProjected(d)
+    n <- 500
+    # From the panel's factor or from its LD matrix alike.
+    for (ref in list(d$panel, d$ldMatrix)) {
+        # qgg reads X'X = sqrt(ww ww') LD, X'y = wy and
+        # y'y = median((b^2 + (n - 2) seb^2) ww).
+        qgg <- .baDense(d, "qgg", ref)
+        expect_equal(
+            unname(sqrt(outer(qgg$ww, qgg$ww)) * qgg$R),
+            n * want$R,
+            tolerance = 1e-8
+        )
+        expect_equal(qgg$wy, n * want$b, tolerance = 1e-8)
+        expect_equal(median((qgg$b^2 + (n - 2) * qgg$seb^2) * qgg$ww), n)
+        expect_equal(
+            pecotmr:::.alphabetFittedCorr(qgg, want$b),
+            as.vector(want$R %*% want$b),
+            tolerance = 1e-8
+        )
+        # hibayes reads X'X = n ldm, X'y = n ldm_jj b and
+        # y'y = mean(n ldm_jj (b^2 + (n - 2) se^2)).
+        hib <- .baDense(d, "hibayes", ref)
+        expect_equal(unname(hib$R), want$R, tolerance = 1e-8)
+        expect_equal(diag(hib$R) * hib$b, want$b, tolerance = 1e-8)
+        expect_equal(
+            mean(n * diag(hib$R) * (hib$b^2 + (n - 2) * hib$seb^2)),
+            n
+        )
+        # A chain's divergence is tested against the effects as given.
+        expect_equal(qgg$bhat, want$bhat)
+        expect_equal(hib$bhat, want$bhat)
+    }
+    # Off, both engines read the statistics as given.
+    given <- .baDense(d, "qgg", ldProjection = NULL)
+    R <- unname(pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test"))
+    expect_equal(unname(given$R), 0.95 * R + 0.05 * diag(nrow(R)))
+    expect_equal(given$b, want$bhat)
+    expect_null(given$ww)
+    expect_null(given$scale)
+})
+
+test_that("hibayes reads the projected likelihood exactly", {
+    skip_if_not_installed("hibayes")
+    d <- .rrwPanelStatLd()
+    hib <- .baDense(d, "hibayes")
+    # sbrm()'s conjugate gradient solves ldm g = X'y / n, here R g = b'.
+    fit <- withr::with_preserve_seed(hibayes::sbrm(
+        sumstat = data.frame(
+            SNP = hib$ids,
+            A1 = "A",
+            A2 = "G",
+            freq = 0.5,
+            b = hib$b,
+            se = hib$seb,
+            p = 2 * pnorm(-abs(hib$b / hib$seb)),
+            N = hib$n
         ),
-        "fit"
-    )$pip
-    expect_true(all(pip >= 0 & pip <= 1))
+        ldm = unname(hib$R),
+        method = "CG",
+        verbose = FALSE
+    ))
+    expect_equal(
+        as.numeric(fit$g),
+        as.vector(solve(hib$R, diag(hib$R) * hib$b)),
+        tolerance = 1e-4
+    )
+})
+
+test_that("qgg reads the projected likelihood exactly", {
+    skip_if_not_installed("qgg")
+    d <- .rrwPanelStatLd()
+    qgg <- .baDense(d, "qgg")
+    qin <- pecotmr:::.alphabetQggInputs(qgg)
+    n <- qgg$n
+    h2 <- 0.01
+    # blup with its variances held solves (X'X + (ve / vb) I) b = X'y. qgg
+    # 1.1.6 hands its kernel the genetic variance y'y h2 / (n - 1) in vb's
+    # place; giving vb that same value makes ve / vb = (1 - h2) / h2 = 99
+    # whichever way it is passed.
+    fit <- suppressMessages(qgg::gbayes(
+        stat = qin$stat,
+        Glist = qin$Glist,
+        LD = qin$LD,
+        method = "blup",
+        h2 = h2,
+        vb = n / (n - 1) * h2,
+        updateB = FALSE,
+        updateE = FALSE,
+        updateG = FALSE,
+        nit = 100,
+        nburn = 1000,
+        nthin = 1
+    ))
+    XtX <- sqrt(outer(qgg$ww, qgg$ww)) * qgg$R
+    expect_equal(
+        unname(fit$stat[qgg$ids, "bm"]),
+        as.vector(solve(XtX + 99 * diag(nrow(XtX)), qgg$wy)),
+        tolerance = 1e-6
+    )
 })
 
 test_that("an sbrm fit leaves the caller's random stream where it was", {
@@ -404,368 +428,159 @@ test_that("an sbrm fit leaves the caller's random stream where it was", {
     expect_equal(after, runif(1))
 })
 
-test_that("pecotmr's sampler stays finite on statistics unlike the LD", {
-    # .rrwPanelStat()'s noise ignores the LD, so y'y - 2b'X'y + b'X'Xb, the
-    # residual sum of squares, turns negative; qgg's own sampler goes NaN
-    # there, while pecotmr's keeps the last residual variance. On the LD
-    # unshrunk, the chain then diverges, and says so.
-    d <- .rrwPanelStat()
-    run <- function(fn, shrinkCorr, ldProjection = NULL) {
-        fn(
-            d$stat,
-            d$panel,
-            nIter = 400,
-            nBurnin = 100,
-            shrinkCorr = shrinkCorr,
-            methodArgs = BayesAlphabetRssOptions(ldProjection = ldProjection)
-        )
-    }
-    diverged <- "bayesAlphabetRss: the posterior mean effects' squares"
-    w <- expect_warning(run(bayesNRssWeights, 1), diverged)
-    expect_true(all(is.finite(w)))
-    # hibayes' forms fall back on half the genetic variance, as hibayes does.
-    w <- expect_warning(run(bayesBRssWeights, 1), diverged)
-    expect_true(all(is.finite(w)))
-    # Shrinkage keeps the chain from diverging; so does SDPR's projection,
-    # the default, which drops the statistics' part the LD cannot explain.
-    expect_silent(run(bayesNRssWeights, 0.8))
-    expect_silent(run(bayesNRssWeights, 1, ldProjection = 0.1))
-    expect_silent(run(bayesBRssWeights, 1, ldProjection = 0.1))
-})
-
-test_that("SDPR's projection reads R (R + aI)^-1 R and R (R + aI)^-1 bhat", {
-    d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    R <- unname(crossprod(ldFactor) / (nrow(ldFactor) - 1))
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    toSpan <- R %*% solve(R + 0.1 * diag(nrow(R)))
-    projected <- pecotmr:::.alphabetProjected(bhat, ldFactor, 0.1)
-    ldOf <- function(x) crossprod(x$ldFactor) / (nrow(x$ldFactor) - 1)
-    expect_equal(ldOf(projected), toSpan %*% R, tolerance = 1e-8)
-    expect_equal(projected$bhat, as.vector(toSpan %*% bhat), tolerance = 1e-8)
-    # At a = 0 it keeps R, and the statistics' part in R's span.
-    hard <- pecotmr:::.alphabetProjected(bhat, ldFactor, 0)
-    expect_equal(ldOf(hard), R, tolerance = 1e-8)
-    expect_equal(
-        hard$bhat,
-        as.vector(R %*% MASS::ginv(R) %*% bhat),
-        tolerance = 1e-8
-    )
-    expect_identical(
-        pecotmr:::.alphabetProjected(bhat, ldFactor, NULL),
-        list(bhat = bhat, ldFactor = ldFactor)
-    )
-})
-
-test_that("BayesAlphabetRssOptions sets SDPR's projection or turns it off", {
-    d <- .rrwPanelStatLd()
-    run <- function(methodArgs = NULL) {
-        set.seed(7)
-        bayesNRssWeights(
-            d$stat,
-            d$panel,
-            nIter = 300,
-            nBurnin = 50,
-            methodArgs = methodArgs
-        )
-    }
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    direct <- function(ldProjection) {
-        set.seed(7)
-        pecotmr:::bayesAlphabetRss(
-            pecotmr:::.zToCor(d$stat$z, 500),
-            ldFactor,
-            500,
-            "bayesN",
-            nIter = 300,
-            nBurnin = 50,
-            shrinkCorr = 0.95,
-            ldProjection = ldProjection
-        )$betaEst
-    }
-    # On by default at SDPR's a = 0.1.
-    expect_equal(run(), direct(0.1))
-    expect_equal(
-        run(BayesAlphabetRssOptions(ldProjection = NULL)),
-        direct(NULL)
-    )
-    # A record whose last setting is NULL, which rlang's splice would drop,
-    # reaches the sampler too.
-    expect_equal(
-        run(BayesAlphabetRssOptions(h2 = 0.5, ldProjection = NULL)),
-        direct(NULL)
-    )
-    expect_equal(run(BayesAlphabetRssOptions(ldProjection = 1)), direct(1))
-    expect_false(isTRUE(all.equal(direct(0.1), direct(NULL))))
-    expect_error(
-        run(BayesAlphabetRssOptions(ldProjection = -1)),
-        "ldProjection.*>= 0"
-    )
-})
-
-test_that("pecotmr's sampler reports progress and refuses bad input", {
-    d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    out <- capture.output(
-        fit <- pecotmr:::bayesAlphabetRss(
-            bhat,
-            ldFactor,
-            500,
-            "bayesN",
-            nIter = 100,
-            nBurnin = 10,
-            verbose = TRUE
-        )
-    )
-    expect_match(out, "Iteration +100 of 100", all = FALSE)
-    expect_error(
-        pecotmr:::bayesAlphabetRss(
-            bhat,
-            ldFactor,
-            500,
-            "bayesN",
-            perVariantWeights = TRUE,
-            nPerVariant = 1:3
-        ),
-        "one sample size per variant"
-    )
-    # The entry point checks what the R side already does, for a direct call.
-    w <- rep(500, ncol(ldFactor))
-    expect_error(
-        pecotmr:::bayesAlphabetFactorCpp(
-            bhat,
-            ldFactor,
-            w,
-            500L,
-            "bayesX",
-            FALSE,
-            0,
-            0.5,
-            100L,
-            10L,
-            1L,
-            FALSE,
-            1L,
-            1,
-            TRUE,
-            FALSE,
-            FALSE
-        ),
-        "Unknown Bayesian alphabet method 'bayesX'"
-    )
-    expect_error(
-        pecotmr:::bayesAlphabetFactorCpp(
-            bhat[-1],
-            ldFactor,
-            w,
-            500L,
-            "bayesN",
-            FALSE,
-            0,
-            0.5,
-            100L,
-            10L,
-            1L,
-            FALSE,
-            1L,
-            1,
-            TRUE,
-            FALSE,
-            FALSE
-        ),
-        "The LD factor has"
-    )
-})
-
-# ---- pecotmr's sampler: the shared options ----
-
-# The factor of c R + (1 - c) I for R = F'F / (k - 1): F's rows scaled by
-# sqrt(c) stacked on the identity's scaled by sqrt(1 - c), all rescaled for
-# the k + p - 1 that the sampler divides by.
-.baShrunkFactor <- function(ldFactor, c) {
-    k <- nrow(ldFactor)
-    p <- ncol(ldFactor)
-    sqrt(k + p - 1) * rbind(sqrt(c / (k - 1)) * ldFactor, sqrt(1 - c) * diag(p))
+# The first draw of the stream `seed` starts.
+.baSeedDraw <- function(seed) {
+    withr::with_seed(seed, runif(1))
 }
 
-# One run of pecotmr's sampler on the factor `ldFactor`.
-.baFactorRun <- function(
-    bhat,
-    ldFactor,
-    method = "bayesA",
-    pi = 0,
-    shrinkCorr = 1,
-    allowJumpSign = TRUE,
-    raoBlackwell = FALSE,
-    seed = 3L
-) {
-    pecotmr:::bayesAlphabetFactorCpp(
-        bhat,
-        ldFactor,
-        rep(500, ncol(ldFactor)),
-        500L,
-        method,
-        FALSE,
-        pi,
-        0.5,
-        300L,
-        50L,
-        1L,
-        FALSE,
-        seed,
-        shrinkCorr,
-        allowJumpSign,
-        raoBlackwell,
-        FALSE
-    )
+# Effects that are the marginal ones scaled by the first draw of the stream
+# a chain's seed starts: each chain's fitted correlations are that draw
+# times the same vector, so LDpred2's filter on their spans keeps the chains
+# whose draws are near the largest. `runaway` scales the draws below it by
+# 10, past the divergence bound.
+.baChainFitter <- function(runaway = 0) {
+    function(solverInput, ...) {
+        u <- runif(1)
+        list(betaEst = solverInput$bhat * if (u < runaway) 10 else u)
+    }
 }
 
-test_that("pecotmr's sampler reads the shrunk LD", {
-    # The sampler reads the LD only through its products, so shrinkCorr = c
-    # on F runs as the unshrunk sampler on a factor of c R + (1 - c) I, draw
-    # for draw up to rounding.
+test_that("each chain is the engine run from its seed, tested on its mean", {
     d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    expect_equal(
-        .baFactorRun(bhat, ldFactor, shrinkCorr = 0.9),
-        .baFactorRun(bhat, .baShrunkFactor(ldFactor, 0.9)),
-        tolerance = 1e-8
-    )
+    inp <- .baDense(d, "hibayes")
+    local_mocked_bindings(.alphabetHibayesRssFit = .baChainFitter())
+    chain <- function(track) {
+        pecotmr:::.alphabetRssChain(
+            ".alphabetHibayesRssFit",
+            inp,
+            method = "bayesN",
+            seed = 11L,
+            track = track
+        )
+    }
+    set.seed(1)
+    plain <- chain(FALSE)
+    after <- runif(1)
+    set.seed(1)
+    expect_equal(after, runif(1))
+    expect_named(plain, "betaEst")
+    expect_equal(plain$betaEst, inp$bhat * .baSeedDraw(11L))
+    # Tracked, it carries the fitted correlations and the divergence test of
+    # its posterior mean.
+    tracked <- chain(TRUE)
+    expect_equal(tracked$betaEst, plain$betaEst)
+    expect_equal(tracked$corrEst, as.vector(inp$R %*% plain$betaEst))
+    expect_false(tracked$diverged)
+    local_mocked_bindings(.alphabetHibayesRssFit = .baChainFitter(1))
+    expect_true(chain(TRUE)$diverged)
 })
 
-test_that("pecotmr's sampler refuses a sign jump only when asked", {
-    # A lone variant with a strong statistic never draws the other sign, so
-    # refusing jumps changes nothing there; a null one's draws do jump.
-    set.seed(16)
-    ldFactor <- matrix(rnorm(50), 50, 1)
-    expect_identical(
-        .baFactorRun(0.5, ldFactor, allowJumpSign = FALSE),
-        .baFactorRun(0.5, ldFactor)
-    )
-    expect_false(identical(
-        .baFactorRun(0, ldFactor, allowJumpSign = FALSE)$betaEst,
-        .baFactorRun(0, ldFactor)$betaEst
-    ))
-})
-
-test_that("pecotmr's Rao-Blackwellized sampler runs the same chain", {
+test_that("several chains average those LDpred2's filter keeps", {
     d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    draws <- .baFactorRun(bhat, ldFactor, "bayesC", pi = 0.1)
-    means <- .baFactorRun(
-        bhat,
-        ldFactor,
-        "bayesC",
-        pi = 0.1,
-        raoBlackwell = TRUE
-    )
-    chain <- c("pip", "pi", "residualVariance")
-    expect_identical(means[chain], draws[chain])
-    expect_false(identical(means$betaEst, draws$betaEst))
-    expect_gt(cor(means$betaEst, draws$betaEst), 0.95)
-})
-
-test_that("pecotmr's sampler averages several chains over the kept ones", {
-    d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    set.seed(8)
-    fit <- pecotmr:::bayesAlphabetRss(
-        bhat,
-        ldFactor,
-        500,
-        "bayesA",
-        nIter = 300,
-        nBurnin = 50,
-        thin = 1,
-        shrinkCorr = 1,
-        # Against the kernel run on the statistics as given.
-        ldProjection = NULL,
-        nChains = 2
-    )
-    # Each chain's seed is drawn from R's generator.
-    set.seed(8)
-    seeds <- sample.int(.Machine$integer.max, 2L)
-    expect_equal(fit$chains$seed, as.numeric(seeds))
+    inp <- .baDense(d, "hibayes")
+    local_mocked_bindings(.alphabetHibayesRssFit = .baChainFitter())
+    run <- function() {
+        set.seed(4)
+        bayesBRssWeights(
+            d$stat,
+            d$ldMatrix,
+            nIter = 20,
+            nBurnin = 5,
+            nChains = 4,
+            fitRetention = "slim"
+        )
+    }
+    w <- run()
+    fit <- attr(w, "fit")
+    expect_equal(nrow(fit$chains), 4L)
     expect_false(any(fit$chains$diverged))
-    kept <- fit$chains$kept
-    singles <- map(seeds[kept], function(seed) {
-        .baFactorRun(bhat, ldFactor, seed = seed)
-    })
-    expect_equal(
-        fit$betaEst,
-        reduce(map(singles, "betaEst"), `+`) / sum(kept)
+    u <- vapply(fit$chains$seed, .baSeedDraw, numeric(1))
+    kept <- u > 0.95 * quantile(u, 0.95)
+    expect_equal(fit$chains$kept, kept)
+    expect_equal(as.numeric(w), mean(u[kept]) * inp$bhat)
+    expect_equal(fit$backend, "hibayes")
+    expect_equal(w, run())
+})
+
+test_that("a diverged chain is dropped, warned of alone, fatal when all are", {
+    d <- .rrwPanelStatLd()
+    local_mocked_bindings(.alphabetHibayesRssFit = .baChainFitter(0.5))
+    set.seed(21)
+    w <- bayesBRssWeights(
+        d$stat,
+        d$ldMatrix,
+        nIter = 20,
+        nBurnin = 5,
+        nChains = 6,
+        fitRetention = "slim"
+    )
+    chains <- attr(w, "fit")$chains
+    u <- vapply(chains$seed, .baSeedDraw, numeric(1))
+    expect_equal(chains$diverged, u < 0.5)
+    expect_true(any(chains$diverged) && !all(chains$diverged))
+    expect_false(any(chains$kept & chains$diverged))
+    # Alone, a diverged chain is returned with a warning.
+    local_mocked_bindings(.alphabetHibayesRssFit = .baChainFitter(1))
+    expect_warning(
+        bayesBRssWeights(d$stat, d$ldMatrix, nIter = 20, nBurnin = 5),
+        "bayesAlphabetRssWeights: the posterior mean effects' squares"
+    )
+    expect_error(
+        bayesBRssWeights(
+            d$stat,
+            d$ldMatrix,
+            nIter = 20,
+            nBurnin = 5,
+            nChains = 2
+        ),
+        "bayesAlphabetRssWeights: every chain diverged"
     )
 })
 
-test_that("every engine reads the wrapper's shrunk LD", {
+test_that("qgg and hibayes read the wrapper's shrunk LD", {
     d <- .rrwPanelStatLd()
     R <- pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test")
     shrunk <- LdMatrix(0.9 * R + 0.1 * diag(nrow(R)), nSamples = ncol(d$panel))
-    # pecotmr's sampler takes the shrinkage itself, on the factor.
-    ld <- pecotmr:::.rssLdSource(d$stat, d$panel, "test")
-    bhat <- pecotmr:::.rssMarginalCor(d$stat, n = 500, p = ncol(ld$ldFactor))
-    set.seed(4)
-    want <- pecotmr:::bayesAlphabetRss(
-        bhat,
-        ld$ldFactor,
-        500,
-        "bayesA",
-        nIter = 300,
-        nBurnin = 50,
-        nPerVariant = d$stat$n,
-        shrinkCorr = 0.9
-    )$betaEst
-    set.seed(4)
-    expect_equal(
-        bayesARssWeights(
-            d$stat,
-            d$panel,
-            nIter = 300,
-            nBurnin = 50,
-            shrinkCorr = 0.9
-        ),
-        want
-    )
-    # qgg and hibayes are given the shrunk matrix.
-    run <- function(fn, backend, ldReference, shrinkCorr) {
+    run <- function(fn, ldReference, shrinkCorr) {
         set.seed(5)
         suppressMessages(fn(
             d$stat,
             ldReference,
-            backend = backend,
             nIter = 300,
             nBurnin = 50,
-            shrinkCorr = shrinkCorr
+            shrinkCorr = shrinkCorr,
+            ldProjection = NULL
         ))
     }
     skip_if_not_installed("hibayes")
     expect_equal(
-        run(bayesBRssWeights, "hibayes", d$ldMatrix, 0.9),
-        run(bayesBRssWeights, "hibayes", shrunk, 1)
+        run(bayesBRssWeights, d$ldMatrix, 0.9),
+        run(bayesBRssWeights, shrunk, 1)
     )
     skip_if_not_installed("qgg")
     expect_equal(
-        run(bayesCRssWeights, "qgg", d$ldMatrix, 0.9),
-        run(bayesCRssWeights, "qgg", shrunk, 1)
+        run(bayesCRssWeights, d$ldMatrix, 0.9),
+        run(bayesCRssWeights, shrunk, 1)
     )
 })
 
-test_that("the alphabet wrapper records and checks its LD shrinkage", {
+test_that("the alphabet wrapper records and checks its settings", {
+    skip_if_not_installed("hibayes")
     d <- .rrwPanelStatLd()
     set.seed(6)
     w <- bayesARssWeights(
         d$stat,
         d$panel,
+        backend = "hibayes",
         nIter = 300,
         nBurnin = 50,
         shrinkCorr = 0.7,
         fitRetention = "slim"
     )
     expect_equal(attr(w, "fit")$shrinkCorr, 0.7)
+    expect_equal(attr(w, "fit")$ldProjection, 0.1)
+    expect_equal(attr(w, "fit")$backend, "hibayes")
+    expect_null(attr(w, "fit")$chains)
     expect_error(
         bayesARssWeights(d$stat, d$panel, shrinkCorr = "heldOut"),
         "shrinkCorr"
@@ -774,45 +589,21 @@ test_that("the alphabet wrapper records and checks its LD shrinkage", {
         bayesARssWeights(d$stat, d$panel, shrinkCorr = 0),
         "`shrinkCorr` must be above 0"
     )
-})
-
-test_that("pecotmr's sampler errors when every one of its chains diverges", {
-    # Statistics of 1e-6 leave the draws near the prior's, far past twice
-    # the statistics' sum of squares.
-    set.seed(17)
-    ldFactor <- matrix(rnorm(50 * 3), 50, 3)
-    run <- function(n) {
-        pecotmr:::bayesAlphabetRss(
-            rep(1e-6, 3),
-            ldFactor,
-            n,
-            "bayesA",
-            nIter = 60,
-            nBurnin = 10,
-            nChains = 2
-        )
-    }
-    expect_error(run(100), "bayesAlphabetRss: every chain diverged")
-    # The samplers divide by n - 1 and the standard errors by n - 2.
-    expect_error(run(2), "bayesAlphabetRss: the sample size must exceed 2")
+    expect_error(bayesARssWeights(d$stat, d$panel, nChains = 0), "nChains")
+    expect_error(
+        bayesARssWeights(d$stat, d$panel, ldProjection = -1),
+        "ldProjection"
+    )
+    expect_error(
+        bayesARssWeights(d$stat, d$panel, ldProjection = "none"),
+        "ldProjection"
+    )
+    # The engines' standard errors divide by n - 2.
     stat <- list(z = rep(1, 3), n = rep(2, 3), variantNames = .rrwIds(3))
     expect_error(
         bayesARssWeights(stat, .rrwLdMatrix(diag(3), nSamples = 50L)),
         "bayesAlphabetRssWeights: the sample size must exceed 2"
     )
-})
-
-test_that("hibayes' form sends a refused jump to the null class", {
-    # Effects of variants in LD trade signs between sweeps; in bayesB a
-    # refused jump zeroes the effect and drops it from the slab, which
-    # changes the chain.
-    d <- .rrwPanelStatLd()
-    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, d$stat$variantNames, "test")
-    bhat <- pecotmr:::.zToCor(d$stat$z, 500)
-    expect_false(identical(
-        .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2, allowJumpSign = FALSE),
-        .baFactorRun(bhat, ldFactor, "bayesB", pi = 0.2)
-    ))
 })
 
 # ---- h2 ----
@@ -855,15 +646,6 @@ test_that("each backend reads h2 as its engine spells it", {
     expect_equal(
         as.list(withH2(BglrOptions(), "BglrOptions", "bglr", 0.2)),
         list(R2 = 0.2)
-    )
-    expect_equal(
-        as.list(withH2(
-            BayesAlphabetRssOptions(),
-            "BayesAlphabetRssOptions",
-            "pecotmr",
-            0.2
-        )),
-        list(h2 = 0.2)
     )
     # hibayes fixes its own at 0.5, so it gets the variances its defaults
     # would give at 0.2: (dfvg - 2) / dfvg vary h2 and vary (1 - h2).
@@ -930,8 +712,7 @@ test_that("h2 = 0.5, every engine's own default, changes no fit", {
     }
     for (b in list(
         list("qgg", s$ldMatrix),
-        list("hibayes", s$ldMatrix),
-        list("pecotmr", s$panel)
+        list("hibayes", s$panel)
     )) {
         expect_equal(
             runRss(b[[1L]], b[[2L]], 0.5),

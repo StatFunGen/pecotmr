@@ -8,6 +8,7 @@
 \usage{
 WeightSelectionParam(
   methods = "best",
+  jointAxes = NULL,
   cutoff = 0,
   pvalCutoff = Inf,
   metric = "rsq",
@@ -16,13 +17,25 @@ WeightSelectionParam(
 }
 \arguments{
 \item{methods}{\code{"best"} (default), \code{"all"}, or the names of the
-methods to use. \code{"best"} takes each gene's method with the highest
-\code{metric} among those clearing the cutoffs whose weights are not all
-zero. A gene whose methods carry no \code{metric} keeps them all, as
-under \code{"all"}, there being nothing to rank them by; so does every
-gene of a source with only one method per gene, which then simply uses
-it. The choice depends on the weights alone, never on a GWAS study, so
-the two pipelines pick the same method for a gene.}
+methods to use. \code{"best"} takes each gene's weight set -- its method
+and kind of joint fit -- with the highest \code{metric} among those
+clearing the cutoffs whose weights are not all zero. A gene whose sets
+carry no \code{metric} keeps them all, as under \code{"all"}, there being
+nothing to rank them by; so does every gene of a source with only one
+set per gene, which then simply uses it. The choice depends on the
+weights alone, never on a GWAS study, so the two pipelines pick the same
+weight set for a gene.}
+
+\item{jointAxes}{Optional character vector: the kinds of joint fit whose
+weight sets are candidates, narrowing them before \code{methods} applies.
+A kind is \code{"none"}, a fit of the tuple alone, or the axes the fit
+joined, \code{"+"}-joined in study, context, trait order:
+\code{"study"}, \code{"context"}, \code{"trait"}, \code{"context+trait"}
+and so on, as the weights' \code{jointStudies} / \code{jointContexts} /
+\code{jointTraits} record. For instance
+\code{WeightSelectionParam(methods = "mvsusie", jointAxes = "study")}
+keeps only mvsusie fitted across studies. \code{NULL} (default) keeps
+every kind.}
 
 \item{cutoff}{Numeric. Minimum cross-validated r-squared a method must
 reach to be used, whatever \code{methods} is. Default \code{0} (no
@@ -45,15 +58,19 @@ is used. Default \code{c("adj_rsq_pval", "pval")}.}
 A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.
 }
 \description{
-Which TWAS methods' weights
+Which TWAS weight sets
   \code{\link{causalInferencePipeline}} and \code{\link{ctwasPipeline}}
   use for each gene (each
   \code{(study, context, trait)}), from the cross-validation metrics on
-  the weights' \code{cvResult}.
+  the weights' \code{cvResult}. A gene can hold several weight sets of one
+  method, one per kind of joint fit -- for instance mvsusie fitted across
+  its contexts and across studies -- and each is a candidate of its own.
 }
 \examples{
 WeightSelectionParam(cutoff = 0.01, metric = "adj_rsq")
 # Every method, or just the two named.
 WeightSelectionParam(methods = "all")
 WeightSelectionParam(methods = c("lasso", "mrash"))
+# Only weights fitted across studies.
+WeightSelectionParam(jointAxes = "study")
 }

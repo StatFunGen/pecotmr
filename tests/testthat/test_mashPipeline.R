@@ -1225,6 +1225,57 @@ test_that("a requested component that yields nothing returns an empty list", {
     expect_false(is.null(out))
 })
 
+test_that("the subset-shared matrices are built only when asked for", {
+    # Opt-in: no default component set names them, so a default prior has
+    # none.
+    defaults <- list(
+        mashPriorCovariances,
+        mashCovarianceComponents,
+        MashPriorParam
+    )
+    for (fn in defaults) {
+        expect_false("subsets" %in% eval(formals(fn)$components))
+    }
+    expect_null(MashPriorParam()$components$subsets)
+    skip_if_not_installed("mashr")
+    skip_if_not_installed("flashier")
+    expect_false(any(startsWith(names(.mpDefaultComps), "subset_")))
+})
+
+test_that("the subsets component joins the canonical set, unrefined", {
+    skip_if_not_installed("mashr")
+    ss <- .mpSs
+    build <- function(components) {
+        suppressMessages(suppressWarnings(mashCovarianceComponents(
+            list(strong = ss),
+            alpha = 0,
+            vhat = diag(3),
+            components = components,
+            setSeed = 1L
+        )))
+    }
+    subsets <- build("subsets")
+    # Three conditions have three pairs, each with equal effects and mashr's
+    # simple_het correlations.
+    expect_length(subsets, 12L)
+    expect_true(all(startsWith(names(subsets), "subset_")))
+    # Each is on two of the three conditions: no effect on the third.
+    expect_true(all(map_lgl(subsets, function(m) sum(diag(m)) == 2)))
+    # Built right after the canonical set, whatever order they were named in.
+    both <- build(c("subsets", "canonical"))
+    expect_equal(names(both), c(names(build("canonical")), names(subsets)))
+    # A fixed hypothesis: the prior keeps it as built.
+    prior <- suppressMessages(suppressWarnings(mashPriorCovariances(
+        list(strong = ss),
+        alpha = 0,
+        vhat = diag(3),
+        components = MashComponentParam(subsets = list(corr = 1)),
+        engine = "none",
+        setSeed = 1L
+    )))
+    expect_equal(prior$U, build("subsets")[c(1L, 5L, 9L)])
+})
+
 test_that("mashCovarianceComponents default builds all non-udr components", {
     skip_if_not_installed("mashr")
     skip_if_not_installed("flashier")
@@ -1733,9 +1784,27 @@ test_that("MashComponentParam takes plain lists or constructors per entry", {
         MashComponentParam(pca = CovCanonicalOptions()),
         "was built with the constructor for 'canonical'"
     )
-    # The four components are formals now, so a misspelled one is R's own
+    # The components are formals now, so a misspelled one is R's own
     # error rather than a hand-rolled "unknown method" check.
     expect_error(MashComponentParam(nosuch = list()), "unused argument")
+})
+
+test_that("MashComponentParam selects and configures the subsets component", {
+    skip_if_not_installed("mashr")
+    p <- MashComponentParam(subsets = list(corr = 1), canonical = list())
+    expect_setequal(names(p), c("canonical", "subsets"))
+    expect_equal(p$subsets$corr, 1)
+    expect_error(
+        MashComponentParam(subsets = CovCanonicalOptions()),
+        "was built with the constructor for 'canonical'"
+    )
+    # Its name selects it at its defaults.
+    named <- MashPriorParam(components = c("canonical", "subsets"))
+    expect_equal(named$components$subsets$corr, c(1, 0.25, 0.5, 0.75))
+    expect_error(
+        MashPriorParam(components = "subset"),
+        "Valid: canonical, subsets, pca, flash, flashNonneg"
+    )
 })
 
 test_that("MashPriorParam takes only a MashComponentParam for components", {

@@ -911,14 +911,52 @@ TwasWeights <- function(
 
 # Indices of the cells (rows of .twasCells()) a (study, context, trait,
 # method) selector matches, the method in either spelling; empty for none.
+# `joint`, a joint key (.noJointKey(), .jointKeyAt()), narrows them to the
+# cells of that joint group; without one the joint axes do not select.
 # @noRd
-.twasCellIndex <- function(cells, studyName, context, trait, method) {
+.twasCellIndex <- function(
+    cells,
+    studyName,
+    context,
+    trait,
+    method,
+    joint = NULL
+) {
     which(
         cells$study == studyName &
             cells$context == context &
             cells$trait == trait &
-            cells$method == .twasMethodToken(method)
+            cells$method == .twasMethodToken(method) &
+            .cellsInJointGroup(cells, joint)
     )
+}
+
+# Which cells belong to joint group `joint`; every cell when none is named.
+# @noRd
+.cellsInJointGroup <- function(cells, joint) {
+    if (is.null(joint)) {
+        return(rep(TRUE, nrow(cells)))
+    }
+    reduce(
+        map(.JOINT_COLUMNS, .cellsJointColumnIn, cells = cells, joint = joint),
+        `&`
+    )
+}
+
+# @noRd
+.cellsJointColumnIn <- function(col, cells, joint) {
+    .jointMembersMatch(.cellsJointColumn(col, cells), joint[[col]])
+}
+
+# Joint column `col` of a cell table, NA where the cells come from no joint
+# fit or the table has no such column.
+# @noRd
+.cellsJointColumn <- function(col, cells) {
+    if (is_in(col, names(cells))) {
+        as.character(cells[[col]])
+    } else {
+        rep(NA_character_, nrow(cells))
+    }
 }
 
 # The constructor's inputs for cells `cells` of `x` (rows of .twasCells()).
@@ -2019,7 +2057,9 @@ setMethod("show", "TwasWeights", function(object) {
         # LDpred2's settings are all its wrappers' own arguments.
         ldpred2Auto = "ldpred2AutoWeights",
         ldpred2Grid = "ldpred2GridWeights",
-        dprGibbs = c("sdprWeights", ".sdprRun"),
+        # A run across studies reads sdpr()'s names (.sdprCoupledSettings()),
+        # its settings across studies, `sharing` and `rho`, among them.
+        dprGibbs = c("sdprWeights", ".sdprRun", "sdpr"),
         bayesA = .alphabetChains("bayesA", "sumstat"),
         bayesB = .alphabetChains("bayesB", "sumstat"),
         bayesC = .alphabetChains("bayesC", "sumstat"),
@@ -2082,13 +2122,17 @@ setMethod("show", "TwasWeights", function(object) {
 .alphabetEngineCallees <- list(
     individual = list(
         qgg = "qgg::gbayes",
-        bglr = c("bglrWeights", "BGLR::BGLR"),
+        bglr = c(
+            "bglrWeights",
+            "BGLR::BGLR",
+            "BGLR::Multitrait",
+            ".bglrTermSettings"
+        ),
         hibayes = "hibayes::ibrm"
     ),
     sumstat = list(
         qgg = "qgg::gbayes",
-        hibayes = "hibayes::sbrm",
-        pecotmr = "bayesAlphabetRss"
+        hibayes = "hibayes::sbrm"
     )
 )
 
@@ -2385,7 +2429,7 @@ setMethod("show", "TwasWeights", function(object) {
     }
     side <- if (identical(inputKind, "QtlDataset")) "individual" else "sumstat"
     choices <- names(.methodBackends[[side]][[token]])
-    if (length(choices) == 0L) {
+    if (!.methodHasBackends(token, side)) {
         return(glue(
             " `backend` is twasWeightsPipeline()'s own argument, and {token} ",
             "has one implementation on {inputKind}, so there is no backend ",
@@ -2942,7 +2986,9 @@ setMethod("show", "TwasWeights", function(object) {
         return(list(mk = mk, W = given, fit = NULL))
     }
     fnName <- .resolveMethodFunction(method, args)
-    fit <- if (is_in(method, ctx$multivariateWeightMethods)) {
+    wholeY <- is_in(method, ctx$multivariateWeightMethods) ||
+        .twasFitsWholeY(fnName)
+    fit <- if (wholeY) {
         .twasFoldMultivariate(method, fnName, args, Xtr, Ytr, j, ctx)
     } else {
         .twasFoldUnivariate(fnName, args, Xtr, Ytr, ctx)
@@ -3360,11 +3406,23 @@ twasWeightsCv <- function(
 # returns list(weights, methodFit).
 # @noRd
 .twasFitWeightsMatrix <- function(fnName, args, ctx, methodName) {
-    if (is_in(methodName, .twasMultivariateWeightMethods)) {
+    if (
+        is_in(methodName, .twasMultivariateWeightMethods) ||
+            .twasFitsWholeY(fnName)
+    ) {
         .twasFitMultivariate(fnName, args, ctx)
     } else {
         .twasFitUnivariate(fnName, args, ctx)
     }
+}
+
+# Whether weight function `fnName` fits every column of Y at once, as it does
+# when it takes Y: a multivariate method, or a univariate one fitted across a
+# group's studies (.lassoCoupledWeights()), which a method's arguments name
+# as their implementation (.resolveMethodFunction()).
+# @noRd
+.twasFitsWholeY <- function(fnName) {
+    is_in("Y", names(formals(match.fun(fnName))))
 }
 
 # Multivariate fit: one call producing the full variants x features matrix.
@@ -3419,27 +3477,67 @@ twasWeightsCv <- function(
 
 # One outcome column's weights, plus the fit the method attached to them. A
 # method that answers with a matrix is reporting every outcome at once, so
-# this column's own slice is taken.
+# this column's own slice is taken. An outcome missing on some samples, as a
+# cross-study group's condition is on the other studies' samples, is fitted
+# on the samples observing it (.twasObservedColumn()).
 # @noRd
 .twasUnivariateColumn <- function(k, fnName, args, ctx) {
-    call <- .twasWeightCallArgs(
-        fnName,
-        list(X = ctx$Xfiltered, y = ctx$Y[, k]),
-        args
-    )
-    w <- if (ctx$verbose < 2) {
-        .quietEval(exec(fnName, !!!call))
-    } else {
-        exec(fnName, !!!call)
+    if (anyNA(ctx$Y[, k])) {
+        return(.twasObservedColumn(
+            ctx$Xfiltered,
+            ctx$Y[, k],
+            k,
+            fnName,
+            args,
+            ctx
+        ))
     }
+    w <- .twasColumnFit(fnName, ctx$Xfiltered, ctx$Y[, k], args, ctx)
     list(
         weights = if (is.matrix(w)) w[, k] else w,
-        fit = if (!identical(ctx$fitRetention, "none")) {
-            attr(w, "fit")
-        } else {
-            NULL
-        }
+        fit = .twasColumnFitRecord(w, ctx)
     )
+}
+
+# Outcome `y` (column `k`) fitted on the samples observing it alone, over the
+# variants that vary among them; the rest -- a variant its study lacks,
+# constant there -- take weight 0. The weights come back over X's columns.
+# @noRd
+.twasObservedColumn <- function(X, y, k, fnName, args, ctx) {
+    observed <- !is.na(y)
+    held <- X[observed, , drop = FALSE]
+    varying <- .nonzeroVarColumns(held)
+    w <- .twasColumnFit(
+        fnName,
+        held[, varying, drop = FALSE],
+        y[observed],
+        args,
+        ctx
+    )
+    own <- if (is.matrix(w)) w[, min(k, ncol(w))] else w
+    list(
+        weights = replace(numeric(ncol(X)), varying, unname(own)),
+        fit = .twasColumnFitRecord(w, ctx)
+    )
+}
+
+# One weight function's fit of `y` on `X`, quiet below verbose level 2.
+# @noRd
+.twasColumnFit <- function(fnName, X, y, args, ctx) {
+    call <- .twasWeightCallArgs(fnName, list(X = X, y = y), args)
+    if (ctx$verbose < 2) {
+        return(.quietEval(exec(fnName, !!!call)))
+    }
+    exec(fnName, !!!call)
+}
+
+# The fit a column's weights carry, kept unless the run keeps none.
+# @noRd
+.twasColumnFitRecord <- function(w, ctx) {
+    if (identical(ctx$fitRetention, "none")) {
+        return(NULL)
+    }
+    attr(w, "fit")
 }
 
 # Assemble the (study, context, trait, method, entry) row vectors for the
@@ -4007,9 +4105,14 @@ estimateSparsity <- function(weightResults) {
     c(baseArgs, .splitMethodArgs(fnName, userArgs))
 }
 
-# One univariate fold's weight column for outcome `k` (quiet unless verbose).
+# One univariate fold's weight column for outcome `k` (quiet unless verbose),
+# fitted on its observed training samples alone when it is missing on some
+# (.twasObservedColumn()).
 # @noRd
 .twasFitColWeight <- function(k, ctx, fnName, Xtr, Ytr, args) {
+    if (anyNA(Ytr[, k])) {
+        return(.twasObservedColumn(Xtr, Ytr[, k], k, fnName, args, ctx)$weights)
+    }
     callArgs <- .twasWeightCallArgs(fnName, list(X = Xtr, y = Ytr[, k]), args)
     w <- if (ctx$verbose < 2) {
         .quietEval(exec(fnName, !!!callArgs))

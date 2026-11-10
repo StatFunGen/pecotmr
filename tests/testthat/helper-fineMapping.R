@@ -228,3 +228,23 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
 .fmStoredColumns <- function(x) {
     colnames(S4Vectors::mcols(unlist(x, use.names = FALSE)))
 }
+
+# The bundled two-study collection, its studies cut to disjoint halves of the
+# samples they share: two studies of one trait on real genotypes, as a fit
+# across studies expects them.
+.fm_disjointStudies <- function() {
+    data(
+        "multiStudyQtlDatasetExample",
+        package = "pecotmr",
+        envir = environment()
+    )
+    studies <- as.list(multiStudyQtlDatasetExample)
+    ids <- colnames(pecotmr:::.qtlContextSe(studies[[1L]], "brain"))
+    half <- seq_len(length(ids) %/% 2L)
+    MultiStudyQtlDataset(
+        qtlDatasets = list(
+            study1 = pecotmr:::.qtlRestrictSamples(studies[[1L]], ids[half]),
+            study2 = pecotmr:::.qtlRestrictSamples(studies[[2L]], ids[-half])
+        )
+    )
+}

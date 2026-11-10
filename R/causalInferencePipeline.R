@@ -53,6 +53,14 @@ NULL
 #'   \item{\code{qtlStudy}, \code{context}, \code{trait},
 #'         \code{method}, \code{gwasStudy}}{Identity columns. On an MR row,
 #'         \code{method} is the fine-mapping method.}
+#'   \item{\code{jointStudies}, \code{jointContexts},
+#'         \code{jointTraits}}{Present when a scored weight set came from a
+#'         joint fit: the studies, contexts or traits the fit joined
+#'         (\code{";"}-joined), as on its \code{twasWeights} or
+#'         \code{fineMappingResult} row, \code{NA} for a weight set from no
+#'         joint fit and on the \code{combined.*} rows. They tell apart the
+#'         weight sets of one \code{(qtlStudy, context, trait, method)}
+#'         fitted in different joint groups.}
 #'   \item{\code{analysis}}{\code{"twas"} or \code{"mr"}.}
 #'   \item{\code{twasZ}, \code{twasPval}}{TWAS Z and p-value; \code{NA} on
 #'         MR rows.}
@@ -324,15 +332,24 @@ causalInferencePipeline <- function(
     )
 }
 
-# Row `i` of a (study, context, trait, method) table as a tuple identity.
+# Row `i` of a weight-set table (.weightCellIds()) as a tuple identity: its
+# (study, context, trait, method), its joint key, and for a TwasWeights cell
+# the row it sits in.
 # @noRd
 .cipCellTuple <- function(cells, i) {
     list(
         qStudy = cells$study[[i]],
         qContext = cells$context[[i]],
         qTrait = cells$trait[[i]],
-        qMethod = cells$method[[i]]
+        qMethod = cells$method[[i]],
+        qJoint = map(.cellsJointColumns(cells), .cipValueAt, i = i),
+        qRow = if (is_in("row", names(cells))) cells$row[[i]]
     )
+}
+
+# @noRd
+.cipValueAt <- function(values, i) {
+    values[[i]]
 }
 
 # One MR input per fine-mapping row -- each (study, context, trait, method) it
@@ -355,13 +372,7 @@ causalInferencePipeline <- function(
 # @noRd
 .cipMrTuple <- function(i, keys, fineMappingResult) {
     tuple <- .cipCellTuple(keys, i)
-    fmrEntry <- fineMappingResult(
-        fineMappingResult,
-        studyName = tuple$qStudy,
-        context = tuple$qContext,
-        trait = tuple$qTrait,
-        method = tuple$qMethod
-    )
+    fmrEntry <- .cipFmrRow(fineMappingResult, tuple)
     list(
         tuple = tuple,
         fmrEntry = fmrEntry,
@@ -389,13 +400,24 @@ causalInferencePipeline <- function(
     t <- input$tuple
     .fmrTupleLabel(
         "QTL",
-        list(
-            study = t$qStudy,
-            context = t$qContext,
-            trait = t$qTrait,
-            method = t$qMethod
+        c(
+            list(
+                study = t$qStudy,
+                context = t$qContext,
+                trait = t$qTrait,
+                method = t$qMethod
+            ),
+            t$qJoint
         )
     )
+}
+
+# A weight set's joint key for a message, ", jointStudies = a;b"; empty for a
+# set from no joint fit.
+# @noRd
+.cipJointLabel <- function(tuple) {
+    set <- discard(tuple$qJoint, is.na)
+    if (length(set) == 0L) "" else str_c(", ", .twasJointKeyLabel(set))
 }
 
 # The rows of each GWAS study that `window` overlaps, split by study. A study
@@ -625,6 +647,9 @@ causalInferencePipeline <- function(
         context = tuple$qContext,
         trait = tuple$qTrait,
         method = tuple$qMethod,
+        jointStudies = tuple$qJoint$jointStudies,
+        jointContexts = tuple$qJoint$jointContexts,
+        jointTraits = tuple$qJoint$jointTraits,
         gwasStudy = gStudy,
         analysis = analysis,
         twasZ = twasOut$Z,
@@ -673,9 +698,11 @@ causalInferencePipeline <- function(
 # Method choice, shared with ctwasPipeline (WeightSelectionParam)
 # =============================================================================
 
-# One row per (gene, method) weight set of `source`: a TwasWeights' cells
-# (with the `row` each sits in), or a fine-mapping result's distinct
-# (study, context, trait, method) rows, a multi-block one once.
+# One row per (gene, method, joint group) weight set of `source`: a
+# TwasWeights' cells (with the `row` each sits in), or a fine-mapping result's
+# distinct (study, context, trait, method, joint key) rows, a multi-block one
+# once. A weight set's joint key (NA for none) tells the fits of one gene and
+# method in different joint groups apart.
 # @noRd
 .weightCellIds <- function(source) {
     if (methods::is(source, "TwasWeights")) {
@@ -685,28 +712,51 @@ causalInferencePipeline <- function(
             context = cells$context,
             trait = cells$trait,
             method = cells$method,
+            !!!.cellsJointColumns(cells),
             row = cells$row
         ))
     }
     distinct(.weightRowIds(source))
 }
 
-# Each row of fine-mapping result `x` as its (study, context, trait, method).
+# Each row of fine-mapping result `x` as its (study, context, trait, method)
+# and joint key.
 # @noRd
 .weightRowIds <- function(x) {
     tibble(
         study = as.character(x$study),
         context = as.character(x$context),
         trait = as.character(x$trait),
-        method = as.character(x$method)
+        method = as.character(x$method),
+        !!!set_names(
+            map(.JOINT_COLUMNS, .fmrIdentityColumn, x = x),
+            .JOINT_COLUMNS
+        )
     )
 }
 
-# One key per weight set of a (study, context, trait, method) table, to match
+# A cell table's three joint columns, NA-filled (.cellsJointColumn()).
+# @noRd
+.cellsJointColumns <- function(cells) {
+    set_names(
+        map(.JOINT_COLUMNS, .cellsJointColumn, cells = cells),
+        .JOINT_COLUMNS
+    )
+}
+
+# One key per weight set of a weight-set table (.weightCellIds()), to match
 # weight sets with each other only.
 # @noRd
 .cellKey <- function(cells) {
-    str_c(cells$study, cells$context, cells$trait, cells$method, sep = "\r")
+    exec(
+        str_c,
+        cells$study,
+        cells$context,
+        cells$trait,
+        cells$method,
+        !!!map(.cellsJointColumns(cells), coalesce, ""),
+        sep = "\r"
+    )
 }
 
 # `source`'s weight sets (.weightCellIds()) with what WeightSelectionParam
@@ -766,13 +816,7 @@ causalInferencePipeline <- function(
     if (methods::is(source, "TwasWeights")) {
         return(.twrCellParts(source, cells$row[[i]], cells$method[[i]]))
     }
-    .fmrSelectEntry(
-        source,
-        studyName = cells$study[[i]],
-        context = cells$context[[i]],
-        trait = cells$trait[[i]],
-        method = cells$method[[i]]
-    )
+    .fmrRowParts(source, .cipFmrRowIndex(source, .cipCellTuple(cells, i)))
 }
 
 # The first of the CV metrics `which` that payload `part` records, NA when it
@@ -814,15 +858,16 @@ causalInferencePipeline <- function(
 }
 
 # The cells of `cells` (.weightCells()) `weightSelectionParam` keeps. Its
-# cutoffs bound every choice; then "best" keeps each gene's best method
-# (.bestCellIn()), "all" every method, and named methods those. A name the
-# cells do not hold is an error, as a misspelling would otherwise score
-# nothing.
+# `jointAxes` narrows them to the kinds of joint fit it names, and its cutoffs
+# bound every choice; then "best" keeps each gene's best weight set
+# (.bestCellIn()), "all" every set, and named methods those. A name the cells
+# do not hold is an error, as a misspelling would otherwise score nothing.
 # @noRd
 .selectWeightCells <- function(cells, weightSelectionParam, caller) {
     methods <- weightSelectionParam$methods
+    kept <- .cellsOfKinds(cells, weightSelectionParam$jointAxes, caller)
     eligible <- .cellsByGene(
-        cells,
+        kept,
         .cellsPassingIn,
         cutoff = weightSelectionParam$cutoff,
         pvalCutoff = weightSelectionParam$pvalCutoff
@@ -833,8 +878,28 @@ causalInferencePipeline <- function(
     if (identical(methods, "best")) {
         return(.cellsByGene(eligible, .bestCellIn))
     }
-    .assertCellMethods(methods, cells$method, caller)
+    .assertCellMethods(methods, kept$method, caller)
     eligible[is_in(eligible$method, methods), ]
+}
+
+# The weight sets of the kinds of joint fit `jointAxes` names (.jointKinds()),
+# every set when it is NULL. A choice keeping none is an error, as a kind the
+# weights do not hold would otherwise score nothing.
+# @noRd
+.cellsOfKinds <- function(cells, jointAxes, caller) {
+    if (is.null(jointAxes) || nrow(cells) == 0L) {
+        return(cells)
+    }
+    kinds <- .jointKinds(.cellsJointColumns(cells))
+    kept <- cells[is_in(kinds, jointAxes), ]
+    if (nrow(kept) > 0L) {
+        return(kept)
+    }
+    abort(glue(
+        "{caller}: WeightSelectionParam(jointAxes = ) names ",
+        "{str_flatten(jointAxes, ', ')}, which the weights do not hold ",
+        "(they hold {str_flatten(unique(kinds), ', ')})."
+    ))
 }
 
 # `cells` narrowed gene by gene: `keep(idx, cells, ...)` gives the rows of a
@@ -894,45 +959,50 @@ causalInferencePipeline <- function(
     ))
 }
 
-.cipFmrHasTuple <- function(fmr, studyName, context, trait, method) {
-    length(.matchTupleRows(
+# The first row of fine-mapping result `fmr` with weight set `tuple`'s full
+# identity (.cipCellTuple()): its (study, context, trait, method) and joint
+# key. The weight sets are read off `fmr`, so there is one.
+# @noRd
+.cipFmrRowIndex <- function(fmr, tuple) {
+    .matchTupleRows(
         fmr,
-        list(
-            study = studyName,
-            context = context,
-            trait = trait,
-            method = method
+        c(
+            list(
+                study = tuple$qStudy,
+                context = tuple$qContext,
+                trait = tuple$qTrait,
+                method = tuple$qMethod
+            ),
+            tuple$qJoint
         )
-    )) >
-        0L
+    )[[1L]]
 }
 
-# Fetch the per-tuple weight-source entry (a TwasWeightsRow from a
-# TwasWeights, or the tuple's row of a fine-mapping result) and resolve it to
-# an aligned (variantIds, weights) pair via the shared `resolveWeights` -- the
-# SuSiE-style posterior effect for a fine-mapping result. Returns NULL when
-# the tuple is absent or has no usable weights.
+# That row, as a one-row fine-mapping result.
+# @noRd
+.cipFmrRow <- function(fmr, tuple) {
+    fmr[.cipFmrRowIndex(fmr, tuple)]
+}
+
+# Fetch the per-tuple weight-source entry (the cell's TwasWeightsRow, or its
+# row of a fine-mapping result) and resolve it to an aligned (variantIds,
+# weights) pair as `resolveWeights` resolves one -- the SuSiE-style posterior
+# effect for a fine-mapping result. Returns NULL when it has no usable
+# weights.
 .cipExtractWeights <- function(weightSource, tuple) {
-    from <- if (methods::is(weightSource, "TwasWeights")) {
-        .cipWeightsFromTwas
+    wr <- if (methods::is(weightSource, "TwasWeights")) {
+        .twrRowResolveWeights(
+            .twrCellParts(weightSource, tuple$qRow, tuple$qMethod)
+        )
     } else {
-        .cipWeightsFromFmr
+        .fmrRowResolveWeights(
+            .fmrRowParts(weightSource, .cipFmrRowIndex(weightSource, tuple))
+        )
     }
-    ent <- from(
-        weightSource,
-        tuple$qStudy,
-        tuple$qContext,
-        tuple$qTrait,
-        tuple$qMethod
-    )
-    if (is.null(ent)) {
-        return(NULL)
-    }
-    wr <- resolveWeights(ent)
     single <- .singleWeightColumn(wr$weights)
     which <- glue(
         "(study={tuple$qStudy}, context={tuple$qContext}, ",
-        "trait={tuple$qTrait}, method={tuple$qMethod})"
+        "trait={tuple$qTrait}, method={tuple$qMethod}{.cipJointLabel(tuple)})"
     )
     if (is.null(single)) {
         warn(glue(
@@ -951,52 +1021,6 @@ causalInferencePipeline <- function(
         return(NULL)
     }
     list_assign(wr, weights = single)
-}
-
-# TwasWeights entry for a tuple (NULL when absent).
-# @noRd
-.cipWeightsFromTwas <- function(
-    twasWeights,
-    studyName,
-    context,
-    trait,
-    method
-) {
-    cells <- .twasCells(twasWeights)
-    hit <- .twasCellIndex(cells, studyName, context, trait, method)
-    if (length(hit) == 0L) {
-        return(NULL)
-    }
-    twasWeights(
-        twasWeights,
-        studyName = studyName,
-        context = context,
-        trait = trait,
-        method = method
-    )
-}
-
-# The fine-mapping entry for a tuple (NULL when absent).
-# @noRd
-.cipWeightsFromFmr <- function(
-    fineMappingResult,
-    studyName,
-    context,
-    trait,
-    method
-) {
-    if (
-        !.cipFmrHasTuple(fineMappingResult, studyName, context, trait, method)
-    ) {
-        return(NULL)
-    }
-    fineMappingResult(
-        fineMappingResult,
-        studyName = studyName,
-        context = context,
-        trait = trait,
-        method = method
-    )
 }
 
 # Compute the per-tuple TWAS Z from a single GwasSumStats tuple's
@@ -1534,6 +1558,7 @@ causalInferencePipeline <- function(
             "context",
             "trait",
             "method",
+            keep(.JOINT_COLUMNS, .cipColumnHasValues, df = df),
             "gwasStudy",
             "analysis",
             "twasZ",
@@ -1548,6 +1573,13 @@ causalInferencePipeline <- function(
         ))
     )
     S4Vectors::`mcols<-`(gr, value = S4Vectors::DataFrame(mcols))
+}
+
+# Whether a joint column of the result records holds any value: a joint
+# column is reported only when some scored weight set came from a joint fit.
+# @noRd
+.cipColumnHasValues <- function(col, df) {
+    is_in(col, names(df)) && any(!is.na(df[[col]]))
 }
 
 # Combine TWAS p-values across method for each (qtlStudy, context,
@@ -1566,7 +1598,8 @@ causalInferencePipeline <- function(
 # One combined row: the group's first TWAS row, carrying the combined p-value
 # for method `m` in place of its own, and placed where that row is (`.at`).
 # Its own Z does not carry over, so it is blanked rather than inherited; a
-# TWAS row has no MR to carry.
+# TWAS row has no MR to carry, and pooling rows of several fits, it has no
+# joint group of its own.
 # @noRd
 .cipCombinedRow <- function(m, mc, rows, cp) {
     mutate(
@@ -1574,8 +1607,14 @@ causalInferencePipeline <- function(
         method = str_c("combined.", m),
         twasZ = NA_real_,
         twasPval = as.numeric(cp$results[[m]]$pval),
+        across(any_of(.JOINT_COLUMNS), .cipNoJointGroup),
         .at = rows[[1L]]
     )
+}
+
+# @noRd
+.cipNoJointGroup <- function(values) {
+    rep(NA_character_, length(values))
 }
 
 # One group's combined rows, or none when it holds a single method (nothing
@@ -1916,6 +1955,7 @@ setClass(
     contains = "MethodParam",
     slots = c(
         methods = "character",
+        jointAxes = "character_OR_NULL",
         cutoff = "numeric",
         pvalCutoff = "numeric",
         metric = "character",
@@ -1944,24 +1984,46 @@ setValidity("WeightSelectionParam", function(object) {
             "methods, name them"
         ))
     }
+    if (!is.null(object@jointAxes)) {
+        assertSubset(
+            object@jointAxes,
+            .JOINT_KINDS,
+            empty.ok = FALSE,
+            .var.name = "jointAxes",
+            add = coll
+        )
+    }
     problems <- coll$getMessages()
     if (length(problems) == 0L) TRUE else problems
 })
 
 #' @title TWAS Weight-Selection Settings
-#' @description Which TWAS methods' weights
+#' @description Which TWAS weight sets
 #'   \code{\link{causalInferencePipeline}} and \code{\link{ctwasPipeline}}
 #'   use for each gene (each
 #'   \code{(study, context, trait)}), from the cross-validation metrics on
-#'   the weights' \code{cvResult}.
+#'   the weights' \code{cvResult}. A gene can hold several weight sets of one
+#'   method, one per kind of joint fit -- for instance mvsusie fitted across
+#'   its contexts and across studies -- and each is a candidate of its own.
 #' @param methods \code{"best"} (default), \code{"all"}, or the names of the
-#'   methods to use. \code{"best"} takes each gene's method with the highest
-#'   \code{metric} among those clearing the cutoffs whose weights are not all
-#'   zero. A gene whose methods carry no \code{metric} keeps them all, as
-#'   under \code{"all"}, there being nothing to rank them by; so does every
-#'   gene of a source with only one method per gene, which then simply uses
-#'   it. The choice depends on the weights alone, never on a GWAS study, so
-#'   the two pipelines pick the same method for a gene.
+#'   methods to use. \code{"best"} takes each gene's weight set -- its method
+#'   and kind of joint fit -- with the highest \code{metric} among those
+#'   clearing the cutoffs whose weights are not all zero. A gene whose sets
+#'   carry no \code{metric} keeps them all, as under \code{"all"}, there being
+#'   nothing to rank them by; so does every gene of a source with only one
+#'   set per gene, which then simply uses it. The choice depends on the
+#'   weights alone, never on a GWAS study, so the two pipelines pick the same
+#'   weight set for a gene.
+#' @param jointAxes Optional character vector: the kinds of joint fit whose
+#'   weight sets are candidates, narrowing them before \code{methods} applies.
+#'   A kind is \code{"none"}, a fit of the tuple alone, or the axes the fit
+#'   joined, \code{"+"}-joined in study, context, trait order:
+#'   \code{"study"}, \code{"context"}, \code{"trait"}, \code{"context+trait"}
+#'   and so on, as the weights' \code{jointStudies} / \code{jointContexts} /
+#'   \code{jointTraits} record. For instance
+#'   \code{WeightSelectionParam(methods = "mvsusie", jointAxes = "study")}
+#'   keeps only mvsusie fitted across studies. \code{NULL} (default) keeps
+#'   every kind.
 #' @param cutoff Numeric. Minimum cross-validated r-squared a method must
 #'   reach to be used, whatever \code{methods} is. Default \code{0} (no
 #'   r-squared gate).
@@ -1981,10 +2043,13 @@ setValidity("WeightSelectionParam", function(object) {
 #' # Every method, or just the two named.
 #' WeightSelectionParam(methods = "all")
 #' WeightSelectionParam(methods = c("lasso", "mrash"))
+#' # Only weights fitted across studies.
+#' WeightSelectionParam(jointAxes = "study")
 #' @importFrom checkmate assertCharacter makeAssertCollection
 #' @export
 WeightSelectionParam <- function(
     methods = "best",
+    jointAxes = NULL,
     cutoff = 0,
     pvalCutoff = Inf,
     metric = "rsq",
@@ -1993,6 +2058,7 @@ WeightSelectionParam <- function(
     new(
         "WeightSelectionParam",
         methods = methods,
+        jointAxes = jointAxes,
         cutoff = cutoff,
         pvalCutoff = pvalCutoff,
         metric = metric,

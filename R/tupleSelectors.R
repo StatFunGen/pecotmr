@@ -9,11 +9,12 @@
 # =============================================================================
 
 # Internal: return integer row indices of `x` where every (column, value)
-# pair in `keys` matches as.character(x[[column]]) == value. Shared
-# building block for tuple-keyed row selectors and cache lookups
-# (.tupleSelectRow, .qtlSumStatsSelectRow, .gwasSelectStudy,
-# .fmCacheLookup, .cipFmrHasTuple, etc.). Pure vectorised AND-match with
-# character coercion -- no validation, no error reporting.
+# pair in `keys` matches as.character(x[[column]]) == value, a joint column
+# by the joint-key rules below (.jointMembersMatch()). Shared building block
+# for tuple-keyed row selectors and cache lookups (.tupleSelectRow,
+# .qtlSumStatsSelectRow, .gwasSelectStudy, .fmCacheLookup, .cipFmrRowIndex,
+# etc.). Pure vectorised AND-match with character coercion -- no
+# validation, no error reporting.
 .matchTupleRows <- function(x, keys) {
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
@@ -27,6 +28,9 @@
 
 # @noRd
 .tupleKeyEquals <- function(k, x, keys) {
+    if (is_in(k, .JOINT_COLUMNS)) {
+        return(.jointMembersMatch(.fmrIdentityColumn(x, k), keys[[k]]))
+    }
     as.character(.tupleColumn(x, k)) == keys[[k]]
 }
 
@@ -36,6 +40,111 @@
 # @noRd
 .tupleColumn <- function(x, k) {
     mcols(x)[[k]]
+}
+
+# ---- joint groups ------------------------------------------------------------
+# A row's joint key -- its jointStudies, jointContexts and jointTraits -- names
+# the conditions its fit joined: each axis's members ";"-joined, NA on an axis
+# the fit did not join. A lookup names the group it means by one, matched like
+# any identity column but for two rules: NA (no joint group, or a collection
+# without the column) matches only NA, and members compare as sets.
+
+# The joint-key columns.
+# @noRd
+.JOINT_COLUMNS <- c("jointStudies", "jointContexts", "jointTraits")
+
+# The joint key of a fit from no joint group.
+# @noRd
+.noJointKey <- function() {
+    set_names(as.list(rep(NA_character_, 3L)), .JOINT_COLUMNS)
+}
+
+# Row `i`'s joint key.
+# @noRd
+.jointKeyAt <- function(x, i) {
+    set_names(map(.JOINT_COLUMNS, .fmrIdentityAt, x = x, i = i), .JOINT_COLUMNS)
+}
+
+# Row `i`'s position in its joint fit's condition axis, NA for a row from no
+# joint fit (or one that records none). A result made before rows recorded it
+# has no such column; there a joint row's position is its rank among its
+# fit's rows, which were stored in the fit's condition order.
+# @noRd
+.fmrJointIndexAt <- function(x, i) {
+    jointIndex <- mcols(x, use.names = FALSE)$jointIndex
+    if (!is.null(jointIndex)) {
+        return(jointIndex[[i]])
+    }
+    .fmrJointRankAt(x, i)
+}
+
+# Row `i`'s rank among its joint fit's rows: those of its method and joint
+# key that share its values on the axes the fit did not join. NA for a row
+# from no joint fit.
+# @noRd
+.fmrJointRankAt <- function(x, i) {
+    joint <- .jointKeyAt(x, i)
+    if (all(map_lgl(joint, is.na))) {
+        return(NA_integer_)
+    }
+    fixed <- c(c("study", "context", "trait")[map_lgl(joint, is.na)], "method")
+    keys <- c(
+        set_names(map(fixed, .fmrIdentityAt, x = x, i = i), fixed),
+        joint
+    )
+    as.integer(match(i, .matchTupleRows(x, keys)))
+}
+
+# Every kind of joint fit (.jointKinds()): none, or the axes joined.
+# @noRd
+.JOINT_KINDS <- c(
+    "none",
+    "study",
+    "context",
+    "trait",
+    "study+context",
+    "study+trait",
+    "context+trait",
+    "study+context+trait"
+)
+
+# Each weight set's kind of joint fit, from its joint columns `joint` (a list
+# or table holding the three, NA where a set joined nothing on that axis): the
+# axes its fit joined, "+"-joined in study, context, trait order, or "none"
+# for a fit of the tuple alone. WeightSelectionParam(jointAxes =) selects by
+# it, and cTWAS splits its runs by it.
+# @noRd
+#' @importFrom purrr pmap_chr
+.jointKinds <- function(joint) {
+    pmap_chr(map(joint[.JOINT_COLUMNS], .jointIsSet), .jointKindLabel)
+}
+
+# @noRd
+.jointIsSet <- function(values) {
+    !is.na(values)
+}
+
+# @noRd
+.jointKindLabel <- function(jointStudies, jointContexts, jointTraits) {
+    axes <- c("study", "context", "trait")[
+        c(jointStudies, jointContexts, jointTraits)
+    ]
+    if (length(axes) == 0L) "none" else str_flatten(axes, "+")
+}
+
+# Whether each joint-column value in `values` names the members `key` does.
+# @noRd
+.jointMembersMatch <- function(values, key) {
+    if (is.na(key)) {
+        return(is.na(values))
+    }
+    map_lgl(values, .sameJointMembers, key = key)
+}
+
+# @noRd
+.sameJointMembers <- function(value, key) {
+    !is.na(value) &&
+        setequal(str_split_1(value, fixed(";")), str_split_1(key, fixed(";")))
 }
 
 # ---- flavour-agnostic identity reads ----------------------------------------

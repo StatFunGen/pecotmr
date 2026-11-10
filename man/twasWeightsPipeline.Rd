@@ -47,11 +47,14 @@ twasWeightsPipeline(data, ...)
   jointSpecification = NULL,
   fineMappingResult = NULL,
   twasWeights = NULL,
+  mashPrior = NULL,
   h2 = NULL,
   fitRetention = c("slim", "none", "full"),
   verbose = 1L,
   panelFilterParam = PanelFilterParam(),
-  crossValidationParam = CrossValidationParam()
+  crossValidationParam = CrossValidationParam(),
+  ensembleParam = EnsembleParam(),
+  studyCoupling = c(0.01, 0.1, 1, 10)
 )
 
 \S4method{twasWeightsPipeline}{MultiStudyQtlDataset}(
@@ -80,6 +83,7 @@ twasWeightsPipeline(data, ...)
   residualizationParam = ResidualizationParam(),
   crossValidationParam = CrossValidationParam(),
   ensembleParam = EnsembleParam(),
+  studyCoupling = c(0.01, 0.1, 1, 10),
   seed = NULL
 )
 }
@@ -113,11 +117,13 @@ the selected contexts and traits together and any other method each
 character vector keyed by method, e.g.
 \code{c(bayesR = "hibayes", bayesL = "bglr")}; \code{NULL} (the
 default) leaves every method on its default. The Bayesian alphabet
-methods have several (see \code{\link{bayesAlphabetWeights}}), and on
-summary statistics so do \code{lasso} (\code{"pecotmr"} or
-\code{"bigsnpr"}, which is slow: see \code{\link{lassosumRssWeights}})
-and \code{ldpred2Auto} and \code{ldpred2Grid}
-(\code{"bigsnpr"} or \code{"pecotmr"}). Naming a
+methods have several (see \code{\link{bayesAlphabetWeights}} and
+\code{\link{bayesAlphabetRssWeights}}; \code{bayesB} has one on summary
+statistics), and on summary statistics so does \code{lasso}
+(\code{"pecotmr"} or \code{"bigsnpr"}, which is slow: see
+\code{\link{lassosumRssWeights}}). On individual-level data,
+\code{bayesC} and \code{bayesN} on \code{"bglr"} also fit each group a
+\code{jointSpecification} makes jointly (see there). Naming a
 method that is not being run, one with a single implementation, or an
 engine the method lacks on the input is an error, and so is a
 \code{backend} inside a \code{methods} entry.}
@@ -170,18 +176,48 @@ concatenates the ranges' genotypes into one joint fit. Ignored for a
 single-range / cis request.}
 
 \item{jointSpecification}{Optional joint-fit specification saying which
-axes \code{mrmash} fits across. When NULL (the default) it runs its
-implicit multi-trait / multi-context fit. Otherwise give a character
-vector of axes (one spec) or a list of specs. A spec is a character
-vector drawn from \code{"study"}, \code{"context"} and \code{"trait"},
-or \code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
+axes the joint methods -- \code{mrmash}, \code{mvsusie} and
+\code{fsusie} -- group conditions across. It means what it means to
+\code{\link{fineMappingPipeline}}, so a run groups conditions exactly as
+a fine-mapping run given the same specification and selection did. When
+NULL (the default) they are grouped as fine-mapping groups them: across
+traits if the input has two or more, else across contexts (across
+contexts on summary statistics). Otherwise give a character vector of
+axes (one spec) or a list of specs. A spec is a character vector drawn
+from \code{"study"}, \code{"context"} and \code{"trait"}, or
+\code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
 (keys \code{study}, \code{context}, \code{trait}) limits the fit to the
 listed values, each of which must exist in \code{data}. A list-form
 spec always goes inside the outer list, even on its own. Other methods
-run per (study, context, trait) as usual. The \code{"study"} axis needs
-summary statistics: it is rejected on a \code{QtlDataset}, and on a
-\code{MultiStudyQtlDataset} only the summary-statistics studies take
-part.}
+run per (study, context, trait) as usual. \code{mrmash} is fitted on
+each group; \code{mvsusie} and \code{fsusie} are read off
+\code{fineMappingResult}'s fit over exactly the group's conditions, each
+condition's own column of it, and a group the result holds no such fit
+of stops the run: fine-map and build weights with the same
+\code{jointSpecification} and \code{contexts} / \code{traitId}
+selection. The \code{"study"} axis needs more than one study, so it is
+rejected on a \code{QtlDataset}. On a \code{MultiStudyQtlDataset} it
+reads \code{mvsusie} off the fine-mapping fits across the
+individual-level studies (one per (context, trait) two or more of them
+carry; no genotype is read), fits \code{lasso}, \code{enet},
+\code{ridge} and \code{l0learn} across them under the penalty on the
+difference between their effects (see \code{studyCoupling}), and fits
+\code{mrmash} across the summary-statistics studies; a composed spec
+including \code{"study"} runs on summary statistics only. On summary
+statistics the study axis also fits the penalized methods across the
+studies under that penalty, each study against its own LD reference;
+\code{mrmash} and \code{mvsusie} need the studies on one reference.
+On individual-level data, \code{bayesC} and \code{bayesN} on
+\code{backend = "bglr"} also fit each group of two or more conditions
+at once, through BGLR's \code{Multitrait()} (see
+\code{\link{bayesAlphabetWeights}}), alongside their fits of one
+(study, context, trait) at a time: a study's contexts or traits, with
+an unstructured residual covariance unless
+\code{BglrOptions(resCov = )} sets another, and on a
+\code{MultiStudyQtlDataset} the individual-level studies on the study
+axis alone, stacked as for the coupled methods, where the residual
+covariance is diagonal: their samples are disjoint. Without a
+specification they run one tuple at a time only.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult}. When supplied,
 its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
@@ -189,7 +225,16 @@ context, trait) tuples are injected into \code{learnTwasWeights} via
 \code{fittedModels} so SuSiE-family weight methods reuse the prior fit
 instead of refitting. Its fits and cross-validation are reused whole,
 so a row narrowed since its fit warns (condition class
-\code{pecotmrFitCoverage}).}
+\code{pecotmrFitCoverage}). Each lookup reads the fits of the group it
+means: a method fitted per tuple reads the tuple's own fit, a joint
+method its group's (see \code{jointSpecification}), never a fit of the
+tuple in another joint group. On a \code{MultiStudyQtlDataset} whose
+\code{jointSpecification} has the study axis, the rows of a fit across
+its studies (\code{fineMappingPipeline(jointSpecification = "study")})
+are read one by one: each study's weights are its own column of that
+fit, over all of the fit's variants (zero at a variant the study lacks),
+with its row's cross-validation, in rows that keep the fit's
+\code{jointStudies}.}
 
 \item{twasWeights}{Optional \code{\link{TwasWeights}} resume cache. For each
 requested \code{(study, context, trait, method)} entry already present in
@@ -197,13 +242,17 @@ this collection, the cached entry is copied through and the
 corresponding weight fit is skipped. Only the un-cached methods are fit;
 the cached and fresh entries are combined in the returned collection.
 Per-entry matching mirrors the \code{fineMappingResult} cache in
-\code{\link{fineMappingPipeline}}. A multivariate method
-(\code{mvsusie}, \code{mr.mash}) fits a group of contexts together, so
-its group is resumed only when the cache holds every context's entry;
-otherwise the whole group is refit.}
+\code{\link{fineMappingPipeline}}. A joint method (\code{mvsusie},
+\code{mr.mash}) fits a group of conditions together, so its group is
+resumed only when the cache holds every condition's entry from a fit of
+that same group (its \code{jointStudies} / \code{jointContexts} /
+\code{jointTraits}); otherwise the whole group is refit. A method fitted
+per tuple resumes only from the tuple's own fit.}
 
-\item{mashPrior}{Optional \code{\link{MashPrior}} (or coercible) supplying
-data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
+\item{mashPrior}{Optional \code{\link{MashPrior}} supplying data-driven
+prior matrices for mr.mash weight methods; \code{NULL} to skip. On a
+\code{QtlSumStats}, which is not cross-validated, mr.mash takes its
+full-data prior, and one that holds per-fold priors alone is an error.}
 
 \item{crossValidationParam}{Cross-validation settings, built with
   \code{\link{CrossValidationParam}}: \code{folds} (default \code{0}, no
@@ -223,11 +272,16 @@ data-driven prior matrices for mr.mash weight methods; \code{NULL} to skip.}
 
 \item{ensembleParam}{SR-TWAS ensemble settings, built with
 \code{\link{EnsembleParam}}: \code{enabled} (default \code{FALSE}),
-\code{r2Threshold}, \code{solver} and \code{alpha}. Stacking reads
+\code{r2Threshold}, \code{solver}, \code{alpha}, \code{acrossStudies}
+and \code{transferScale}. On individual-level data stacking reads
 out-of-fold predictions, so \code{enabled = TRUE} requires
 \code{crossValidationParam} with \code{folds >= 2} and is an error
 otherwise --- it previously returned a result quietly missing its
-ensemble row.}
+ensemble row. On summary statistics it reads held-out splits of the
+statistics instead. With \code{acrossStudies = TRUE} and a
+\code{"study"} \code{jointSpecification}, each study's ensemble also
+stacks the other studies' fits, as MAGEPRO and LEOPARD combine
+ancestries; those rows carry \code{jointStudies}.}
 
 \item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
 before BGLR / qgg spike-and-slab methods that consume it.}
@@ -337,6 +391,41 @@ governs the main-process draws.}
 built with
 \code{\link{PanelFilterParam}}. See \emph{Panel filters on the RSS path}
 above.}
+
+\item{studyCoupling}{For a \code{MultiStudyQtlDataset}, or a
+\code{QtlSumStats} holding several studies: the strengths \eqn{c} of
+the penalty \eqn{(c/2) \sum (b_{jk} - b_{jk'})^2} on the difference
+between studies' per-SD effects that the penalized methods are fitted
+with across the studies a \code{"study"} \code{jointSpecification}
+joins, as PROSPER couples ancestries. Each study's loss is its own mean
+squared error, and each study takes the grid point its own held-out
+data score best: on individual-level studies, \eqn{(\lambda, c)} on
+folds drawn within each study; on summary statistics, \eqn{(s,
+\lambda, c)} on held-out statistics drawn from each study's own LD,
+every study fitted against its own LD reference. \eqn{c = 0} gives the
+studies' separate fits and a large \eqn{c} one pooled fit. The
+default, \code{c(0.01, 0.1, 1, 10)}, spans nearly separate to nearly
+pooled. The methods' per-study fits run too; the coupled ones are told
+apart by their \code{jointStudies}
+(\code{\link{WeightSelectionParam}}'s \code{jointAxes = "study"}
+selects them). \code{NULL} fits none. Coupled on individual-level
+studies: \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
+(\code{mcp} and \code{scad} stay per study, as ncvreg takes no sparse
+design); on summary statistics those and \code{mcp} and \code{scad},
+each fitted by pecotmr's own solver whatever its \code{backend}.
+\code{l0learn} across studies takes \code{penalty = "L0"} only. On
+summary statistics \code{prsCs} and \code{dprGibbs} are fitted across
+the studies too, as JointPRS and SDPRX fit ancestries; \eqn{c} does
+not apply to them, though \code{NULL} turns them off as well. Under
+\code{prsCs} the studies share PRS-CS's continuous shrinkage prior, as
+PRS-CSx shares it, and their effects on a variant are correlated, the
+correlation learned on \eqn{[0, 0.99]}; its weights stay standardized,
+so \code{maf} is refused there. Under \code{dprGibbs} each non-null
+component of SDPR's Dirichlet process mixture carries a variant's
+effects in a set of the studies, correlated: \code{\link{SdprOptions}}'
+\code{sharing} sets which sets, and \code{rho} the correlation (learned
+by default). Its \code{perVariantSampleSize}, \code{array} and
+\code{optLlk = 2} describe one study, so they are refused there.}
 }
 \value{
 A \code{\link{TwasWeights}} collection with one row per gene --
@@ -360,9 +449,12 @@ Accepts:
 \details{
 Method-restriction rules (enforced):
 \itemize{
-  \item \code{mr.mash}, \code{mvsusie} follow the multi-trait /
+  \item \code{mr.mash}, \code{mvsusie} and \code{fsusie} are grouped
+        across conditions as \code{\link{fineMappingPipeline}} groups
+        them (see \code{jointSpecification}) and follow the multi-trait /
         multi-context rules of the fine-mapping \code{mvsusie} family
-        (require at least two traits OR at least two contexts).
+        (require at least two traits OR at least two contexts), but for
+        \code{mvsusie} grouped across studies.
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run

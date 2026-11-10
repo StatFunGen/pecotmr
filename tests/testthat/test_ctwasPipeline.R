@@ -292,17 +292,11 @@ test_that("assembleCtwasInputs accepts a subset of gwasSumStats' keys", {
         .handleDosage = .ctp_mockExtractor(),
         .package = "pecotmr"
     )
-    # Two blocks supply zSnp; only block1 supplies TwasWeights, whose panel
-    # shares block1's six variants of its twelve -- a partial overlap,
-    # reported once per session.
-    rlang::reset_warning_verbosity("pecotmrLdReferenceOverlap-ctwasPipeline")
-    expect_warning(
-        inputs <- assembleCtwasInputs(
-            gwasSumStats = ss,
-            twasWeights = list(block1 = tw),
-            weightSelectionParam = WeightSelectionParam(methods = "susie")
-        ),
-        "share 6 variant"
+    # Two blocks supply zSnp; only block1 supplies TwasWeights.
+    inputs <- assembleCtwasInputs(
+        gwasSumStats = ss,
+        twasWeights = list(block1 = tw),
+        weightSelectionParam = WeightSelectionParam(methods = "susie")
     )
     # Both blocks appear in region_info / snp_map (SNP-only block2 contributes
     # its zSnp), but the weights list only has block1's gene.
@@ -480,75 +474,108 @@ test_that("CtwasPriorParam rejects an unknown varStructure", {
 })
 
 # ===========================================================================
-# .ctwasRequireMatchingLdRefs
+# Weights from another panel
 # ===========================================================================
 
-test_that(".ctwasRequireMatchingLdRefs: NULL twas-side handle is allowed", {
-    twNoLd <- TwasWeights(
-        studyName = "Q1",
-        context = "c1",
-        trait = "t1",
-        method = "susie",
-        entry = list(TwasWeightsRow(
-            variantIds = sprintf("chr1:%d:A:G", 100L * (1:5)),
-            weights = rep(0.1, 5)
-        )),
-        ldReference = NULL
-    )
-    expect_silent(pecotmr:::.ctwasRequireMatchingLdRefs(
-        twNoLd,
-        .ctp_makeGwasSumstats()
-    ))
-})
-
-# One weight row on `handle`, for the region-level match checks.
-.ctp_weightsOn <- function(handle) {
+# The fixture's weights on `handle`, the panel they were fitted on.
+.ctp_weightsFittedOn <- function(handle) {
     TwasWeights(
         studyName = "Q1",
         context = "c1",
         trait = "t1",
         method = "susie",
         entry = list(TwasWeightsRow(
-            variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
-            weights = rep(0.1, 3)
+            variantIds = map_chr(1:5, .ctp_snpId),
+            weights = c(0.1, 0.05, -0.2, 0.3, 0.0)
         )),
         ldReference = handle
     )
 }
 
-test_that(".ctwasRequireMatchingLdRefs: differently trimmed panels ok", {
-    # One LD reference QC'd separately on the two sides leaves each sketch
-    # trimmed to its own surviving variants, so the panels overlap without
-    # being identical. That is the normal case, not an error.
-    #
-    # The overlap note is rate-limited to once per session and the assembly
-    # tests legitimately trip it first (each block's GWAS panel is narrowed to
-    # its own variants while the weights carry the whole one), so clear that
-    # budget here rather than depending on which files ran before this.
-    rlang::reset_warning_verbosity("pecotmrLdReferenceOverlap-ctwasPipeline")
-    tw <- .ctp_weightsOn(.ctp_makeHandle(snp_n = 5L))
-    gwas <- pecotmr:::.withRowLdRefs(
-        .ctp_makeGwasSumstats(),
-        .ctp_makeHandle(snp_n = 6L)
+test_that("cTWAS takes weights fitted on another panel as they are", {
+    # Every gene z and correlation is the GWAS panel's, so weights fitted on
+    # other samples -- another ancestry's -- make exactly the genes the same
+    # weights on the GWAS panel make. Pre-bucketed weights keep their own
+    # panel, which used to be refused for its different samples.
+    ss <- .ctp_makeGwasSumstats()
+    local_mocked_bindings(
+        .handleDosage = .ctp_mockExtractor(),
+        .package = "pecotmr"
+    )
+    assemble <- function(handle) {
+        assembleCtwasInputs(
+            gwasSumStats = ss,
+            twasWeights = list(block1 = .ctp_weightsFittedOn(handle)),
+            weightSelectionParam = WeightSelectionParam(methods = "susie")
+        )
+    }
+    onGwas <- assemble(.ctp_makeHandle())
+    elsewhere <- .ctp_makeHandle(n_samples = 20L)
+    expect_false(identical(sampleIds(elsewhere), sampleIds(.ctp_makeHandle())))
+    onOther <- assemble(elsewhere)
+    expect_identical(names(onOther$weights), "t1|Q1_c1_QTL_susie")
+    expect_identical(onOther$weights, onGwas$weights)
+})
+
+test_that("cTWAS reports the weight its genes lose to the GWAS panel", {
+    lost <- pecotmr:::.ctwasLostWeightShare
+    expect_equal(lost(c(0.5, -0.3, 0.2), 1:2), 0.2)
+    expect_equal(lost(c(0.5, -0.3, 0.2), integer(0)), 1)
+    expect_equal(lost(c(0, 0), 1L), 0)
+    gene <- function(key, vids, lost) list(key = key, vids = vids, lost = lost)
+    expect_message(
+        expect_no_warning(pecotmr:::.ctwasReportWeightLoss(list(
+            gene("g1", "v1", 0),
+            gene("g2", c("v1", "v2"), 0.25),
+            gene("g3", "v3", 0.5)
+        ))),
+        "2 gene\\(s\\) lost .*median 37.5%.*at most 50.0% \\(g3\\)"
     )
     expect_warning(
-        expect_null(pecotmr:::.ctwasRequireMatchingLdRefs(tw, gwas)),
-        "share 5 variant"
+        pecotmr:::.ctwasReportWeightLoss(list(
+            gene("g1", "v1", 0),
+            gene("g2", character(0), 1)
+        )),
+        "dropped 1 gene\\(s\\) with no weight variant on the GWAS LD panel: g2"
+    )
+    expect_silent(pecotmr:::.ctwasReportWeightLoss(list(gene("g1", "v1", 0))))
+    expect_equal(
+        pecotmr:::.ctwasGeneList(sprintf("g%d", 1:7)),
+        "g1, g2, g3, g4, g5 and 2 more"
     )
 })
 
-test_that(".ctwasRequireMatchingLdRefs: disjoint panels error", {
-    gwasLd <- .ctp_makeHandle(snp_n = 3L)
-    si <- snpInfo(gwasLd)
-    si$BP <- si$BP + 1e6L
-    gwasLd@snpInfo <- si
-    expect_error(
-        pecotmr:::.ctwasRequireMatchingLdRefs(
-            .ctp_weightsOn(.ctp_makeHandle(snp_n = 3L)),
-            pecotmr:::.withRowLdRefs(.ctp_makeGwasSumstats(), gwasLd)
-        ),
-        "share no variant"
+test_that("a gene with no weight variant on the GWAS panel is dropped", {
+    ss <- .ctp_makeGwasSumstats()
+    local_mocked_bindings(
+        .handleDosage = .ctp_mockExtractor(),
+        .package = "pecotmr"
     )
+    # One gene inside block 1, and one whose variants the panel lacks.
+    off <- TwasWeightsRow(
+        variantIds = sprintf("chr1:%d:G:A", c(150L, 250L)),
+        weights = c(0.2, 0.1)
+    )
+    tw <- c(
+        .ctp_makeTwasWeights(),
+        TwasWeights(
+            studyName = "Q1",
+            context = "c1",
+            trait = "t2",
+            method = "susie",
+            entry = list(off),
+            ldReference = .ctp_makeHandle()
+        )
+    )
+    expect_warning(
+        inputs <- suppressMessages(assembleCtwasInputs(
+            gwasSumStats = ss,
+            twasWeights = list(block1 = tw),
+            weightSelectionParam = WeightSelectionParam(methods = "susie")
+        )),
+        "dropped 1 gene\\(s\\).*t2\\|Q1_c1_QTL_susie"
+    )
+    expect_identical(names(inputs$weights), "t1|Q1_c1_QTL_susie")
 })
 
 # ===========================================================================
@@ -970,7 +997,7 @@ test_that(".ctwasRunPlan reads one flat source or a list of them", {
             WeightSelectionParam(),
             "ctwasPipeline()"
         ),
-        "1 gene\\(s\\), such as t1 \\(Q1, c1\\), hold several methods"
+        "1 gene\\(s\\), such as t1 \\(Q1, c1\\), hold several weight sets"
     )
     # A named method is one run, from a pre-bucketed list with an empty block.
     named <- pecotmr:::.ctwasRunPlan(
@@ -994,6 +1021,49 @@ test_that(".ctwasRunPlan reads one flat source or a list of them", {
             "ctwasPipeline()"
         ),
         "names lasso, which the weights do not hold \\(they hold mrash\\)"
+    )
+})
+
+test_that(".ctwasRunPlan runs a method once per kind of joint fit", {
+    e <- TwasWeightsRow(
+        variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
+        weights = c(0.1, 0.2, 0.3)
+    )
+    tw <- TwasWeights(
+        studyName = rep("Q1", 3L),
+        context = rep("c1", 3L),
+        trait = rep("t1", 3L),
+        method = c("lasso", "lasso", "susie"),
+        entry = list(e, e, e),
+        jointStudies = c(NA, "Q1;Q2", NA),
+        ldReference = .ctp_makeHandle()
+    )
+    plan <- function(...) {
+        pecotmr:::.ctwasRunPlan(tw, WeightSelectionParam(...), "f()")
+    }
+    runs <- plan(methods = "all")
+    expect_setequal(
+        str_c(map_chr(runs, "label"), map_chr(runs, "jointTwasAxes")),
+        c("lassonone", "lassostudy", "susienone")
+    )
+    expect_equal(map_int(map(runs, "cells"), nrow), c(1L, 1L, 1L))
+    # jointAxes narrows the runs to the kinds it names.
+    study <- plan(methods = "lasso", jointAxes = "study")
+    expect_equal(map_chr(study, "jointTwasAxes"), "study")
+    expect_equal(study[[1L]]$cells$jointStudies, "Q1;Q2")
+    # With no CV metric, "best" cannot choose among the gene's weight sets.
+    expect_error(
+        plan(),
+        "hold several weight sets \\(methods or kinds of joint fit\\)"
+    )
+    # A gene's lone weight set is its best, in a run of no one kind.
+    best <- plan(jointAxes = "study")
+    expect_equal(best[[1L]]$label, "best")
+    expect_true(is.na(best[[1L]]$jointTwasAxes))
+    # One run's inputs: two runs of one method are told apart by kind.
+    expect_error(
+        pecotmr:::.ctwasAssertOneRun(plan(methods = "lasso")),
+        "kind of joint fit \\(lasso, lasso \\(study\\)\\)"
     )
 })
 
@@ -1637,7 +1707,8 @@ test_that("preparing a gene reads only the panel's rows at its positions", {
         pecotmr:::.ctwasGeneSpan(aligned$vids, near$spanInfo),
         pecotmr:::.ctwasGeneSpan(aligned$vids, info)
     )
-    # With none of its positions on the panel, no gene is made.
+    # With none of its positions on the panel, the gene keeps no variant and
+    # has lost all its weight, for the run to report and drop it.
     off <- TwasWeightsRow(variantIds = "chr1:999:A:T", weights = 0.2)
     offNear <- pecotmr:::.ctwasPanelNear(off, ctx)
     expect_equal(nrow(offNear$spanInfo), 0L)
@@ -1649,7 +1720,9 @@ test_that("preparing a gene reads only the panel's rows at its positions", {
         ),
         "No matching variants"
     )
-    expect_null(none)
+    expect_length(none$vids, 0L)
+    expect_equal(none$lost, 1)
+    expect_equal(aligned$lost, 0.2)
 })
 
 test_that(".ctwasIsSusieFit: recognizes the susie intermediate shape", {
@@ -2169,6 +2242,115 @@ test_that(".ctwasBuildZGene: each weighted gene's z under its weight id", {
         )
     )
     expect_null(pecotmr:::.ctwasBuildZGene(gr, list(), NA_character_))
+})
+
+test_that(".ctwasBuildZGene reads the z of the weights' own joint group", {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 100), c(200, 200))
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        qtlStudy = c("Q1", "Q1"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        method = c("mvsusie", "mvsusie"),
+        jointStudies = c(NA, "Q1;Q2"),
+        jointContexts = c("c1;c2", NA),
+        twasZ = c(1.5, -2)
+    )
+    entry <- list(
+        type = "QTL",
+        context = "Q1_c1",
+        qtl_context = "c1",
+        gene_name = "t1",
+        study = "Q1",
+        method = "mvsusie",
+        joint_twas_studies = "Q1;Q2",
+        joint_twas_contexts = NA_character_,
+        joint_twas_traits = NA_character_
+    )
+    zOf <- function(e) {
+        pecotmr:::.ctwasBuildZGene(
+            gr,
+            list(`t1|Q1_c1_QTL_mvsusie` = e),
+            NA_character_
+        )$z
+    }
+    expect_equal(zOf(entry), -2)
+    expect_equal(
+        zOf(list_assign(
+            entry,
+            joint_twas_studies = NA_character_,
+            joint_twas_contexts = "c1;c2"
+        )),
+        1.5
+    )
+})
+
+test_that("a supplied z stands only for weights the pipeline kept as given", {
+    ids <- map_chr(1:2, .ctp_snpId)
+    wgt <- matrix(c(0.5, -0.2), ncol = 1L, dimnames = list(ids, "wgt"))
+    entry <- list(
+        wgt = wgt,
+        wgt_var = 1,
+        type = "QTL",
+        context = "Q1_c1",
+        qtl_context = "c1",
+        study = "Q1",
+        method = "susie"
+    )
+    weights <- list(
+        `t1|Q1_c1_QTL_susie` = list_assign(
+            entry,
+            gene_name = "t1",
+            trimmed = FALSE
+        ),
+        `t2|Q1_c1_QTL_susie` = list_assign(
+            entry,
+            gene_name = "t2",
+            trimmed = TRUE
+        )
+    )
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(c(100, 100), c(200, 200))
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        qtlStudy = "Q1",
+        context = "c1",
+        trait = c("t1", "t2"),
+        method = "susie",
+        twasZ = c(9, 9)
+    )
+    zSnp <- data.frame(id = ids, A1 = "A", A2 = "G", z = c(2, -1))
+    supplied <- list(twasZ = gr, gwasStudy = NA_character_)
+    expect_message(
+        z <- pecotmr:::.ctwasZGeneFor(weights, zSnp, supplied),
+        "1 gene\\(s\\) had their weights trimmed after `twasZ` scored them"
+    )
+    expect_equal(z$id, names(weights))
+    # The kept gene's z is twasZ's; the trimmed one's its own w'z/sqrt(w'Rw).
+    expect_equal(z$z, c(9, 0.5 * 2 + 0.2))
+    # Without twasZ, every gene's own.
+    expect_equal(
+        pecotmr:::.ctwasZGeneFor(weights, zSnp, list())$z,
+        rep(0.5 * 2 + 0.2, 2L)
+    )
+})
+
+test_that(".ctwasGeneTrimmed: variants dropped at the panel or by the filter", {
+    aligned <- list(
+        keptIdx = 1:3,
+        origVids = letters[1:3],
+        vids = letters[1:3]
+    )
+    expect_false(pecotmr:::.ctwasGeneTrimmed(
+        aligned,
+        list(vids = letters[1:3])
+    ))
+    expect_true(pecotmr:::.ctwasGeneTrimmed(aligned, list(vids = letters[1:2])))
+    lost <- list_assign(aligned, keptIdx = 1:2, vids = letters[1:2])
+    expect_true(pecotmr:::.ctwasGeneTrimmed(lost, list(vids = letters[1:2])))
 })
 
 # ===========================================================================
@@ -3938,7 +4120,7 @@ test_that("assembleCtwasInputs refuses a choice that makes several runs", {
             twasWeights = list(block1 = .ctp_twoGeneTwoMethodTw()),
             weightSelectionParam = WeightSelectionParam(methods = "all")
         ),
-        "makes 2 cTWAS runs, one per method \\(mrash, susie\\)"
+        "2 cTWAS runs, one per method and kind of joint fit \\(mrash, susie\\)"
     )
 })
 
@@ -4071,22 +4253,27 @@ test_that(".ctwasBuildWeights skips a gene harmonization leaves empty", {
         .ctwasHarmonizeWeights = function(...) NULL,
         .package = "pecotmr"
     )
-    expect_length(
-        .ctp_buildWeights(
+    expect_warning(
+        built <- .ctp_buildWeights(
             .ctp_makeTwasWeights(),
             .ctp_makeLdPanel()
         ),
-        0L
+        "dropped 1 gene\\(s\\) with no weight variant on the GWAS LD panel"
     )
+    expect_length(built, 0L)
 })
 
 test_that(".ctwasBuildWeights skips a gene with no variant in gwasSnpIds", {
-    expect_length(
-        .ctp_buildWeights(
+    expect_warning(
+        built <- .ctp_buildWeights(
             .ctp_makeTwasWeights(),
             .ctp_makeLdPanel(),
             gwasSnpIds = .ctp_snpId(6)
         ), # gene covers ids 1..5 only
+        "dropped 1 gene\\(s\\) with no weight variant on the GWAS LD panel"
+    )
+    expect_length(
+        built,
         0L
     )
 })
@@ -4150,10 +4337,10 @@ test_that(".ctwasBuildWeights skips a gene the filter empties", {
 })
 
 # ===========================================================================
-# .ctwasGetFinemapAux — PIP + credible-set membership / purity extraction
+# .ctwasFinemapAux — PIP + credible-set membership / purity extraction
 # ===========================================================================
 
-test_that(".ctwasGetFinemapAux: parses pip + cs_95 membership + purity", {
+test_that(".ctwasFinemapAuxOf: parses pip + cs_95 membership + purity", {
     tl <- data.frame(
         variant_id = c(
             "chr1:100:G:A",
@@ -4173,7 +4360,7 @@ test_that(".ctwasGetFinemapAux: parses pip + cs_95 membership + purity", {
         method = "susie",
         entry = list(FineMappingRow(tl$variant_id, NULL, tl))
     )
-    aux <- pecotmr:::.ctwasGetFinemapAux(fmr, "Q1", "c1", "t1")
+    aux <- pecotmr:::.ctwasFinemapAuxOf(pecotmr:::.fmrRowParts(fmr, 1L))
     expect_equal(aux$pip[["chr1:200:G:A"]], 0.6)
     expect_length(aux$csMembers, 2L)
     expect_setequal(aux$csMembers[[1L]], c("chr1:100:G:A", "chr1:200:G:A"))
@@ -4181,7 +4368,7 @@ test_that(".ctwasGetFinemapAux: parses pip + cs_95 membership + purity", {
     expect_equal(aux$csPurity, c(0.95, 0.7))
 })
 
-test_that(".ctwasGetFinemapAux: cs_95 without purity column gives NA purity", {
+test_that(".ctwasFinemapAuxOf: cs_95 without purity column gives NA purity", {
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:A:G", "chr1:300:A:G"),
         pip = c(0.1, 0.5, 0.9),
@@ -4195,13 +4382,13 @@ test_that(".ctwasGetFinemapAux: cs_95 without purity column gives NA purity", {
         method = "susie",
         entry = list(FineMappingRow(tl$variant_id, NULL, tl))
     )
-    aux <- pecotmr:::.ctwasGetFinemapAux(fmr, "Q1", "c1", "t1")
+    aux <- pecotmr:::.ctwasFinemapAuxOf(pecotmr:::.fmrRowParts(fmr, 1L))
     expect_length(aux$csMembers, 1L)
     expect_setequal(aux$csMembers[[1L]], c("chr1:100:A:G", "chr1:200:A:G"))
     expect_true(all(is.na(aux$csPurity)))
 })
 
-test_that(".ctwasGetFinemapAux: no cs_95 column yields empty CS membership", {
+test_that(".ctwasFinemapAuxOf: no cs_95 column yields empty CS membership", {
     tl <- data.frame(
         variant_id = c("chr1:100:A:G", "chr1:200:A:G"),
         pip = c(0.2, 0.8),
@@ -4214,13 +4401,13 @@ test_that(".ctwasGetFinemapAux: no cs_95 column yields empty CS membership", {
         method = "susie",
         entry = list(FineMappingRow(tl$variant_id, NULL, tl))
     )
-    aux <- pecotmr:::.ctwasGetFinemapAux(fmr, "Q1", "c1", "t1")
+    aux <- pecotmr:::.ctwasFinemapAuxOf(pecotmr:::.fmrRowParts(fmr, 1L))
     expect_length(aux$csMembers, 0L)
     expect_length(aux$csPurity, 0L)
     expect_equal(aux$pip[["chr1:200:A:G"]], 0.8)
 })
 
-test_that(".ctwasGetFinemapAux: a cs_95 column naming no set yields none", {
+test_that(".ctwasFinemapAuxOf: a cs_95 column naming no set yields none", {
     # A fit that found no credible set still reports its top loci, each one
     # "in no set" (index 0).
     tl <- data.frame(
@@ -4236,7 +4423,7 @@ test_that(".ctwasGetFinemapAux: a cs_95 column naming no set yields none", {
         method = "susie",
         entry = list(FineMappingRow(tl$variant_id, NULL, tl))
     )
-    aux <- pecotmr:::.ctwasGetFinemapAux(fmr, "Q1", "c1", "t1")
+    aux <- pecotmr:::.ctwasFinemapAuxOf(pecotmr:::.fmrRowParts(fmr, 1L))
     expect_length(aux$csMembers, 0L)
     expect_identical(aux$csPurity, numeric(0))
     expect_equal(aux$pip[["chr1:200:A:G"]], 0.3)
@@ -4272,8 +4459,7 @@ test_that(".ctwasFixMolecularId: rows without a gene id are left alone", {
     expect_equal(fixed$molecular_id, "a|b")
 })
 
-test_that(".ctwasGetFinemapAux: NULL input, no match or empty topLoci: NULL", {
-    expect_null(pecotmr:::.ctwasGetFinemapAux(NULL, "Q1", "c1", "t1"))
+test_that(".ctwasFinemapAux reads only the fit the weights came from", {
     tl <- data.frame(
         variant_id = "chr1:100:A:G",
         pip = 0.5,
@@ -4286,9 +4472,31 @@ test_that(".ctwasGetFinemapAux: NULL input, no match or empty topLoci: NULL", {
         method = "susie",
         entry = list(FineMappingRow(tl$variant_id, NULL, tl))
     )
-    # No matching (study, context, trait, method) tuple -> NULL.
-    expect_null(pecotmr:::.ctwasGetFinemapAux(fmr, "NOPE", "c1", "t1"))
-    # Matching tuple but an empty topLoci -> NULL.
+    parts <- TwasWeightsRow(variantIds = tl$variant_id, weights = 0.1)
+    meta <- function(study = "Q1", method = "susie") {
+        list(
+            study = study,
+            context = "c1",
+            trait = "t1",
+            method = method,
+            joint = pecotmr:::.noJointKey()
+        )
+    }
+    expect_equal(
+        pecotmr:::.ctwasFinemapAux(parts, fmr, meta())$pip,
+        c("chr1:100:A:G" = 0.5)
+    )
+    # Without a result, or another gene's: nothing to read.
+    expect_null(pecotmr:::.ctwasFinemapAux(parts, NULL, meta()))
+    expect_null(pecotmr:::.ctwasFinemapAux(parts, fmr, meta("NOPE")))
+    # Another method's weights read none, even with the gene's fit at hand.
+    expect_null(pecotmr:::.ctwasFinemapAux(parts, fmr, meta(method = "lasso")))
+    # A fine-mapping row as the weight source is its own fit.
+    expect_equal(
+        pecotmr:::.ctwasFinemapAux(pecotmr:::.fmrRowParts(fmr, 1L), NULL, NULL),
+        pecotmr:::.ctwasFinemapAux(parts, fmr, meta())
+    )
+    # A row with no variants has nothing to read.
     fmrEmpty <- QtlFineMappingResult(
         studyName = "Q1",
         context = "c1",
@@ -4296,7 +4504,46 @@ test_that(".ctwasGetFinemapAux: NULL input, no match or empty topLoci: NULL", {
         method = "susie",
         entry = list(FineMappingRow(character(0), NULL, data.frame()))
     )
-    expect_null(pecotmr:::.ctwasGetFinemapAux(fmrEmpty, "Q1", "c1", "t1"))
+    expect_null(pecotmr:::.ctwasFinemapAux(parts, fmrEmpty, meta()))
+})
+
+test_that("a joint fit's weights read the rows of their own group", {
+    vids <- sprintf("chr1:%d:A:G", 100L * 1:3)
+    row <- function(pip) {
+        FineMappingRow(
+            variantIds = vids,
+            susieFit = list(),
+            topLoci = data.frame(variant_id = vids, pip = pip)
+        )
+    }
+    # One tuple in two joint fits, across contexts and across studies.
+    fmr <- QtlFineMappingResult(
+        studyName = c("s1", "s1"),
+        context = c("brain", "brain"),
+        trait = c("g", "g"),
+        method = c("mvsusie", "mvsusie"),
+        entry = list(row(c(0.9, 0.1, 0.1)), row(c(0.1, 0.1, 0.9))),
+        jointStudies = c(NA, "s1;s2"),
+        jointContexts = c("brain;liver", NA)
+    )
+    parts <- TwasWeightsRow(variantIds = vids, weights = c(0.1, 0.1, 0.1))
+    meta <- function(joint) {
+        list(
+            study = "s1",
+            context = "brain",
+            trait = "g",
+            method = "mvsusie",
+            joint = list_modify(pecotmr:::.noJointKey(), !!!joint)
+        )
+    }
+    pipOf <- function(joint) {
+        unname(pecotmr:::.ctwasFinemapAux(parts, fmr, meta(joint))$pip)
+    }
+    # Members compare as sets.
+    expect_equal(pipOf(list(jointStudies = "s2;s1")), c(0.1, 0.1, 0.9))
+    expect_equal(pipOf(list(jointContexts = "brain;liver")), c(0.9, 0.1, 0.1))
+    # A group the result holds no fit of reads none.
+    expect_null(pecotmr:::.ctwasFinemapAux(parts, fmr, meta(list())))
 })
 
 # ===========================================================================
@@ -4415,6 +4662,63 @@ test_that(".ctwasRunToRows: no weights, no rows; two studies, two rows", {
     result <- pecotmr:::.ctwasRowsToResult(rows)
     expect_true(all(S4Vectors::mcols(result)$jointStudies == "Q1,Q2"))
     expect_false("jointContexts" %in% pecotmr:::.tupleColumnNames(result))
+})
+
+test_that(".ctwasRunToRows: a run's rows carry its kind of joint fit", {
+    alone <- .ctp_weights(c("Q1|c1|gA|lasso", "Q1|c1|gB|lasso"))
+    joint <- map(
+        alone,
+        list_assign,
+        joint_twas_studies = "Q1;Q2",
+        joint_twas_contexts = NA_character_,
+        joint_twas_traits = NA_character_
+    )
+    run <- function(weights) {
+        list(
+            weights = weights,
+            finemap_res = NULL,
+            susie_alpha_res = NULL,
+            param = list(),
+            region_info = NULL
+        )
+    }
+    rows <- pecotmr:::.ctwasRunToRows(run(joint), "D1", "lasso")
+    expect_equal(map_chr(rows, "jointTwasAxes"), "study")
+    expect_true(rows[[1L]]$modelsJoint)
+    # A "best" run's genes can be of different kinds, so it names none.
+    best <- pecotmr:::.ctwasRunToRows(run(joint), "D1", "best")
+    expect_true(is.na(best[[1L]]$jointTwasAxes))
+    # Weights of fits of each gene alone: with no run modelling a joint fit,
+    # the result has no jointTwasAxes column.
+    single <- pecotmr:::.ctwasRunToRows(run(alone), "D1", "lasso")
+    expect_equal(single[[1L]]$jointTwasAxes, "none")
+    expect_false(single[[1L]]$modelsJoint)
+    expect_false(
+        "jointTwasAxes" %in%
+            pecotmr:::.tupleColumnNames(pecotmr:::.ctwasRowsToResult(single))
+    )
+    # Beside a joint run, the two runs of one method stay apart by kind.
+    both <- pecotmr:::.ctwasRowsToResult(c(single, rows))
+    expect_equal(S4Vectors::mcols(both)$jointTwasAxes, c("none", "study"))
+})
+
+test_that(".ctwasWithJointTwas keeps each gene's own joint members", {
+    weights <- .ctp_weights(c("Q1|c1|gA|lasso", "Q1|c1|gB|lasso"))
+    ids <- names(weights)
+    mixed <- set_names(
+        list(
+            list_assign(weights[[1L]], joint_twas_studies = "Q1;Q2"),
+            weights[[2L]]
+        ),
+        ids
+    )
+    df <- data.frame(id = c(ids, "chr1:100:G:A"), susie_pip = c(0.9, 0.1, 0))
+    out <- pecotmr:::.ctwasWithJointTwas(df, mixed)
+    expect_equal(out$joint_twas_studies, c("Q1;Q2", NA, NA))
+    expect_true(all(is.na(out$joint_twas_contexts)))
+    expect_true(all(is.na(out$joint_twas_traits)))
+    # A run of fits of each gene alone gains no such columns.
+    expect_identical(pecotmr:::.ctwasWithJointTwas(df, weights), df)
 })
 
 test_that(".ctwasScoredParam adds each group's identity and cTWAS's summary", {
@@ -5047,7 +5351,7 @@ test_that(".ctwasFirstPass requires an LD reference on every region", {
     byBlock <- pecotmr:::.ctwasGwasByBlock(.ctp_noLdGwas())
     expect_identical(ldReference(byBlock[[1L]]), list())
     expect_error(
-        pecotmr:::.ctwasFirstPass("b1", byBlock, list(b1 = NULL)),
+        pecotmr:::.ctwasFirstPass("b1", byBlock),
         "region 'b1' carries no ldReference"
     )
 })
@@ -5215,9 +5519,17 @@ test_that(".ctwasRenormFit cuts a joint mvSuSiE fit to the row's condition", {
     cut <- pecotmr:::.ctwasRenormFit(row, fmr, meta)
     expect_equal(cut$mu, matrix(c(0.3, 0.4), 1L, 2L))
     expect_true(pecotmr:::.ctwasRenormalizable(cut, 2L))
-    # A row recording no position keeps the whole fit, which the
-    # renormalization then leaves alone.
+    # A result made before rows recorded a position reads it off the order of
+    # the fit's rows.
     fmr$jointIndex <- NULL
+    expect_equal(
+        pecotmr:::.ctwasRenormFit(row, fmr, meta)$mu,
+        matrix(c(0.3, 0.4), 1L, 2L)
+    )
+    # A row recording none -- merged over ranges whose fits dropped different
+    # conditions -- keeps the whole fit, which the renormalization then
+    # leaves alone.
+    fmr$jointIndex <- c(NA_integer_, NA_integer_)
     whole <- pecotmr:::.ctwasRenormFit(row, fmr, meta)
     expect_identical(dim(whole$mu), c(1L, 2L, 2L))
     expect_false(pecotmr:::.ctwasRenormalizable(whole, 2L))
@@ -5352,13 +5664,13 @@ test_that(".ctwasRegionGwasLd refuses a region whose rows use two references", {
         list(.ctp_makeHandle(snp_n = 12L), .ctp_makeHandle(snp_n = 6L))
     )
     expect_error(
-        pecotmr:::.ctwasRegionGwasLd(1L, list(gwas), list()),
+        pecotmr:::.ctwasRegionGwasLd(1L, list(gwas)),
         "2 different LD references; a region's LD is one matrix"
     )
 })
 
 # ===========================================================================
-# The rescues read the fine-mapping method they are told to
+# The rescues read the fit a fine-mapping method's weights came from
 # ===========================================================================
 
 # A gene's fine-mapping under two methods that disagree about variant 3: susie
@@ -5382,60 +5694,40 @@ test_that(".ctwasRegionGwasLd refuses a region whose rows use two references", {
     )
 }
 
-test_that(".ctwasRescueSource narrows the result to the named method", {
-    data(qtlDatasetExample)
-    vids <- .ctp_panelSnpInfo(pecotmr:::.qtlGenotypeSe(qtlDatasetExample))$SNP
-    fmr <- .ctp_twoMethodRescue(vids[1:5])
-    expect_null(pecotmr:::.ctwasRescueSource(NULL, NULL))
-    narrowed <- pecotmr:::.ctwasRescueSource(fmr, "susieInf")
-    expect_identical(as.character(narrowed$method), "susieInf")
-    expect_error(
-        pecotmr:::.ctwasRescueSource(fmr, NULL),
-        "must name the method of it .*available: susie, susieInf"
-    )
-    expect_error(
-        pecotmr:::.ctwasRescueSource(fmr, "ensemble"),
-        "'ensemble' is not a method of `fineMappingResult`"
-    )
-    expect_error(
-        pecotmr:::.ctwasRescueSource(NULL, "susie"),
-        "names a method of `fineMappingResult`, which was not given"
-    )
-})
-
-test_that("an ensemble gene is rescued by the fine-mapping method named", {
+test_that("a fine-mapping method's weights are capped by their own fit", {
     data(qtlDatasetExample)
     gh <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     vids <- .ctp_panelSnpInfo(gh)$SNP[1:5]
+    fmr <- .ctp_twoMethodRescue(vids)
     # Variant 3 carries the smallest weight, so the cap drops it unless a
     # rescue keeps it.
-    tw <- TwasWeights(
-        studyName = "study1",
-        context = "brain",
-        trait = "ENSG_example",
-        method = "ensemble",
-        entry = list(TwasWeightsRow(
-            variantIds = vids,
-            weights = c(0.1, -0.2, 0.05, 0.3, 0.15)
-        )),
-        ldReference = gh
-    )
-    fmr <- .ctp_twoMethodRescue(vids)
-    kept <- function(fineMappingMethod) {
+    kept <- function(method) {
+        tw <- TwasWeights(
+            studyName = "study1",
+            context = "brain",
+            trait = "ENSG_example",
+            method = method,
+            entry = list(TwasWeightsRow(
+                variantIds = vids,
+                weights = c(0.1, -0.2, 0.05, 0.3, 0.15)
+            )),
+            ldReference = gh
+        )
         wl <- .ctp_buildWeights(
             tw,
             .ctp_fullPanel(gh),
-            fineMappingResult = pecotmr:::.ctwasRescueSource(
-                fmr,
-                fineMappingMethod
-            ),
+            fineMappingResult = fmr,
             minPipCutoff = 0.5,
             maxNumVariants = 3L
         )
         rownames(wl[[1L]]$wgt)
     }
+    # susie's own fit puts variant 3's PIP at 0.9, susieInf's at 0.01.
     expect_true(vids[[3L]] %in% kept("susie"))
     expect_false(vids[[3L]] %in% kept("susieInf"))
+    # Another method's weights are capped by |weight|, whatever the gene's
+    # fine-mapping says.
+    expect_false(vids[[3L]] %in% kept("ensemble"))
 })
 
 # ===========================================================================

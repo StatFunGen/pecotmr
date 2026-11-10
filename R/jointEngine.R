@@ -48,6 +48,20 @@ NULL
     if (length(u) > 1L) str_flatten(u, ";") else NA_character_
 }
 
+# The joint key of a group over conditions `cond` (.JOINT_COLUMNS): what its
+# rows record and what a lookup of its fit matches on.
+# @noRd
+.jointKeyOfConditions <- function(cond) {
+    set_names(
+        map(
+            c("study", "context", "trait"),
+            .jointAxisMembers,
+            conditions = cond
+        ),
+        .JOINT_COLUMNS
+    )
+}
+
 # Slice a fine-mapping per-method CV payload (.fmSliceCv output:
 # list(samplePartition, prediction = list(<m>_predicted = sample x condition),
 # performance = list(<m>_performance = condition x 6))) down to one condition r,
@@ -115,9 +129,13 @@ NULL
 # accumulator / builder then records a chrUn sentinel). A row is named by its
 # whole (study, context, trait) tuple: a QtlSumStats can carry the same
 # (context, trait) in several studies, each with its own position and window.
-# A QtlDataset holds one study, so `study` has nothing to choose there.
+# A QtlDataset holds one study, so `study` has nothing to choose there; a
+# MultiStudyQtlDataset's individual-level study answers for itself.
 #' @importFrom rlang try_fetch
 .traitPosFor <- function(data, study, context, trait) {
+    if (.isMultiStudyComponent(data, study)) {
+        return(.traitPosFor(data[[study]], study, context, trait))
+    }
     if (methods::is(data, "QtlDataset")) {
         se <- try_fetch(
             .qtlContextSe(data, context = context),
@@ -154,6 +172,9 @@ NULL
 }
 
 .fitRegionFor <- function(data, study, context, trait, cisWindow = NULL) {
+    if (.isMultiStudyComponent(data, study)) {
+        return(.fitRegionFor(data[[study]], study, context, trait, cisWindow))
+    }
     if (methods::is(data, "QtlDataset")) {
         tp <- .traitPosFor(data, study, context, trait)
         if (is.null(tp)) {
@@ -176,6 +197,12 @@ NULL
         return(.rowRegionAt(data, idx[[1L]]))
     }
     NULL
+}
+
+# Whether `study` is one of a MultiStudyQtlDataset's individual-level studies.
+# @noRd
+.isMultiStudyComponent <- function(data, study) {
+    methods::is(data, "MultiStudyQtlDataset") && is_in(study, names(data))
 }
 
 # The rows of a QtlSumStats holding one (study, context, trait) tuple.
@@ -298,9 +325,18 @@ NULL
 # therefore maf = NA) even though the genotypes were right there. The window is
 # taken from the fit's OWN variants rather than a trait cis-window: a joint
 # group spans several traits, so no single trait's window describes X.
+#
+# A cross-study group carries its own, one column per condition, since its
+# conditions are different studies' samples and it was read from no one block.
 # @noRd
 .jointAfForGroup <- function(g, block) {
-    if (!is(g, "IndividualJointGroup") || is.null(block$af)) {
+    if (!is(g, "IndividualJointGroup")) {
+        return(NULL)
+    }
+    if (length(.jgAf(g)) > 0L) {
+        return(.jgAf(g))
+    }
+    if (is.null(block$af)) {
         return(NULL)
     }
     block$af[match(colnames(.jgX(g)), colnames(block$X))]
@@ -490,12 +526,13 @@ setMethod(
         return(vector("list", nCond))
     }
     survivors <- which(keep)
+    xy <- .jointMvFitRows(Xc, Yc[, survivors, drop = FALSE])
     fitted <- .jointMvFit(
         group,
-        Xc,
-        Yc[, survivors, drop = FALSE],
+        xy$X,
+        xy$Y,
         cfg,
-        args,
+        list_assign(args, methodArgs = .jointMvMethodArgs(args)),
         ddCut,
         verbose
     )
@@ -504,12 +541,49 @@ setMethod(
         .jointMvEntry,
         fitted = fitted,
         Xc = Xc,
+        Yc = Yc,
         keep = keep,
         survivors = survivors,
         cfg = cfg,
         af = args$af,
         region = args$region
     )
+}
+
+# The rows a joint fit is given: those observing at least one of the
+# conditions it fits. A cross-study group's rows each observe one study, so a
+# study the screen drops leaves rows that observe nothing. Every row of any
+# other group observes every condition, and the group is passed on as it is.
+# @noRd
+.jointMvFitRows <- function(Xc, Ys) {
+    observed <- rowSums(!is.na(Ys)) > 0L
+    if (all(observed)) {
+        return(list(X = Xc, Y = Ys))
+    }
+    list(
+        X = Xc[observed, , drop = FALSE],
+        Y = Ys[observed, , drop = FALSE]
+    )
+}
+
+# The run's per-method options, mvsusie's `standardize` defaulting to FALSE
+# when the residualizer scaled X and Y within each study
+# (`ResidualizationParam(scaleResiduals = TRUE)`, the default), so the shared
+# prior components describe per-SD effects. mvsusieR's own standardization
+# scales each outcome's prior by sd(y) / sqrt(n): on studies of unequal size,
+# its shared components would mean equal effects on the z scale, letting the
+# smaller study's per-SD effect be sqrt(n_large / n_small) times larger. Where
+# every condition has the same samples the two agree. A user's own
+# `standardize` wins.
+# @noRd
+.jointMvMethodArgs <- function(args) {
+    methodArgs <- args$methodArgs %||% list()
+    user <- as.list(methodArgs[["mvsusie"]] %||% list())
+    scaled <- .qtlScaleResiduals(args$residualizationParam)
+    if (!scaled || is_in("standardize", names(user))) {
+        return(args$methodArgs)
+    }
+    list_assign(methodArgs, mvsusie = list_assign(user, standardize = FALSE))
 }
 
 # SER pre-screen mask over the conditions: TRUE-all when no screen, the survivor
@@ -547,13 +621,15 @@ setMethod(
         args$mrmashPrior,
         key$study,
         key$trait,
-        context = key$context
+        context = key$context,
+        conditionNames = colnames(Ys)
     )
     mvCv <- .fmLookupMrmashCv(
         args$mrmashPrior,
         key$study,
         key$trait,
-        context = key$context
+        context = key$context,
+        conditionNames = colnames(Ys)
     )
     mvPrior <- .buildMvsusieReweightedPrior(mvFitParts, colnames(Ys), ddCut)
     fit <- if (.jointFitsFullData(cfg)) {
@@ -638,17 +714,19 @@ setMethod(
 }
 
 # One mvsusie per-condition entry (NULL for a screened-out column), sliced at
-# the condition's position in the fitted survivor set + its CV slice.
+# the condition's position in the fitted survivor set + its CV slice. Its
+# credible sets' purity and its allele frequencies are the condition's own:
+# read on the samples that observe it, which for a cross-study group are its
+# study's alone.
 # @noRd
 .jointMvEntry <- function(
     i,
     fitted,
     Xc,
+    Yc,
     keep,
     survivors,
     cfg,
-    credibleSetParam,
-    fitRetention,
     af = NULL,
     region = NULL
 ) {
@@ -662,9 +740,9 @@ setMethod(
         .fmPostprocessOne(
             fit = fitted$fit,
             method = "mvsusie",
-            dataX = Xc,
+            dataX = .jointConditionX(Xc, Yc, i),
             dataY = NULL,
-            af = af,
+            af = if (is.matrix(af)) af[, i] else af,
             region = region,
             conditionIdx = r,
             csInput = "X",
@@ -678,6 +756,17 @@ setMethod(
         .fmAttachCv(bare, .fmSliceCvCondition(fitted$cvM, r))
     }
     e
+}
+
+# The genotypes of the samples observing condition `i`: all of them, except in
+# a cross-study group, where each study's samples observe its own condition.
+# @noRd
+.jointConditionX <- function(Xc, Yc, i) {
+    observed <- !is.na(Yc[, i])
+    if (all(observed)) {
+        return(Xc)
+    }
+    Xc[observed, , drop = FALSE]
 }
 
 # (sumstats, fine-mapping) -> mvSuSiE-rss joint fit. RSS has no sample folds and
@@ -730,7 +819,8 @@ setMethod(
         args$mrmashPrior,
         key$study,
         key$trait,
-        context = key$context
+        context = key$context,
+        conditionNames = colnames(.jgZ(group))
     )
     mvPrior <- .buildMvsusieReweightedPrior(
         mvFitParts,
@@ -880,7 +970,7 @@ setMethod(
         methodKey <- .twasMethodKey(token)
         stdz <- cfg$standardized %||% FALSE
         fittedModels <- args$fittedModels %||% list()
-        ma <- .jointTwasMethodArgs(
+        resolved <- .jointTwasMethodArgs(
             args,
             methodKey,
             token,
@@ -890,6 +980,12 @@ setMethod(
             cond,
             cfg,
             stdz
+        )
+        ma <- .jointTwasMultitrait(
+            .jointTwasCoupled(resolved, token, cond, cfg),
+            token,
+            cond,
+            cfg
         )
         wm <- set_names(list(ma), methodKey)
         full <- .jointTwasFitFull(
@@ -905,9 +1001,12 @@ setMethod(
         )
         cvRes <- .jointTwasCv(Xc, Yc, wm, ma, full$W, args, cfg, token)
         # One per-condition entry: that condition's weight column + the shared
-        # fit + its CV slice. fitFullData = FALSE -> CV-only entry.
-        map(
+        # fit + its CV slice. fitFullData = FALSE -> CV-only entry. A
+        # fine-mapping fit's columns are its own conditions', each found by
+        # its row (args$fmColumns).
+        map2(
             seq_len(nCond),
+            args$fmColumns[[token]] %||% seq_len(nCond),
             .jointTwasEntry,
             full = full,
             cvRes = cvRes,
@@ -957,6 +1056,64 @@ setMethod(
         return(withFit)
     }
     .jointTwasSpikeSlabPi(withFit, token, Xc, Yc, cond, cfg, stdz)
+}
+
+# The weight functions the univariate methods fit a group across studies
+# with, under the penalty on the difference between the studies' effects
+# (.lassoCoupledWeights() and its peers). mcp and scad have none: ncvreg takes
+# no sparse design, and the stacked one is mostly zeros.
+# @noRd
+.TWAS_COUPLED_IMPL <- c(
+    lasso = ".lassoCoupledWeights",
+    enet = ".enetCoupledWeights",
+    ridge = ".ridgeCoupledWeights",
+    l0learn = ".l0learnCoupledWeights"
+)
+
+# A univariate method's arguments on a group across studies, in a run that
+# couples them (`studyCoupling` given): they name its coupled implementation,
+# which .resolveMethodFunction() reads, and carry the run's coupling
+# strengths. Any other group's, and each study's own fit for the ensemble
+# across studies (.twasStackEntries()), are left as they are.
+# @noRd
+.jointTwasCoupled <- function(ma, token, cond, cfg) {
+    impl <- .TWAS_COUPLED_IMPL[token]
+    if (
+        is.na(impl) ||
+            is.null(cfg$studyCoupling) ||
+            n_distinct(cond$study) < 2L
+    ) {
+        return(ma)
+    }
+    `attr<-`(
+        list_assign(ma, strengths = cfg$studyCoupling),
+        "impl",
+        unname(impl)
+    )
+}
+
+# A Bayesian alphabet method's arguments on a group of two or more
+# conditions, in a run that fits it jointly there (`multitraitTokens`: bayesC
+# and bayesN on BGLR, under a jointSpecification): they name the whole-Y
+# implementation that fits the group's conditions at once through BGLR's
+# Multitrait() (.bglrJointWeights()), and say whether the group spans
+# studies, whose residuals are independent. A one-condition group's, and
+# each study's own fit for the ensemble across studies (.twasStackEntries()),
+# are left as they are.
+# @noRd
+.jointTwasMultitrait <- function(ma, token, cond, cfg) {
+    if (!is_in(token, cfg$multitraitTokens) || nrow(cond) < 2L) {
+        return(ma)
+    }
+    `attr<-`(
+        list_assign(
+            ma,
+            method = token,
+            acrossStudies = n_distinct(cond$study) >= 2L
+        ),
+        "impl",
+        ".bglrJointWeights"
+    )
 }
 
 # The method args with the precomputed fine-mapping fit injected, when the
@@ -1029,7 +1186,7 @@ setMethod(
                 n = .jgN(group),
                 variantNames = .jgVariantIds(group)
             ),
-            ldReference = .jgLdRef(group),
+            ldReference = .jgOneLdRef(group, "mrmash"),
             fitRetention = .jointRetentionLevel(cfg)
         ),
         .twasUserArgs(args$methodArgs, "mrmash")
@@ -1207,10 +1364,14 @@ setMethod(
     )
 }
 
-# One per-condition TwasWeightsRow (empty when there are no full-data weights,
-# else that condition's weight column + shared fit + CV slice).
+# Condition `r`'s TwasWeightsRow (empty when there are no full-data weights,
+# else column `column` of the weights + shared fit + CV slice). NULL for a
+# condition the fit has no column of.
 # @noRd
-.jointTwasEntry <- function(r, full, cvRes, stdz, cfg) {
+.jointTwasEntry <- function(r, column, full, cvRes, stdz, cfg) {
+    if (is.na(column)) {
+        return(NULL)
+    }
     cvR <- if (!is.null(cvRes)) {
         .sliceTwasCvResultToCondition(cvRes, r)
     } else {
@@ -1226,38 +1387,41 @@ setMethod(
     }
     TwasWeightsRow(
         variantIds = full$vids,
-        weights = full$W[, r],
+        weights = full$W[, column],
         methodFits = full$fitParts,
         cvResult = cvR,
         weightStandardized = stdz
     )
 }
 
-# (sumstats, twas) -> mr.mash-rss joint fit as ONE matrix entry. No sample
-# folds.
+# (sumstats, twas) -> ONE matrix entry: mr.mash-rss fitted on the group, or a
+# fine-mapping method's weights read off its fit of the group
+# (.jointTwasRssWeights()). No sample folds.
 setMethod(
     "fitJointGroup",
     signature("SumStatsJointGroup", "TwasJointPipeline"),
     function(group, pipeline, token, args) {
         cfg <- .jpConfig(pipeline)
-        weights <- .jointMrmashRssWeights(group, cfg, args)
+        weights <- .jointTwasRssWeights(group, cfg, args, token)
+        if (is.null(weights)) {
+            return(NULL)
+        }
         vids <- rownames(weights) %||% rownames(.jgZ(group))
         fitParts <- attr(weights, "fit")
+        nCond <- ncol(.jgZ(group))
         # A single-condition fit comes back as a bare vector; the per-condition
         # split below reads it by column either way.
         wMatrix <- if (is.matrix(weights)) {
             weights
         } else {
-            matrix(
-                weights,
-                ncol = ncol(.jgZ(group)),
-                dimnames = list(vids, NULL)
-            )
+            matrix(weights, ncol = nCond, dimnames = list(vids, NULL))
         }
         # One per-condition entry: that condition's weight column + the shared
-        # fit.
-        map(
-            seq_len(ncol(wMatrix)),
+        # fit. A fine-mapping fit's columns are its own conditions', each found
+        # by its row (args$fmColumns).
+        map2(
+            seq_len(nCond),
+            args$fmColumns[[token]] %||% seq_len(nCond),
             .jointColEntry,
             vids = vids,
             weights = wMatrix,
@@ -1266,6 +1430,210 @@ setMethod(
         )
     }
 )
+
+# One summary-statistics group's weights for `token`: mr.mash-rss fitted on
+# it, or a fine-mapping method's read off the group's own fine-mapping fit
+# (.twasGroupFmArgs()), checked against the group's block. NULL when that
+# fit has no part for this region, or, with a warning, when the fit fails:
+# the other groups still run.
+# @noRd
+#' @importFrom rlang try_fetch
+.jointTwasRssWeights <- function(group, cfg, args, token) {
+    coupled <- .jointTwasIsCoupledRss(group, cfg, token)
+    if (!coupled) {
+        # Refused before the fit, which only warns: a group of studies on
+        # their own references is no group for a fit taking one LD matrix.
+        .jgOneLdRef(group, token)
+    }
+    try_fetch(
+        if (coupled) {
+            .jointTwasCoupledRss(group, cfg, args, token)
+        } else {
+            .jointTwasRssFit(group, cfg, args, token)
+        },
+        error = function(cnd) {
+            warn(
+                glue(
+                    "twasWeightsPipeline: {token} failed for ",
+                    "{.twasConditionsLabel(.jgConditions(group))}."
+                ),
+                parent = cnd
+            )
+            NULL
+        }
+    )
+}
+
+# @noRd
+.jointTwasRssFit <- function(group, cfg, args, token) {
+    adapter <- .twasFineMappingMethodAdapters[[token]]
+    if (is.null(adapter)) {
+        return(.jointMrmashRssWeights(group, cfg, args))
+    }
+    fit <- args$fittedModels[[token]]
+    if (is.null(fit)) {
+        return(NULL)
+    }
+    callArgs <- set_names(
+        list(
+            list(
+                z = .jgZ(group),
+                n = .jgN(group),
+                variantNames = .jgVariantIds(group)
+            ),
+            .jgOneLdRef(group, token),
+            fit,
+            .jointRetentionLevel(cfg, token)
+        ),
+        c("stat", "ldReference", adapter$rssFitArg, "fitRetention")
+    )
+    exec(adapter$rssWeightFn, !!!callArgs)
+}
+
+# The penalties the summary-statistics methods fit a group across studies
+# with, under the penalty on the difference between the studies' effects
+# (.rssCoupledWeights()), from each method's own settings.
+# @noRd
+.TWAS_COUPLED_RSS <- c(
+    lasso = "lasso",
+    enet = "enet",
+    ridge = "ridge",
+    mcp = "MCP",
+    scad = "SCAD",
+    l0learn = "L0"
+)
+
+# The samplers fitted across studies, each by the function fitting it:
+# PRS-CS as JointPRS fits ancestries, SDPR as SDPRX fits them.
+# @noRd
+.TWAS_COUPLED_MCMC <- c(
+    prsCs = ".prsCsCoupledWeights",
+    dprGibbs = ".sdprCoupledWeights"
+)
+
+# The summary-statistics methods fitted across studies: the penalized ones,
+# under the penalty on the difference between the studies' effects, and the
+# samplers.
+# @noRd
+.TWAS_COUPLED_SUMSTATS <- c(
+    names(.TWAS_COUPLED_RSS),
+    names(.TWAS_COUPLED_MCMC)
+)
+
+# The path options a PenalizedRssOptions holds, which a penalized method's
+# settings carry flattened.
+# @noRd
+.RSS_PATH_OPTIONS <- c("lambda", "thr", "maxiter", "strategy")
+
+# Whether `token` is fitted across `group`'s studies: a method fitted across
+# studies, on a group of two or more studies, in a run that fits them
+# (`studyCoupling` given).
+# @noRd
+.jointTwasIsCoupledRss <- function(group, cfg, token) {
+    is_in(token, .TWAS_COUPLED_SUMSTATS) &&
+        !is.null(cfg$studyCoupling) &&
+        n_distinct(.jgConditions(group)$study) >= 2L
+}
+
+# A method's weights across `group`'s studies: each study's z-scores over the
+# variants it carries, against its own LD reference, a sampler's by its chain
+# across studies (.TWAS_COUPLED_MCMC) and a penalized method's under its own
+# penalty, shrinkage grid and path options (.rssCoupledWeights()).
+# @noRd
+.jointTwasCoupledRss <- function(group, cfg, args, token) {
+    Z <- .jgZ(group)
+    .jointCoupledFit(
+        map(seq_len(ncol(Z)), .jointCoupledStat, Z = Z, N = .jgN(group)),
+        group,
+        cfg,
+        args,
+        token,
+        .jointRetentionLevel(cfg, token)
+    )
+}
+
+# `token`'s weights across the studies whose statistics are `stats`, each on
+# its condition's LD reference in `group`, at retention `retention`.
+# @noRd
+.jointCoupledFit <- function(stats, group, cfg, args, token, retention) {
+    user <- .twasUserArgs(args$methodArgs, token)
+    label <- glue("{token} across studies")
+    Z <- .jgZ(group)
+    refs <- map(seq_len(ncol(Z)), .jgLdRefAt, g = group)
+    if (is_in(token, names(.TWAS_COUPLED_MCMC))) {
+        return(exec(
+            .TWAS_COUPLED_MCMC[[token]],
+            stats,
+            refs,
+            rownames(Z),
+            user,
+            retention,
+            label
+        ))
+    }
+    .coupledRssRefuseSelection(user$selection, label)
+    .rssCoupledWeights(
+        stats,
+        refs,
+        rownames(Z),
+        .coupledRssSpec(token, user, label),
+        user$s %||% c(0.2, 0.5, 0.9, 1.0),
+        cfg$studyCoupling,
+        user[intersect(names(user), .RSS_PATH_OPTIONS)],
+        retention,
+        label
+    )
+}
+
+# Study `k`'s statistics: its z-scores and sample size over the variants it
+# carries (those not NA in its column).
+# @noRd
+.jointCoupledStat <- function(k, Z, N) {
+    held <- !is.na(Z[, k])
+    list(
+        z = unname(Z[held, k]),
+        n = rep(N[[k]], sum(held)),
+        variantNames = rownames(Z)[held]
+    )
+}
+
+# The penalty a method fits across studies with: its own, from its settings
+# (enet's alpha, mcp's and scad's gamma and alpha). l0learn fits the L0
+# penalty alone, as the individual-level coupled fit does.
+# @noRd
+.coupledRssSpec <- function(token, user, label) {
+    penalty <- .TWAS_COUPLED_RSS[[token]]
+    if (identical(penalty, "L0") && !is.null(user$penalty)) {
+        .coupledRequireL0(user$penalty)
+    }
+    switch(
+        penalty,
+        lasso = .rssPenalty("lasso"),
+        enet = .rssPenalty("lasso", alpha = user$alpha %||% 0.5),
+        ridge = .rssPenalty("lasso", alpha = 0),
+        L0 = .rssPenalty("L0"),
+        .rssPenalty(penalty, alpha = user$alpha %||% 1, gamma = user$gamma)
+    )
+}
+
+# A fit across studies picks each study's grid point on its own held-out
+# statistics, the rule the per-study fits default to.
+# @noRd
+.coupledRssRefuseSelection <- function(selection, label) {
+    if (is.null(selection) || identical(selection, "heldOut")) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "{label}: selection = \"{selection}\" does not apply; each ",
+            "study picks its grid point on its own held-out statistics."
+        ),
+        i = str_c(
+            "Leave `selection` unset, or pass studyCoupling = NULL to fit ",
+            "each study on its own."
+        )
+    ))
+}
 
 # ---- result construction (construct) ----------------------------------------
 
@@ -1666,9 +2034,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# cross-study / sumstats (no individual form: individual-level studies have
-# disjoint samples). One group per (context, trait) present in >= 2 scoped
-# studies; the study axis varies -> "joint" + jointStudies.
+# cross-study / sumstats. One group per (context, trait) present in >= 2
+# scoped studies; the study axis varies -> "joint" + jointStudies. The
+# individual-level form is .enumCrossStudyIndividual().
 .enumCrossStudySumstats <- function(data, scope, args = list()) {
     cols <- list(
         study = as.character(data$study),
@@ -1717,7 +2085,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # One cross-study joint group for a (context, trait) cell, or NULL when fewer
 # than two studies survive the scope filter -- a "joint" fit over one study is
-# just that study, so the cell contributes nothing.
+# just that study, so the cell contributes nothing. Studies on one LD
+# reference share its SNP order; studies each on their own reference (each
+# ancestry its own panel) hold their z-scores over the union of their
+# variants (.buildJointSumstatZUnion()), and the group one reference per
+# condition, which only the fits across studies under the coupling read.
 # @noRd
 .enumCrossStudyGroup <- function(data, scope, args, cols, cx, tid) {
     candidates <- which(
@@ -1737,27 +2109,333 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     if (length(tupleRows) < 2L) {
         return(NULL)
     }
-    ldReference <- .jointRowsLdRef(data, tupleRows, "jointCrossStudy")
-    stNames <- cols$study[tupleRows]
-    jz <- .buildJointSumstatZMatrix(
-        data,
-        tupleRows,
-        stNames,
-        errorLabel = "jointCrossStudy",
-        ldReference = ldReference,
-        cutoffs = args$cutoffs
-    )
+    jz <- .crossStudyGroupZ(data, tupleRows, cols, args$cutoffs)
     new(
         "SumStatsJointGroup",
         conditions = tibble(
-            study = stNames,
+            study = cols$study[tupleRows],
             context = cx,
             trait = tid
         ),
         Z = jz$Z,
-        ldReference = ldReference,
+        ldReference = jz$ldReference,
         N = jz$nVec
     )
+}
+
+# The z-scores, sample sizes and LD of a cross-study group's rows: one
+# reference and its SNP order when the rows share one, else each row's own
+# reference and the union of their variants (.buildJointSumstatZUnion()).
+# @noRd
+.crossStudyGroupZ <- function(data, tupleRows, cols, cutoffs) {
+    if (n_distinct(.ldRefKeys(data)[tupleRows]) > 1L) {
+        refs <- map(tupleRows, .rowLdRef, x = data)
+        jz <- .buildJointSumstatZUnion(
+            tupleRows,
+            cols,
+            refs,
+            list(data = data, cutoffs = cutoffs, label = "jointCrossStudy")
+        )
+        return(list_assign(jz, ldReference = refs))
+    }
+    ldReference <- .rowLdRef(data, tupleRows[[1L]])
+    jz <- .buildJointSumstatZMatrix(
+        data,
+        tupleRows,
+        cols$study[tupleRows],
+        errorLabel = "jointCrossStudy",
+        ldReference = ldReference,
+        cutoffs = cutoffs
+    )
+    list_assign(jz, ldReference = ldReference)
+}
+
+# cross-study / individual: a MultiStudyQtlDataset's individual-level studies
+# fitted together, one group per (context, trait) that two or more of its
+# scoped studies carry. Their samples are disjoint, so a group stacks them:
+# each study's samples in rows of their own, the union of the studies' variants
+# in the columns, and each study's phenotype observed on its own rows alone
+# (block-missing Y). Each study keeps its own residualization, filters and
+# scaling. The study axis varies -> "joint" + jointStudies.
+.enumCrossStudyIndividual <- function(data, scope, args = list()) {
+    studies <- intersect(names(data), scope$studies)
+    if (length(studies) < 2L) {
+        return(list())
+    }
+    .jeConcat(map(
+        unique(list_c(scope$contexts[studies])),
+        .enumCrossStudyIndividualForContext,
+        data = data,
+        scope = scope,
+        studies = studies,
+        args = args,
+        phenotypeFilter = .jointPhenotypeFilter(args)
+    ))
+}
+
+# One context's cross-study units, one per trait two or more studies carry in
+# it.
+# @noRd
+.enumCrossStudyIndividualForContext <- function(
+    cx,
+    data,
+    scope,
+    studies,
+    args,
+    phenotypeFilter
+) {
+    carried <- set_names(
+        map(studies, .xsStudyTraits, cx = cx, data = data, scope = scope),
+        studies
+    )
+    compact(map(
+        unique(list_c(carried)),
+        .deferCrossStudy,
+        cx = cx,
+        carried = carried,
+        data = data,
+        args = args,
+        phenotypeFilter = phenotypeFilter
+    ))
+}
+
+# The scoped, selected traits study `st` carries in context `cx`; none when the
+# context is not one of its scoped ones.
+# @noRd
+.xsStudyTraits <- function(st, cx, data, scope) {
+    if (!is_in(cx, scope$contexts[[st]])) {
+        return(character(0))
+    }
+    .enumContextTraits(cx, data[[st]], scope, st)
+}
+
+# One (context, trait) cross-study unit, or NULL when fewer than two studies
+# carry the trait with samples to fit. The phenotypes are read here, before any
+# genotype, so the studies' samples are known to be disjoint before a block is
+# read.
+# @noRd
+.deferCrossStudy <- function(tid, cx, carried, data, args, phenotypeFilter) {
+    plans <- compact(map(
+        names(keep(carried, .xsCarries, tid = tid)),
+        .xsStudyPlan,
+        tid = tid,
+        cx = cx,
+        data = data,
+        args = args,
+        phenotypeFilter = phenotypeFilter
+    ))
+    if (length(plans) < 2L) {
+        return(NULL)
+    }
+    .xsRequireDisjointSamples(plans, cx, tid)
+    .deferSelfReading(
+        tid,
+        .enumCrossStudyIndividualGroupFor,
+        cx = cx,
+        plans = plans,
+        args = args
+    )
+}
+
+# @noRd
+.xsCarries <- function(traits, tid) {
+    is_in(tid, traits)
+}
+
+# A cross-study unit's conditions, known before any genotype is read: one per
+# study planned into it (.deferCrossStudy()).
+# @noRd
+.xsUnitConditions <- function(unit) {
+    tibble(
+        study = map_chr(unit$args$plans, "study"),
+        context = unit$args$cx,
+        trait = unit$args[[1L]]
+    )
+}
+
+# One study's part of a cross-study unit, before any genotype is read: its
+# phenotype, residualized as the study's own fits residualize it, and the
+# genotypes it is to be read on. NULL when fewer than two samples have one.
+# @noRd
+.xsStudyPlan <- function(st, tid, cx, data, args, phenotypeFilter) {
+    qd <- data[[st]]
+    Y <- .fmResidPheno(
+        qd,
+        contexts = cx,
+        traitId = tid,
+        phenotypeFilter = phenotypeFilter,
+        residualizationParam = args$residualizationParam
+    )
+    if (nrow(Y) < 2L) {
+        return(NULL)
+    }
+    list(
+        study = st,
+        dataset = qd,
+        Y = Y,
+        spec = .qtlFitSpec(
+            .fmGenoWindow(qd, tid, args$region, args$cisWindow),
+            cx,
+            rownames(Y)
+        )
+    )
+}
+
+# The studies of a cross-study group share no sample: its rows are each one
+# study's, with residuals independent across studies, so a sample in two of
+# them would be counted twice as two unrelated ones.
+# @noRd
+.xsRequireDisjointSamples <- function(plans, cx, tid) {
+    samples <- list_c(map(plans, .xsPlanSamples))
+    shared <- unique(samples[duplicated(samples)])
+    if (length(shared) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "jointCrossStudy: the studies fitted for context '{cx}', trait ",
+            "'{tid}' share {length(shared)} sample(s)."
+        ),
+        i = glue("Studies: {str_flatten(map_chr(plans, 'study'), ', ')}."),
+        i = str_c(
+            "A cross-study fit stacks its studies' samples as rows of their ",
+            "own, so it needs studies on disjoint samples."
+        )
+    ))
+}
+
+# @noRd
+.xsPlanSamples <- function(plan) {
+    rownames(plan$Y)
+}
+
+# One (context, trait) cross-study group, each study's genotypes read on a plan
+# of its own (.xsStudyPiece()) and the studies stacked (.xsStack()); NULL when
+# fewer than two studies keep samples with genotypes.
+# @noRd
+.enumCrossStudyIndividualGroupFor <- function(tid, cx, plans, args) {
+    pieces <- compact(map(plans, .xsStudyPiece, args = args))
+    if (length(pieces) < 2L) {
+        return(NULL)
+    }
+    stacked <- .xsStack(pieces)
+    new(
+        "IndividualJointGroup",
+        conditions = tibble(
+            study = map_chr(pieces, "study"),
+            context = cx,
+            trait = tid
+        ),
+        X = stacked$X,
+        Y = stacked$Y,
+        af = stacked$af
+    )
+}
+
+# One study's residualized genotypes over its window, on its phenotype's
+# samples, with their allele frequencies: read on the study's own dataset under
+# the run's genotype filter and residualization, as its own fits read them.
+# @noRd
+.xsStudyPiece <- function(plan, args) {
+    fits <- .qtlRunWork(
+        .qtlWork(list(plan), list(plan$spec), .xsPieceOf),
+        plan$dataset,
+        args$genotypeFilter,
+        args$residualizationParam,
+        withAf = TRUE
+    )
+    fits[[1L]]
+}
+
+# A study's piece of its block: the samples the block shares with the
+# phenotype, or NULL when fewer than two, or no variant, remain.
+# @noRd
+.xsPieceOf <- function(plan, block) {
+    X <- block$X
+    common <- intersect(rownames(X), rownames(plan$Y))
+    if (length(common) < 2L || ncol(X) == 0L) {
+        return(NULL)
+    }
+    list(
+        study = plan$study,
+        X = .qtlRowsOf(X, common),
+        af = block$af %||% rep(NA_real_, ncol(X)),
+        Y = plan$Y[common, , drop = FALSE]
+    )
+}
+
+# The studies' pieces as one design. Rows: each study's samples. Columns: the
+# union of the studies' variants, matched by allele (matchVariants()), in
+# genomic order. Where a study spells a variant's alleles the other way round,
+# its genotypes are negated and its frequencies complemented into the union's
+# frame. A variant a study lacks is a column of zeros in its rows -- its
+# residualized genotypes have mean zero, so the column carries nothing there --
+# and NA among its frequencies. Y holds each study's phenotype on its own rows
+# and NA elsewhere; af is variants x studies.
+# @noRd
+.xsStack <- function(pieces) {
+    ids <- .xsVariantUnion(map(pieces, .xsPieceIds))
+    aligned <- map(pieces, .xsAlignPiece, ids = ids)
+    studies <- map_chr(pieces, "study")
+    xs <- map(aligned, "X")
+    ys <- map(seq_along(pieces), .xsStudyY, pieces = pieces, studies = studies)
+    afs <- map(aligned, "af")
+    list(
+        X = exec(rbind, !!!xs),
+        Y = exec(rbind, !!!ys),
+        af = `dimnames<-`(exec(cbind, !!!afs), list(ids, studies))
+    )
+}
+
+# @noRd
+.xsPieceIds <- function(piece) {
+    colnames(piece$X)
+}
+
+# The union of the studies' variant ids, in genomic order: each study adds the
+# variants no earlier one holds, matched by allele, in its own spelling.
+# @noRd
+.xsVariantUnion <- function(idSets) {
+    ids <- reduce(idSets, .xsAddVariants)
+    parsed <- parseVariantId(ids)
+    ids[order(parsed$chrom, parsed$pos)]
+}
+
+# @noRd
+.xsAddVariants <- function(held, ids) {
+    m <- matchVariants(ids, held, removeStrandAmbiguous = FALSE)
+    c(held, ids[!is_in(seq_along(ids), m$idxA)])
+}
+
+# A study's piece in the union's columns: its genotypes signed into the union's
+# allele frame and zero where it lacks the variant; its frequencies likewise,
+# complemented where flipped and NA where it lacks the variant.
+# @noRd
+.xsAlignPiece <- function(piece, ids) {
+    m <- matchVariants(colnames(piece$X), ids, removeStrandAmbiguous = FALSE)
+    at <- match(seq_along(ids), m$idxB)
+    src <- coalesce(m$idxA[at], 1L)
+    sign <- coalesce(m$sign[at], 0)
+    af <- piece$af[src]
+    X <- sweep(piece$X[, src, drop = FALSE], 2L, sign, "*")
+    list(
+        X = `dimnames<-`(X, list(rownames(piece$X), ids)),
+        af = if_else(is.na(at), NA_real_, if_else(sign < 0, 1 - af, af))
+    )
+}
+
+# Study `k`'s rows of the stacked phenotype: its own phenotype in its column,
+# NA in the other studies'.
+# @noRd
+.xsStudyY <- function(k, pieces, studies) {
+    y <- pieces[[k]]$Y[, 1L]
+    cols <- map(seq_along(studies), .xsYColumn, y = y, k = k)
+    `dimnames<-`(exec(cbind, !!!cols), list(rownames(pieces[[k]]$Y), studies))
+}
+
+# @noRd
+.xsYColumn <- function(j, y, k) {
+    if (j == k) unname(y) else rep(NA_real_, length(y))
 }
 
 # composed / individual: ONE group joining every scoped (context, trait) tuple
@@ -1988,13 +2666,13 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # first condition -- the joint fit is shared across conditions) and fix ONE
 # shared fold partition (so every method's out-of-fold CV predictions align for
 # the ensemble layer). Returns `args` unchanged for fine-mapping pipelines.
-.twasGroupArgs <- function(g, pipeline, args) {
+.twasGroupArgs <- function(g, pipeline, args, tokens) {
     if (!is(pipeline, "TwasJointPipeline")) {
         return(args)
     }
     cfg <- .jpConfig(pipeline)
     cond <- .jgConditions(g)
-    groupFmArgs <- .twasGroupFmArgs(args, cond)
+    groupFmArgs <- .twasGroupFmArgs(args, cond, tokens)
     out <- list_assign(args, !!!groupFmArgs)
     cv <- cfg$crossValidationParam %||% list()
     cvF <- cv$folds %||% 0L
@@ -2012,39 +2690,194 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# The group's fine-mapping fits, read off its first condition's row (every
-# condition's row of a joint fit keys the one fit), and its CV. Empty when
-# the caller supplied no fine-mapping result.
+# The group's fine-mapping fits and CV, from the fine-mapping fit over exactly
+# its conditions (.twasRequireFmGroup()): the fits read off its first
+# condition's row (every condition's row of a joint fit keys the one fit), and
+# each condition's column of each fit (.twasGroupFmColumns()). A group of one
+# condition reads that condition's own fits. Empty when the caller supplied no
+# fine-mapping result.
 # @noRd
-.twasGroupFmArgs <- function(args, cond) {
+.twasGroupFmArgs <- function(args, cond, tokens) {
     fmRes <- args$fineMappingResult
     if (is.null(fmRes)) {
         return(list())
     }
-    s1 <- as.character(cond$study[[1L]])
-    c1 <- as.character(cond$context[[1L]])
-    t1 <- as.character(cond$trait[[1L]])
+    joint <- .jointKeyOfConditions(cond)
+    .twasRequireFmGroup(fmRes, cond, joint, tokens)
     nR <- if (is.null(args$nRegions)) 1L else args$nRegions
     bi <- if (is.null(args$regionIndex)) 1L else args$regionIndex
-    af <- .twasFineMappingFits(fmRes, studyName = s1, context = c1, trait = t1)
-    list(
-        fittedModels = if (is.null(af)) {
-            list()
-        } else {
-            .twasFitsForRegion(af, bi, nR)
-        },
-        fineMappingCv = .twasGroupFmCv(fmRes, cond)
+    af <- .twasFineMappingFits(
+        fmRes,
+        studyName = as.character(cond$study[[1L]]),
+        context = as.character(cond$context[[1L]]),
+        trait = as.character(cond$trait[[1L]]),
+        joint = joint
     )
+    list(
+        fittedModels = .twasFitsForRegion(af, bi, nR),
+        fineMappingCv = .twasGroupFmCv(fmRes, cond, joint),
+        fmColumns = .twasGroupFmColumns(fmRes, cond, joint, names(af))
+    )
+}
+
+# Fine-mapping and TWAS group conditions alike, so a group reads a joint
+# fine-mapping method only from that method's fit over exactly its conditions.
+# Fits of its conditions over others are a divergence between the two runs,
+# not a fit to borrow; with none at all, there is nothing to read.
+# @noRd
+.twasRequireFmGroup <- function(fmRes, cond, joint, tokens) {
+    if (nrow(cond) < 2L) {
+        return(invisible(NULL))
+    }
+    walk(
+        keep(
+            intersect(tokens, names(.twasFineMappingMethodAdapters)),
+            .twasIsMultivariateToken
+        ),
+        .twasRequireFmGroupFor,
+        fmRes = fmRes,
+        cond = cond,
+        joint = joint
+    )
+}
+
+# @noRd
+.twasRequireFmGroupFor <- function(token, fmRes, cond, joint) {
+    own <- .twasFmConditionRows(fmRes, token, cond, joint)
+    if (length(own) > 0L) {
+        return(invisible(NULL))
+    }
+    others <- .twasFmConditionRows(fmRes, token, cond, NULL)
+    groups <- unique(map_chr(others, .twasFmGroupLabelAt, fmRes = fmRes))
+    found <- if (length(groups) == 0L) {
+        "it holds none of these conditions"
+    } else {
+        str_c(
+            "its fits of these conditions are over ",
+            str_flatten(groups, "; ")
+        )
+    }
+    abort(c(
+        glue(
+            "twasWeightsPipeline: fineMappingResult has no {token} fit over ",
+            "exactly {.twasJointKeyLabel(joint)} ",
+            "({.twasConditionsLabel(cond)}), the group this run fits them ",
+            "in; {found}."
+        ),
+        i = str_c(
+            "TWAS reads a joint fine-mapping fit only for the group it was ",
+            "fitted over: run both pipelines with the same jointSpecification ",
+            "and the same contexts / traitId selection."
+        )
+    ))
+}
+
+# The rows `token` holds for the conditions `cond`, those of joint group
+# `joint` (any group when NULL).
+# @noRd
+.twasFmConditionRows <- function(fmRes, token, cond, joint) {
+    list_c(
+        pmap(
+            list(
+                studyName = as.character(cond$study),
+                context = as.character(cond$context),
+                trait = as.character(cond$trait)
+            ),
+            .twasFmTokenRows,
+            x = fmRes,
+            token = token,
+            joint = joint
+        ),
+        ptype = integer()
+    )
+}
+
+# Row `i`'s group as a label (.twasJointKeyLabel()).
+# @noRd
+.twasFmGroupLabelAt <- function(i, fmRes) {
+    .twasJointKeyLabel(.jointKeyAt(fmRes, i))
+}
+
+# A joint key as text: its set axes, or "no joint group".
+# @noRd
+.twasJointKeyLabel <- function(joint) {
+    set <- discard(joint, is.na)
+    if (length(set) == 0L) {
+        return("no joint group")
+    }
+    str_flatten(str_c(names(set), " = ", unlist(set)), ", ")
+}
+
+# The first conditions of `cond` as "(study, context, trait)" text.
+# @noRd
+.twasConditionsLabel <- function(cond) {
+    shown <- head(str_c(cond$study, ", ", cond$context, ", ", cond$trait), 3L)
+    more <- if (nrow(cond) > 3L) {
+        str_c(" and ", nrow(cond) - 3L, " more")
+    } else {
+        ""
+    }
+    str_c(str_flatten(str_c("(", shown, ")"), ", "), more)
+}
+
+# Each condition's column of the group's fine-mapping fit, per method among
+# `tokens`: its row's position in the fit's condition axis, NA for a
+# condition the fit has no row of. NULL for a group of one condition, whose
+# fits have one column.
+# @noRd
+.twasGroupFmColumns <- function(fmRes, cond, joint, tokens) {
+    if (nrow(cond) < 2L) {
+        return(NULL)
+    }
+    set_names(
+        map(
+            tokens,
+            .twasFmColumnsFor,
+            fmRes = fmRes,
+            cond = cond,
+            joint = joint
+        ),
+        tokens
+    )
+}
+
+# @noRd
+.twasFmColumnsFor <- function(token, fmRes, cond, joint) {
+    map_int(
+        seq_len(nrow(cond)),
+        .twasFmColumnAt,
+        token = token,
+        fmRes = fmRes,
+        cond = cond,
+        joint = joint
+    )
+}
+
+# @noRd
+.twasFmColumnAt <- function(r, token, fmRes, cond, joint) {
+    rows <- .twasFmTokenRows(
+        fmRes,
+        token,
+        as.character(cond$study[[r]]),
+        as.character(cond$context[[r]]),
+        as.character(cond$trait[[r]]),
+        joint
+    )
+    if (length(rows) == 0L) {
+        return(NA_integer_)
+    }
+    as.integer(.fmrJointIndexAt(fmRes, rows[[1L]]))
 }
 
 # The group's fine-mapping CV with one prediction column and one performance
 # row per condition, in the group's order -- the shape .jointTwasCvResult()
 # gives, which the per-condition slice indexes. A joint fit stores each
 # condition's slice on that condition's row, so the first row alone covered
-# only the first condition. A method is handed off only when every condition
-# carries its CV, and only from one fold partition.
+# only the first condition. The rows are those of the group's own fit
+# (`joint`). A method is handed off only when every condition carries its
+# CV, and only from one fold partition.
 # @noRd
-.twasGroupFmCv <- function(fmRes, cond) {
+.twasGroupFmCv <- function(fmRes, cond, joint) {
     cvs <- pmap(
         list(
             studyName = as.character(cond$study),
@@ -2052,7 +2885,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             trait = as.character(cond$trait)
         ),
         .twasCvResultFor,
-        fineMappingResult = fmRes
+        fineMappingResult = fmRes,
+        joint = joint
     )
     if (length(cvs) == 1L) {
         return(cvs[[1L]])
@@ -2317,11 +3151,19 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
+# A unit not built yet that reads its own genotypes when it is: a cross-study
+# group needs a block from each study, which no one dataset's read gives, so the
+# builder reads them itself and is handed no X.
+# @noRd
+.deferSelfReading <- function(x, builder, ...) {
+    list(builder = builder, args = list(x, ...), readsOwn = TRUE)
+}
+
 # The genotypes a unit's fits are on; none for a group already built, which
-# holds its own.
+# holds its own, or for a unit that reads its own.
 # @noRd
 .unitSpec <- function(unit, data, args) {
-    if (is(unit, "JointGroup")) {
+    if (is(unit, "JointGroup") || isTRUE(unit$readsOwn)) {
         return(NULL)
     }
     .qtlFitSpec(
@@ -2336,16 +3178,21 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # no X).
 # @noRd
 .unitGroups <- function(unit, block = NULL) {
-    built <- if (is(unit, "JointGroup")) {
-        unit
-    } else {
-        unitArgs <- unit$args
-        exec(unit$builder, !!!unitArgs, X = block$X)
-    }
+    built <- if (is(unit, "JointGroup")) unit else .unitBuild(unit, block)
     if (is(built, "JointGroup")) {
         return(list(built))
     }
     compact(as.list(built))
+}
+
+# A deferred unit built: on `block`, or on the blocks it reads itself.
+# @noRd
+.unitBuild <- function(unit, block) {
+    unitArgs <- unit$args
+    if (isTRUE(unit$readsOwn)) {
+        return(exec(unit$builder, !!!unitArgs))
+    }
+    exec(unit$builder, !!!unitArgs, X = block$X)
 }
 
 # The group less any (context, trait) condition a per-context `traitId`
@@ -2393,8 +3240,50 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     block = NULL
 ) {
     grp <- .jointGroupProvenance(g, data, args)
-    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block, tokens)
-    perTokenEntries <- compact(set_names(
+    rowTokens <- .jointRowTokens(tokens, pipeline, grp$cond)
+    fitArgs <- .jointGroupFitArgs(g, pipeline, args, block, rowTokens)
+    perTokenEntries <- .jointRowEntries(
+        rowTokens,
+        g,
+        pipeline,
+        fitArgs,
+        grp,
+        args
+    )
+    tokenRecords <- .jeConcat(map(
+        names(perTokenEntries),
+        .jointTokenRecords,
+        perTokenEntries = perTokenEntries,
+        grp = grp,
+        data = data
+    ))
+    stacking <- .twasStacksGroup(pipeline, grp$cond)
+    if (!doEnsemble || (length(perTokenEntries) < 2L && !stacking)) {
+        return(tokenRecords)
+    }
+    c(
+        tokenRecords,
+        .jointEntryRecords(
+            .jointEnsembleEntries(
+                g,
+                perTokenEntries,
+                pipeline,
+                list_assign(args, samplePartition = fitArgs$samplePartition),
+                block,
+                stacking
+            ),
+            "ensemble",
+            grp,
+            data
+        )
+    )
+}
+
+# Each of `tokens`' entries on group `g`, by token, those producing none left
+# out.
+# @noRd
+.jointRowEntries <- function(tokens, g, pipeline, fitArgs, grp, args) {
+    compact(set_names(
         map(
             tokens,
             .jointTokenEntriesOrNull,
@@ -2406,25 +3295,113 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         ),
         tokens
     ))
-    tokenRecords <- .jeConcat(map(
-        names(perTokenEntries),
-        .jointTokenRecords,
-        perTokenEntries = perTokenEntries,
-        grp = grp,
-        data = data
-    ))
-    if (!doEnsemble || length(perTokenEntries) < 2L) {
-        return(tokenRecords)
+}
+
+# The tokens whose fits of a group become its rows. A run stacking across
+# studies (EnsembleParam(acrossStudies = TRUE)) also hands a group across
+# studies the methods it only stacks, fitted there one study at a time
+# (.twasStackEntries()); those make no rows of their own, as each study's
+# own run has them. The methods it fits across the studies, coupled or
+# jointly (`multitraitTokens`), do.
+# @noRd
+.jointRowTokens <- function(tokens, pipeline, cond) {
+    if (!.twasStacksGroup(pipeline, cond)) {
+        return(tokens)
     }
-    c(
-        tokenRecords,
-        .jointEntryRecords(
-            .twasEnsembleLayer(g, perTokenEntries, .jpConfig(pipeline)),
-            "ensemble",
-            grp,
-            data
+    cfg <- .jpConfig(pipeline)
+    coupled <- if (is.null(cfg$studyCoupling)) {
+        character(0)
+    } else {
+        union(names(.TWAS_COUPLED_IMPL), .TWAS_COUPLED_SUMSTATS)
+    }
+    intersect(tokens, union(coupled, cfg$multitraitTokens))
+}
+
+# Whether a run stacks across the studies of a group: its ensemble is on and
+# across studies, and the group spans two or more.
+# @noRd
+.twasStacksGroup <- function(pipeline, cond) {
+    ens <- if (is(pipeline, "TwasJointPipeline")) {
+        .jpConfig(pipeline)$ensembleParam
+    }
+    isTRUE(ens$enabled) &&
+        isTRUE(ens$acrossStudies) &&
+        n_distinct(cond$study) >= 2L
+}
+
+# A group's ensemble entries, per condition: its methods' out-of-fold
+# predictions stacked (.twasEnsembleLayer()), with each study's own fits
+# (.twasStackEntries()) when it is stacked across studies, cross-validated on
+# the fold partition its methods share (`args$samplePartition`). On summary
+# statistics only a group across studies is stacked here, on held-out splits
+# (.twasSumstatEnsembleLayer()), as each study's own methods are stacked one
+# tuple at a time.
+# @noRd
+.jointEnsembleEntries <- function(
+    g,
+    perTokenEntries,
+    pipeline,
+    args,
+    block,
+    stacking
+) {
+    cfg <- .jpConfig(pipeline)
+    if (is(g, "SumStatsJointGroup")) {
+        if (!stacking) {
+            return(list())
+        }
+        return(.twasSumstatEnsembleLayer(g, perTokenEntries, cfg, args))
+    }
+    stack <- if (stacking) .twasStackEntries(g, pipeline, args, block)
+    .twasEnsembleLayer(g, perTokenEntries, cfg, stack %||% list())
+}
+
+# Each study's own fit of every method a group across studies stacks, as
+# entries by condition: fitted on the study's samples alone (the other
+# studies' rows are missing from its condition), neither coupled nor joint,
+# and never read from the resume cache, which keeps the group's fits across
+# studies under the same tokens.
+# @noRd
+.twasStackEntries <- function(g, pipeline, args, block) {
+    tokens <- .jpConfig(pipeline)$ensembleParam$stackTokens
+    uncoupled <- new(
+        "TwasJointPipeline",
+        config = list_assign(
+            .jpConfig(pipeline),
+            studyCoupling = NULL,
+            multitraitTokens = NULL
         )
     )
+    fitArgs <- .jointGroupFitArgs(g, uncoupled, args, block, tokens)
+    compact(set_names(
+        map(
+            tokens,
+            .twasStackFit,
+            g = g,
+            pipeline = uncoupled,
+            fitArgs = fitArgs
+        ),
+        tokens
+    ))
+}
+
+# @noRd
+#' @importFrom rlang try_fetch
+.twasStackFit <- function(token, g, pipeline, fitArgs) {
+    entries <- try_fetch(
+        fitJointGroup(g, pipeline, token, fitArgs),
+        error = function(cnd) {
+            warn(
+                glue(
+                    "twasWeightsPipeline: {token} failed on a study of ",
+                    "the ensemble across studies."
+                ),
+                parent = cnd
+            )
+            NULL
+        }
+    )
+    if (length(entries) == 0L) NULL else entries
 }
 
 # A group's provenance: the ";"-joined members of each varying axis (identical
@@ -2436,11 +3413,12 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # @noRd
 .jointGroupProvenance <- function(g, data, args) {
     cond <- .jgConditions(g)
+    key <- .jointKeyOfConditions(cond)
     list(
         cond = cond,
-        js = .jointAxisMembers(cond, "study"),
-        jc = .jointAxisMembers(cond, "context"),
-        jt = .jointAxisMembers(cond, "trait"),
+        js = key$jointStudies,
+        jc = key$jointContexts,
+        jt = key$jointTraits,
         region = .jointGroupWindow(data, cond, args),
         ldReference = .jgLdRefOf(g)
     )
@@ -2454,7 +3432,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 .jointGroupFitArgs <- function(g, pipeline, args, block, tokens) {
     af <- .jointAfForGroup(g, block)
     list_assign(
-        .twasGroupArgs(g, pipeline, args),
+        .twasGroupArgs(g, pipeline, args, tokens),
         af = af,
         region = args$region,
         h2 = .jointGroupH2(g, pipeline, tokens)
@@ -2520,7 +3498,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # All-or-nothing resume-cache lookup for a token across a group's conditions
 # (twas uses the TwasWeights cache, FM the QtlFineMappingResult cache). NULL
-# unless every condition is cached.
+# unless every condition is cached from a fit of this same group.
 # @noRd
 .jointTokenCacheLookup <- function(pipeline, token, cond, cache) {
     if (is.null(cache)) {
@@ -2537,7 +3515,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         lookup = lookup,
         cache = cache,
         cond = cond,
-        token = token
+        token = token,
+        joint = .jointKeyOfConditions(cond)
     )
     if (any(map_lgl(cached, is.null))) NULL else cached
 }
@@ -2551,7 +3530,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # 1). Returns a length-nCond list of ensemble TwasWeightsRow (NULL where < 2
 # methods qualify). All methods share the group's fold partition (the runner
 # fixes it before fitting), so their out-of-fold predictions are comparable.
-.twasEnsembleLayer <- function(group, perTokenEntries, cfg) {
+.twasEnsembleLayer <- function(group, perTokenEntries, cfg, stack = list()) {
     tokens <- names(perTokenEntries)
     Y <- .jgY(group)
     r2Cut <- if (is.null(cfg$ensembleParam$r2Threshold)) {
@@ -2580,7 +3559,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         solver = solver,
         alpha = alpha,
         stdz = stdz,
-        cfg = cfg
+        cfg = cfg,
+        stack = stack,
+        group = group
     )
 }
 
@@ -2624,16 +3605,23 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # partition), skipping methods with no CV / weights.
 # @noRd
 .twasEnsembleCollect <- function(r, perTokenEntries, tokens) {
-    parts <- compact(map(
+    .twasEnsembleParts(compact(map(
         tokens,
         .twasEnsembleTokenPart,
         r = r,
         perTokenEntries = perTokenEntries
-    ))
+    )))
+}
+
+# The ensemble inputs of the predictors `parts`, each named by its `token`,
+# and the fold partition the first one with out-of-fold predictions shares.
+# @noRd
+.twasEnsembleParts <- function(parts) {
     if (length(parts) == 0L) {
         return(list(preds = list(), wts = list(), rsq = c()))
     }
     contributing <- map_chr(parts, "token")
+    partitions <- compact(map(parts, "partition"))
     list(
         preds = set_names(
             map(parts, "pred"),
@@ -2644,8 +3632,119 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             str_c(contributing, "_weights")
         ),
         rsq = set_names(map_dbl(parts, "rsq"), contributing),
-        partition = parts[[1L]]$partition
+        partition = if (length(partitions) > 0L) partitions[[1L]]
     )
+}
+
+# Two predictor sets' ensemble inputs as one.
+# @noRd
+.twasEnsembleMerge <- function(a, b) {
+    list(
+        preds = c(a$preds, b$preds),
+        wts = c(a$wts, b$wts),
+        rsq = c(a$rsq, b$rsq),
+        partition = a$partition %||% b$partition
+    )
+}
+
+# Condition `r`'s predictors from each study's own fits `stack`, named
+# "study/method": its own study's by their out-of-fold predictions, every
+# other study's as fixed predictors on its samples
+# (.twasStackExternalPart()). None without a stack.
+# @noRd
+.twasStackCollect <- function(r, stack, group, scale) {
+    if (length(stack) == 0L) {
+        return(list(preds = list(), wts = list(), rsq = c()))
+    }
+    studies <- .jgConditions(group)$study
+    own <- map2(
+        map(
+            names(stack),
+            .twasEnsembleTokenPart,
+            r = r,
+            perTokenEntries = stack
+        ),
+        str_c(studies[[r]], "/", names(stack)),
+        .twasRenamePart
+    )
+    external <- list_flatten(map(
+        setdiff(seq_along(studies), r),
+        .twasStackExternalParts,
+        r = r,
+        stack = stack,
+        group = group,
+        scale = scale
+    ))
+    .twasEnsembleParts(compact(c(own, external)))
+}
+
+# @noRd
+.twasRenamePart <- function(part, name) {
+    if (is.null(part)) NULL else list_assign(part, token = name)
+}
+
+# Study `k`'s own fits as fixed predictors of condition `r`.
+# @noRd
+.twasStackExternalParts <- function(k, r, stack, group, scale) {
+    map(
+        names(stack),
+        .twasStackExternalPart,
+        k = k,
+        r = r,
+        stack = stack,
+        group = group,
+        scale = scale
+    )
+}
+
+# Study k's fit of `tk`, carried to study r's genotypes
+# (.twasTransferWeights()) over the variants that vary among r's samples,
+# and applied to the group's samples, as its own methods' out-of-fold
+# predictions cover them all (the other studies' outcomes are missing from
+# r's condition). Its R^2 on r's samples is honest, as none of them fitted
+# it. NULL when k has no weights for `tk`.
+# @noRd
+.twasStackExternalPart <- function(tk, k, r, stack, group, scale) {
+    e <- stack[[tk]][[k]]
+    w <- if (!is.null(e)) .rowWeights(e)
+    if (is.null(w)) {
+        return(NULL)
+    }
+    X <- .jgX(group)
+    observed <- !is.na(.jgY(group)[, r])
+    carried <- .twasTransferWeights(
+        set_names(as.numeric(w), .rowVariantIds(e))[colnames(X)],
+        .jgAf(group),
+        c(k, r),
+        scale
+    )
+    varying <- .nonzeroVarColumns(X[observed, , drop = FALSE])
+    used <- replace(carried, !varying | is.na(carried), 0)
+    pred <- drop(X %*% used)
+    list(
+        token = str_c(.jgConditions(group)$study[[k]], "/", tk),
+        pred = matrix(pred, ncol = 1L, dimnames = list(rownames(X), NULL)),
+        weights = matrix(used, ncol = 1L, dimnames = list(colnames(X), NULL)),
+        rsq = .cvMetricRow(pred[observed], .jgY(group)[observed, r])[["rsq"]],
+        partition = NULL
+    )
+}
+
+# Weights `w` of study `pair[1]` carried to study `pair[2]`'s genotypes: as
+# they are per SD ("perSd"), or per allele ("perAllele"), each scaled by the
+# ratio of the target's genotype SD to the source's, sqrt(2 p (1 - p)) from
+# the studies' allele frequencies `af` (variants x studies), and 0 where the
+# source's is 0 or unknown.
+# @noRd
+.twasTransferWeights <- function(w, af, pair, scale) {
+    if (!identical(scale, "perAllele")) {
+        return(w)
+    }
+    sdFrom <- sqrt(
+        2 * af[names(w), pair[[1L]]] * (1 - af[names(w), pair[[1L]]])
+    )
+    sdTo <- sqrt(2 * af[names(w), pair[[2L]]] * (1 - af[names(w), pair[[2L]]]))
+    w * if_else(is.finite(sdFrom) & sdFrom > 0, sdTo / sdFrom, 0)
 }
 
 # SR-TWAS ensemble entry for one condition: combine the R^2-passing methods
@@ -2660,9 +3759,14 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     solver,
     alpha,
     stdz,
-    cfg
+    cfg,
+    stack = list(),
+    group = NULL
 ) {
-    coll <- .twasEnsembleCollect(r, perTokenEntries, tokens)
+    coll <- .twasEnsembleMerge(
+        .twasEnsembleCollect(r, perTokenEntries, tokens),
+        .twasStackCollect(r, stack, group, cfg$ensembleParam$transferScale)
+    )
     passing <- names(coll$rsq)[!is.na(coll$rsq) & coll$rsq >= r2Cut]
     if (length(passing) < 2L) {
         return(NULL)
@@ -2687,9 +3791,19 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     .twasEnsembleRow(
         ens,
         coll$partition,
-        variantIds(perTokenEntries[[passing[1L]]][[r]]),
-        stdz
+        rownames(coll$wts[[str_c(passing[1L], "_weights")]]),
+        stdz,
+        if (length(stack) > 0L) .twasConditionVarying(group, r)
     )
+}
+
+# Which of a group's variants vary among condition `r`'s samples, by name: in
+# a group across studies, a variant r's study lacks is zero there, and the
+# ensemble gives it no weight.
+# @noRd
+.twasConditionVarying <- function(group, r) {
+    X <- .jgX(group)[!is.na(.jgY(group)[, r]), , drop = FALSE]
+    set_names(.nonzeroVarColumns(X), colnames(X))
 }
 
 # The ensemble's row: its combined weights, and a cvResult recording its
@@ -2697,13 +3811,20 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # each method's does, beside the stacking coefficients and the methods' own
 # R^2. `fallbackIds` names the weights when the ensemble's do not.
 # @noRd
-.twasEnsembleRow <- function(ens, partition, fallbackIds, stdz) {
+.twasEnsembleRow <- function(
+    ens,
+    partition,
+    fallbackIds,
+    stdz,
+    varying = NULL
+) {
     ew <- ens$ensembleTwasWeights
     vids <- (if (!is.null(names(ew))) names(ew) else rownames(ew)) %||%
         fallbackIds
+    kept <- if (is.null(varying)) 1 else as.numeric(varying[vids])
     TwasWeightsRow(
         variantIds = vids,
-        weights = as.numeric(ew),
+        weights = as.numeric(ew) * kept,
         cvResult = compact(list(
             samplePartition = partition,
             predictions = ens$predictions,
@@ -2712,6 +3833,311 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             methodPerformance = ens$methodPerformance
         )),
         weightStandardized = stdz
+    )
+}
+
+# ---- The ensemble across summary-statistics studies -------------------------
+#
+# A summary-statistics group across studies stacked as LEOPARD combines
+# ancestries (EnsembleParam(acrossStudies = TRUE)): per condition, the
+# study's own predictors -- the group's fits across studies and each
+# method's own fit of the study -- refit on held-out splits of its
+# statistics, beside every other study's own fits as fixed predictors
+# carried to the study, all through .sumstatEnsemble().
+
+# Each condition's ensemble entry, NULL where fewer than two predictors clear
+# the threshold.
+# @noRd
+.twasSumstatEnsembleLayer <- function(g, perTokenEntries, cfg, args) {
+    studyFits <- map(
+        seq_len(ncol(.jgZ(g))),
+        .twasSumstatStudyFits,
+        g = g,
+        cfg = cfg,
+        args = args
+    )
+    map(
+        seq_along(studyFits),
+        .twasSumstatStackCondition,
+        g = g,
+        perTokenEntries = perTokenEntries,
+        studyFits = studyFits,
+        cfg = cfg,
+        args = args
+    )
+}
+
+# Condition `k`'s own fits of every method the run stacks, made as the
+# per-tuple path makes them (.twasQssUnivariateFitOne()) on the study's
+# statistics and LD reference, with the fit context their refits read.
+# @noRd
+.twasSumstatStudyFits <- function(k, g, cfg, args) {
+    cond <- .jgConditions(g)
+    key <- c(cond$study[[k]], cond$context[[k]], cond$trait[[k]])
+    held <- .jointCoupledStat(k, .jgZ(g), .jgN(g))
+    rowCtx <- list(
+        variantIds = held$variantNames,
+        stat = list(
+            z = held$z,
+            n = .jgN(g)[[k]],
+            variantNames = held$variantNames
+        ),
+        ldReference = .ldRefInMemory(
+            .jgLdRefAt(g, k),
+            held$variantNames,
+            label = "twasWeightsPipeline"
+        )
+    )
+    tokens <- cfg$ensembleParam$stackTokens
+    fitCtx <- c(
+        rowCtx,
+        list(
+            h2 = .twasQssRowH2(
+                cfg$h2,
+                key[[1L]],
+                key[[2L]],
+                key[[3L]],
+                rowCtx,
+                tokens
+            )
+        )
+    )
+    list(
+        fitCtx = fitCtx,
+        rows = compact(map(
+            tokens,
+            .twasQssUnivariateFitOne,
+            st = key[[1L]],
+            ctx = key[[2L]],
+            tr = key[[3L]],
+            fitCtx = fitCtx,
+            methodArgs = args$methodArgs,
+            fitRetention = "none",
+            fineMappingResult = NULL
+        ))
+    )
+}
+
+# Condition `r`'s ensemble entry (.sumstatEnsemble()), or NULL.
+# @noRd
+.twasSumstatStackCondition <- function(
+    r,
+    g,
+    perTokenEntries,
+    studyFits,
+    cfg,
+    args
+) {
+    fitCtx <- studyFits[[r]]$fitCtx
+    own <- .twasSumstatOwnMethods(r, g, perTokenEntries, studyFits, cfg, args)
+    external <- .twasSumstatExternal(
+        r,
+        g,
+        studyFits,
+        cfg$ensembleParam$transferScale
+    )
+    if (length(own) + ncol(external) < 2L) {
+        return(NULL)
+    }
+    stat <- fitCtx$stat
+    ld <- .rssLdSource(stat, fitCtx$ldReference, "twasWeightsPipeline")
+    ens <- .sumstatEnsemble(
+        own,
+        external,
+        .lassosumClampCor(
+            .rssMarginalCor(stat, n = stat$n, p = .ldSourceSize(ld))
+        ),
+        stat$n,
+        ld,
+        cfg$ensembleParam$r2Threshold
+    )
+    if (is.null(ens)) {
+        return(NULL)
+    }
+    .twasSumstatEnsembleRow(ens, fitCtx$variantIds)
+}
+
+# Condition `r`'s own predictors: the group's fits across studies, by token,
+# and each method's own fit of its study, as "study/method".
+# @noRd
+.twasSumstatOwnMethods <- function(
+    r,
+    g,
+    perTokenEntries,
+    studyFits,
+    cfg,
+    args
+) {
+    fits <- studyFits[[r]]
+    c(
+        compact(map(
+            set_names(names(perTokenEntries)),
+            .twasCoupledStackMethod,
+            r = r,
+            g = g,
+            perTokenEntries = perTokenEntries,
+            cfg = cfg,
+            args = args
+        )),
+        compact(set_names(
+            map(
+                fits$rows,
+                .twasQssStackMethod,
+                fitCtx = fits$fitCtx,
+                methodArgs = args$methodArgs
+            ),
+            str_c(
+                .jgConditions(g)$study[[r]],
+                "/",
+                map_chr(fits$rows, "method")
+            )
+        ))
+    )
+}
+
+# The group's fit across studies of `token` as condition `r`'s predictor:
+# its weights over r's variants, and the refit that replaces r's statistics
+# by a held-out split's training part and fits across the studies again
+# (.twasCoupledRefit()). NULL when the fit has no weights for r.
+# @noRd
+.twasCoupledStackMethod <- function(token, r, g, perTokenEntries, cfg, args) {
+    e <- perTokenEntries[[token]][[r]]
+    w <- if (!is.null(e)) .rowWeights(e)
+    if (is.null(w)) {
+        return(NULL)
+    }
+    Z <- .jgZ(g)
+    stats <- map(seq_len(ncol(Z)), .jointCoupledStat, Z = Z, N = .jgN(g))
+    ids <- stats[[r]]$variantNames
+    list(
+        weights = replace_na(
+            unname(set_names(as.numeric(w), .rowVariantIds(e))[ids]),
+            0
+        ),
+        refit = list(
+            fn = ".twasCoupledRefit",
+            args = list(
+                token = token,
+                stats = stats,
+                r = r,
+                g = g,
+                cfg = cfg,
+                args = args
+            )
+        )
+    )
+}
+
+# The fit across studies of `token` on a group whose condition `r` is
+# replaced by a held-out split's training part (`trainCor` on `share` of its
+# samples): r's weights over its own variants.
+# @noRd
+.twasCoupledRefit <- function(trainCor, share, token, stats, r, g, cfg, args) {
+    n <- share * stats[[r]]$n
+    trained <- list_assign(
+        stats[[r]],
+        z = trainCor * sqrt((n - 2) / (1 - trainCor^2)),
+        n = n
+    )
+    W <- .jointCoupledFit(
+        replace(stats, r, list(trained)),
+        g,
+        cfg,
+        args,
+        token,
+        "none"
+    )
+    unname(W[stats[[r]]$variantNames, r])
+}
+
+# The other studies' own fits as fixed predictors of condition `r`, over its
+# variants (variants x predictors, named "study/method"): each carried to r
+# (.twasSumstatTransfer()), 0 where its study lacks a variant.
+# @noRd
+.twasSumstatExternal <- function(r, g, studyFits, scale) {
+    ids <- studyFits[[r]]$fitCtx$variantIds
+    columns <- list_flatten(map(
+        setdiff(seq_along(studyFits), r),
+        .twasSumstatExternalStudy,
+        r = r,
+        g = g,
+        studyFits = studyFits,
+        ids = ids,
+        scale = scale
+    ))
+    if (length(columns) == 0L) {
+        return(matrix(0, length(ids), 0L))
+    }
+    exec(cbind, !!!columns)
+}
+
+# Study `k`'s own fits over condition r's variants `ids`, one named column
+# each.
+# @noRd
+.twasSumstatExternalStudy <- function(k, r, g, studyFits, ids, scale) {
+    rows <- studyFits[[k]]$rows
+    set_names(
+        map(
+            rows,
+            .twasSumstatExternalColumn,
+            ids = ids,
+            refs = list(.jgLdRefAt(g, k), .jgLdRefAt(g, r)),
+            scale = scale
+        ),
+        str_c(.jgConditions(g)$study[[k]], "/", map_chr(rows, "method"))
+    )
+}
+
+# @noRd
+.twasSumstatExternalColumn <- function(row, ids, refs, scale) {
+    w <- replace_na(
+        unname(set_names(weights(row$entry), variantIds(row$entry))[ids]),
+        0
+    )
+    .twasSumstatTransfer(w, ids, refs, scale)
+}
+
+# Weights `w` over variants `ids` of the study on LD reference `refs[[1]]`
+# carried to the study on `refs[[2]]`: as they are per SD ("perSd"), or per
+# allele ("perAllele"), each scaled by the ratio of the target's genotype SD
+# to the source's, from each reference's genotype variances
+# (.ldRefVariance()), which needs every source variant's allele frequency.
+# @noRd
+.twasSumstatTransfer <- function(w, ids, refs, scale) {
+    if (!identical(scale, "perAllele") || !any(w != 0)) {
+        return(w)
+    }
+    used <- w != 0
+    variances <- map(refs, .twasRefVariance, ids = ids[used])
+    if (anyNA(variances[[1L]]) || anyNA(variances[[2L]])) {
+        abort(c(
+            str_c(
+                "twasWeightsPipeline: EnsembleParam(transferScale = ",
+                "\"perAllele\") needs each study's allele frequencies, and ",
+                "an LD reference records none."
+            ),
+            i = "Give the LdMatrix's variants an `AF` column, or use \"perSd\"."
+        ))
+    }
+    replace(
+        w,
+        used,
+        w[used] *
+            if_else(
+                variances[[1L]] > 0,
+                sqrt(variances[[2L]] / variances[[1L]]),
+                0
+            )
+    )
+}
+
+# Each variant's genotype variance on an LD reference (.ldRefVariance()), in
+# the order of `ids`.
+# @noRd
+.twasRefVariance <- function(ref, ids) {
+    .ldRefVariance(
+        ref,
+        .ldFromRefMatch(ref, ids, "twasWeightsPipeline", "error")$idx
     )
 }
 
@@ -2834,6 +4260,14 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         pattern = "study",
         dataForm = "sumstats",
         enumerate = .enumCrossStudySumstats,
+        minGroup = 2L
+    ),
+    # A MultiStudyQtlDataset's individual-level studies, block-missing Y.
+    new(
+        "JointDispatchCell",
+        pattern = "study",
+        dataForm = "individual",
+        enumerate = .enumCrossStudyIndividual,
         minGroup = 2L
     ),
     new(
@@ -2975,6 +4409,24 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     traitIds,
     args
 ) {
+    scope <- .jointSpecScope(
+        spec,
+        data,
+        dataForm,
+        contexts,
+        traitIds,
+        args$region
+    )
+    pattern <- if (length(spec$axes) > 1L) "composed" else spec$axes[[1L]]
+    cell <- .lookupJointCell(pattern, dataForm)
+    spArgs <- c(args, list(axes = spec$axes))
+    .jointCellWork(cell, pipeline, data, scope, jointMethods, spArgs)
+}
+
+# One spec's scope: its own, narrowed to the run's selection and, on
+# individual-level data with no trait named, to the traits inside `region`.
+# @noRd
+.jointSpecScope <- function(spec, data, dataForm, contexts, traitIds, region) {
     resolved <- .fmResolveSpecScope(
         spec,
         data,
@@ -2983,27 +4435,25 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
     restrictToRegion <- dataForm == "individual" &&
         is.null(traitIds) &&
-        !is.null(args$region)
-    scope <- if (restrictToRegion) {
-        .jointRestrictRegionTraits(resolved, data, args$region)
+        !is.null(region)
+    if (restrictToRegion) {
+        .jointRestrictRegionTraits(resolved, data, region)
     } else {
         resolved
     }
-    pattern <- if (length(spec$axes) > 1L) "composed" else spec$axes[[1L]]
-    cell <- .lookupJointCell(pattern, dataForm)
-    spArgs <- c(args, list(axes = spec$axes))
-    .jointCellWork(cell, pipeline, data, scope, jointMethods, spArgs)
 }
 
 # One study's traits narrowed to those inside `region`; left alone when the
-# study has no context to read a phenotype from.
+# study has no context to read a phenotype from. A MultiStudyQtlDataset's
+# individual-level study reads its own.
 # @noRd
 .jointStudyTraitsInRegion <- function(st, scope, data, region) {
     ctxs <- scope$contexts[[st]]
     if (length(ctxs) == 0L) {
         return(scope$traits[[st]])
     }
-    se <- .qtlContextSe(data, context = ctxs[[1L]])
+    study <- if (.isMultiStudyComponent(data, st)) data[[st]] else data
+    se <- .qtlContextSe(study, context = ctxs[[1L]])
     .fmTraitsInRegion(
         se,
         intersect(scope$traits[[st]], rownames(se)),
@@ -3032,9 +4482,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
 }
 
-# Individual-level (QtlDataset) input cannot joint over study: studies have
-# disjoint samples (cross-study joints live on the sumstats slot). Preserve the
-# historical axis-specific error messages.
+# A QtlDataset is one study, so a study axis has nothing to join on it. Studies
+# join on summary statistics, and fine-mapping also joins a
+# MultiStudyQtlDataset's individual-level studies (.enumCrossStudyIndividual());
+# a composed axis including the study needs summary statistics either way.
 .jointRejectStudyOnIndividual <- function(parsedJointSpec) {
     for (spec in parsedJointSpec) {
         if (is_in("study", spec$axes)) {
@@ -3046,8 +4497,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
                 abort(msg)
             }
             msg <- glue(
-                "jointSpecification with axis 'study' requires sumstats input ",
-                "(QtlDataset is a single individual-level study)."
+                "jointSpecification with axis 'study' needs more than one ",
+                "study (QtlDataset is a single individual-level study)."
             )
             abort(msg)
         }
@@ -3068,12 +4519,16 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     m[r, , drop = FALSE]
 }
 
-# One per-condition TwasWeightsRow from column `r` of a joint weight matrix.
+# Condition `r`'s TwasWeightsRow from column `column` of a joint weight
+# matrix; NULL for a condition the fit has no column of.
 # @noRd
-.jointColEntry <- function(r, vids, weights, fitParts, cfg) {
+.jointColEntry <- function(r, column, vids, weights, fitParts, cfg) {
+    if (is.na(column)) {
+        return(NULL)
+    }
     TwasWeightsRow(
         variantIds = vids,
-        weights = weights[, r],
+        weights = weights[, column],
         methodFits = fitParts,
         weightStandardized = TRUE
     )
@@ -3171,21 +4626,28 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         traitPos = tpos,
         region = grp$region,
         # The reference the group was fitted against, so each result row
-        # keeps it; NULL for an individual-level group.
-        ldReference = grp$ldReference,
+        # keeps it -- its own, when each study is on its own -- and NULL for
+        # an individual-level group.
+        ldReference = if (.jgIsPerConditionLd(grp$ldReference)) {
+            grp$ldReference[[i]]
+        } else {
+            grp$ldReference
+        },
         jointIndex = jointIndex[[i]]
     )
 }
 
-# Resume-cache lookup for condition `i` via the pipeline-specific `lookup` fn.
+# Resume-cache lookup for condition `i` of joint group `joint` via the
+# pipeline-specific `lookup` fn.
 # @noRd
-.jointCacheLookupAt <- function(i, lookup, cache, cond, token) {
+.jointCacheLookupAt <- function(i, lookup, cache, cond, token, joint) {
     lookup(
         cache,
         as.character(cond$study[[i]]),
         as.character(cond$context[[i]]),
         as.character(cond$trait[[i]]),
-        token
+        token,
+        joint
     )
 }
 

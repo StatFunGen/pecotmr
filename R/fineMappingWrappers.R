@@ -2818,9 +2818,6 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #' @return The fit object returned by \code{mvsusieR::mvsusie}.
 #' @examples
 #' \donttest{
-#' # mvsusieR 0.3.0 calls susieR::block_coordinate_ascent unqualified, so
-#' # susieR must be attached until mvsusieR adds the NAMESPACE import.
-#' library(susieR)
 #' data(multiTraitData)
 #' X <- multiTraitData$X[, 1:60]
 #' Y <- multiTraitData$Y
@@ -2857,7 +2854,15 @@ fitMvsusie <- function(
         ),
         !!!user
     )
-    exec(mvsusieR::mvsusie, !!!callArgs)
+    if (!anyNA(Y)) {
+        return(exec(mvsusieR::mvsusie, !!!callArgs))
+    }
+    # mvsusieR 0.3.0's missing-Y fit estimates the residual variance in a
+    # loop that calls susieR's block_coordinate_ascent() without importing
+    # it, so the call finds it only on the search path. susieR is attached
+    # for this call alone, and detached after unless it already was. Drop
+    # this once mvsusieR imports the function.
+    withr::with_package("susieR", exec(mvsusieR::mvsusie, !!!callArgs))
 }
 
 #' Fit mvSuSiE-RSS on summary-statistic (Z, R, N) data

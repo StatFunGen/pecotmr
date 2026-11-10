@@ -19,7 +19,9 @@ bayesLWeights(
 \arguments{
 \item{X}{A numeric matrix of genotypes (samples x variants).}
 
-\item{y}{A numeric vector of phenotypes, one per row of \code{X}.}
+\item{y}{A numeric vector of phenotypes, one per row of \code{X}; or, for
+\code{bayesC} and \code{bayesN} on \code{"bglr"}, a matrix with one
+column per condition, which may hold missing values (see Description).}
 
 \item{backend}{\code{"qgg"} (default), \code{"bglr"} or
 \code{"hibayes"}.}
@@ -31,7 +33,9 @@ estimator to estimate it with first, on \code{X} and \code{y}:
 \code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
 \code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
 0.001 and capped at 0.99, and an estimate that cannot be made leaves
-the engine's default, with a warning. qgg reads it as \code{h2} and
+the engine's default, with a warning. For a matrix \code{y} the
+estimator runs on each column's observed samples and their mean is
+used, as \code{Multitrait()} takes one. qgg reads it as \code{h2} and
 BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
 genetic and residual variances (\code{vg}, \code{ve}) its defaults
 would give at \code{h2}. Setting that engine's spelling through

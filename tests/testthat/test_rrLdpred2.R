@@ -1,87 +1,12 @@
 context("regularized_regression - LDpred2")
 
-# ---- pecotmr's sampler against bigsnpr's -----------------------------------
+# ---- divergence and the chain filter ----------------------------------------
 
-# The panel's factor for pecotmr, the matrix it gives for bigsnpr. Effects in
-# tight LD are not identified from the panel's 100 samples, so the fits are
-# compared by their fitted correlations R b, averaged over seeds.
-.ld2FittedMean <- function(fit, R, seeds) {
-    fitted <- map(seeds, function(sd) {
-        set.seed(sd)
-        as.vector(R %*% fit())
-    })
-    reduce(fitted, `+`) / length(seeds)
-}
-
-test_that("pecotmr's LDpred2-grid sampler agrees with bigsnpr's", {
-    skip_if_not_installed("bigsnpr")
-    d <- .rrwPanelStatLd()
-    R <- pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test")
-    point <- function(ld, backend) {
-        function() {
-            ldpred2GridWeights(
-                d$stat,
-                ld,
-                backend = backend,
-                p = 0.1,
-                h2 = 0.15,
-                sparse = FALSE
-            )
-        }
-    }
-    ours <- .ld2FittedMean(point(d$panel, "pecotmr"), R, 1:6)
-    theirs <- .ld2FittedMean(point(d$ldMatrix, "bigsnpr"), R, 1:6)
-    expect_gt(cor(ours, theirs), 0.99)
-})
-
-test_that("pecotmr's LDpred2-auto sampler agrees with bigsnpr's", {
-    skip_if_not_installed("bigsnpr")
-    d <- .rrwPanelStatLd()
-    R <- pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test")
-    run <- function(ld, backend) {
-        ldpred2AutoWeights(
-            d$stat,
-            ld,
-            backend = backend,
-            h2Init = 0.1,
-            pInit = c(0.05, 0.1),
-            fitRetention = "slim"
-        )
-    }
-    set.seed(1)
-    ours <- run(d$panel, "pecotmr")
-    set.seed(1)
-    theirs <- run(d$ldMatrix, "bigsnpr")
-    expect_gt(cor(as.vector(R %*% ours), as.vector(R %*% theirs)), 0.99)
-    expect_equal(attr(ours, "fit")$h2, attr(theirs, "fit")$h2, tolerance = 0.2)
-})
-
-# ---- the sampler ------------------------------------------------------------
-
-test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
+test_that("an LDpred2 run stops once its effects outgrow the statistics", {
     # Statistics of 1e-6 on one sample each leave the prior's draws, of
     # variance near 1, far above twice the statistics' sum of squares.
     set.seed(6)
     ldFactor <- scale(matrix(rnorm(40 * 5), 40, 5))
-    run <- pecotmr:::ldpred2FactorCpp(
-        rep(1e-6, 5),
-        ldFactor,
-        rep(1, 5),
-        FALSE,
-        1,
-        1,
-        FALSE,
-        1,
-        TRUE,
-        1e-5,
-        1,
-        1,
-        100L,
-        50L,
-        FALSE,
-        1L
-    )
-    expect_true(run$diverged)
     stat <- list(cor = rep(1e-6, 5), n = rep(1, 5), variantNames = .rrwIds(5))
     ld <- .rrwLdMatrix(crossprod(ldFactor) / 39, nSamples = 40L)
     skip_if_not_installed("bigsnpr")
@@ -92,40 +17,6 @@ test_that("an LDpred2 chain stops once its effects outgrow the statistics", {
     expect_error(
         ldpred2AutoWeights(stat, ld, h2Init = 1, pInit = 1),
         "every chain diverged"
-    )
-})
-
-test_that("pecotmr's LDpred2 sampler checks its input and reports progress", {
-    set.seed(7)
-    ldFactor <- scale(matrix(rnorm(40 * 5), 40, 5))
-    run <- function(n, verbose) {
-        pecotmr:::ldpred2FactorCpp(
-            rep(0.3, 5),
-            ldFactor,
-            n,
-            FALSE,
-            0.5,
-            0.2,
-            FALSE,
-            1,
-            TRUE,
-            1e-5,
-            1,
-            1,
-            100L,
-            50L,
-            verbose,
-            1L
-        )
-    }
-    expect_error(
-        run(rep(100, 4), FALSE),
-        "There are 4 sample sizes but 5 effects"
-    )
-    expect_match(
-        capture.output(run(rep(100, 5), TRUE)),
-        "Iteration +100 of 100",
-        all = FALSE
     )
 })
 
@@ -148,6 +39,7 @@ test_that("LDpred2-auto keeps the chains the LDpred2 vignette keeps", {
 # ---- the weight functions --------------------------------------------------
 
 test_that("ldpred2AutoWeights reports its chains at each retention", {
+    skip_if_not_installed("bigsnpr")
     d <- .rrwPanelStatLd()
     set.seed(2)
     w <- ldpred2AutoWeights(
@@ -175,6 +67,7 @@ test_that("ldpred2AutoWeights reports its chains at each retention", {
 })
 
 test_that("ldpred2GridWeights records its pick and its grid", {
+    skip_if_not_installed("bigsnpr")
     d <- .rrwPanelStatLd()
     set.seed(3)
     w <- ldpred2GridWeights(
@@ -206,6 +99,7 @@ test_that("ldpred2GridWeights records its pick and its grid", {
 })
 
 test_that("LDpred2's heritability defaults to the window's LAVA estimate", {
+    skip_if_not_installed("bigsnpr")
     d <- .rrwPanelStatLd()
     gridH2 <- function() {
         set.seed(4)
@@ -230,21 +124,8 @@ test_that("LDpred2's heritability defaults to the window's LAVA estimate", {
     )
 })
 
-test_that("the LDpred2 weights check their engine and settings", {
+test_that("the LDpred2 weights check their settings", {
     d <- .rrwPanelStatLd()
-    expect_error(
-        ldpred2AutoWeights(d$stat, d$ldMatrix, backend = "pecotmr"),
-        "runs on a genotype reference's factor"
-    )
-    expect_error(
-        ldpred2GridWeights(
-            d$stat,
-            d$panel,
-            backend = "bigsnpr",
-            allowJumpSign = FALSE
-        ),
-        "always allows a drawn effect to change sign"
-    )
     expect_error(
         ldpred2AutoWeights(d$stat, d$panel, h2Init = 0.1, pInit = c(0, 0.1)),
         "`pInit` must be above 0"
@@ -274,9 +155,9 @@ test_that("bigsnpr's grid sampler reads the LD shrunk to shrinkCorr", {
         .package = "bigsnpr"
     )
     R <- unname(inp$ld$R)
-    pecotmr:::.ldpred2Engine(inp, "bigsnpr", 0.9)
+    pecotmr:::.bigsnprEngine(inp, 0.9)
     expect_equal(unname(written), 0.9 * R + 0.1 * diag(nrow(R)))
-    pecotmr:::.ldpred2Engine(inp, "bigsnpr")
+    pecotmr:::.bigsnprEngine(inp)
     expect_equal(unname(written), R)
     expect_equal(formals(ldpred2GridWeights)$shrinkCorr, 0.95)
 })

@@ -50,9 +50,6 @@ inside fine-mapping and TWAS-weight pipelines.
 }
 \examples{
 \donttest{
-# mvsusieR 0.3.0 calls susieR::block_coordinate_ascent unqualified, so
-# susieR must be attached until mvsusieR adds the NAMESPACE import.
-library(susieR)
 data(multiTraitData)
 X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y

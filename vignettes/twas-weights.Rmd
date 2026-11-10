@@ -201,6 +201,16 @@ studies, contexts or traits. The `jointSpecification` argument in
 contexts are fitted against one LD matrix, so their rows must share an LD
 reference.
 
+The joint methods are grouped exactly as `fineMappingPipeline()` groups
+them. By default that is across traits when there are two or more, else
+across contexts (always across contexts on summary statistics); with a
+`jointSpecification`, it is by that specification.
+`mvsusie` weights are read off the fine-mapping fit over each group's exact
+conditions, so fine-map and build weights with the same specification and
+`contexts` / `traitId` selection: a group with no such fit stops the run.
+On a `MultiStudyQtlDataset`, `jointSpecification = "study"` reads `mvsusie`
+off a fine-mapping fit across its studies.
+
 ```{r joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.
 twasWeightsPipeline(
@@ -210,6 +220,68 @@ twasWeightsPipeline(
         axes = "context",
         scope = list(context = c("brain", "liver"))
     ))
+)
+```
+
+The study axis also fits `lasso`, `enet`, `ridge` and `l0learn` across the
+studies, beside their per-study fits. Each study's effects are pulled
+towards the others' by a penalty on their difference, as PROSPER couples
+ancestries, at the strengths given by `studyCoupling` (default
+`c(0.01, 0.1, 1, 10)`, from nearly separate fits to nearly one pooled fit).
+Each study keeps the coupling strength and penalty level its own held-out
+samples score best. These rows carry `jointStudies`, so
+`WeightSelectionParam(jointAxes = "study")` picks them out downstream, and
+`studyCoupling = NULL` turns them off. `mcp` and `scad` stay per study.
+
+`bayesC` and `bayesN` on BGLR (`backend = c(bayesC = "bglr")`) fit each group
+a `jointSpecification` makes jointly too, beside their fits one condition at
+a time: BGLR's `Multitrait()` gives `bayesC` a spike and slab whose slab is
+correlated across the group's conditions and `bayesN` a Gaussian prior with
+a covariance across them, and draws a condition's missing phenotypes within
+its sampler. That serves a study's contexts or traits, and on the study axis
+the individual-level studies, whose residuals are taken as independent.
+`BglrOptions(Cov = )` sets the structure and prior of the effects'
+covariance across conditions (`list(type = "UN")` by default), and
+`BglrOptions(resCov = )` the residual covariance's within a study.
+
+On summary statistics, a `QtlSumStats` holding several studies or the
+summary-statistic studies of a `MultiStudyQtlDataset`, the study axis
+couples the penalized RSS methods the same way, `mcp` and `scad` included.
+Each study is fitted against its own LD reference, over the union of the
+studies' variants, and keeps the shrinkage, penalty level and coupling
+strength its own held-out statistics score best. `prsCs` is fitted across
+the studies as JointPRS fits ancestries: they share PRS-CS's continuous
+shrinkage prior, as PRS-CSx shares it, and the correlation of their effects
+is learned. In one cis window that correlation is only weakly informed by
+a sparse signal, so most of the coupling comes from the shared prior.
+`dprGibbs` is fitted across the studies as SDPRX fits ancestries: each
+non-null component of SDPR's mixture carries a variant's effects in a set
+of the studies, correlated. `SdprOptions(sharing = )` picks the sets: each
+study alone or all together (`"eachOrAll"`, the default), every subset of
+studies (`"everySubset"`), or all together only (`"all"`, SDPRX's
+`force_shared`). `SdprOptions(rho = )` fixes the correlation, which is
+otherwise learned.
+
+The SR-TWAS ensemble can also stack across studies, as MAGEPRO and LEOPARD
+combine ancestries. With `EnsembleParam(enabled = TRUE, acrossStudies = TRUE)`
+and the study axis, each study's ensemble stacks its own methods' out-of-fold
+predictions (the fits across studies among them) together with every other
+study's own fits, applied to its samples as fixed predictors. Its
+coefficients show how much each study draws on the others: `"lasso"` names a
+method's fit of the group, `"B/lasso"` study B's own lasso fit. Another
+study's weights are carried over per standard deviation of its genotypes, or
+per allele with `transferScale = "perAllele"`. On summary statistics, which
+hold no samples to cross-validate on, the stack reads held-out splits of the
+statistics drawn from each study's LD instead, each method refit on every
+split; this gives a single study an ensemble on summary statistics too.
+
+```{r coupled, eval=FALSE}
+# `msd`: a MultiStudyQtlDataset of two ancestries, each with its own samples.
+tw <- twasWeightsPipeline(
+    msd,
+    methods = c("lasso", "enet"),
+    jointSpecification = "study",
+    crossValidationParam = CrossValidationParam(folds = 5)
 )
 ```
 
@@ -264,20 +336,19 @@ and so on; `dprVb`, `dprAdaptiveGibbs` and `sparsevb` have none.
 reference is the same `ldReference` the rest of the package takes: a genotype
 panel from `readGenotypes()`, a `GenotypeMixture` or an `LdMatrix`, matched to
 the statistics by their `variantNames`. lassosum, the penalized methods,
-PRS-CS, SDPR and pecotmr's own Bayesian alphabet sampler use a genotype
-reference through its standardized genotypes without forming the LD matrix;
-the mr.ash and mr.mash engines, qgg and hibayes take the matrix, which is
-formed over the statistics' variants.
+PRS-CS and SDPR use a genotype reference through its standardized genotypes
+without forming the LD matrix; the mr.ash and mr.mash engines, qgg, hibayes
+and bigsnpr take the matrix, which is formed over the statistics' variants.
 
 Each Bayesian alphabet method runs on several engines, chosen with `backend`.
 On individual-level data, `bayesB` defaults to BGLR and the others to qgg,
-with hibayes available for all. On summary statistics, a genotype reference
-defaults to pecotmr's sampler, and an `LdMatrix` to qgg (`bayesA`, `bayesC`,
-`bayesN`, `bayesR`) or hibayes (`bayesB`, `bayesL`). The pipeline takes the
-choice per method: `twasWeightsPipeline(..., backend = c(bayesR = "hibayes"))`.
-LDpred2 defaults the same way, to pecotmr's sampler on a genotype reference
-and to bigsnpr on an `LdMatrix`. `lasso` also runs on bigsnpr's lassosum2
-(`backend = "bigsnpr"`), which takes its own settings in `BigsnprOptions()`.
+with hibayes available for all and BGLR also for `bayesC`, `bayesL` and
+`bayesN`. On summary statistics, `bayesA`, `bayesC`, `bayesN` and `bayesR`
+default to qgg and `bayesL` to hibayes, each with the other available, and
+`bayesB` runs on hibayes alone. The pipeline takes the choice per method:
+`twasWeightsPipeline(..., backend = c(bayesR = "hibayes"))`. LDpred2 runs on
+bigsnpr. `lasso` also runs on bigsnpr's lassosum2 (`backend = "bigsnpr"`),
+which takes its own settings in `BigsnprOptions()`.
 
 Every alphabet engine reads the LD shrunk toward the identity,
 `shrinkCorr` R + (1 - `shrinkCorr`) I, with `shrinkCorr = 0.95` by default,
@@ -285,22 +356,25 @@ the LDpred2 vignette's: a reference with fewer people than the window has
 variants lacks directions the statistics have, and without shrinkage the
 alphabet's effects can grow without bound along them. A small or mismatched
 reference does better with less, down to 0.4; the study's own genotypes as
-the reference need none. pecotmr's sampler also reads the statistics through
+the reference need none. Both engines also read the statistics through
 SDPR's likelihood by default: the LD as R (R + aI)^-1^ R and the marginal
-effects as R (R + aI)^-1^ b, with a = 0.1, which drops the part of the
-effects the reference LD cannot explain, the part those effects grow along.
-`BayesAlphabetRssOptions(ldProjection = NULL)` turns it off.
+effects as R (R + aI)^-1^ b, with a = 0.1 (`ldProjection`). That drops the
+part of the effects the reference LD cannot explain, the part they grow
+along, which can make the statistics claim more of the trait's variance
+than any phenotype has. `ldProjection = NULL` turns it off.
 
-PRS-CS, SDPR, pecotmr's Bayesian alphabet sampler and LDpred2 share
-LDpred2's sampler options. `nChains` runs several chains and averages those
-that LDpred2's own filter keeps; `raoBlackwell = TRUE` averages each
-effect's conditional posterior mean rather than its draws; `shrinkCorr`
-shrinks the LD toward the identity (PRS-CS, the alphabet and LDpred2); and
-`allowJumpSign = FALSE` refuses a draw whose sign differs from the effect's
-(the alphabet and LDpred2). Each method takes them in its options, as in
-`prsCsWeights(stat, ldReference, methodArgs = PrsCsOptions(nChains = 4))`;
-the alphabet takes `shrinkCorr` as an argument of its own, since it applies
-to every engine.
+PRS-CS and SDPR take LDpred2's sampler options in their own: `nChains` runs
+several chains and averages those that LDpred2's own filter keeps, and
+`raoBlackwell = TRUE` averages each effect's conditional posterior mean
+rather than its draws; PRS-CS also takes `shrinkCorr`. They go in each
+method's options, as in
+`prsCsWeights(stat, ldReference, methodArgs = PrsCsOptions(nChains = 4))`.
+LDpred2 takes `shrinkCorr` too, and LDpred2-auto `allowJumpSign = FALSE`,
+which refuses a draw whose sign differs from the effect's. The alphabet on
+summary statistics takes `shrinkCorr` and `nChains` as arguments of its own,
+since they apply to both its engines; each chain is one run of the engine
+from its own seed and, since the engines keep their draws to themselves, is
+tested for divergence on its posterior mean.
 
 Several of these engines estimate more than the weights, and
 `fitRetention = "slim"` keeps it as the `"fit"` attribute of the weights they

@@ -60,10 +60,21 @@ setClass(
 # the cross-trait enumerator for fsusie (functional SuSiE over the trait
 # domain);
 # empty for every other pattern/method.
+#
+# `af` is the effect-allele frequency of each variant (X column) in each
+# condition (Y column), set only by the cross-study enumerator: its conditions
+# are different studies' samples, so each has frequencies of its own. Empty for
+# every other pattern, whose conditions share the samples of the block they
+# were read from, and so its frequencies.
 setClass(
     "IndividualJointGroup",
     contains = "JointGroup",
-    representation(X = "matrix", Y = "matrix", traitPos = "numeric"),
+    representation(
+        X = "matrix",
+        Y = "matrix",
+        traitPos = "numeric",
+        af = "matrix"
+    ),
     validity = function(object) {
         errors <- c(
             if (nrow(object@X) != nrow(object@Y)) {
@@ -80,6 +91,16 @@ setClass(
                     "when set, 'traitPos' must have one entry per TRAIT ",
                     "(Y column), not per variant"
                 )
+            },
+            if (
+                length(object@af) > 0L &&
+                    (nrow(object@af) != ncol(object@X) ||
+                        ncol(object@af) != ncol(object@Y))
+            ) {
+                str_c(
+                    "when set, 'af' must have one row per variant (X column) ",
+                    "and one column per condition (Y column)"
+                )
             }
         )
         if (length(errors) == 0L) TRUE else errors
@@ -87,6 +108,10 @@ setClass(
 )
 
 # ---- SumStatsJointGroup -----------------------------------------------------
+# A group's LD: one reference for every condition, or, for studies each on
+# its own reference (.enumCrossStudyGroup()), a list of one per condition.
+setClassUnion("JointLdReference", c("LdReference_OR_NULL", "list"))
+
 setClass(
     "SumStatsJointGroup",
     contains = "JointGroup",
@@ -97,7 +122,7 @@ setClass(
     # path in fineMappingPipeline already does.
     representation(
         Z = "matrix",
-        ldReference = "LdReference_OR_NULL",
+        ldReference = "JointLdReference",
         N = "numeric"
     ),
     validity = function(object) {
@@ -110,11 +135,34 @@ setClass(
                     "'Z' must carry the variant ids as rownames: they are ",
                     "what the LD matrix is derived over"
                 )
-            }
+            },
+            .jgPerConditionLdError(object)
         )
         if (length(errors) == 0L) TRUE else errors
     }
 )
+
+# A per-condition LD list holds one LD reference for each condition.
+# @noRd
+.jgPerConditionLdError <- function(object) {
+    refs <- object@ldReference
+    if (!.jgIsPerConditionLd(refs)) {
+        return(NULL)
+    }
+    fits <- length(refs) == nrow(object@conditions) &&
+        all(map_lgl(refs, is, "LdReference_OR_NULL"))
+    if (fits) {
+        return(NULL)
+    }
+    "a per-condition 'ldReference' list holds one LD reference per condition"
+}
+
+# Whether `refs` is a group's list of one LD reference per condition, rather
+# than one reference.
+# @noRd
+.jgIsPerConditionLd <- function(refs) {
+    is.list(refs) && !isS4(refs)
+}
 
 # ---- JointDispatchCell ------------------------------------------------------
 setClass(
@@ -176,6 +224,12 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
 # @noRd
 .jgTraitPos <- function(g) g@traitPos
 
+# Each variant's effect-allele frequency in each condition (variants x
+# conditions), or an empty matrix when the group's conditions share the
+# block's frequencies.
+# @noRd
+.jgAf <- function(g) g@af
+
 # @noRd
 .jgZ <- function(g) g@Z
 
@@ -187,6 +241,38 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
 # @noRd
 .jgVariantIds <- function(g) rownames(.jgZ(g))
 
+# Condition `k`'s LD reference.
+# @noRd
+.jgLdRefAt <- function(g, k) {
+    refs <- .jgLdRef(g)
+    if (.jgIsPerConditionLd(refs)) refs[[k]] else refs
+}
+
+# The group's one LD reference, for a fit that takes one LD matrix (mr.mash,
+# mvsusie); a group whose studies are each on their own reference has none.
+# @noRd
+.jgOneLdRef <- function(g, label) {
+    refs <- .jgLdRef(g)
+    if (!.jgIsPerConditionLd(refs)) {
+        return(refs)
+    }
+    cond <- .jgConditions(g)
+    abort(c(
+        glue(
+            "{label}: a joint fit uses one LD matrix, but its rows use ",
+            "different LD references."
+        ),
+        i = str_c(
+            "Rows: ",
+            str_flatten(
+                str_c(cond$study, cond$context, cond$trait, sep = ":"),
+                "; "
+            )
+        ),
+        i = "Fit them separately, or give them one LD reference."
+    ))
+}
+
 # The group's LD matrix, derived from its sketch.
 #
 # Callers must derive ONCE per group and pass the result down: the per-
@@ -195,7 +281,7 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
 # @noRd
 .jgLdMatrix <- function(g) {
     .ldFromRef(
-        .jgLdRef(g),
+        .jgOneLdRef(g, "jointEngine"),
         .jgVariantIds(g),
         label = "jointEngine"
     )
@@ -235,11 +321,13 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
         ))
     }
     N <- if (length(g@N) == length(keep)) g@N[idx] else g@N
+    refs <- g@ldReference
     methods::initialize(
         g,
         conditions = cond,
         Z = g@Z[, idx, drop = FALSE],
-        N = N
+        N = N,
+        ldReference = if (.jgIsPerConditionLd(refs)) refs[idx] else refs
     )
 }
 
