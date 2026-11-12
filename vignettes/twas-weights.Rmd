@@ -55,10 +55,11 @@ from a `QtlDataset`. Cross-validation is off by default
 Like `fineMappingPipeline()`, you need to tell it which genotype window to
 extract — `cisWindow` (per trait) is the most common choice.
 
-Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`, `fsusie`) are
-not re-fit by `twasWeightsPipeline()` - instead run fine-mapping models with
-`fineMappingPipeline()` first and pass the result via `fineMappingResult = …`
-(see the next section).
+Fine-mapping methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`,
+`mvsusieInf`, `mvsusieAsh`, `fsusie`) are not re-fit by
+`twasWeightsPipeline()` - instead
+run fine-mapping models with `fineMappingPipeline()` first and pass the result
+via `fineMappingResult = …` (see the next section).
 
 ```{r individual-quickstart}
 tw <- twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
@@ -143,9 +144,10 @@ to the call for a single QtlDataset.
 
 Pass a character vector to fit several methods on the same fold split and
 return them as the methods of each gene's row in the collection. Fine-mapping
-methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`) can only be included if
-their results are present in the object passed to the `fineMappingResult`
-argument:
+methods (`susie`, `susieInf`, `susieAsh`, `mvsusie`, `mvsusieInf`,
+`mvsusieAsh`) can only be
+included if their results are present in the object passed to the
+`fineMappingResult` argument:
 
 ```{r multimethod, eval=FALSE}
 # TWAS-regression only — no fineMappingResult needed.
@@ -209,7 +211,9 @@ across contexts (always across contexts on summary statistics); with a
 conditions, so fine-map and build weights with the same specification and
 `contexts` / `traitId` selection: a group with no such fit stops the run.
 On a `MultiStudyQtlDataset`, `jointSpecification = "study"` reads `mvsusie`
-off a fine-mapping fit across its studies.
+off a fine-mapping fit across its studies; on summary statistics that fit
+holds each study on its own LD reference, and a variant a study lacks has
+weight 0 in it.
 
 ```{r joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.

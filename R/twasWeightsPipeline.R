@@ -169,7 +169,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 # `cond` and whose scope, on the axes it pools, admits their values. Its
 # covariances are taken on the group's conditions, in their order, named by
 # `labels`, and put on the per-SD scale mr.mash fits on
-# (.mashPriorScaleFactor()). No such prior, or several, is an error.
+# (.mashPriorScaleFactor()); its residual correlation, when it carries one,
+# on the same conditions unscaled; and its mixture weights (`w`, by
+# component), when it carries them. No such prior, or several, is an error.
 # @noRd
 .mashPriorForGroup <- function(priors, cond, axes, labels) {
     rows <- map(priors, .mashPriorRows, cond = cond, axes = axes)
@@ -178,15 +180,20 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         .mashPriorMatchError(names(priors), length(hit), cond, axes)
     }
     prior <- priors[[hit]]
-    list(
+    residual <- prior$residualCorrelation
+    compact(list(
         U = map(
             prior$U,
             .mashPriorOnGroup,
             rows = rows[[hit]],
             scale = .mashPriorScaleFactor(prior, rows[[hit]]),
             labels = labels
-        )
-    )
+        ),
+        residualCorrelation = if (!is.null(residual)) {
+            .mashPriorOnGroup(residual, rows[[hit]], 1, labels)
+        },
+        w = prior$w
+    ))
 }
 
 # The rows of a prior's covariances that are the group's conditions, in
@@ -539,6 +546,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         "l0learn",
         "sparsevb",
         "mvsusie",
+        "mvsusieInf",
+        "mvsusieAsh",
         "mrmash"
     )
 }
@@ -572,6 +581,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         l0learn = "l0learn",
         sparsevb = "sparsevb",
         mvsusie = "mvsusie",
+        mvsusie_inf = "mvsusieInf",
+        mvsusie_ash = "mvsusieAsh",
         mrmash = "mrmash",
         prsCs = "prsCs",
         ldpred2Auto = "ldpred2Auto",
@@ -711,6 +722,20 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         fitArg = "mvsusieFit",
         rssFitArg = "mvsusieRssFit",
         methodKey = "mvsusie_weights"
+    ),
+    mvsusieInf = list(
+        weightFn = "mvsusieInfWeights",
+        rssWeightFn = "mvsusieInfRssWeights",
+        fitArg = "mvsusieInfFit",
+        rssFitArg = "mvsusieInfRssFit",
+        methodKey = "mvsusie_inf_weights"
+    ),
+    mvsusieAsh = list(
+        weightFn = "mvsusieAshWeights",
+        rssWeightFn = "mvsusieAshRssWeights",
+        fitArg = "mvsusieAshFit",
+        rssFitArg = "mvsusieAshRssFit",
+        methodKey = "mvsusie_ash_weights"
     ),
     fsusie = list(
         weightFn = "fsusieWeights",
@@ -1084,7 +1109,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         return(list())
     }
     assertClass(fineMappingResult, "FineMappingResultBase")
-    tokens <- c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")
+    tokens <- c(
+        "susie",
+        "susieInf",
+        "susieAsh",
+        .fmMvsusieTokens(),
+        "fsusie"
+    )
     found <- compact(set_names(
         map(
             tokens,
@@ -1259,12 +1290,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'
 #' Method-restriction rules (enforced):
 #' \itemize{
-#'   \item \code{mr.mash}, \code{mvsusie} and \code{fsusie} are grouped
-#'         across conditions as \code{\link{fineMappingPipeline}} groups
-#'         them (see \code{jointSpecification}) and follow the multi-trait /
+#'   \item \code{mr.mash}, \code{mvsusie}, \code{mvsusieInf} and
+#'         \code{fsusie} are grouped across conditions as
+#'         \code{\link{fineMappingPipeline}} groups them (see
+#'         \code{jointSpecification}) and follow the multi-trait /
 #'         multi-context rules of the fine-mapping \code{mvsusie} family
 #'         (require at least two traits OR at least two contexts), but for
-#'         \code{mvsusie} grouped across studies.
+#'         the mvSuSiE methods grouped across studies.
 #'   \item \code{prsCs} runs only on summary statistics, so it is rejected
 #'         on \code{QtlDataset} input.
 #'   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run
@@ -1325,9 +1357,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{c("lasso", "prsCs", "dprGibbs")}, which there run lassosum, PRS-CS
 #'   and SDPR; the fine-mapping methods are not in it, and are requested by
 #'   name together with a \code{fineMappingResult}. A
-#'   multivariate method (\code{mrmash}, \code{mvsusie}, \code{fsusie}) fits
-#'   the selected contexts and traits together and any other method each
-#'   (context, trait) alone, so the two kinds can be requested at once.
+#'   multivariate method (\code{mrmash}, \code{mvsusie}, \code{mvsusieInf},
+#'   \code{fsusie}) fits the selected contexts and traits together and any
+#'   other method each (context, trait) alone, so the two kinds can be
+#'   requested at once.
 #' @param backend The engine a method with several runs on, as a named
 #'   character vector keyed by method, e.g.
 #'   \code{c(bayesR = "hibayes", bayesL = "bglr")}; \code{NULL} (the
@@ -1402,8 +1435,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   concatenates the ranges' genotypes into one joint fit. Ignored for a
 #'   single-range / cis request.
 #' @param jointSpecification Optional joint-fit specification saying which
-#'   axes the joint methods -- \code{mrmash}, \code{mvsusie} and
-#'   \code{fsusie} -- group conditions across. It means what it means to
+#'   axes the joint methods -- \code{mrmash}, \code{mvsusie},
+#'   \code{mvsusieInf} and \code{fsusie} -- group conditions across. It
+#'   means what it means to
 #'   \code{\link{fineMappingPipeline}}, so a run groups conditions exactly as
 #'   a fine-mapping run given the same specification and selection did. When
 #'   NULL (the default) they are grouped as fine-mapping groups them: across
@@ -1416,8 +1450,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   listed values, each of which must exist in \code{data}. A list-form
 #'   spec always goes inside the outer list, even on its own. Other methods
 #'   run per (study, context, trait) as usual. \code{mrmash} is fitted on
-#'   each group; \code{mvsusie} and \code{fsusie} are read off
-#'   \code{fineMappingResult}'s fit over exactly the group's conditions, each
+#'   each group; \code{mvsusie}, \code{mvsusieInf} and \code{fsusie} are
+#'   read off \code{fineMappingResult}'s fit over exactly the group's
+#'   conditions, each
 #'   condition's own column of it, and a group the result holds no such fit
 #'   of stops the run: fine-map and build weights with the same
 #'   \code{jointSpecification} and \code{contexts} / \code{traitId}
@@ -1428,7 +1463,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   (context, trait) two or more of them carry, and a composed spec
 #'   including \code{"study"} one group per value of the axes it leaves out
 #'   (each trait for \code{c("study", "context")}). On those groups it reads
-#'   \code{mvsusie} off the fine-mapping fits (no genotype is read) and fits
+#'   the mvSuSiE methods off the fine-mapping fits (no genotype is read) and
+#'   fits
 #'   \code{mrmash}, each condition on its own samples (mr.mash's
 #'   \code{missing_y_method = "approximate"}); on the study axis alone it
 #'   also fits \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
@@ -1436,9 +1472,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   effects (see \code{studyCoupling}). The summary-statistics studies are
 #'   fitted as well. On summary statistics the study axis also fits the
 #'   penalized methods across the studies under that penalty, each study
-#'   against its own LD reference, and \code{mrmash} takes each study's own
-#'   reference too (see \code{\link{mrmashRssWeights}}); \code{mvsusie}
-#'   needs the studies on one reference.
+#'   against its own LD reference, and \code{mrmash} and the mvSuSiE methods
+#'   take each study's own reference too (see \code{\link{mrmashRssWeights}}
+#'   and \code{\link{mvsusieRssWeights}}).
 #'   On individual-level data, \code{bayesC} and \code{bayesN} on
 #'   \code{backend = "bglr"} also fit each group of two or more conditions
 #'   at once, through BGLR's \code{Multitrait()} (see
@@ -1518,7 +1554,8 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   posterior summaries, without any copy of \code{X} unless \code{retainX}
 #'   asks for it. Every other method keeps its fit whole or not at all, except
 #'   the fine-mapping methods (\code{susie}, \code{susieInf},
-#'   \code{susieAsh}, \code{mvsusie}, \code{fsusie}), whose rows keep none:
+#'   \code{susieAsh}, \code{mvsusie}, \code{mvsusieInf}, \code{fsusie}),
+#'   whose rows keep none:
 #'   their weights come from the \code{fineMappingResult}'s fit, which is where
 #'   \code{ctwasPipeline()} reads it. Requesting \code{"full"} for a run where
 #'   no method can honour it is an error, and a mixed run warns rather than
@@ -4253,15 +4290,16 @@ setMethod(
 # fine-mapping row, holding that row's column of the fit's weights. No
 # genotype is read.
 
-# One TWAS row per row of mvsusie's fit over each of the study-axis groups
-# `groups` (condition tables), stopping on a group the fine-mapping result
-# holds no fit over exactly (.twasRequireFmGroup()); NULL for no rows. The
-# rows are built by the joint engine's record builder, as a joint fit's are.
+# One TWAS row per row of each mvSuSiE method's (`tokens`) fit over each of
+# the study-axis groups `groups` (condition tables), stopping on a group the
+# fine-mapping result holds no fit over exactly (.twasRequireFmGroup()); NULL
+# for no rows. The rows are built by the joint engine's record builder, as a
+# joint fit's are.
 # @noRd
-.twasAcrossStudyWeights <- function(groups, cfg) {
+.twasAcrossStudyWeights <- function(groups, cfg, tokens) {
     fm <- cfg$fineMappingResult
     rows <- list_c(
-        map(groups, .twasStudyGroupRows, fm = fm),
+        map(tokens, .twasStudyTokenRows, groups = groups, fm = fm),
         ptype = integer()
     )
     read <- list(
@@ -4272,12 +4310,21 @@ setMethod(
     .buildJointResult(TwasWeights, compact(records))
 }
 
-# The rows of mvsusie's fit over exactly group `cond`'s studies.
+# The rows of `token`'s fits over the study-axis groups `groups`.
 # @noRd
-.twasStudyGroupRows <- function(cond, fm) {
+.twasStudyTokenRows <- function(token, groups, fm) {
+    list_c(
+        map(groups, .twasStudyGroupRows, fm = fm, token = token),
+        ptype = integer()
+    )
+}
+
+# The rows of `token`'s fit over exactly group `cond`'s studies.
+# @noRd
+.twasStudyGroupRows <- function(cond, fm, token) {
     joint <- .jointKeyOfConditions(cond)
-    .twasRequireFmGroup(fm, cond, joint, "mvsusie")
-    .twasFmConditionRows(fm, "mvsusie", cond, joint)
+    .twasRequireFmGroup(fm, cond, joint, token)
+    .twasFmConditionRows(fm, token, cond, joint)
 }
 
 # The groups the study-axis specs `studySpecs` make of the individual-level

@@ -11,6 +11,10 @@
 \alias{SerOptions}
 \alias{MvsusieOptions}
 \alias{MvsusieRssOptions}
+\alias{MvsusieInfOptions}
+\alias{MvsusieInfRssOptions}
+\alias{MvsusieAshOptions}
+\alias{MvsusieAshRssOptions}
 \alias{FsusieOptions}
 \title{Arguments For A Fine-Mapping Engine}
 \usage{
@@ -31,6 +35,14 @@ SerOptions(...)
 MvsusieOptions(...)
 
 MvsusieRssOptions(...)
+
+MvsusieInfOptions(...)
+
+MvsusieInfRssOptions(...)
+
+MvsusieAshOptions(...)
+
+MvsusieAshRssOptions(...)
 
 FsusieOptions(...)
 }

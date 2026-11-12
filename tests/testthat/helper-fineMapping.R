@@ -272,3 +272,24 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
         phenotypes = list(brain = brain, liver = liver)
     )
 }
+
+# Skip unless mvsusieR fits unmappable effects, which the mvsusieInf method
+# runs.
+.fm_skipIfNoMvsusieInf <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("unmappable_effects", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates unmappable effects"
+    )
+}
+
+# Skip unless mvsusieR fits unmappable effects by adaptive shrinkage, with
+# mr.mashr, which the mvsusieAsh method runs.
+.fm_skipIfNoMvsusieAsh <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("unmappable_prior", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates unmappable effects by adaptive shrinkage"
+    )
+}

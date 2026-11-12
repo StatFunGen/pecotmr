@@ -355,15 +355,16 @@ setMethod(
         if (identical(token, "fsusie")) {
             return(.jointFitFsusie(group, Xc, Yc, nCond, cfg, args))
         }
-        if (!identical(token, "mvsusie")) {
+        if (!is_in(token, .fmMvsusieTokens())) {
             msg <- glue(
                 "fitJointGroup(IndividualJointGroup, FmJointPipeline): ",
                 "unsupported token '{token}' ",
-                "(expected 'mvsusie' or 'fsusie')."
+                "(expected 'mvsusie', 'mvsusieInf', 'mvsusieAsh' or ",
+                "'fsusie')."
             )
             abort(msg)
         }
-        .jointFitMvsusie(group, Xc, Yc, nCond, cfg, args)
+        .jointFitMvsusie(group, Xc, Yc, nCond, cfg, args, token)
     }
 )
 
@@ -511,10 +512,11 @@ setMethod(
     e
 }
 
-# mvsusie joint fit: SER pre-screen the conditions, fit the survivors, then emit
-# one per-context entry per ORIGINAL condition (NULL for screened-out columns).
+# mvSuSiE (`token`: mvsusie, mvsusieInf or mvsusieAsh) joint fit: SER
+# pre-screen the conditions, fit the survivors, then emit one per-context
+# entry per ORIGINAL condition (NULL for screened-out columns).
 # @noRd
-.jointFitMvsusie <- function(group, Xc, Yc, nCond, cfg, args) {
+.jointFitMvsusie <- function(group, Xc, Yc, nCond, cfg, args, token) {
     ddCut <- if (is.null(cfg$dataDrivenPriorWeightsCutoff)) {
         1e-10
     } else {
@@ -532,9 +534,10 @@ setMethod(
         xy$X,
         xy$Y,
         cfg,
-        list_assign(args, methodArgs = .jointMvMethodArgs(args)),
+        list_assign(args, methodArgs = .jointMvMethodArgs(args, token)),
         ddCut,
-        verbose
+        verbose,
+        token
     )
     map(
         seq_len(nCond),
@@ -545,6 +548,7 @@ setMethod(
         keep = keep,
         survivors = survivors,
         cfg = cfg,
+        token = token,
         af = args$af,
         region = args$region
     )
@@ -566,8 +570,8 @@ setMethod(
     )
 }
 
-# The run's per-method options, mvsusie's `standardize` defaulting to FALSE
-# when the residualizer scaled X and Y within each study
+# The run's per-method options, the mvSuSiE method's (`token`) `standardize`
+# defaulting to FALSE when the residualizer scaled X and Y within each study
 # (`ResidualizationParam(scaleResiduals = TRUE)`, the default), so the shared
 # prior components describe per-SD effects. mvsusieR's own standardization
 # scales each outcome's prior by sd(y) / sqrt(n): on studies of unequal size,
@@ -576,14 +580,15 @@ setMethod(
 # every condition has the same samples the two agree. A user's own
 # `standardize` wins.
 # @noRd
-.jointMvMethodArgs <- function(args) {
+.jointMvMethodArgs <- function(args, token) {
     methodArgs <- args$methodArgs %||% list()
-    user <- as.list(methodArgs[["mvsusie"]] %||% list())
+    user <- as.list(methodArgs[[token]] %||% list())
     scaled <- .qtlScaleResiduals(args$residualizationParam)
     if (!scaled || is_in("standardize", names(user))) {
         return(args$methodArgs)
     }
-    list_assign(methodArgs, mvsusie = list_assign(user, standardize = FALSE))
+    unscaled <- set_names(list(list_assign(user, standardize = FALSE)), token)
+    list_assign(methodArgs, !!!unscaled)
 }
 
 # SER pre-screen mask over the conditions: TRUE-all when no screen, the survivor
@@ -612,10 +617,10 @@ setMethod(
     keep
 }
 
-# Fit mvsusie over the surviving conditions with the data-driven reweighted
-# prior, returning list(fit, cvM).
+# Fit the mvSuSiE method `token` over the surviving conditions with the
+# data-driven reweighted prior, returning list(fit, cvM).
 # @noRd
-.jointMvFit <- function(group, Xc, Ys, cfg, args, ddCut, verbose) {
+.jointMvFit <- function(group, Xc, Ys, cfg, args, ddCut, verbose, token) {
     key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
         args$mrmashPrior,
@@ -633,7 +638,7 @@ setMethod(
     )
     mvPrior <- .buildMvsusieReweightedPrior(mvFitParts, colnames(Ys), ddCut)
     fit <- if (.jointFitsFullData(cfg)) {
-        .jointMvFullFit(Xc, Ys, cfg, args, mvPrior)
+        .jointMvFullFit(Xc, Ys, cfg, args, mvPrior, token)
     } else {
         NULL
     }
@@ -646,14 +651,16 @@ setMethod(
         mvFitParts,
         mvCv,
         ddCut,
-        verbose
+        verbose,
+        token
     )
     list(fit = fit, cvM = cvM)
 }
 
-# The full-data mvSuSiE fit of one joint group, under the reweighted prior.
+# The full-data fit of the mvSuSiE method `token` on one joint group, under
+# the reweighted prior.
 # @noRd
-.jointMvFullFit <- function(Xc, Ys, cfg, args, mvPrior) {
+.jointMvFullFit <- function(Xc, Ys, cfg, args, mvPrior, token) {
     mvBaseArgs <- c(
         list(
             X = Xc,
@@ -661,12 +668,33 @@ setMethod(
             prior_variance = mvPrior$priorVariance,
             coverage = cfg$credibleSetParam$coverage
         ),
-        compact(list(residual_variance = mvPrior$residualVariance))
+        compact(list(
+            residual_variance = mvPrior$residualVariance,
+            unmappable_prior = .fmAshThetaPrior(
+                token,
+                mvPrior,
+                colnames(Ys),
+                .mrmashComputeSumstats(
+                    Xc,
+                    Ys,
+                    standardize = TRUE,
+                    threads = 1L
+                ),
+                args$methodArgs[[token]],
+                .residualSd(mvPrior$residualVariance, Ys)
+            ),
+            unmappable_variance = .fmInfUnmappableVariance(
+                token,
+                mvPrior,
+                colnames(Ys),
+                args$methodArgs[[token]]
+            )
+        ))
     )
-    fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[["mvsusie"]])
-    fitMvsusieArgs <- .splitMethodArgs(fitMvsusie, fitArgs)
+    fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[[token]])
+    fitMvsusieArgs <- .fmMvsusieSplitArgs(token, fitMvsusie, fitArgs)
     exec(fitMvsusie, !!!fitMvsusieArgs) |>
-        .setFinemappingFitClass("mvsusie")
+        .setFinemappingFitClass(token)
 }
 
 # Whether a joint run fits the full data as well as cross-validating, from the
@@ -676,7 +704,8 @@ setMethod(
     isTRUE(cfg$crossValidationParam$fitFullData %||% TRUE)
 }
 
-# Per-fold mvsusie CV slice (reusing the mr.mash prior per fold), or NULL.
+# Per-fold CV slice of the mvSuSiE method `token` (reusing the mr.mash prior
+# per fold), or NULL.
 # @noRd
 .jointMvCv <- function(
     Xc,
@@ -687,7 +716,8 @@ setMethod(
     mvFitParts,
     mvCv,
     ddCut,
-    verbose
+    verbose,
+    token
 ) {
     cv <- cfg$crossValidationParam %||% list()
     cvFolds <- cv$folds %||% 0L
@@ -699,7 +729,7 @@ setMethod(
     cv <- .fmWeightsCv(
         Xc,
         Ys,
-        "mvsusie",
+        token,
         args$methodArgs,
         cvFolds,
         samplePartition = sp,
@@ -710,14 +740,14 @@ setMethod(
         BPPARAM = cv$BPPARAM %||% SerialParam(),
         seed = cfg$seed
     )
-    .fmSliceCv(cv, "mvsusie")
+    .fmSliceCv(cv, token)
 }
 
-# One mvsusie per-condition entry (NULL for a screened-out column), sliced at
-# the condition's position in the fitted survivor set + its CV slice. Its
-# credible sets' purity and its allele frequencies are the condition's own:
-# read on the samples that observe it, which for a cross-study group are its
-# study's alone.
+# One per-condition entry of the mvSuSiE method `token` (NULL for a
+# screened-out column), sliced at the condition's position in the fitted
+# survivor set + its CV slice. Its credible sets' purity and its allele
+# frequencies are the condition's own: read on the samples that observe it,
+# which for a cross-study group are its study's alone.
 # @noRd
 .jointMvEntry <- function(
     i,
@@ -727,6 +757,7 @@ setMethod(
     keep,
     survivors,
     cfg,
+    token,
     af = NULL,
     region = NULL
 ) {
@@ -739,7 +770,7 @@ setMethod(
     } else {
         .fmPostprocessOne(
             fit = fitted$fit,
-            method = "mvsusie",
+            method = token,
             dataX = .jointConditionX(Xc, Yc, i),
             dataY = NULL,
             af = if (is.matrix(af)) af[, i] else af,
@@ -780,35 +811,106 @@ setMethod(
                 "fsusie has no RSS variant; it requires individual-level input."
             )
         }
-        if (!identical(token, "mvsusie")) {
+        if (!is_in(token, .fmMvsusieTokens())) {
             msg <- glue(
                 "fitJointGroup(SumStatsJointGroup, FmJointPipeline): ",
-                "unsupported token '{token}' (expected 'mvsusie')."
+                "unsupported token '{token}' (expected 'mvsusie', ",
+                "'mvsusieInf' or 'mvsusieAsh')."
             )
             abort(msg)
         }
         cfg <- .jpConfig(pipeline)
         # Derived ONCE here and threaded down: .jointRssEntry runs per
-        # condition, so deriving inside it would rebuild the same matrix for
+        # condition, so deriving inside it would rebuild the same LD for
         # every column of Z.
-        ldMat <- .jgLdMatrix(group)
-        fit <- .jointFitMvsusieRss(group, ldMat, cfg, args)
+        ld <- .rssConditionLd(
+            .jointRssStat(group),
+            .jgLdRef(group),
+            "jointEngine"
+        )
+        fit <- .jointFitMvsusieRss(group, ld, cfg, args, token)
         # One per-condition entry (RSS has no sample folds).
         map(
             seq_len(ncol(.jgZ(group))),
             .jointRssEntry,
             fit = fit,
-            ldMat = ldMat,
+            ld = ld,
             cfg = cfg,
+            token = token,
             region = args$region
         )
     }
 )
 
-# mvSuSiE-RSS joint fit over summary statistics, with the data-driven reweighted
-# prior. Returns the class-tagged fit.
+# A summary-statistics group's statistics, as the RSS fits read them.
 # @noRd
-.jointFitMvsusieRss <- function(group, ldMat, cfg, args) {
+.jointRssStat <- function(group) {
+    list(
+        z = .jgZ(group),
+        n = .jgN(group),
+        variantNames = .jgVariantIds(group),
+        sampleGroups = .jgConditions(group)$study
+    )
+}
+
+# The heritability of each condition of a summary-statistics group under the
+# run's settled `h2` (`spec`), as for one QtlSumStats row (.fmRssH2()): its
+# H2Estimate row's, or its estimate on the condition's z-scores and LD (`ld`,
+# .rssConditionLd()); NA where it has none. NULL without `spec`.
+# @noRd
+.jointRssH2 <- function(group, ld, spec, label) {
+    if (is.null(spec)) {
+        return(NULL)
+    }
+    stat <- .rssCarriedStat(.jointRssStat(group), ld)
+    map_dbl(
+        seq_len(ncol(stat$z)),
+        .jointConditionH2,
+        stat = stat,
+        cond = .jgConditions(group),
+        ld = ld,
+        refs = .jgLdRef(group),
+        spec = spec,
+        label = label
+    )
+}
+
+# One condition's heritability (.jointRssH2()), on its LD's matrix or
+# factor.
+# @noRd
+.jointConditionH2 <- function(r, stat, cond, ld, refs, spec, label) {
+    source <- if (is.null(ld$X)) {
+        list(R = if (is.list(ld$R)) ld$R[[r]] else ld$R)
+    } else {
+        list(ldFactor = if (is.list(ld$X)) ld$X[[r]] else ld$X)
+    }
+    ref <- if (.jgIsPerConditionLd(refs)) refs[[r]] else refs
+    n <- rep_len(as.numeric(stat$n), ncol(stat$z))[[r]]
+    h2 <- .h2ForTrait(
+        spec,
+        .h2TupleKey(cond$study[[r]], cond$context[[r]], cond$trait[[r]]),
+        label,
+        .h2SumStatsFit,
+        list(
+            z = stat$z[, r],
+            n = rep(n, nrow(stat$z)),
+            ld = c(source, list(nSamples = .ldRefNoiseN(ref))),
+            label = label
+        )
+    )
+    h2 %||% NA_real_
+}
+
+# mvSuSiE-RSS joint fit of the method `token` over summary statistics, with
+# the data-driven reweighted prior. Returns the class-tagged fit. `ld` is the
+# group's LD (.rssConditionLd()): one matrix or factor, or one per condition
+# when its studies are each on their own reference, fitted as different
+# samples with each condition's sample size. The mr.mash fit's residual
+# covariance is both the residual variance and the Y covariance (varY), zero
+# between references; without a fit, mvsusie_rss estimates both from the
+# near-null z-scores.
+# @noRd
+.jointFitMvsusieRss <- function(group, ld, cfg, args, token) {
     ddCut <- if (is.null(cfg$dataDrivenPriorWeightsCutoff)) {
         1e-10
     } else {
@@ -827,34 +929,71 @@ setMethod(
         colnames(.jgZ(group)),
         ddCut
     )
+    residual <- .rssMaskBetweenRefs(mvPrior$residualVariance, ld$group)
+    # V carries each condition's heritability, as SuSiE-RSS's 1 - h2;
+    # varY stays the correlation
+    residualVariance <- .rssH2Scaled(
+        residual,
+        .jointRssH2(group, ld, cfg$h2, "fitJointGroup(SumStatsJointGroup)")
+    )
     mvBaseArgs <- list(
-        Z = .jgZ(group),
-        R = ldMat,
-        N = as.numeric(stats::median(.jgN(group))),
+        Z = .rssCarriedStat(.jointRssStat(group), ld)$z,
+        N = ld$n %||% as.numeric(stats::median(.jgN(group))),
         prior_variance = mvPrior$priorVariance,
         coverage = cfg$credibleSetParam$coverage
     ) |>
-        c(compact(list(residual_variance = mvPrior$residualVariance)))
-    fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[["mvsusie"]])
-    fitMvsusieRssArgs <- .splitMethodArgs(fitMvsusieRss, fitArgs)
+        c(compact(list(
+            R = ld$R,
+            X = ld$X,
+            sample_groups = ld$group,
+            residual_variance = residualVariance,
+            varY = residual,
+            unmappable_prior = .fmAshThetaPrior(
+                token,
+                mvPrior,
+                colnames(.jgZ(group)),
+                .mrmashRssStats(.rssCarriedStat(.jointRssStat(group), ld)),
+                args$methodArgs[[token]],
+                .residualSd(residualVariance)
+            ),
+            unmappable_variance = .fmInfUnmappableVariance(
+                token,
+                mvPrior,
+                colnames(.jgZ(group)),
+                args$methodArgs[[token]]
+            )
+        )))
+    fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[[token]])
+    fitMvsusieRssArgs <- .fmMvsusieSplitArgs(
+        token,
+        fitMvsusieRss,
+        fitArgs,
+        rss = TRUE
+    )
     fit <- exec(fitMvsusieRss, !!!fitMvsusieRssArgs)
-    .setFinemappingFitClass(fit, "mvsusie")
+    .setFinemappingFitClass(fit, str_c(token, "Rss"))
 }
 
-# One RSS per-condition FineMappingRow (csInput = "Xcorr").
+# One RSS per-condition FineMappingRow of the mvSuSiE method `token`, its
+# credible sets' purity read on the condition's own LD (`ld`,
+# .rssConditionLd()) -- its study's, where the group's studies are each on
+# their own reference: from its matrix (csInput = "Xcorr") or its factor
+# (csInput = "X", never subsampled, the fit being tagged "mvsusieRss").
 # `credibleSetParam` / `fitRetention` come off `cfg`, which is what the caller
 # supplies; they were also declared as formals with no defaults, so nothing
 # could ever have passed them without erroring. `group` was unused too.
 # @noRd
-.jointRssEntry <- function(r, fit, ldMat, cfg, region = NULL) {
+.jointRssEntry <- function(r, fit, ld, cfg, token, region = NULL) {
+    useFactor <- !is.null(ld$X)
+    conditionLd <- if (useFactor) ld$X else ld$R
     .fmPostprocessOne(
         fit = fit,
-        method = "mvsusie",
-        dataX = ldMat,
+        method = token,
+        dataX = if (is.list(conditionLd)) conditionLd[[r]] else conditionLd,
         dataY = NULL,
         region = region,
         conditionIdx = r,
-        csInput = "Xcorr",
+        csInput = if (useFactor) "X" else "Xcorr",
         credibleSetParam = cfg$credibleSetParam,
         fitRetention = cfg$fitRetention
     )
@@ -967,34 +1106,16 @@ setMethod(
         Yc <- .jgY(group)
         nCond <- ncol(Yc)
         cond <- .jgConditions(group)
-        methodKey <- .twasMethodKey(token)
         stdz <- cfg$standardized %||% FALSE
-        fittedModels <- args$fittedModels %||% list()
         groupArgs <- .jointTwasGroupPriors(args, token, cond, colnames(Yc))
-        resolved <- .jointTwasMethodArgs(
-            groupArgs,
-            methodKey,
-            token,
-            fittedModels,
-            Xc,
-            Yc,
-            cond,
-            cfg,
-            stdz
-        )
-        ma <- .jointTwasMultitrait(
-            .jointTwasCoupled(resolved, token, cond, cfg),
-            token,
-            cond,
-            cfg
-        )
-        wm <- set_names(list(ma), methodKey)
+        ma <- .jointTwasGroupMethodArgs(groupArgs, token, Xc, Yc, cond, cfg)
+        wm <- set_names(list(ma), .twasMethodKey(token))
         full <- .jointTwasFitFull(
             Xc,
             Yc,
             cond,
             wm,
-            fittedModels,
+            args$fittedModels %||% list(),
             cfg,
             stdz,
             nCond,
@@ -1016,6 +1137,32 @@ setMethod(
         )
     }
 )
+
+# A TWAS method's arguments on one individual-level group: the caller's, with
+# a fine-mapping fit injected and h2 and spike-and-slab pi set as configured
+# (.jointTwasMethodArgs()), naming the implementation that fits the group
+# across studies under the coupling penalty (.jointTwasCoupled()) or through
+# BGLR's Multitrait() (.jointTwasMultitrait()) where the group calls for one.
+# @noRd
+.jointTwasGroupMethodArgs <- function(args, token, Xc, Yc, cond, cfg) {
+    resolved <- .jointTwasMethodArgs(
+        args,
+        .twasMethodKey(token),
+        token,
+        args$fittedModels %||% list(),
+        Xc,
+        Yc,
+        cond,
+        cfg,
+        cfg$standardized %||% FALSE
+    )
+    .jointTwasMultitrait(
+        .jointTwasCoupled(resolved, token, cond, cfg),
+        token,
+        cond,
+        cfg
+    )
+}
 
 # mr.mash's data-driven priors for one group, from the run's MashPrior
 # (`args$mashPriors`, .unpackMashPrior()): the full-data prior into its method
@@ -1209,17 +1356,24 @@ setMethod(
 # per-method options split across the wrapper's own formals and the engine's
 # arguments exactly as the per-tuple path splits them (.twasWeightCallArgs()).
 # A group whose studies are each on their own LD reference hands mr.mash.rss
-# one reference per condition (mrmashRssWeights()).
+# one reference per condition (mrmashRssWeights()). With the run's `h2`, the
+# statistics carry each condition's heritability (.jointRssH2()), which the
+# residual covariance mr.mash.rss starts from carries.
 # @noRd
 .jointMrmashRssWeights <- function(group, cfg, args) {
+    stat <- .jointRssStat(group)
+    h2 <- if (!is.null(cfg$h2)) {
+        .jointRssH2(
+            group,
+            .rssConditionLd(stat, .jgLdRef(group), "jointEngine"),
+            cfg$h2,
+            "fitJointGroup(SumStatsJointGroup)"
+        )
+    }
     callArgs <- .twasWeightCallArgs(
         "mrmashRssWeights",
         list(
-            stat = list(
-                z = .jgZ(group),
-                n = .jgN(group),
-                variantNames = .jgVariantIds(group)
-            ),
+            stat = c(stat, compact(list(h2 = h2))),
             ldReference = .jgLdRef(group),
             fitRetention = .jointRetentionLevel(cfg)
         ),
@@ -1499,10 +1653,10 @@ setMethod(
 #' @importFrom rlang try_fetch
 .jointTwasRssWeights <- function(group, cfg, args, token) {
     coupled <- .jointTwasIsCoupledRss(group, cfg, token)
-    if (!coupled && !identical(token, "mrmash")) {
+    if (!coupled && !is_in(token, c("mrmash", .fmMvsusieTokens()))) {
         # Refused before the fit, which only warns: a group of studies on
         # their own references is no group for a fit taking one LD matrix.
-        # mr.mash takes one per condition.
+        # mr.mash and the mvSuSiE methods take one per condition.
         .jgOneLdRef(group, token)
     }
     try_fetch(
@@ -1534,14 +1688,12 @@ setMethod(
     if (is.null(fit)) {
         return(NULL)
     }
+    # The group's LD reference: one, as .jointTwasRssWeights() required, or,
+    # for the mvSuSiE methods, possibly one per condition.
     callArgs <- set_names(
         list(
-            list(
-                z = .jgZ(group),
-                n = .jgN(group),
-                variantNames = .jgVariantIds(group)
-            ),
-            .jgOneLdRef(group, token),
+            .jointRssStat(group),
+            .jgLdRef(group),
             fit,
             .jointRetentionLevel(cfg, token)
         ),

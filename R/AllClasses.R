@@ -116,12 +116,18 @@ methods::setValidity("SumStatsBase", function(object) {
     if (nrow(object) == 0L) {
         return(FALSE)
     }
+    anyDuplicated(.ssRowKeys(object, tupleCols)) > 0L
+}
+
+# Each element's identity: its tuple and its span, an empty element keyed
+# apart (.keyEmptyElements()).
+# @noRd
+.ssRowKeys <- function(object, tupleCols) {
     md <- mcols(object)
     tupleKey <- map(tupleCols, .ssKeyColumn, md = md)
     rangeKey <- .keyEmptyElements(object, .rtlRangeKeys(object))
     keyParts <- c(tupleKey, list(rangeKey))
-    keys <- exec(str_c, !!!keyParts, sep = "|")
-    anyDuplicated(keys) > 0L
+    exec(str_c, !!!keyParts, sep = "|")
 }
 
 # Span keys with every EMPTY element given a key of its own. An empty element

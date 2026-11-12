@@ -30,8 +30,12 @@ formed from the reference over these variants.}
 \item{varY}{Variance of the phenotype, or \code{NULL} (default) to fit on
 the standardized scale. Used only with \code{b} and \code{seb}.}
 
-\item{sigma2E}{Initial residual variance, or \code{NULL} (default) for
-\code{mr.ash.rss}'s own.}
+\item{sigma2E}{The residual variance, or \code{NULL} (default) for
+\code{varY} when it is finite, else 1 (the standardized scale). It is
+held fixed, as the other summary-statistics fits hold theirs: against a
+reference LD, an estimate absorbs LD mismatch.
+\code{MrashRssOptions(update_sigma = TRUE)} estimates it from this
+start, as \code{mr.ash.rss} does by default.}
 
 \item{s0}{Prior variances of the mixture components, relative to the
 residual variance, or \code{NULL} (default) for the grid

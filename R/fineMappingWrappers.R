@@ -141,6 +141,8 @@ formatCsColumn <- function(coverage, method) {
     lookup <- c(
         susieInf = "susie_inf",
         susieAsh = "susie_ash",
+        mvsusieInf = "mvsusie_inf",
+        mvsusieAsh = "mvsusie_ash",
         susieRss = "susie_rss",
         susieInfRss = "susie_inf_rss",
         susieAshRss = "susie_ash_rss",
@@ -150,6 +152,11 @@ formatCsColumn <- function(coverage, method) {
     map_chr(method, .camelToSnakeOne, lookup = lookup)
 }
 
+# The S3 classes a fit is post-processed under. mvsusieInf and mvsusieAsh
+# fits are mvsusie fits too; an mvSuSiE-RSS fit ("mvsusieRss",
+# "mvsusieInfRss", "mvsusieAshRss") is tagged "mvsusieRss", as every
+# susie_rss fit is "susieRss", for the purity its LD factor reads
+# (.csTableSusie()).
 .setFinemappingFitClass <- function(fit, method) {
     if (is.null(fit)) {
         return(NULL)
@@ -163,6 +170,11 @@ formatCsColumn <- function(coverage, method) {
         bayesianConditionalRegression = "susieRss",
         fsusie = "susiF",
         mvsusie = "mvsusie",
+        mvsusieInf = c("mvsusieInf", "mvsusie"),
+        mvsusieRss = c("mvsusieRss", "mvsusie"),
+        mvsusieInfRss = c("mvsusieRss", "mvsusieInf", "mvsusie"),
+        mvsusieAsh = c("mvsusieAsh", "mvsusie"),
+        mvsusieAshRss = c("mvsusieRss", "mvsusieAsh", "mvsusie"),
         NULL
     )
     if (is.null(methodClass)) {
@@ -755,7 +767,9 @@ postprocessFinemappingFit.susiF <- function(
         compact(list(
             sumstats = sumstats,
             sampleNames = .sampleNamesFromDataY(dataY),
-            contextNames = if (method == "mvsusie") fit$outcome_names,
+            contextNames = if (is_in(method, .fmMvsusieTokens())) {
+                fit$outcome_names
+            },
             otherQuantities = otherQuantities
         ))
     )
@@ -1042,21 +1056,109 @@ computeCsTable <- function(
             median_abs_corr = medianAbsCorr
         ))
     )
-    # X vs Xcorr only changes how susie_get_cs computes purity; the between-CS
-    # correlation is derived on demand later by computeCsCorrelation(), so it is
-    # no longer stored on the fit.
-    ldArg <- if (csInput == "Xcorr") {
-        list(Xcorr = dataX)
-    } else if (inherits(fit, "susieRss")) {
+    ldArg <- .csLdArg(fit, dataX, csInput)
+    noData <- .csNoDataVariants(dataX, csInput)
+    sets <- if (any(noData)) {
+        .csSetsOverPresent(fit, csArgs, ldArg, noData)
+    } else {
+        exec(susie_get_cs, fit, !!!csArgs, !!!ldArg)
+    }
+    list(sets = sets, pip = fit$pip)
+}
+
+# How susie_get_cs() reads the LD for purity: from X (correlation computed
+# on genotypes) or Xcorr (precomputed LD). The between-CS correlation is
+# derived on demand later by computeCsCorrelation(), so it is not stored.
+# @noRd
+.csLdArg <- function(fit, dataX, csInput) {
+    if (csInput == "Xcorr") {
+        return(list(Xcorr = dataX))
+    }
+    if (inherits(fit, c("susieRss", "mvsusieRss"))) {
         # An RSS fit's X is its LD reference's factor, standing in for the
         # matrix, so its purity must be the matrix route's: never subsampled.
-        list(X = dataX, n_purity = Inf)
-    } else {
-        list(X = dataX)
+        return(list(X = dataX, n_purity = Inf))
     }
-    getCsArgs <- c(list(fit), csArgs, ldArg)
-    sets <- exec(susie_get_cs, !!!getCsArgs)
-    list(sets = sets, pip = fit$pip)
+    list(X = dataX)
+}
+
+# The variants `dataX` holds no data on: a zero diagonal of an LD matrix, or
+# a constant column of genotypes or of an LD factor (constant up to the
+# rounding residualizing leaves) -- in a fit across studies, the variants a
+# condition's study lacks.
+# @noRd
+.csNoDataVariants <- function(dataX, csInput) {
+    if (!is.matrix(dataX)) {
+        return(FALSE)
+    }
+    if (identical(csInput, "Xcorr")) {
+        return(diag(dataX) == 0)
+    }
+    colSds(dataX) < sqrt(.Machine$double.eps)
+}
+
+# The credible sets, each with its purity read over the members `dataX`
+# holds data on (`noData` marks the others): a member without data says
+# nothing about the set's LD, so it does not lower its purity, and a set
+# with no other member is dropped. Ordered by purity, as susie_get_cs()
+# orders them.
+# @noRd
+.csSetsOverPresent <- function(fit, csArgs, ldArg, noData) {
+    every <- exec(
+        susie_get_cs,
+        fit,
+        coverage = csArgs$coverage,
+        min_abs_corr = 0,
+        !!!ldArg
+    )
+    present <- map(every$cs, setdiff, which(noData))
+    purity <- map(present, .csMemberPurity, csArgs = csArgs, ldArg = ldArg)
+    kept <- which(!map_lgl(purity, is.null))
+    if (length(kept) == 0L) {
+        return(list(
+            cs = NULL,
+            coverage = NULL,
+            requested_coverage = csArgs$coverage
+        ))
+    }
+    table <- exec(rbind, !!!unname(purity[kept]))
+    ordering <- order(table[, 1L], decreasing = TRUE)
+    at <- kept[ordering]
+    list(
+        cs = every$cs[at],
+        purity = `rownames<-`(
+            table[ordering, , drop = FALSE],
+            names(every$cs)[at]
+        ),
+        cs_index = every$cs_index[at],
+        coverage = every$coverage[at],
+        requested_coverage = csArgs$coverage
+    )
+}
+
+# The purity of credible-set members `members` by susie_get_cs()'s own rule
+# and thresholds, NULL when it fails them: the set of one effect spread
+# evenly over them, all of which its coverage then takes, read on their LD.
+# @noRd
+.csMemberPurity <- function(members, csArgs, ldArg) {
+    m <- length(members)
+    if (m == 0L) {
+        return(NULL)
+    }
+    ld <- if (is.null(ldArg$Xcorr)) {
+        list_assign(ldArg, X = ldArg$X[, members, drop = FALSE])
+    } else {
+        list(Xcorr = ldArg$Xcorr[members, members, drop = FALSE])
+    }
+    thresholds <- csArgs[names(csArgs) != "coverage"]
+    sets <- exec(
+        susie_get_cs,
+        list(alpha = matrix(1 / m, 1L, m), V = 1),
+        coverage = 1 - 1 / (2 * m),
+        !!!thresholds,
+        !!!ld
+    )
+    sets$purity
 }
 
 # --- computeCsCorrelation: between-CS correlation, derived on demand ----------
@@ -1881,10 +1983,16 @@ buildTopLoci <- function(
 
 # susieInf / susieAsh carry an infinitesimal effect alongside the sparse one,
 # and `coef.susie()` adds it in. Dropping it would silently change what the
-# posterior effect means for those two methods.
+# posterior effect means for those two methods. mvsusieInf's is variants x
+# conditions, read at the condition's column as mu is.
 # @noRd
-.btlInfinitesimal <- function(fit, nV) {
-    theta <- fit[["theta"]]
+.btlInfinitesimal <- function(fit, nV, conditionIdx = NULL) {
+    raw <- fit[["theta"]]
+    theta <- if (is.matrix(raw) && !is.null(conditionIdx)) {
+        raw[, conditionIdx]
+    } else {
+        raw
+    }
     if (is.null(theta) || !is.numeric(theta) || length(theta) != nV) {
         return(rep(0, nV))
     }
@@ -1895,7 +2003,8 @@ buildTopLoci <- function(
 # single-effect log Bayes factor. A conditionIdx slices 3-D mvsusie mu/mu2.
 #
 # The mean and SD are returned on the scale of the X the fit was GIVEN, which
-# means dividing the internal `colSums(alpha * mu)` by
+# means dividing the internal `colSums(c * alpha * mu)` (c each effect's slot
+# weight, all 1 without a slot prior) by
 # `X_column_scale_factors` -- exactly what `susieR::coef.susie()` does, and
 # what `susieWeights()`, `.ctwasRenormalizeSusieWeights()` and the whole TWAS
 # layer already return. Without the division this one column was the only
@@ -1907,9 +2016,10 @@ buildTopLoci <- function(
     mu <- .fmSliceCond(fit$mu, conditionIdx)
     mu2 <- .fmSliceCond(fit$mu2, conditionIdx)
     scaleFactors <- .fitScaleFactors(fit, nV)
-    infinitesimal <- .btlInfinitesimal(fit, nV)
+    infinitesimal <- .btlInfinitesimal(fit, nV, conditionIdx)
+    slotWeights <- .fitSlotWeights(fit, nrow(alpha))
     meanStd <- if (!is.null(mu) && all(dim(alpha) == dim(mu))) {
-        colSums(alpha * mu) + infinitesimal
+        colSums(slotWeights * alpha * mu) + infinitesimal
     } else {
         rep(NA_real_, nV)
     }
@@ -1924,7 +2034,7 @@ buildTopLoci <- function(
         # From the STANDARDIZED moments, then rescaled: an SD rescales the
         # same way its mean does, but the mu2 identity only holds in the
         # units mu2 is stored in.
-        .susiePosteriorSd(alpha, mu, mu2) / scaleFactors
+        .susiePosteriorSd(alpha, mu, mu2, slotWeights) / scaleFactors
     } else {
         rep(NA_real_, nV)
     }
@@ -1948,11 +2058,21 @@ buildTopLoci <- function(
 # A variant's posterior SD from the single effects' moments, on the scale mu
 # and mu2 are stored in. The effects are independent in the variational
 # posterior, so their variances add: each is alpha * mu2 - (alpha * mu)^2, as
-# susieR::susie_get_posterior_sd() sums them. Subtracting the square of the
-# summed mean instead would treat the effects as one.
+# susieR::susie_get_posterior_sd() sums them, or, for an effect active with
+# probability c (its slot weight), c alpha mu2 - (c alpha mu)^2. Subtracting
+# the square of the summed mean instead would treat the effects as one.
 # @noRd
-.susiePosteriorSd <- function(alpha, mu, mu2) {
-    sqrt(pmax(colSums(alpha * mu2 - (alpha * mu)^2), 0))
+.susiePosteriorSd <- function(alpha, mu, mu2, slotWeights = 1) {
+    weighted <- slotWeights * alpha
+    sqrt(pmax(colSums(weighted * mu2 - (weighted * mu)^2), 0))
+}
+
+# The slot weights of a fit's single effects: their activity probabilities
+# under a slot prior, as susieR and mvsusieR report them (`slot_weights`),
+# which weight the PIPs and posterior summaries; all 1 without one.
+# @noRd
+.fitSlotWeights <- function(fit, nEffects) {
+    fit[["slot_weights"]] %||% rep(1, nEffects)
 }
 
 # Parse variant IDs to chrom/pos/A1/A2; error on missing or invalid coordinates.
@@ -2406,7 +2526,7 @@ buildTopLoci <- function(
 trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
     common <- .trimBaseFit(fit, effectIdx, csTables) |>
         .trimAddCommon(fit, effectIdx)
-    trimmed <- if (method == "mvsusie") {
+    trimmed <- if (is_in(method, .fmMvsusieTokens())) {
         .trimAddMvsusie(common, fit, effectIdx)
     } else {
         common
@@ -2454,7 +2574,9 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 }
 
 # Optional slots common to susie/mvsusie: column scales, posterior mu/mu2
-# (L x p, or L x p x R for multivariate), theta, omega_weights.
+# (L x p, or L x p x R for multivariate), the slot weights of the kept
+# effects (which coef.susie() and the posterior summaries read), theta,
+# omega_weights.
 .trimAddCommon <- function(trimmed, fit, effectIdx) {
     commonFields <- compact(list(
         X_column_scale_factors = .storedScaleFactors(
@@ -2462,6 +2584,7 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
         ),
         mu = .trimEffectSlice(fit$mu, effectIdx),
         mu2 = .trimEffectSlice(fit$mu2, effectIdx),
+        slot_weights = fit[["slot_weights"]][effectIdx],
         theta = fit$theta,
         omega_weights = fit$omega_weights
     ))
@@ -2564,15 +2687,18 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 }
 
 # mvsusie-specific slots: the coefficient matrix and the conditional lfsr
-# array (re-summarizing the stored fit reads it per condition). mu2_diag has
-# no reader once topLoci is built, so it is not stored.
+# array (re-summarizing the stored fit reads it per condition), and for
+# mvsusieInf the unmappable effects' covariance (tau2); their posterior mean
+# (theta), which the coefficients include, is a common slot. mu2_diag has no
+# reader once topLoci is built, so it is not stored.
 # @noRd
 .trimAddMvsusie <- function(trimmed, fit, effectIdx) {
     mvFields <- compact(list(
         coef = if (requireNamespace("mvsusieR", quietly = TRUE)) {
             mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
         },
-        clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx)
+        clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx),
+        tau2 = fit$tau2
     ))
     list_assign(trimmed, !!!mvFields)
 }
@@ -2815,7 +2941,12 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #'   with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be silently
 #'   ignored.
-#' @return The fit object returned by \code{mvsusieR::mvsusie}.
+#' @return The fit object returned by \code{mvsusieR::mvsusie}. A variant
+#'   with no data for a condition --- constant in the samples observing it,
+#'   as a variant a study lacks is in a design stacked across studies --- has
+#'   posterior mean 0 there: mvsusieR gives it its prior's prediction from
+#'   the other conditions, which as that condition's effect (or TWAS weight)
+#'   is on a scale the condition does not have.
 #' @examples
 #' \donttest{
 #' data(multiTraitData)
@@ -2862,7 +2993,69 @@ fitMvsusie <- function(
     # it, so the call finds it only on the search path. susieR is attached
     # for this call alone, and detached after unless it already was. Drop
     # this once mvsusieR imports the function.
-    withr::with_package("susieR", exec(mvsusieR::mvsusie, !!!callArgs))
+    fit <- withr::with_package(
+        "susieR",
+        exec(mvsusieR::mvsusie, !!!callArgs)
+    )
+    .mvsusieZeroLackedFit(fit, .mvsusieLackedIndividual(X, Y))
+}
+
+# The (variant, condition) pairs of a design with no data: a variant
+# constant in the samples observing a condition (variants x conditions).
+# @noRd
+.mvsusieLackedIndividual <- function(X, Y) {
+    phenotypes <- as.matrix(Y)
+    nCond <- ncol(phenotypes)
+    matrix(
+        list_c(map(
+            seq_len(nCond),
+            .mvsusieConditionLacked,
+            X = X,
+            Y = phenotypes
+        )),
+        ncol = nCond
+    )
+}
+
+# @noRd
+#' @importFrom matrixStats colSds
+.mvsusieConditionLacked <- function(r, X, Y) {
+    sds <- colSds(as.matrix(X)[!is.na(Y[, r]), , drop = FALSE])
+    # Constant up to rounding counts as constant: residualizing leaves a
+    # column constant in these samples constant only to rounding.
+    is.na(sds) | sds < sqrt(.Machine$double.eps)
+}
+
+# `fit` with an effect of 0 at each (variant, condition) pair with no data
+# (`lacked`, variants x conditions), where mvsusieR puts its prior's
+# prediction from the conditions with data: posterior mean and second moment
+# 0 -- for the sparse effects and, in an mvsusieInf fit, the unmappable
+# effects (theta) -- and no lfsr, the sign of an effect of 0 being undefined.
+# @noRd
+.mvsusieZeroLackedFit <- function(fit, lacked) {
+    mu <- fit$mu
+    if (!any(lacked) || length(dim(mu)) != 3L) {
+        return(fit)
+    }
+    mask <- array(rep(lacked, each = dim(mu)[[1L]]), dim(mu))
+    zeroed <- compact(list(
+        mu = replace(mu, mask, 0),
+        mu2_diag = .mvsusieMaskField(fit$mu2_diag, mask, 0),
+        conditional_lfsr = .mvsusieMaskField(fit$conditional_lfsr, mask, NA),
+        theta = .mvsusieMaskField(fit$theta, lacked, 0),
+        lfsr = .mvsusieMaskField(fit$lfsr, lacked, NA)
+    ))
+    list_assign(fit, !!!zeroed)
+}
+
+# `x` with `value` where `mask` holds, or NULL when `x` is not of the mask's
+# shape: a field the fit lacks, or holds as NA for want of an effect.
+# @noRd
+.mvsusieMaskField <- function(x, mask, value) {
+    if (!identical(dim(x), dim(mask))) {
+        return(NULL)
+    }
+    replace(x, mask, value)
 }
 
 #' Fit mvSuSiE-RSS on summary-statistic (Z, R, N) data
@@ -2872,16 +3065,31 @@ fitMvsusie <- function(
 #' insulates pecotmr from that naming.
 #'
 #' @param Z Numeric matrix of Z-scores (variants x conditions).
-#' @param R Variant-by-variant LD correlation matrix.
-#' @param N Scalar sample size (median across conditions when N varies).
+#' @param R Variant-by-variant LD correlation matrix, or a list of one per
+#'   condition when the conditions are measured on different samples (e.g.
+#'   studies of different ancestries, each on its own LD reference); see
+#'   \code{mvsusieR::mvsusie_rss}. Give either \code{R} or \code{X}.
+#' @param N Sample size: a scalar (the median across conditions when N
+#'   varies), or one per condition, the same for the conditions on one LD
+#'   matrix.
 #' @param prior_variance Prior variance matrix.
 #' @param coverage Credible set coverage (default 0.95).
 #' @inheritParams fitMvsusie
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie_rss},
 #'   built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 #'   its own constructor, since it is a different function from
-#'   \code{mvsusie} with different arguments.
-#' @return The fit object returned by \code{mvsusieR::mvsusie_rss}.
+#'   \code{mvsusie} with different arguments --- or, for the unmappable
+#'   effects model, \code{\link{MvsusieInfRssOptions}}.
+#' @param X Instead of \code{R}, a factor of the LD matrix: a samples x
+#'   variants matrix, such as a reference panel's genotypes, whose columns
+#'   \code{mvsusieR::mvsusie_rss} centres (when they are not already) and
+#'   scales so that its cross-product is \code{R}, or a list of one per
+#'   condition, as for \code{R}. The variants x variants matrix is then
+#'   never formed.
+#' @return The fit object returned by \code{mvsusieR::mvsusie_rss}. With
+#'   one LD per condition, a variant a condition's LD lacks (a zero row and
+#'   column of its matrix, or a zero column of its factor) has posterior
+#'   mean 0 there, as in \code{\link{fitMvsusie}}.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
@@ -2897,39 +3105,63 @@ fitMvsusie <- function(
 #' LD <- cor(X)
 #' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X), prior_variance = 1)
 #' head(sort(fit$pip, decreasing = TRUE))
-#' @importFrom checkmate assertNumber
+#' @importFrom checkmate assertNumber assertNumeric
 #' @export
 fitMvsusieRss <- function(
     Z,
-    R,
+    R = NULL,
     N,
     prior_variance,
     coverage = 0.95,
     L = 10L,
     L_greedy = NULL,
-    methodArgs = MvsusieRssOptions()
+    methodArgs = MvsusieRssOptions(),
+    X = NULL
 ) {
     .assertMethodOptions(methodArgs, "MvsusieRssOptions", "methodArgs")
-    assertNumber(N, lower = 0, finite = TRUE)
+    assertNumeric(
+        N,
+        lower = 0,
+        finite = TRUE,
+        any.missing = FALSE,
+        min.len = 1L
+    )
     assertNumber(coverage, lower = 0, upper = 1)
     assertCount(L, positive = TRUE)
     assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
+    .mvsusieRssAssertOneLd(R, X)
     user <- as.list(methodArgs)
     callArgs <- list_modify(
         c(
             list(
                 Z = Z,
-                R = R,
                 N = N,
                 prior_variance = prior_variance,
                 coverage = coverage,
                 L = L
             ),
-            compact(list(L_greedy = L_greedy))
+            compact(list(R = R, X = X, L_greedy = L_greedy))
         ),
         !!!user
     )
-    exec(mvsusieR::mvsusie_rss, !!!callArgs)
+    fit <- exec(mvsusieR::mvsusie_rss, !!!callArgs)
+    if (!is.list(R) && !is.list(X)) {
+        return(fit)
+    }
+    .mvsusieZeroLackedFit(fit, .rssLackedVariants(list(R = R, X = X)))
+}
+
+# fitMvsusieRss() reads the LD as its matrix `R` or its factor `X`, exactly
+# one of them.
+# @noRd
+.mvsusieRssAssertOneLd <- function(R, X) {
+    if (is.null(R) == is.null(X)) {
+        abort(str_c(
+            "fitMvsusieRss: give exactly one of `R` (the LD matrix) and ",
+            "`X` (a factor of it)."
+        ))
+    }
+    invisible(NULL)
 }
 
 #' @title Arguments For mvsusieR's Mixture-Prior Builder
@@ -3602,23 +3834,111 @@ mvsusieWeights <- function(
     fitRetention = c("none", "slim", "full")
 ) {
     fitRetention <- arg_match(fitRetention)
-    if (is.null(mvsusieFit)) {
+    .mvsusieExtractWeights(mvsusieFit, "mvsusie", fitRetention)
+}
+
+#' Compute mvSuSiE-inf TWAS weights
+#'
+#' Extracts coefficients from an existing mvSuSiE-inf fit
+#' (\code{mvsusieR::mvsusie()} with \code{unmappable_effects = "inf"}), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
+#'
+#' @section Non-zero weights with zero PIPs: The weights add the posterior
+#'   mean of the unmappable effects (the fit's \code{theta}) to the sparse
+#'   effects, so a fit with no credible set still gives non-zero weights,
+#'   as \code{\link{susieInfWeights}} does.
+#'
+#' @inheritParams mvsusieWeights
+#' @param mvsusieInfFit A fitted mvSuSiE-inf object, or the trimmed one a
+#'   fine-mapping result stores, whose precomputed \code{coef} is read.
+#'   Required.
+#' @return Matrix of variant weights, with the fit attached as attribute
+#'   \code{"fit"} unless \code{fitRetention = "none"}.
+#' @examples
+#' \donttest{
+#' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
+#' library(susieR)
+#' data(multiTraitData)
+#' # The unmappable effects take conditions observed on the same samples.
+#' observed <- stats::complete.cases(multiTraitData$Y)
+#' X <- multiTraitData$X[observed, 1:60]
+#' Y <- multiTraitData$Y[observed, ]
+#' fit <- fitMvsusie(X = X, Y = Y,
+#'   prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
+#'   methodArgs = MvsusieInfOptions(max_iter = 50))
+#' mvsusieInfWeights(mvsusieInfFit = fit)
+#' }
+#' @export
+mvsusieInfWeights <- function(
+    X = NULL,
+    Y = NULL,
+    mvsusieInfFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    fitRetention <- arg_match(fitRetention)
+    .mvsusieExtractWeights(mvsusieInfFit, "mvsusieInf", fitRetention)
+}
+
+#' Compute mvSuSiE-ash TWAS weights
+#'
+#' Extracts coefficients from an existing mvSuSiE-ash fit
+#' (\code{mvsusieR::mvsusie()} with \code{unmappable_effects = "ash"}), as
+#' \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
+#'
+#' @section Non-zero weights with zero PIPs: The weights add the posterior
+#'   mean of the unmappable effects (the fit's \code{theta}, fitted by
+#'   mr.mash) to the slot-weighted sparse effects, so a fit with no
+#'   credible set still gives non-zero weights, as
+#'   \code{\link{susieAshWeights}} does.
+#'
+#' @inheritParams mvsusieWeights
+#' @param mvsusieAshFit A fitted mvSuSiE-ash object, or the trimmed one a
+#'   fine-mapping result stores, whose precomputed \code{coef} is read.
+#'   Required.
+#' @return Matrix of variant weights, with the fit attached as attribute
+#'   \code{"fit"} unless \code{fitRetention = "none"}.
+#' @examples
+#' \donttest{
+#' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
+#' library(susieR)
+#' data(multiTraitData)
+#' # The unmappable effects take conditions observed on the same samples.
+#' observed <- stats::complete.cases(multiTraitData$Y)
+#' X <- multiTraitData$X[observed, 1:60]
+#' Y <- multiTraitData$Y[observed, ]
+#' fit <- fitMvsusie(X = X, Y = Y,
+#'   prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
+#'   methodArgs = MvsusieAshOptions(max_iter = 20))
+#' mvsusieAshWeights(mvsusieAshFit = fit)
+#' }
+#' @export
+mvsusieAshWeights <- function(
+    X = NULL,
+    Y = NULL,
+    mvsusieAshFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    fitRetention <- arg_match(fitRetention)
+    .mvsusieExtractWeights(mvsusieAshFit, "mvsusieAsh", fitRetention)
+}
+
+# The weights of an existing fit of mvSuSiE-family `token`. These never
+# fine-map, so a NULL `fit` is an error naming the argument that takes one.
+# @noRd
+.mvsusieExtractWeights <- function(fit, token, fitRetention) {
+    if (is.null(fit)) {
         msg <- glue(
-            "mvsusieWeights: `mvsusieFit` is required. This extracts weights ",
+            "{token}Weights: `{token}Fit` is required. This extracts weights ",
             "from an existing mvSuSiE fit and never runs fine-mapping ",
             "itself; fit it via fineMappingPipeline() and pass the result in."
         )
         abort(msg)
     }
-    weights <- .mvsusieFitCoef(mvsusieFit)
+    weights <- .mvsusieFitCoef(fit)
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    `attr<-`(
-        weights,
-        "fit",
-        .withFitVariantIds(mvsusieFit, rownames(weights))
-    )
+    `attr<-`(weights, "fit", .withFitVariantIds(fit, rownames(weights)))
 }
 
 # The variants x conditions weights of an mvSuSiE fit. A trimmed fit (as
@@ -3941,7 +4261,10 @@ fsusieWeights <- function(
 #'   weights from one block are not comparable against another's.
 #' @param ldReference Optional LD reference for that block: a genotype
 #'   panel, a \code{\link{GenotypeMixture}} or an \code{\link{LdMatrix}}.
-#'   With one, the statistics' variants must also be in it. No LD is read.
+#'   With one, the statistics' variants must also be in it. A fit of
+#'   conditions measured on different samples takes a list of one reference
+#'   per column of \code{stat$z}, as it was fitted with; each must be a
+#'   valid reference. No LD is read.
 #' @param mvsusieRssFit A fitted \code{mvsusieRss} object. Required: this
 #'   extracts weights and never runs fine-mapping itself.
 #' @param fitRetention How much of the fit is kept on the returned weights:
@@ -3976,46 +4299,158 @@ mvsusieRssWeights <- function(
 ) {
     assertList(stat)
     fitRetention <- arg_match(fitRetention)
-    if (!requireNamespace("mvsusieR", quietly = TRUE)) {
-        abort("Package 'mvsusieR' is required.")
-    }
-    if (is.null(mvsusieRssFit)) {
+    .mvsusieRssExtractWeights(
+        stat,
+        ldReference,
+        mvsusieRssFit,
+        "mvsusie",
+        fitRetention
+    )
+}
+
+#' Compute mvSuSiE-inf-RSS TWAS weights from summary statistics
+#'
+#' Extracts coefficients from an existing mvSuSiE-inf-RSS fit
+#' (\code{mvsusieR::mvsusie_rss()} with \code{unmappable_effects = "inf"}),
+#' as \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
+#' The fit is checked against \code{stat} and \code{ldReference} as in
+#' \code{\link{mvsusieRssWeights}}, and the weights include the unmappable
+#' effects, as in \code{\link{mvsusieInfWeights}}.
+#'
+#' @inheritParams mvsusieRssWeights
+#' @param mvsusieInfRssFit A fitted \code{mvsusieInfRss} object, or the
+#'   trimmed one a fine-mapping result stores. Required: this extracts
+#'   weights and never runs fine-mapping itself.
+#' @return A numeric matrix of per-variant per-context weights (variants x
+#'   conditions).
+#' @examples
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' ss <- lapply(seq_len(ncol(X)), function(j) {
+#'   coef(summary(lm(y ~ X[, j])))[2, 1:2]
+#' })
+#' stat <- list(
+#'   bhat = vapply(ss, `[`, numeric(1), 1L),
+#'   shat = vapply(ss, `[`, numeric(1), 2L),
+#'   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+#'   n = rep(nrow(X), ncol(X)))
+#' LD <- cor(X)
+#' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+#'   prior_variance = 1, methodArgs = MvsusieInfRssOptions())
+#' mvsusieInfRssWeights(stat, mvsusieInfRssFit = fit)
+#' @export
+mvsusieInfRssWeights <- function(
+    stat,
+    ldReference = NULL,
+    mvsusieInfRssFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    assertList(stat)
+    fitRetention <- arg_match(fitRetention)
+    .mvsusieRssExtractWeights(
+        stat,
+        ldReference,
+        mvsusieInfRssFit,
+        "mvsusieInf",
+        fitRetention
+    )
+}
+
+#' Compute mvSuSiE-ash-RSS TWAS weights from summary statistics
+#'
+#' Extracts coefficients from an existing mvSuSiE-ash-RSS fit
+#' (\code{mvsusieR::mvsusie_rss()} with \code{unmappable_effects = "ash"}),
+#' as \code{\link{fineMappingPipeline}} makes it; it fits nothing itself.
+#' The fit is checked against \code{stat} and \code{ldReference} as in
+#' \code{\link{mvsusieRssWeights}}, and the weights include the unmappable
+#' effects, as in \code{\link{mvsusieAshWeights}}.
+#'
+#' @inheritParams mvsusieRssWeights
+#' @param mvsusieAshRssFit A fitted \code{mvsusieAshRss} object, or the
+#'   trimmed one a fine-mapping result stores. Required: this extracts
+#'   weights and never runs fine-mapping itself.
+#' @return A numeric matrix of per-variant per-context weights (variants x
+#'   conditions).
+#' @examples
+#' \donttest{
+#' data(eqtlRegionExample)
+#' X <- eqtlRegionExample$X[, 1:30]
+#' y <- eqtlRegionExample$yRes
+#' ss <- lapply(seq_len(ncol(X)), function(j) {
+#'   coef(summary(lm(y ~ X[, j])))[2, 1:2]
+#' })
+#' stat <- list(
+#'   bhat = vapply(ss, `[`, numeric(1), 1L),
+#'   shat = vapply(ss, `[`, numeric(1), 2L),
+#'   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
+#'   n = rep(nrow(X), ncol(X)))
+#' LD <- cor(X)
+#' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+#'   prior_variance = 1, methodArgs = MvsusieAshRssOptions(max_iter = 20))
+#' mvsusieAshRssWeights(stat, mvsusieAshRssFit = fit)
+#' }
+#' @export
+mvsusieAshRssWeights <- function(
+    stat,
+    ldReference = NULL,
+    mvsusieAshRssFit = NULL,
+    fitRetention = c("none", "slim", "full")
+) {
+    assertList(stat)
+    fitRetention <- arg_match(fitRetention)
+    .mvsusieRssExtractWeights(
+        stat,
+        ldReference,
+        mvsusieAshRssFit,
+        "mvsusieAsh",
+        fitRetention
+    )
+}
+
+# The weights of an existing RSS fit of mvSuSiE-family `token`, checked
+# against the block `stat` (and `ldReference`) describe: the block the fit
+# is being combined with, so a fit from a different one is refused rather
+# than extracted.
+# @noRd
+.mvsusieRssExtractWeights <- function(
+    stat,
+    ldReference,
+    fit,
+    token,
+    fitRetention
+) {
+    label <- str_c(token, "RssWeights")
+    if (is.null(fit)) {
         msg <- glue(
-            "mvsusieRssWeights: `mvsusieRssFit` is required. This extracts ",
+            "{label}: `{token}RssFit` is required. This extracts ",
             "weights from an existing mvSuSiE-RSS fit and never runs ",
             "fine-mapping itself; fit it via fineMappingPipeline() and pass ",
             "the result in."
         )
         abort(msg)
     }
-    weights <- mvsusieR::coef.mvsusie(mvsusieRssFit)[-1, , drop = FALSE]
-    # `stat` (and `ldReference`) describe the block the fit is being combined
-    # with. The susie *RssWeights wrappers check the fit against them; this
-    # one used to take both and read neither, so a fit from a different block
-    # was extracted without complaint.
+    weights <- .mvsusieFitCoef(fit)
     .mvsusieRssAssertBlock(
         weights,
-        .rssVariantCount(stat, ldReference, "mvsusieRssWeights")
+        .rssVariantCount(stat, ldReference, label),
+        token
     )
     if (identical(fitRetention, "none")) {
         return(weights)
     }
-    `attr<-`(
-        weights,
-        "fit",
-        .withFitVariantIds(mvsusieRssFit, stat[["variantNames"]])
-    )
+    `attr<-`(weights, "fit", .withFitVariantIds(fit, stat[["variantNames"]]))
 }
 
 # The supplied fit must describe the LD block it is being extracted against;
 # the pairing is what makes the weights comparable across a region.
 # @noRd
-.mvsusieRssAssertBlock <- function(weights, nVariants) {
+.mvsusieRssAssertBlock <- function(weights, nVariants, token) {
     if (is.na(nVariants) || nrow(weights) == nVariants) {
         return(invisible(NULL))
     }
     abort(glue(
-        "Dimension mismatch: mvsusieRss fit has {nrow(weights)} variants ",
+        "Dimension mismatch: {token}Rss fit has {nrow(weights)} variants ",
         "but the statistics describe {nVariants}."
     ))
 }
@@ -5639,6 +6074,8 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     if (length(w0Updated) == 0L) {
         return(.fmCanonicalPrior(fitParts$V, conditionNames, R))
     }
+    # Components of the fit's prior other than the data-driven ones (the
+    # null is dropped by rescaleCovW0()) are the canonical matrices.
     list(
         priorVariance = buildMvsusieMixturePrior(
             conditionNames = conditionNames,
@@ -5646,8 +6083,103 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             mixtureWeights = w0Updated,
             weightsTol = weightsTol
         ),
-        residualVariance = fitParts$V
+        residualVariance = fitParts$V,
+        dataDrivenPriorMatrices = ddpm,
+        canonicalPriorMatrices = !all(is_in(names(rescaled), names(ddpm$U)))
     )
+}
+
+# The prior of the unmappable effects of `token`'s fit (mvsusieR's
+# unmappable_prior). For mvsusieAsh with the data-driven matrices of the
+# run's mr.mash fit (carried on `mvPrior`), that fit's prior on the
+# conditions `conditionNames`, as mrmashWrapper() builds it: those matrices,
+# and the canonical ones when the fit had them, over the grid of `sumstats`
+# (Bhat, Shat: the conditions' simple regressions on the standardized
+# variables, the scale mvsusieR fits theta on). The grid is in units of the
+# residual standard deviations `residualSd` (.residualSd()) when the prior
+# is relative to them (mvsusieR's relative_unmappable_prior, its default).
+# NULL leaves mvsusieR's default, or the one the method's options give
+# (`userArgs`), which then replaces it whole rather than being merged into
+# it. `sumstats` is only computed when it is used.
+# @noRd
+.fmAshThetaPrior <- function(
+    token,
+    mvPrior,
+    conditionNames,
+    sumstats,
+    userArgs,
+    residualSd = 1
+) {
+    U <- pluck(mvPrior, "dataDrivenPriorMatrices", "U")
+    given <- as.list(userArgs)$unmappable_prior
+    if (!identical(token, "mvsusieAsh") || is.null(U) || !is.null(given)) {
+        return(NULL)
+    }
+    conditionU <- if (is.null(colnames(U[[1L]]))) {
+        U
+    } else {
+        map(U, .mashSubsetMatrix, conditionsToKeep = conditionNames)
+    }
+    relative <- as.list(userArgs)$relative_unmappable_prior %||% TRUE
+    gridSd <- if (isTRUE(relative)) residualSd else 1
+    buildMrmashPriorMatrices(
+        Bhat = t(t(sumstats$Bhat) / gridSd),
+        Shat = t(t(sumstats$Shat) / gridSd),
+        dataDrivenPriorMatrices = list(U = conditionU),
+        canonicalPriorMatrices = isTRUE(mvPrior$canonicalPriorMatrices)
+    )$S0
+}
+
+# The residual standard deviations of a fit's outcomes (for theta's prior,
+# .fmAshThetaPrior()): those of the residual variance it starts from, or of
+# the outcomes `Y` when it starts from their covariance, as mvsusieR does;
+# 1 (the z scale) when it has neither.
+# @noRd
+.residualSd <- function(residualVariance, Y = NULL) {
+    if (!is.null(residualVariance)) {
+        return(sqrt(diag(as.matrix(residualVariance))))
+    }
+    if (is.null(Y)) {
+        return(1)
+    }
+    apply(Y, 2L, stats::sd, na.rm = TRUE)
+}
+
+# The covariance of the polygenic effects of `token`'s fit (mvsusieR's
+# unmappable_variance). For mvsusieInf with the data-driven matrices of the
+# run's mash prior (carried on `mvPrior`), that mixture collapsed over its
+# weights, sum_k w_k U_k (.mashCollapseWeights()), on the conditions
+# `conditionNames`: learned genome-wide, it gives the polygenic effects
+# their correlations, while the fit estimates each condition's variance.
+# NULL leaves mvsusieR's default (no correlation), or the one the method's
+# options give (`userArgs`).
+# @noRd
+.fmInfUnmappableVariance <- function(token, mvPrior, conditionNames, userArgs) {
+    ddpm <- pluck(mvPrior, "dataDrivenPriorMatrices")
+    given <- as.list(userArgs)$unmappable_variance
+    if (!identical(token, "mvsusieInf") || is.null(ddpm$U) || !is.null(given)) {
+        return(NULL)
+    }
+    collapsed <- reduce(map2(ddpm$U, .mashCollapseWeights(ddpm), `*`), `+`)
+    if (is.null(colnames(collapsed))) {
+        return(collapsed)
+    }
+    .mashSubsetMatrix(collapsed, conditionsToKeep = conditionNames)
+}
+
+# The weights a mash prior's matrices are collapsed with, in the order of
+# its matrices and summing to 1: its mixture weights, 0 for the matrices
+# without one (canonical matrices added after the fit), or equal weights
+# when it carries none.
+# @noRd
+.mashCollapseWeights <- function(ddpm) {
+    matched <- ddpm$w[names(ddpm$U) %||% character()]
+    w <- if (length(matched) == 0L || all(is.na(matched))) {
+        rep(1, length(ddpm$U))
+    } else {
+        replace(matched, is.na(matched), 0)
+    }
+    unname(w / sum(w))
 }
 
 # Per-column marginal-association z-scores of y on each column of X (univariate
@@ -5717,13 +6249,14 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     maxLbf > (if (metric == "bf") log(cutoff) else cutoff)
 }
 
-# Per-fold mvsusie weights. Reuses the data-driven reweighted prior + residual
-# covariance from the full-data mr.mash fit on every fold -- the prior is over
-# conditions, identical across folds (only samples are held out). NULL mvPrior
-# -> the canonical mixture over this fold's outcome columns, which is the same
-# prior .fmCanonicalPrior() builds for the full-data path.
+# Per-fold mvsusie / mvsusieInf weights. Reuses the data-driven reweighted
+# prior + residual covariance from the full-data mr.mash fit on every fold --
+# the prior is over conditions, identical across folds (only samples are held
+# out). NULL mvPrior -> the canonical mixture over this fold's outcome
+# columns, which is the same prior .fmCanonicalPrior() builds for the
+# full-data path.
 # @noRd
-.fmFoldWeightsMv <- function(Xtr, Ytr, coverage, userArgs, mvPrior) {
+.fmFoldWeightsMv <- function(token, Xtr, Ytr, coverage, userArgs, mvPrior) {
     baseArgs <- list(
         X = Xtr,
         Y = Ytr,
@@ -5737,10 +6270,26 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             mvPrior$priorVariance
         }
     )
-    priorArgs <- compact(list(residual_variance = mvPrior$residualVariance))
+    priorArgs <- compact(list(
+        residual_variance = mvPrior$residualVariance,
+        unmappable_prior = .fmAshThetaPrior(
+            token,
+            mvPrior,
+            colnames(Ytr),
+            .mrmashComputeSumstats(Xtr, Ytr, standardize = TRUE, threads = 1L),
+            userArgs,
+            .residualSd(mvPrior$residualVariance, Ytr)
+        ),
+        unmappable_variance = .fmInfUnmappableVariance(
+            token,
+            mvPrior,
+            colnames(Ytr),
+            userArgs
+        )
+    ))
     withPrior <- list_assign(baseArgs, !!!priorArgs)
     mvArgs <- .fmMergeUserArgs(withPrior, userArgs)
-    fitMvsusieArgs <- .splitMethodArgs(fitMvsusie, mvArgs)
+    fitMvsusieArgs <- .fmMvsusieSplitArgs(token, fitMvsusie, mvArgs)
     fit <- exec(fitMvsusie, !!!fitMvsusieArgs)
     raw <- as.matrix(mvsusieWeights(mvsusieFit = fit))
     `rownames<-`(raw, rownames(raw) %||% colnames(Xtr))
@@ -5822,6 +6371,54 @@ MvsusieRssOptions <- function(...) {
         "MvsusieRssOptions",
         "mvsusieRss",
         list(...)
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieInfOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie",
+        "MvsusieInfOptions",
+        "mvsusieInf",
+        list(...),
+        defaults = list(unmappable_effects = "inf")
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieInfRssOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie_rss",
+        "MvsusieInfRssOptions",
+        "mvsusieInfRss",
+        list(...),
+        defaults = list(unmappable_effects = "inf")
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieAshOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie",
+        "MvsusieAshOptions",
+        "mvsusieAsh",
+        list(...),
+        defaults = list(unmappable_effects = "ash")
+    )
+}
+
+#' @rdname fineMappingMethodOptions
+#' @export
+MvsusieAshRssOptions <- function(...) {
+    .fmMethodOptions(
+        "mvsusieR::mvsusie_rss",
+        "MvsusieAshRssOptions",
+        "mvsusieAshRss",
+        list(...),
+        defaults = list(unmappable_effects = "ash")
     )
 }
 

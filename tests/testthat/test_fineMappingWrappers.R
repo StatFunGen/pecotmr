@@ -851,6 +851,30 @@ test_that("buildTopLoci conditionIdx slices mvsusie's 3-D posterior", {
     expect_true(all(is.na(tl0$posterior_mean)))
 })
 
+test_that("buildTopLoci reads an mvsusieInf theta at its condition", {
+    set.seed(1)
+    alpha <- matrix(c(0.7, 0.2, 0.1, 0.6, 0.2, 0.2), nrow = 2L, ncol = 3L)
+    mu <- array(rnorm(12L), dim = c(2L, 3L, 2L))
+    # Variants x conditions, as mvsusieR gives the unmappable effects.
+    theta <- matrix(c(0.1, -0.2, 0.05, 0.3, 0, -0.1), 3L, 2L)
+    fit <- list(
+        alpha = alpha,
+        mu = mu,
+        mu2 = mu^2 + 0.1,
+        theta = theta,
+        pip = 1 - apply(1 - alpha, 2, prod)
+    )
+    tl <- buildTopLoci(
+        fit,
+        NULL,
+        variantNames = c("1:100:A:G", "1:200:C:T", "1:300:G:A"),
+        method = "mvsusieInf",
+        conditionIdx = 2L
+    )
+    expect_equal(tl$posterior_theta, theta[, 2L])
+    expect_equal(tl$posterior_mean, colSums(alpha * mu[,, 2]) + theta[, 2L])
+})
+
 test_that("buildTopLoci: mvsusie per-condition lfsr + effect (long)", {
     L <- 2L
     p <- 4L
@@ -2672,6 +2696,136 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
     expect_error(MvsusieRssOptions(L = 3), "maxNumSingleEffects")
 })
 
+test_that("fitMvsusieRss takes one LD matrix and sample size per condition", {
+    skip_if_not_installed("mvsusieR")
+    local_mocked_bindings(
+        mvsusie_rss = function(Z, R, N, prior_variance, coverage, ...) {
+            list(R = R, N = N, mu = array(1, c(2L, 3L, 2L)))
+        },
+        .package = "mvsusieR"
+    )
+    # The second condition's matrix lacks the third variant.
+    lacking <- diag(c(1, 1, 0))
+    fit <- fitMvsusieRss(
+        matrix(0, 3L, 2L),
+        list(diag(3), lacking),
+        N = c(100, 80),
+        prior_variance = diag(2)
+    )
+    expect_equal(fit$N, c(100, 80))
+    expect_identical(fit$R[[2L]], lacking)
+    # Its posterior mean there is 0; the rest is as mvsusieR gave it.
+    expect_equal(fit$mu[, 3L, 2L], c(0, 0))
+    expect_equal(sum(fit$mu == 0), 2L)
+    expect_error(
+        fitMvsusieRss(
+            matrix(0, 3L, 2L),
+            diag(3),
+            N = c(100, NA),
+            prior_variance = diag(2)
+        ),
+        "N"
+    )
+})
+
+test_that("a variant a condition has no data on has posterior mean 0", {
+    X <- cbind(v1 = c(1, 2, 3, 4), v2 = c(1, 2, 5, 5))
+    Y <- cbind(A = c(1, 2, NA, NA), B = c(NA, NA, 3, 4))
+    # v2 is constant in the samples observing B.
+    lacked <- pecotmr:::.mvsusieLackedIndividual(X, Y)
+    expect_equal(lacked, cbind(c(FALSE, FALSE), c(FALSE, TRUE)))
+    # So it is when residualizing left it constant only up to rounding.
+    rounded <- replace(X, cbind(3:4, 2L), 0.8902 * (1 + c(0, 2e-16)))
+    expect_gt(stats::sd(rounded[3:4, 2L]), 0)
+    expect_equal(pecotmr:::.mvsusieLackedIndividual(rounded, Y), lacked)
+    fit <- list(
+        mu = array(1, c(2L, 2L, 2L)),
+        mu2_diag = array(2, c(2L, 2L, 2L)),
+        conditional_lfsr = array(0.1, c(2L, 2L, 2L)),
+        lfsr = matrix(0.1, 2L, 2L)
+    )
+    zeroed <- pecotmr:::.mvsusieZeroLackedFit(fit, lacked)
+    expect_equal(zeroed$mu[, 2L, 2L], c(0, 0))
+    expect_equal(sum(zeroed$mu == 0), 2L)
+    # Its second moment is 0 too, and it has no lfsr there.
+    expect_equal(zeroed$mu2_diag[, 2L, 2L], c(0, 0))
+    expect_equal(sum(zeroed$mu2_diag == 0), 2L)
+    expect_equal(which(is.na(zeroed$conditional_lfsr)), c(7L, 8L))
+    expect_equal(zeroed$lfsr, replace(fit$lfsr, lacked, NA))
+    # In an mvsusieInf fit, its unmappable effect there is 0 too.
+    infFit <- list_assign(fit, theta = matrix(1, 2L, 2L))
+    expect_equal(
+        pecotmr:::.mvsusieZeroLackedFit(infFit, lacked)$theta,
+        replace(infFit$theta, lacked, 0)
+    )
+    # A fit of no effect holds NA where the lfsr arrays would be.
+    none <- list_assign(fit, conditional_lfsr = NA)
+    expect_identical(
+        pecotmr:::.mvsusieZeroLackedFit(none, lacked)$conditional_lfsr,
+        NA
+    )
+    # Nothing lacked, or a fit of one condition, is left as it is.
+    expect_identical(pecotmr:::.mvsusieZeroLackedFit(fit, lacked & FALSE), fit)
+    flat <- list(mu = matrix(1, 2L, 2L))
+    expect_identical(pecotmr:::.mvsusieZeroLackedFit(flat, lacked), flat)
+})
+
+test_that("a credible set's purity is read over the members with data", {
+    set.seed(2)
+    X <- matrix(rnorm(400L), 100L, 4L)
+    X[, 2L] <- X[, 1L] + rnorm(100L, sd = 0.2)
+    # Variant 4 has no data in these samples.
+    X[, 4L] <- 1
+    # Effect 1's set takes variants 1, 2 and 4; effect 2's, variant 4 alone.
+    fit <- list(
+        alpha = rbind(c(0.5, 0.2, 0, 0.3), c(0, 0, 0.02, 0.98)),
+        V = c(1, 1),
+        pip = c(0.5, 0.2, 0.02, 0.99)
+    )
+    want <- abs(stats::cor(X[, 1L], X[, 2L]))
+    viaX <- pecotmr:::.csTableSusie(fit, X, 0.95, "X", 0.5, NULL)$sets
+    expect_equal(unname(viaX$cs), list(c(1L, 2L, 4L)))
+    expect_equal(viaX$purity$min.abs.corr, want)
+    expect_equal(viaX$cs_index, 1L)
+    expect_equal(viaX$coverage, 1)
+    # The same on the LD matrix, where the variant has a zero diagonal.
+    R <- `diag<-`(suppressWarnings(stats::cor(X)), c(1, 1, 1, 0))
+    R[is.na(R)] <- 0
+    viaR <- pecotmr:::.csTableSusie(fit, R, 0.95, "Xcorr", 0.5, NULL)$sets
+    expect_equal(
+        viaR[c("cs", "purity", "cs_index")],
+        viaX[c("cs", "purity", "cs_index")]
+    )
+    # Purity over the members with data still has to clear the threshold.
+    weak <- `[<-`(X, , 2L, rnorm(100L))
+    expect_null(
+        pecotmr:::.csTableSusie(fit, weak, 0.95, "X", 0.5, NULL)$sets$cs
+    )
+    # Without such a variant the sets are susie_get_cs()'s own.
+    full <- `[<-`(X, , 4L, rnorm(100L))
+    expect_identical(
+        pecotmr:::.csTableSusie(fit, full, 0.95, "X", 0.5, NULL)$sets,
+        susieR::susie_get_cs(fit, X = full, coverage = 0.95, min_abs_corr = 0.5)
+    )
+})
+
+test_that("an unmappable-effects fit refuses missing phenotypes in a study", {
+    .fm_skipIfNoMvsusieInf()
+    data(multiTraitData, envir = environment())
+    Y <- multiTraitData$Y[, 1:2]
+    # Two conditions on the same samples, one of them missing a few.
+    Y[1:5, 2L] <- NA
+    expect_error(
+        fitMvsusie(
+            X = multiTraitData$X[, 1:20],
+            Y = Y,
+            prior_variance = buildMvsusieMixturePrior(R = 2L),
+            methodArgs = MvsusieInfOptions(max_iter = 5)
+        ),
+        "missing values within outcomes measured on the same samples"
+    )
+})
+
 test_that("fitFsusie forwards arguments to fsusieR::susiF", {
     skip_if_not_installed("fsusieR")
     local_mocked_bindings(
@@ -2798,11 +2952,14 @@ test_that("susieAshRssWeights adds the fit's ash theta", {
         susieAshRssFit = fit,
         fitRetention = "none"
     )
-    # coef.susie(): the sparse alpha * mu effects plus theta, divided by the
-    # scale factors.
+    # coef.susie(): the sparse alpha * mu effects, each weighted by its slot
+    # weight (the slot prior ash runs with), plus theta, divided by the scale
+    # factors.
+    slotWeights <- fit$slot_weights %||% rep(1, nrow(fit$alpha))
     expect_equal(
         w,
-        (colSums(fit$alpha * fit$mu) + fit$theta) / fit$X_column_scale_factors
+        (colSums(slotWeights * fit$alpha * fit$mu) + fit$theta) /
+            fit$X_column_scale_factors
     )
 })
 
@@ -2821,6 +2978,35 @@ test_that("mvsusieRssWeights returns p x K weights from a supplied fit", {
     )
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
+})
+
+test_that("mvsusieRssWeights takes one LD reference per condition", {
+    skip_if_not_installed("mvsusieR")
+    m <- .rrwMulti(n = 80, p = 8, K = 2)
+    fakeCoef <- matrix(rnorm((m$p + 1) * m$K), nrow = m$p + 1, ncol = m$K)
+    local_mocked_bindings(
+        coef.mvsusie = function(...) fakeCoef,
+        .package = "mvsusieR"
+    )
+    refs <- rep(list(m$ldReference), m$K)
+    w <- mvsusieRssWeights(m$stat, refs, mvsusieRssFit = "precomputed_fit")
+    expect_equal(dim(w), c(m$p, m$K))
+    expect_error(
+        mvsusieRssWeights(
+            m$stat,
+            refs[1L],
+            mvsusieRssFit = "precomputed_fit"
+        ),
+        "one LD reference per column of stat\\$z \\(2\\); got 1"
+    )
+    expect_error(
+        mvsusieRssWeights(
+            m$stat,
+            list(m$ldReference, "not-a-reference"),
+            mvsusieRssFit = "precomputed_fit"
+        ),
+        "ldReference must be a genotype panel"
+    )
 })
 
 test_that("mvsusieRssWeights checks the fit against the statistics' block", {
@@ -2887,6 +3073,74 @@ test_that("mvsusieRssWeights demands a fit before anything else", {
     )
 })
 
+test_that("the mvSuSiE RSS weights read a stored fit's coefficients", {
+    m <- .rrwMulti(n = 60, p = 6, K = 2)
+    # A fit as a fine-mapping result stores it, without the intercept and
+    # the effects coef.mvsusie() sums over: its precomputed coefficients.
+    stored <- list(coef = matrix(seq_len(12L) / 10, 6L, 2L))
+    expect_equal(
+        mvsusieRssWeights(m$stat, mvsusieRssFit = stored),
+        stored$coef
+    )
+    expect_equal(
+        mvsusieInfRssWeights(m$stat, mvsusieInfRssFit = stored),
+        stored$coef
+    )
+    expect_error(
+        mvsusieInfRssWeights(m$stat),
+        "`mvsusieInfRssFit` is required"
+    )
+    fewer <- list_assign(
+        m$stat,
+        z = m$stat$z[-1L, ],
+        variantNames = m$stat$variantNames[-1L]
+    )
+    expect_error(
+        mvsusieInfRssWeights(fewer, mvsusieInfRssFit = stored),
+        "mvsusieInfRss fit has 6 variants but the statistics describe 5"
+    )
+})
+
+test_that("fitMvsusieRss fits unmappable effects on an LD factor", {
+    .fm_skipIfNoMvsusieInf()
+    d <- .rrwPanelStat()
+    ids <- d$stat$variantNames
+    ldFactor <- pecotmr:::.ldFactorFromRef(d$panel, ids, "test")
+    k <- nrow(ldFactor)
+    # Statistics consistent with the LD, z = R b + e with e ~ N(0, R) drawn
+    # through the factor: on this rank-deficient LD, susie-inf fails on
+    # statistics outside its column space, in susieR as in mvsusieR.
+    withr::local_seed(4L)
+    draw <- function(b) {
+        effects <- replace(numeric(length(ids)), c(3L, 20L), b)
+        signal <- ldFactor %*% effects + sqrt(k - 1) * stats::rnorm(k)
+        as.vector(crossprod(ldFactor, signal)) / (k - 1)
+    }
+    Z <- cbind(a = draw(c(8, -6)), b = draw(c(6, -6)))
+    fitOn <- function(...) {
+        suppressMessages(fitMvsusieRss(
+            Z,
+            N = 500,
+            prior_variance = buildMvsusieMixturePrior(R = 2L),
+            methodArgs = MvsusieInfRssOptions(verbose = FALSE),
+            ...
+        ))
+    }
+    # The panel's genotypes as the factor of its LD fit as its matrix does.
+    viaFactor <- fitOn(X = ldFactor)
+    viaMatrix <- fitOn(R = pecotmr:::.ldFromRef(d$panel, ids, "test"))
+    expect_gt(viaFactor$pip[[20L]], 0.9)
+    expect_equal(viaFactor$pip, viaMatrix$pip, tolerance = 1e-6)
+    expect_equal(viaFactor$theta, viaMatrix$theta, tolerance = 1e-6)
+    expect_equal(viaFactor$tau2, viaMatrix$tau2, tolerance = 1e-6)
+    expect_equal(dim(viaFactor$tau2), c(2L, 2L))
+    # One LD form only.
+    expect_error(
+        fitMvsusieRss(Z, R = diag(40), N = 500, prior_variance = 1, X = Z),
+        "give exactly one of `R` \\(the LD matrix\\) and `X`"
+    )
+})
+
 # ---- mvsusieWeights ----
 test_that("mvsusieWeights errors when mvsusieR package is not available", {
     skip_if(
@@ -2895,6 +3149,200 @@ test_that("mvsusieWeights errors when mvsusieR package is not available", {
     )
 
     expect_error(mvsusieWeights(mvsusieFit = list(alpha = 1)), "mvsusieR")
+})
+
+test_that("mvsusieInfWeights reads the fit, its unmappable effects included", {
+    skip_if_not_installed("mvsusieR")
+    stored <- list(coef = matrix(1:6 / 10, 3L, 2L))
+    expect_equal(mvsusieInfWeights(mvsusieInfFit = stored), stored$coef)
+    kept <- mvsusieInfWeights(mvsusieInfFit = stored, fitRetention = "slim")
+    expect_identical(attr(kept, "fit")$coef, stored$coef)
+    expect_error(mvsusieInfWeights(), "`mvsusieInfFit` is required")
+    .fm_skipIfNoMvsusieInf()
+    data(multiTraitData, envir = environment())
+    fit <- fitMvsusie(
+        X = multiTraitData$X[, 1:60],
+        Y = multiTraitData$Y[, 1:2],
+        prior_variance = buildMvsusieMixturePrior(R = 2L),
+        methodArgs = MvsusieInfOptions(max_iter = 50)
+    )
+    expect_equal(dim(fit$theta), c(60L, 2L))
+    effects <- map(seq_len(nrow(fit$alpha)), function(l) {
+        fit$alpha[l, ] * fit$mu[l, , ]
+    })
+    expect_equal(
+        unname(mvsusieInfWeights(mvsusieInfFit = fit)),
+        unname((reduce(effects, `+`) + fit$theta) / fit$X_column_scale_factors)
+    )
+})
+
+test_that("unmappable effects belong to the mvsusieInf method", {
+    expect_error(
+        MvsusieOptions(unmappable_effects = "inf"),
+        "`unmappable_effects` -> the method: `mvsusieInf`"
+    )
+    expect_error(
+        MvsusieRssOptions(unmappable_effects = "inf"),
+        "`unmappable_effects` -> the method: `mvsusieInf`"
+    )
+    expect_error(
+        MvsusieInfOptions(unmappable_effects = "none"),
+        "unmappable_effects"
+    )
+    .fm_skipIfNoMvsusieInf()
+    expect_identical(as.list(MvsusieInfOptions())$unmappable_effects, "inf")
+    rssArgs <- as.list(MvsusieInfRssOptions(max_iter = 5L))
+    expect_identical(rssArgs$unmappable_effects, "inf")
+    expect_identical(rssArgs$max_iter, 5L)
+})
+
+test_that("mvsusieAshWeights reads the fit, theta and slot weights included", {
+    skip_if_not_installed("mvsusieR")
+    stored <- list(coef = matrix(1:6 / 10, 3L, 2L))
+    expect_equal(mvsusieAshWeights(mvsusieAshFit = stored), stored$coef)
+    expect_error(mvsusieAshWeights(), "`mvsusieAshFit` is required")
+    m <- .rrwMulti(n = 60, p = 6, K = 2)
+    stored6 <- list(coef = matrix(seq_len(12L) / 10, 6L, 2L))
+    expect_equal(
+        mvsusieAshRssWeights(m$stat, mvsusieAshRssFit = stored6),
+        stored6$coef
+    )
+    expect_error(
+        mvsusieAshRssWeights(m$stat),
+        "`mvsusieAshRssFit` is required"
+    )
+    .fm_skipIfNoMvsusieAsh()
+    data(multiTraitData, envir = environment())
+    observed <- stats::complete.cases(multiTraitData$Y)
+    fit <- suppressMessages(fitMvsusie(
+        X = multiTraitData$X[observed, 1:40],
+        Y = multiTraitData$Y[observed, 1:2],
+        prior_variance = buildMvsusieMixturePrior(R = 2L),
+        methodArgs = MvsusieAshOptions(max_iter = 10)
+    ))
+    expect_equal(dim(fit$theta), c(40L, 2L))
+    expect_length(fit$c_hat, nrow(fit$alpha))
+    effects <- map(seq_len(nrow(fit$alpha)), function(l) {
+        fit$c_hat[l] * fit$alpha[l, ] * fit$mu[l, , ]
+    })
+    expect_equal(
+        unname(mvsusieAshWeights(mvsusieAshFit = fit)),
+        unname((reduce(effects, `+`) + fit$theta) / fit$X_column_scale_factors)
+    )
+})
+
+test_that("unmappable effects by adaptive shrinkage belong to mvsusieAsh", {
+    expect_error(
+        MvsusieOptions(unmappable_effects = "ash"),
+        "`mvsusieAsh` for unmappable"
+    )
+    expect_error(
+        MvsusieAshOptions(unmappable_effects = "none"),
+        "unmappable_effects"
+    )
+    .fm_skipIfNoMvsusieAsh()
+    expect_identical(as.list(MvsusieAshOptions())$unmappable_effects, "ash")
+    rssArgs <- as.list(MvsusieAshRssOptions(max_iter = 5L))
+    expect_identical(rssArgs$unmappable_effects, "ash")
+    expect_identical(rssArgs$max_iter, 5L)
+})
+
+test_that("mvsusieAsh's unmappable effects take the run's mr.mash prior", {
+    .fm_skipIfNoMvsusieAsh()
+    conditions <- c("a", "b")
+    U <- list(
+        tPCA = matrix(
+            c(1, 0.5, 0.5, 1),
+            2L,
+            dimnames = list(conditions, conditions)
+        )
+    )
+    mvPrior <- list(
+        dataDrivenPriorMatrices = list(U = U),
+        canonicalPriorMatrices = TRUE
+    )
+    ss <- list(
+        Bhat = matrix(c(0.1, -0.2, 0.05, 0.3, 0.1, -0.1), 3L),
+        Shat = matrix(0.05, 3L, 2L)
+    )
+    S0 <- pecotmr:::.fmAshThetaPrior(
+        "mvsusieAsh",
+        mvPrior,
+        conditions,
+        ss,
+        NULL
+    )
+    expect_equal(
+        S0,
+        buildMrmashPriorMatrices(
+            Bhat = ss$Bhat,
+            Shat = ss$Shat,
+            dataDrivenPriorMatrices = list(U = U),
+            canonicalPriorMatrices = TRUE
+        )$S0
+    )
+    # The run's matrices on the group's conditions only
+    wider <- c(conditions, "c")
+    U3 <- list(
+        tPCA = matrix(0.2, 3L, 3L, dimnames = list(wider, wider)) +
+            diag(0.8, 3L)
+    )
+    S3 <- pecotmr:::.fmAshThetaPrior(
+        "mvsusieAsh",
+        list(dataDrivenPriorMatrices = list(U = U3)),
+        conditions,
+        ss,
+        NULL
+    )
+    expect_true(all(map_lgl(S3, function(S) all(dim(S) == 2L))))
+    # None for the other methods, without an mr.mash fit, or when the
+    # options give one; the statistics are then never computed
+    expect_null(pecotmr:::.fmAshThetaPrior(
+        "mvsusieInf",
+        mvPrior,
+        conditions,
+        stop("unused"),
+        NULL
+    ))
+    expect_null(pecotmr:::.fmAshThetaPrior(
+        "mvsusieAsh",
+        list(),
+        conditions,
+        stop("unused"),
+        NULL
+    ))
+    expect_null(pecotmr:::.fmAshThetaPrior(
+        "mvsusieAsh",
+        mvPrior,
+        conditions,
+        stop("unused"),
+        MvsusieAshOptions(unmappable_prior = S0)
+    ))
+})
+
+test_that("posterior summaries weight each effect by its slot weight", {
+    alpha <- matrix(c(0.9, 0.1, 0.5, 0.5), 2L, byrow = TRUE)
+    mu <- matrix(c(1, 2, 3, 4), 2L, byrow = TRUE)
+    mu2 <- mu^2 + 0.1
+    slotWeights <- c(1, 0.4)
+    fit <- list(alpha = alpha, mu = mu, mu2 = mu2, slot_weights = slotWeights)
+    post <- pecotmr:::.btlPosterior(fit, NULL, 2L)
+    weighted <- slotWeights * alpha
+    expect_equal(post$postMean, colSums(weighted * mu))
+    expect_equal(
+        post$postSd,
+        sqrt(colSums(weighted * mu2 - (weighted * mu)^2))
+    )
+    # Without a slot prior every effect counts fully
+    unweighted <- pecotmr:::.btlPosterior(
+        fit[c("alpha", "mu", "mu2")],
+        NULL,
+        2L
+    )
+    expect_equal(unweighted$postMean, colSums(alpha * mu))
+    # A trimmed fit keeps the slot weights of the effects it keeps
+    trimmed <- pecotmr:::.trimAddCommon(list(), fit, 2L)
+    expect_equal(trimmed$slot_weights, 0.4)
 })
 
 test_that("mvsusieWeights refuses to fine-map when no fit is supplied", {
@@ -5036,7 +5484,7 @@ test_that(".fmFoldWeightsMv: NULL mvPrior uses buildMvsusieMixturePrior", {
             },
             .package = "pecotmr"
         )
-        pecotmr:::.fmFoldWeightsMv(Xtr, Ytr, 0.95, NULL, NULL)
+        pecotmr:::.fmFoldWeightsMv("mvsusie", Xtr, Ytr, 0.95, NULL, NULL)
     })
     expect_equal(args$R, 2L)
     expect_equal(args$include_indices, c("c1", "c2"))
@@ -5779,5 +6227,77 @@ test_that("computeCsCorrelation refuses an LD-free summary-statistics source", {
     expect_error(
         computeCsCorrelation(fe, pecotmr:::.withRowLdRefs(mc, NULL)),
         "carries no LD reference"
+    )
+})
+
+test_that(".fmInfUnmappableVariance collapses the mash prior by its weights", {
+    U <- list(
+        a = matrix(c(1, 0.5, 0.5, 1), 2, dimnames = rep(list(c("x", "y")), 2)),
+        b = matrix(c(2, 0, 0, 1), 2, dimnames = rep(list(c("x", "y")), 2))
+    )
+    mvPrior <- list(
+        dataDrivenPriorMatrices = list(U = U, w = c(a = 0.75, b = 0.25))
+    )
+    U0 <- .fmInfUnmappableVariance("mvsusieInf", mvPrior, c("x", "y"), list())
+    expect_equal(U0, 0.75 * U$a + 0.25 * U$b)
+    # Without weights, equal ones; only for mvsusieInf; a given one wins
+    noW <- list(dataDrivenPriorMatrices = list(U = U))
+    expect_equal(
+        .fmInfUnmappableVariance("mvsusieInf", noW, c("x", "y"), list()),
+        0.5 * U$a + 0.5 * U$b
+    )
+    expect_null(.fmInfUnmappableVariance(
+        "mvsusieAsh",
+        mvPrior,
+        c("x", "y"),
+        list()
+    ))
+    expect_null(.fmInfUnmappableVariance(
+        "mvsusieInf",
+        mvPrior,
+        c("x", "y"),
+        list(unmappable_variance = diag(2))
+    ))
+    # Matrices without a weight (canonical ones added after the fit) get 0
+    expect_equal(.mashCollapseWeights(list(U = U, w = c(a = 1))), c(1, 0))
+})
+
+test_that(".fmAshThetaPrior follows the canonical setting and residual scale", {
+    U <- list(
+        a = matrix(c(1, 0.5, 0.5, 1), 2, dimnames = rep(list(c("x", "y")), 2))
+    )
+    sumstats <- list(
+        Bhat = matrix(c(0.2, 0.1, -0.3, 0.05), 2),
+        Shat = matrix(0.05, 2, 2)
+    )
+    prior <- function(canonical, args = list(), sd = c(1, 1)) {
+        .fmAshThetaPrior(
+            "mvsusieAsh",
+            list(
+                dataDrivenPriorMatrices = list(U = U),
+                canonicalPriorMatrices = canonical
+            ),
+            c("x", "y"),
+            sumstats,
+            args,
+            sd
+        )
+    }
+    expect_gt(length(prior(TRUE)), length(prior(FALSE)))
+    # In units of the residual standard deviations: the grid of the scaled
+    # statistics
+    S0 <- prior(FALSE, sd = c(2, 2))
+    expect_equal(
+        S0,
+        buildMrmashPriorMatrices(
+            Bhat = sumstats$Bhat / 2,
+            Shat = sumstats$Shat / 2,
+            dataDrivenPriorMatrices = list(U = U),
+            canonicalPriorMatrices = FALSE
+        )$S0
+    )
+    expect_equal(
+        prior(FALSE, list(relative_unmappable_prior = FALSE), c(2, 2)),
+        prior(FALSE)
     )
 })

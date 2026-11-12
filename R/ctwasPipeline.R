@@ -3048,7 +3048,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # of `mu[, keptIdx]` to match the panel's allele frame (carrying over the
 # per-variant sign flip already applied to `harmonizedW`), and recompute the
 # per-variant weight as
-# `colSums(alpha * mu_subset) / X_column_scale_factors_subset`.
+# `colSums(c * alpha * mu_subset) / X_column_scale_factors_subset`, c each
+# effect's slot weight (all 1 without a slot prior).
 # Returns the new weight vector (length = length(keptIdx)), or NULL if
 # the fit's dimensions don't line up with the entry's variantIds.
 # @noRd
@@ -3074,7 +3075,9 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     rawScale <- .fitScaleFactors(fits, length(origVids))[keptIdx]
     # Guard against zero scale factors (shouldn't happen in practice).
     xColSub <- replace(rawScale, rawScale == 0, 1)
-    as.numeric(colSums(newAlpha * muSub) / xColSub)
+    # Each effect weighted by its slot weight, as coef.susie() weights it
+    slotWeights <- .fitSlotWeights(fits, nrow(newAlpha))
+    as.numeric(colSums(slotWeights * newAlpha * muSub) / xColSub)
 }
 
 # Whether a fit's weights can be recomputed from its alpha and mu over a

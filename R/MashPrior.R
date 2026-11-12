@@ -8,10 +8,10 @@
 # partition they were computed on, so honest CV reuses the SAME folds.
 #
 #   fullFit  the full-data priors: the mashPipeline() output, a named list with
-#            one prior per joint spec, each list(U, w, alpha, inputScale, axes,
-#            scope, conditions). Each mr.mash group takes the one over its
-#            spec's axes whose conditions include the group's
-#            (.mashPriorForGroup()), as `dataDrivenPriorMatrices`.
+#            one prior per joint spec, each list(U, w, residualCorrelation,
+#            alpha, inputScale, axes, scope, conditions). Each mr.mash group
+#            takes the one over its spec's axes whose conditions include the
+#            group's (.mashPriorForGroup()), as `dataDrivenPriorMatrices`.
 #   cvFits   NULL, or a list with:
 #              samplePartition  data.frame(Sample, Fold) -- the CV folds the
 #                               per-fold priors were computed on.
@@ -33,15 +33,20 @@ NULL
 #'   \code{\link{TwasWeights}}.
 #' @slot fullFit The full-data priors -- the \code{\link{mashPipeline}}
 #'   output: a named list with one prior per joint spec, each a list of
-#'   \code{U}, \code{w}, \code{alpha}, \code{inputScale}, \code{axes},
-#'   \code{scope} and \code{conditions}. Each mr.mash group takes the prior
-#'   over its joint spec's axes whose conditions include the group's (and
-#'   whose scope does); its \code{U} is taken on the group's conditions, in
-#'   their order, and put on the per-SD scale mr.mash fits on by dividing
-#'   entry \eqn{(k, l)} by \eqn{(n_k n_l)^{e/2}}, where \eqn{n} is the
-#'   conditions' sample size and \eqn{e} is 1 on the z scale and
-#'   \code{alpha} otherwise. No such prior, or several, is an error.
-#'   \code{NULL} when only per-fold priors are supplied (a CV-only run).
+#'   \code{U}, \code{w}, \code{residualCorrelation}, \code{alpha},
+#'   \code{inputScale}, \code{axes}, \code{scope} and \code{conditions}.
+#'   Each mr.mash group takes the prior over its joint spec's axes whose
+#'   conditions include the group's (and whose scope does); its \code{U} is
+#'   taken on the group's conditions, in their order, and put on the per-SD
+#'   scale mr.mash fits on by dividing entry \eqn{(k, l)} by
+#'   \eqn{(n_k n_l)^{e/2}}, where \eqn{n} is the conditions' sample size and
+#'   \eqn{e} is 1 on the z scale and \code{alpha} otherwise. Its
+#'   \code{residualCorrelation}, a correlation, is taken on the group's
+#'   conditions unscaled. A prior without one (from an earlier
+#'   \code{mashPipeline()}) is accepted, and the mr.mash fits then take
+#'   their residual covariance from the data. No such prior, or several, is
+#'   an error. \code{NULL} when only per-fold priors are supplied (a CV-only
+#'   run).
 #' @slot cvFits \code{NULL}, or a list with \code{samplePartition}
 #'   (\code{data.frame(Sample, Fold)}) and \code{perFoldFits} (a list of
 #'   per-fold priors, each the shape of \code{fullFit},
@@ -112,6 +117,14 @@ setClass(
         return(glue(
             "{label}$U must be a non-empty list of {k} x {k} matrices, one ",
             "row per condition"
+        ))
+    }
+    residualOk <- is.null(prior$residualCorrelation) ||
+        .mashCovIsSquareN(prior$residualCorrelation, nCond = k)
+    if (!residualOk) {
+        return(glue(
+            "{label}$residualCorrelation must be a {k} x {k} matrix, one row ",
+            "per condition"
         ))
     }
     .mashPriorScaleProblem(prior, label)

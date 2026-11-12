@@ -187,15 +187,23 @@ MashPriorParam <- function(
 #'   \code{\link{mashResidualCorrelation}}, which is where each estimator is
 #'   described.
 #'
-#'   \code{"identity"} (the default) takes the residual correlation to be the
-#'   identity, needs no extra partition, and never depends on which partitions
-#'   were supplied. It is the safe default rather than the best one: it
-#'   assumes conditions share no residual correlation, which
+#'   \code{"simple"} (the default) estimates it from the \code{"null"}
+#'   partition, which it therefore requires: the correlation of the z-scores
+#'   of the variants with \eqn{|z| < 2} in every condition (mashr's
+#'   \code{estimate_null_correlation_simple()}). \code{"identity"} takes the
+#'   residual correlation to be the identity and needs no extra partition,
+#'   but assumes conditions share no residual correlation, which
 #'   overlapping-sample designs -- the usual multi-context QTL case, where the
 #'   same donors are measured in every context -- violate. Supplying a
-#'   \code{"null"} partition while leaving this at \code{"identity"} reports
-#'   that the partition is unused, since that combination is more often an
+#'   \code{"null"} partition while asking for \code{"identity"} reports that
+#'   the partition is unused, since that combination is more often an
 #'   oversight than an intent.
+#'
+#'   Each prior keeps the \eqn{\hat V} it was fitted with
+#'   (\code{residualCorrelation}). \code{\link{twasWeightsPipeline}}'s
+#'   mr.mash fits take it as their residual covariance on summary statistics,
+#'   and can start from it on individual-level data
+#'   (\code{MrmashOptions(vInitMethod = "mash")}).
 #'
 #'   The estimators differ in what they require: \code{"simple"},
 #'   \code{"simpleSpecific"} and \code{"corshrink"} need a \code{"null"}
@@ -224,7 +232,9 @@ MashPriorParam <- function(
 #'     \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
 #'       otherwise fall back to (Z, 1) when every entry carries Z. Mixed
 #'       inputs (some entries missing BETA, others missing Z) are a
-#'       hard error.}
+#'       hard error. For a joint spec with the study among its axes, whose
+#'       per-allele effects are not comparable between studies, use the
+#'       standardized scale when every entry carries Z and N, else (Z, 1).}
 #'   }
 #'   \code{alpha} should be chosen consistently with the resolved scale:
 #'   typically \code{alpha = 0} for beta and standardized, \code{alpha = 1}
@@ -236,11 +246,19 @@ MashPriorParam <- function(
 #'   spec's conditions are the combinations of its axes' values; the other
 #'   axes are pooled, each combination of their values a block of rows, in
 #'   which a condition it lacks is a missing cell. With the study among the
-#'   axes a block's studies are matched by allele. \code{NULL} (the default)
+#'   axes a block's studies are matched by allele, and share no samples
+#'   unless \code{sampleOverlap} says they do: the residual correlation is
+#'   estimated within each study and is zero between them
+#'   (\code{\link{mashResidualCorrelation}}). \code{NULL} (the default)
 #'   takes a \code{QtlSumStats}' contexts, or a \code{GwasSumStats}'
 #'   studies. A supplied \code{residualCorrelation} or
 #'   \code{priorCovariances} is over one spec's conditions, so it takes one
 #'   spec.
+#' @param sampleOverlap Which studies may share samples, for the estimated
+#'   residual correlation: \code{FALSE} (the default), \code{TRUE}, or a
+#'   list of groups of studies (\code{\link{mashResidualCorrelation}}). Read
+#'   with the study among a spec's axes, and not with a supplied
+#'   \code{residualCorrelation}.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -257,6 +275,7 @@ MashPriorParam <- function(
 #' @return A named list with one prior per spec, named by its axes joined by
 #'   \code{"+"}. Each is a list of \code{U} (the combined covariance list:
 #'   canonical + PCA + flash + ED), \code{w} (the estimated mixture weights),
+#'   \code{residualCorrelation} (the \eqn{\hat V} they were fitted with),
 #'   \code{alpha}, \code{inputScale} (the resolved scale), \code{axes},
 #'   \code{scope} and \code{conditions}: one row per row of each \code{U}
 #'   matrix, its \code{study}, \code{context} and \code{trait} (\code{NA}
@@ -266,7 +285,7 @@ MashPriorParam <- function(
 #' @examples
 #' data(qtlSumStatsMulticontextExample)
 #' ss <- qtlSumStatsMulticontextExample
-#' sumStatsList <- list(strong = ss, random = ss)
+#' sumStatsList <- list(strong = ss, random = ss, null = ss)
 #' mashPipeline(sumStatsList, alpha = 0, prior = MashPriorParam(nPcs = 2L))
 #' @export
 mashPipeline <- function(
@@ -274,8 +293,8 @@ mashPipeline <- function(
     alpha,
     residualCorrelation = NULL,
     residualCorrelationMethod = c(
-        "identity",
         "simple",
+        "identity",
         "simpleSpecific",
         "corshrink",
         "mle"
@@ -283,16 +302,17 @@ mashPipeline <- function(
     prior = MashPriorParam(),
     inputScale = c("auto", "beta", "z", "standardized"),
     jointSpecification = NULL,
+    sampleOverlap = FALSE,
     mashDataArgs = MashDataOptions(),
     mashArgs = MashOptions(),
     setSeed = 999
 ) {
     inputScale <- arg_match(inputScale)
-    residualCorrelationMethod <- arg_match(residualCorrelationMethod)
+    method <- arg_match(residualCorrelationMethod)
     .mashPipelineAssert(prior, mashDataArgs, mashArgs)
     .mashRequirePriorPackages()
     partitions <- .mashPartitions(sumStatsList)
-    .mashValidateSumStatsList(partitions, residualCorrelation)
+    .mashValidateSumStatsList(partitions, residualCorrelation, method)
     specs <- .mashPipelineSpecs(
         jointSpecification,
         partitions$strong,
@@ -308,9 +328,10 @@ mashPipeline <- function(
             sumStatsList = partitions,
             alpha = alpha,
             residualCorrelation = residualCorrelation,
-            method = residualCorrelationMethod,
+            method = method,
             prior = prior,
             inputScale = inputScale,
+            sampleOverlap = sampleOverlap,
             mashDataArgs = mashDataArgs,
             mashArgs = mashArgs
         ),
@@ -345,10 +366,7 @@ mashPipeline <- function(
 }
 
 # One spec's prior: its residual correlation and covariances, fitted on the
-# spec's layout of the summary statistics (.mashBlockSetup()), with what
-# applying it to a group of conditions takes (.mashPriorForGroup()): the
-# conditions and sample sizes of its columns, and the scale its covariances
-# are on.
+# spec's layout of the summary statistics (.mashBlockSetup()).
 # @noRd
 .mashPipelineSpecPrior <- function(
     spec,
@@ -358,6 +376,7 @@ mashPipeline <- function(
     method,
     prior,
     inputScale,
+    sampleOverlap,
     mashDataArgs,
     mashArgs
 ) {
@@ -372,7 +391,8 @@ mashPipeline <- function(
         method,
         prior$priorCovariances,
         mashDataArgs,
-        jointSpecification
+        jointSpecification,
+        sampleOverlap
     )
     fitted <- .mashPipelinePrior(
         sumStatsList,
@@ -384,8 +404,24 @@ mashPipeline <- function(
         mashArgs = mashArgs,
         jointSpecification = jointSpecification
     )
-    layout <- .mashSumStatsToMatrices(
+    .mashPriorRecord(
+        fitted,
+        alpha,
+        spec,
         sumStatsList$strong,
+        inputScale,
+        vhat
+    )
+}
+
+# A fitted prior with what applying it to a group of conditions takes
+# (.mashPriorForGroup()): the residual correlation `vhat` it was fitted with,
+# the conditions and sample sizes of its columns, and the scale its
+# covariances are on.
+# @noRd
+.mashPriorRecord <- function(fitted, alpha, spec, strong, inputScale, vhat) {
+    layout <- .mashSumStatsToMatrices(
+        strong,
         "strong",
         inputScale = inputScale,
         spec = spec
@@ -393,6 +429,7 @@ mashPipeline <- function(
     list(
         U = fitted$U,
         w = fitted$w,
+        residualCorrelation = as.matrix(vhat),
         alpha = alpha,
         inputScale = layout$scale,
         axes = spec$axes,
@@ -502,9 +539,14 @@ mashPipeline <- function(
 
 # `sumStatsList` must be a named list of strong[/random/null] partitions;
 # `random` is required only when vhat must be derived from data (no supplied
-# residualCorrelation).
+# residualCorrelation), and `null` when it is estimated by `method` from the
+# null variants.
 # @noRd
-.mashValidateSumStatsList <- function(sumStatsList, residualCorrelation) {
+.mashValidateSumStatsList <- function(
+    sumStatsList,
+    residualCorrelation,
+    method
+) {
     if (!is.list(sumStatsList) || is.null(names(sumStatsList))) {
         msg <- glue(
             "mashPipeline: `sumStatsList` must be a named list (or ",
@@ -513,17 +555,14 @@ mashPipeline <- function(
         )
         abort(msg)
     }
-    required <- if (is.null(residualCorrelation)) {
-        c("strong", "random")
-    } else {
-        "strong"
-    }
+    required <- .mashRequiredPartitions(residualCorrelation, method)
     missingNames <- setdiff(required, names(sumStatsList))
     if (length(missingNames) > 0L) {
         entrWord <- if (length(missingNames) == 1L) "entry" else "entries"
         msg <- glue(
             "mashPipeline: `sumStatsList` is missing required {entrWord}: ",
-            "{str_flatten(shQuote(missingNames), ', ')}."
+            "{str_flatten(shQuote(missingNames), ', ')}.",
+            "{.mashNullPartitionHint(missingNames, method)}"
         )
         abort(msg)
     }
@@ -536,6 +575,34 @@ mashPipeline <- function(
         )
         abort(msg)
     }
+}
+
+# The partitions mashPipeline() reads: the strong set always; with no supplied
+# residual correlation, the random set the weights are fitted on, and the null
+# variants a null-based `method` estimates it from.
+# @noRd
+.mashRequiredPartitions <- function(residualCorrelation, method) {
+    if (!is.null(residualCorrelation)) {
+        return("strong")
+    }
+    nullBased <- is_in(method, c("simple", "simpleSpecific", "corshrink"))
+    c("strong", "random", if (nullBased) "null")
+}
+
+# What to do about a missing null partition: estimate V from one, or take it
+# to be the identity. Empty when the null partition is not what is missing.
+# @noRd
+.mashNullPartitionHint <- function(missingNames, method) {
+    if (!is_in("null", missingNames)) {
+        return("")
+    }
+    str_c(
+        " residualCorrelationMethod = '",
+        method,
+        "' estimates the residual ",
+        "correlation from the null variants; supply them as 'null', or pass ",
+        "residualCorrelationMethod = 'identity' to take it to be the identity."
+    )
 }
 
 # Identity ignores the null partition entirely, so a caller who assembled one
@@ -595,7 +662,8 @@ mashPipeline <- function(
     method,
     priorCovariances,
     mashDataArgs = MashDataOptions(),
-    jointSpecification = NULL
+    jointSpecification = NULL,
+    sampleOverlap = FALSE
 ) {
     if (!is.null(residualCorrelation)) {
         return(residualCorrelation)
@@ -608,6 +676,7 @@ mashPipeline <- function(
         priorCovariances = priorCovariances,
         inputScale = inputScale,
         jointSpecification = jointSpecification,
+        sampleOverlap = sampleOverlap,
         mashDataArgs = mashDataArgs,
         setSeed = NULL
     )
@@ -643,7 +712,21 @@ mashPipeline <- function(
 #'   \code{\link{mashPipeline}}).
 #' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
 #'   which axes make the conditions (\code{NULL}, the default, for a
-#'   \code{QtlSumStats}' contexts).
+#'   \code{QtlSumStats}' contexts). With the study among its axes, the
+#'   studies share no samples unless \code{sampleOverlap} says they do:
+#'   \eqn{\hat V} is estimated within each study, by \code{method}, over the
+#'   variants that study carries (for \code{"mle"}, against the prior's
+#'   covariances on its conditions), and is zero between studies. A study of
+#'   one condition gets 1, or, when \code{"simple"} or \code{"mle"} is asked
+#'   for covariances (\code{est_cor = FALSE}), the variance of its null z.
+#' @param sampleOverlap Which studies may share samples, read with the study
+#'   among the joint spec's axes. \code{FALSE} (the default): none, so
+#'   \eqn{\hat V} is zero between studies. \code{TRUE}: any of them, so it is
+#'   estimated across every condition. A list of character vectors, each
+#'   naming studies that share samples -- GWAS of several traits from one
+#'   biobank, say: it is estimated within each group, and each study no group
+#'   names, and is zero between them. A group spanning studies is estimated
+#'   over the variants every one of its studies carries.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -670,6 +753,7 @@ mashResidualCorrelation <- function(
     maxIter = 6L,
     inputScale = c("auto", "beta", "z", "standardized"),
     jointSpecification = NULL,
+    sampleOverlap = FALSE,
     mashDataArgs = MashDataOptions(),
     setSeed = 999
 ) {
@@ -688,10 +772,10 @@ mashResidualCorrelation <- function(
         abort("Package 'mashr' is required for this function.")
     }
     partitions <- .mashPartitions(sumStatsList)
-    spec <- .mashOneSpec(
+    spec <- .mashResidCorSpec(
         jointSpecification,
-        .mashSpecPartition(partitions),
-        "mashResidualCorrelation"
+        sampleOverlap,
+        .mashSpecPartition(partitions)
     )
     if (!is.null(setSeed)) {
         withr::local_seed(setSeed)
@@ -706,8 +790,51 @@ mashResidualCorrelation <- function(
         maxIter,
         mashDataArgs,
         corArgs,
-        spec
+        spec,
+        sampleOverlap
     )
+}
+
+# The one spec mashResidualCorrelation() lays its matrices out by, with
+# `sampleOverlap` checked against the studies of the summary statistics `x`.
+# @noRd
+.mashResidCorSpec <- function(jointSpecification, sampleOverlap, x) {
+    .mashCheckSampleOverlap(sampleOverlap, unique(as.character(x$study)))
+    .mashOneSpec(jointSpecification, x, "mashResidualCorrelation")
+}
+
+# `sampleOverlap` is TRUE, FALSE, or groups of the data's studies that share
+# samples, each study in one group at most.
+# @noRd
+.mashCheckSampleOverlap <- function(sampleOverlap, studies) {
+    if (isTRUE(sampleOverlap) || isFALSE(sampleOverlap)) {
+        return(invisible(NULL))
+    }
+    isGroups <- is.list(sampleOverlap) &&
+        length(sampleOverlap) > 0L &&
+        all(map_lgl(sampleOverlap, is.character))
+    if (!isGroups) {
+        abort(glue(
+            "`sampleOverlap` must be TRUE, FALSE, or a list of character ",
+            "vectors, each naming studies that share samples."
+        ))
+    }
+    listed <- list_c(sampleOverlap)
+    unknown <- setdiff(listed, studies)
+    if (length(unknown) > 0L) {
+        abort(glue(
+            "`sampleOverlap` names studies the summary statistics do not ",
+            "have: {str_flatten(unknown, ', ')}."
+        ))
+    }
+    twice <- unique(listed[duplicated(listed)])
+    if (length(twice) > 0L) {
+        abort(glue(
+            "`sampleOverlap` lists {str_flatten(twice, ', ')} in two groups; ",
+            "studies that share samples belong in one."
+        ))
+    }
+    invisible(NULL)
 }
 
 # Run the chosen estimator. Split from mashResidualCorrelation() so that
@@ -725,7 +852,8 @@ mashResidualCorrelation <- function(
     maxIter,
     mashDataArgs,
     corArgs,
-    spec = NULL
+    spec = NULL,
+    sampleOverlap = FALSE
 ) {
     if (method == "identity") {
         strongMats <- .mashSumStatsToMatrices(
@@ -736,30 +864,190 @@ mashResidualCorrelation <- function(
         )
         return(diag(rep(1, ncol(strongMats$b))))
     }
-    if (method == "simple") {
-        return(.mashResidCorSimple(
-            sumStatsList,
+    partition <- .mashResidCorPartition(method, sumStatsList, priorCovariances)
+    mats <- .mashSumStatsToMatrices(
+        sumStatsList[[partition]],
+        partition,
+        inputScale = inputScale,
+        spec = spec
+    )
+    blocks <- .mashStudyBlocks(mats$conditions, sampleOverlap)
+    estimates <- map(
+        blocks,
+        .mashResidCorBlock,
+        mats = mats,
+        method = method,
+        alpha = alpha,
+        priorCovariances = .mashAsUlist(priorCovariances),
+        nSubset = nSubset,
+        maxIter = maxIter,
+        mashDataArgs = mashDataArgs,
+        corArgs = corArgs
+    )
+    if (length(blocks) == 1L) {
+        return(estimates[[1L]])
+    }
+    .mashBlockDiagonal(estimates, blocks, colnames(mats$b))
+}
+
+# The partition an estimator reads, checked present: the null variants for
+# 'simple', 'simpleSpecific' and 'corshrink', the random set and a prior to
+# refine against for 'mle'.
+# @noRd
+.mashResidCorPartition <- function(method, sumStatsList, priorCovariances) {
+    if (method == "mle") {
+        .mashCheckMleInputs(sumStatsList, priorCovariances)
+        return("random")
+    }
+    if (is.null(sumStatsList$null)) {
+        msg <- glue(
+            "mashResidualCorrelation: method '{method}' requires a 'null' ",
+            "entry in `sumStatsList` (the null variants V is estimated on)."
+        )
+        abort(msg)
+    }
+    "null"
+}
+
+# The columns that may share samples: one block per study when the columns
+# are different studies', which share none unless `sampleOverlap` says they
+# do (.mashOverlapGroup()), else one block of every column.
+# @noRd
+.mashStudyBlocks <- function(conditions, sampleOverlap = FALSE) {
+    study <- conditions$study
+    if (anyNA(study) || n_distinct(study) < 2L || isTRUE(sampleOverlap)) {
+        return(list(seq_along(study)))
+    }
+    group <- .mashOverlapGroup(study, sampleOverlap)
+    unname(split(seq_along(study), factor(group, levels = unique(group))))
+}
+
+# Each column's block: its study, or the group of studies sharing samples that
+# `sampleOverlap` puts it in.
+# @noRd
+.mashOverlapGroup <- function(study, sampleOverlap) {
+    if (!is.list(sampleOverlap)) {
+        return(study)
+    }
+    groupOf <- map_int(study, .mashGroupOf, groups = sampleOverlap)
+    if_else(groupOf > 0L, str_c("\r", groupOf), study)
+}
+
+# @noRd
+.mashGroupOf <- function(st, groups) {
+    detect_index(groups, is_in, x = st)
+}
+
+# The rows a block's V is estimated over: the variants every one of its
+# studies carries -- in any of the study's columns -- so a variant one study
+# lacks does not pull their correlation toward zero. A block of one study, or
+# of pooled ones, takes every row it observes.
+# @noRd
+.mashBlockRows <- function(mats, cols) {
+    study <- mats$conditions$study[cols]
+    byStudy <- if (anyNA(study)) list(cols) else split(cols, study)
+    reduce(map(byStudy, .mashRowsObserved, observed = mats$observed), `&`)
+}
+
+# @noRd
+.mashRowsObserved <- function(cols, observed) {
+    rowSums(observed[, cols, drop = FALSE]) > 0L
+}
+
+# V on one block of columns, by `method`, over the variants the block carries;
+# for 'mle', against the prior's covariances on those columns.
+# @noRd
+.mashResidCorBlock <- function(
+    cols,
+    mats,
+    method,
+    alpha,
+    priorCovariances,
+    nSubset,
+    maxIter,
+    mashDataArgs,
+    corArgs
+) {
+    rows <- .mashBlockRows(mats, cols)
+    block <- list(
+        b = mats$b[rows, cols, drop = FALSE],
+        s = mats$s[rows, cols, drop = FALSE]
+    )
+    if (length(cols) == 1L) {
+        return(.mashResidCorOneCondition(
+            block,
+            method,
             alpha,
-            inputScale,
+            nSubset,
             mashDataArgs,
-            corArgs,
-            spec
+            corArgs
         ))
     }
-    if (method == "mle") {
-        return(.mashResidCorMle(
-            sumStatsList,
+    switch(
+        method,
+        simple = .mashResidCorSimple(block, alpha, mashDataArgs, corArgs),
+        mle = .mashResidCorMle(
+            block,
             alpha,
-            inputScale,
-            priorCovariances,
+            map(priorCovariances, .mashSubsetCov, cols = cols),
             nSubset,
             maxIter,
             mashDataArgs,
-            corArgs,
-            spec
-        ))
+            corArgs
+        ),
+        .mashResidCorNullBased(block, method, corArgs)
+    )
+}
+
+# V of a block of one condition, which mashr's and CorShrink's estimators
+# cannot take (mashr drops a one-column matrix to a vector, and mash() fits
+# two conditions or more): its correlation with itself, 1, unless 'simple' or
+# 'mle' was asked for covariances (est_cor = FALSE). Then it is the variance
+# of its null z, as estimate_null_correlation_simple() computes it on the
+# column given twice -- for 'mle' on its random subset, the starting value
+# mash_estimate_corr_em() takes, which its EM cannot refine on one condition.
+# @noRd
+.mashResidCorOneCondition <- function(
+    block,
+    method,
+    alpha,
+    nSubset,
+    mashDataArgs,
+    corArgs
+) {
+    user <- as.list(corArgs)
+    if (!is_in(method, c("simple", "mle")) || !isFALSE(user$est_cor)) {
+        return(matrix(1))
     }
-    .mashResidCorNullBased(sumStatsList, inputScale, method, corArgs, spec)
+    n <- nrow(block$b)
+    rows <- if (method == "mle") sample(n, min(nSubset, n)) else seq_len(n)
+    twice <- .mashSetData(
+        block$b[rows, c(1L, 1L), drop = FALSE],
+        block$s[rows, c(1L, 1L), drop = FALSE],
+        alpha,
+        NULL,
+        mashDataArgs
+    )
+    simpleArgs <- if (method == "simple") user else list(est_cor = FALSE)
+    V <- exec(mashr::estimate_null_correlation_simple, twice, !!!simpleArgs)
+    V[1L, 1L, drop = FALSE]
+}
+
+# @noRd
+.mashSubsetCov <- function(U, cols) {
+    U[cols, cols, drop = FALSE]
+}
+
+# Each block's V laid on the columns in their order, zero between blocks,
+# named by `labels` (none when NULL).
+# @noRd
+.mashBlockDiagonal <- function(estimates, blocks, labels) {
+    joined <- as.matrix(Matrix::bdiag(map(estimates, as.matrix)))
+    at <- order(list_c(blocks))
+    `dimnames<-`(
+        joined[at, at, drop = FALSE],
+        if (!is.null(labels)) list(labels, labels)
+    )
 }
 
 # The component contract is a named LIST of covariance matrices. c() collapses
@@ -2717,24 +3005,37 @@ mergeMashData <- function(resData, oneData) {
     )
 }
 
-# Build variants x conditions (Bhat, Shat) matrices for ONE object plus the
-# row indices of its "strong" variants. Class dispatch:
-#   QtlSumStats / GwasSumStats -> .mashSumStatsToMatrices; strong = the single
-#       most significant variant (max|z|) per condition, unioned.
-#   FineMappingResultBase      -> pivot marginalEffects() into a
-#       variants x context (beta, se) pair; strong = the lead (max PIP) variant
-#       of each credible set in each condition (credibleSets()), unioned.
-#       Conditions
-#       with no credible set contribute no strong variant.
+# Build variants x conditions (Bhat, Shat) matrices for ONE object, laid out by
+# the joint spec as mashPipeline() lays summary statistics out
+# (.mashSumStatsToMatrices()), plus the row indices of its "strong" variants
+# and the summary statistics the rows are of. Class dispatch:
+#   QtlSumStats / GwasSumStats -> strong = the single most significant variant
+#       (max|z|) per condition, unioned.
+#   FineMappingResultBase      -> its marginal effects as summary statistics
+#       (.mashFmrSumStats()); strong = the lead (max PIP) variant of each
+#       credible set (credibleSets()), unioned. Conditions with no credible
+#       set contribute no strong variant.
 # For z-scale QtlSumStats the returned Shat is 1, so downstream code that forms
 # z = b / s recovers the z-scores uniformly across both scales.
 # @noRd
-.mashObjectMatrices <- function(obj, inputScale, coverage) {
+.mashObjectMatrices <- function(
+    obj,
+    inputScale,
+    coverage,
+    jointSpecification = NULL,
+    label = "region"
+) {
     if (methods::is(obj, "QtlSumStats") || methods::is(obj, "GwasSumStats")) {
-        return(.mashSumStatsMatrices(obj, inputScale))
+        return(.mashSumStatsMatrices(obj, inputScale, jointSpecification))
     }
     if (methods::is(obj, "FineMappingResultBase")) {
-        return(.mashFmrMatrices(obj, coverage))
+        return(.mashFmrMatrices(
+            obj,
+            coverage,
+            inputScale,
+            jointSpecification,
+            label
+        ))
     }
     msg <- glue(
         "mashInput: each element of `objects` must be a QtlSumStats, ",
@@ -2747,83 +3048,169 @@ mergeMashData <- function(resData, oneData) {
 # (Bhat, Shat, strongRows) from a SumStats object; strong = the max|z| variant
 # per condition column, unioned.
 # @noRd
-.mashSumStatsMatrices <- function(obj, inputScale) {
-    mats <- .mashSumStatsToMatrices(obj, "mash input", inputScale = inputScale)
+.mashSumStatsMatrices <- function(obj, inputScale, jointSpecification) {
+    mats <- .mashSumStatsToMatrices(
+        obj,
+        "mash input",
+        inputScale = inputScale,
+        spec = .mashOneSpec(jointSpecification, obj, "mashInput")
+    )
     z <- mats$b / mats$s
-    strongRows <- sort(unique(apply(abs(z), 2L, which.max)))
-    list(b = mats$b, s = mats$s, strongRows = strongRows)
+    list_assign(
+        mats,
+        strongRows = sort(unique(apply(abs(z), 2L, which.max))),
+        sumStats = obj
+    )
 }
 
-# (Bhat, Shat, strongRows) from a fine-mapping result: pivot the marginal
-# effects to a variants x contexts matrix pair; strong = each credible set's
-# lead (max PIP) variant.
+# (Bhat, Shat, strongRows) from a fine-mapping result: its marginal effects as
+# the summary statistics they are (.mashFmrSumStats()), laid out as those are;
+# strong = each credible set's lead (max PIP) variant.
 # @noRd
-.mashFmrMatrices <- function(obj, coverage) {
-    # Both views are ranged; the pivot works on their per-variant columns.
-    rawMe <- as_tibble(
-        as.data.frame(S4Vectors::mcols(marginalEffects(obj)), optional = TRUE)
-    )
+.mashFmrMatrices <- function(
+    obj,
+    coverage,
+    inputScale,
+    jointSpecification,
+    label
+) {
+    # Both views are ranged; the credible sets are read off their columns.
     rawCs <- as_tibble(
         as.data.frame(
             S4Vectors::mcols(credibleSets(obj, coverage = coverage)),
             optional = TRUE
         )
     )
-    cond <- .mashFmrConditionColumn(obj)
-    if (!all(is_in(c("variant_id", cond, "beta", "se"), names(rawMe)))) {
-        msg <- glue(
-            "mashInput: marginalEffects() must return variant_id/{cond}/",
-            "beta/se columns; a fine-mapping result with >= 2 ",
-            "{if (cond == 'study') 'studies' else 'contexts'} is required."
-        )
-        abort(msg)
-    }
-    pinned <- .mashFmrMethodPin(rawMe, rawCs)
-    me <- pinned$me
-    cs <- pinned$cs
-    contexts <- unique(me[[cond]])
-    variants <- unique(me$variant_id)
-    empty <- matrix(
-        NA_real_,
-        length(variants),
-        length(contexts),
-        dimnames = list(variants, contexts)
+    pinned <- .mashFmrMethodPin(marginalEffects(obj), rawCs)
+    converted <- .mashFmrSumStats(obj, pinned$me, label)
+    ss <- converted$sumStats
+    mats <- .mashSumStatsToMatrices(
+        ss,
+        "mash input",
+        inputScale = inputScale,
+        spec = .mashOneSpec(jointSpecification, ss, "mashInput")
     )
-    # One (variant, condition) cell per long-format row; the rest stay NA.
-    cell <- cbind(match(me$variant_id, variants), match(me[[cond]], contexts))
-    list(
-        b = replace(empty, cell, me$beta),
-        s = replace(empty, cell, me$se),
-        strongRows = .mashFmrStrongRows(cs, variants, cond)
+    list_assign(
+        mats,
+        strongRows = .mashFmrStrongRows(pinned$cs, mats, converted$tuples),
+        sumStats = ss
     )
 }
 
-# The column a fine-mapping result's conditions are read from. A QTL result's
-# are its contexts. A GWAS result has no context axis, so its conditions are
-# its studies -- as they are for a GwasSumStats.
+# A fine-mapping result's marginal effects as the summary statistics they
+# are: one entry per (study, context, trait) of a QTL result, or per (study,
+# block) of a GWAS one, with the effects' alleles, BETA, SE, Z and N. They were
+# fitted after their pipeline's QC, and are recorded as mash input, as the
+# matrix constructors record it (role = "mash"); summary statistics need the
+# result's genome build. Returns them with the key of each of their rows.
 # @noRd
-.mashFmrConditionColumn <- function(obj) {
-    if (methods::is(obj, "GwasFineMappingResult")) "study" else "context"
+#' @importFrom vctrs vec_group_id vec_unique_loc
+.mashFmrSumStats <- function(obj, me, label) {
+    isGwas <- methods::is(obj, "GwasFineMappingResult")
+    keyCols <- if (isGwas) {
+        c("study", "blockId")
+    } else {
+        c("study", "context", "trait")
+    }
+    lacking <- setdiff(
+        c(keyCols, "variant_id", "A1", "A2", "beta", "se"),
+        colnames(S4Vectors::mcols(me))
+    )
+    if (length(lacking) > 0L) {
+        abort(glue(
+            "mashInput: the fine-mapping result for '{label}' has marginal ",
+            "effects without {str_flatten(lacking, ', ')}, which its summary ",
+            "statistics need."
+        ))
+    }
+    genome <- .mashFmrGenome(obj, me, label)
+    keys <- as_tibble(as.data.frame(S4Vectors::mcols(me)[keyCols]))
+    tupleId <- vec_group_id(keys)
+    tuples <- keys[vec_unique_loc(keys), , drop = FALSE]
+    entries <- map(seq_len(nrow(tuples)), .mashFmrEntry, me = me, id = tupleId)
+    ss <- if (isGwas) {
+        GwasSumStats(
+            studyName = tuples$study,
+            entry = entries,
+            genome = genome,
+            ldReference = NULL,
+            qcOptions = list(role = "mash"),
+            blockId = tuples$blockId
+        )
+    } else {
+        QtlSumStats(
+            studyName = tuples$study,
+            context = tuples$context,
+            trait = tuples$trait,
+            entry = entries,
+            genome = genome,
+            ldReference = NULL,
+            qcOptions = list(role = "mash")
+        )
+    }
+    list(sumStats = ss, tuples = tuples)
 }
 
-# A multi-method fine-mapping result would duplicate (variant, context) cells;
-# pin the first method so the pivot is unambiguous.
+# One tuple's marginal effects as a summary-statistics entry.
+# @noRd
+.mashFmrEntry <- function(i, me, id) {
+    rows <- me[id == i]
+    mc <- S4Vectors::mcols(rows)
+    stats <- S4Vectors::DataFrame(
+        SNP = mc$variant_id,
+        A1 = mc$A1,
+        A2 = mc$A2,
+        BETA = mc$beta,
+        SE = mc$se,
+        Z = mc$z
+    )
+    withN <- if (is_in("N", colnames(mc)) && !all(is.na(mc$N))) {
+        cbind(stats, N = mc$N)
+    } else {
+        stats
+    }
+    S4Vectors::`mcols<-`(GenomicRanges::granges(rows), value = withN)
+}
+
+# The genome build a fine-mapping result's summary statistics take: its own.
+# @noRd
+.mashFmrGenome <- function(obj, me, label) {
+    builds <- unique(discard(
+        unname(c(GenomeInfoDb::genome(obj), GenomeInfoDb::genome(me))),
+        is.na
+    ))
+    if (length(builds) == 0L) {
+        abort(glue(
+            "mashInput: the fine-mapping result for '{label}' has no genome ",
+            "build, which its marginal effects need to be summary ",
+            "statistics; set one with genome(x) <- (e.g. \"hg38\")."
+        ))
+    }
+    builds[[1L]]
+}
+
+# A multi-method fine-mapping result would give a tuple's variants twice;
+# keep the first method's marginal effects and credible sets.
 # @noRd
 .mashFmrMethodPin <- function(me, cs) {
-    if (!is_in("method", names(me)) || n_distinct(me$method) <= 1L) {
+    methods <- S4Vectors::mcols(me)$method
+    if (is.null(methods) || n_distinct(methods) <= 1L) {
         return(list(me = me, cs = cs))
     }
-    m1 <- me$method[[1L]]
+    m1 <- methods[[1L]]
     msg <- glue(
         "mashInput: the fine-mapping result carries multiple methods; using ",
         "'{m1}'."
     )
     warn(msg)
-    me <- filter(me, .data$method == m1)
-    if (is_in("method", names(cs))) {
-        cs <- filter(cs, .data$method == m1)
-    }
-    list(me = me, cs = cs)
+    list(
+        me = me[methods == m1],
+        cs = if (is_in("method", names(cs))) {
+            filter(cs, .data$method == m1)
+        } else {
+            cs
+        }
+    )
 }
 
 # @noRd
@@ -2831,31 +3218,64 @@ mergeMashData <- function(resData, oneData) {
     replace(as.character(v), is.na(v), "\u0001NA")
 }
 
-# The max-PIP variant among one credible set's rows.
+# The layout rows of each credible set's lead (max PIP) variant, found in its
+# tuple's block of rows by allele (.mashLeadRow()).
 # @noRd
-.mashLeadVariant <- function(rows, cs) {
-    cs$variant_id[[rows[[which.max(cs$pip[rows])]]]]
+#' @importFrom vctrs vec_match
+.mashFmrStrongRows <- function(cs, mats, tuples) {
+    leads <- .mashCsLeads(cs, names(tuples))
+    if (is.null(leads)) {
+        return(integer(0))
+    }
+    tupleRow <- vec_match(leads[names(tuples)], tuples)
+    block <- mats$tupleBlocks$block[match(tupleRow, mats$tupleBlocks$row)]
+    rows <- map2_int(
+        leads$variant_id,
+        block,
+        .mashLeadRow,
+        rowKeys = mats$rowKeys
+    )
+    sort(unique(rows[!is.na(rows)]))
 }
 
-# Row indices (into `variants`) of each credible set's lead (max PIP) variant.
-# A set is named by its condition and its index -- and, for a GWAS study
-# fine-mapped block by block, its block, since set indices restart in each.
+# One row per credible set: its tuple's key and its lead (max PIP) variant. A
+# set is named by its tuple and its index -- with, for a GWAS study fine-mapped
+# block by block, its block, since set indices restart in each. NULL with no
+# set.
 # @noRd
-.mashFmrStrongRows <- function(cs, variants, cond = "context") {
+.mashCsLeads <- function(cs, keyCols) {
     csCol <- names(cs)[str_detect(names(cs), "^cs_")]
-    strongVar <- if (
-        nrow(cs) > 0L && length(csCol) > 0L && is_in("pip", names(cs))
-    ) {
-        keys <- c(cond, intersect("blockId", names(cs)), csCol[[1L]])
-        # NA spelled out: the view NA-fills an axis a row lacks (a QTL row's
-        # blockId), and interaction() would drop every NA-keyed row.
-        grp <- interaction(map(as.list(cs[keys]), .mashKeyNa), drop = TRUE)
-        map_chr(split(seq_len(nrow(cs)), grp), .mashLeadVariant, cs = cs)
-    } else {
-        character(0)
+    if (nrow(cs) == 0L || length(csCol) == 0L || !is_in("pip", names(cs))) {
+        return(NULL)
     }
-    strongRows <- sort(match(unique(strongVar), variants))
-    strongRows[!is.na(strongRows)]
+    # NA spelled out: the view NA-fills an axis a row lacks (a QTL row's
+    # blockId), and interaction() would drop every NA-keyed row.
+    keys <- c(keyCols, csCol[[1L]])
+    grp <- interaction(map(as.list(cs[keys]), .mashKeyNa), drop = TRUE)
+    lead <- map_int(split(seq_len(nrow(cs)), grp), .mashLeadIndex, cs = cs)
+    cs[lead, c(keyCols, "variant_id"), drop = FALSE]
+}
+
+# The max-PIP row among one credible set's rows.
+# @noRd
+.mashLeadIndex <- function(rows, cs) {
+    rows[[which.max(cs$pip[rows])]]
+}
+
+# The layout row of a lead variant: its block's row of that variant, matched
+# by allele; NA outside the layout.
+# @noRd
+.mashLeadRow <- function(variant, block, rowKeys) {
+    if (is.na(block)) {
+        return(NA_integer_)
+    }
+    inBlock <- which(rowKeys$block == block)
+    m <- matchVariants(
+        variant,
+        rowKeys$variant[inBlock],
+        removeStrandAmbiguous = FALSE
+    )
+    if (length(m$idxB) == 0L) NA_integer_ else inBlock[[m$idxB[[1L]]]]
 }
 
 # Extract the strong / random / null partitions from ONE object as a flat
@@ -2872,12 +3292,16 @@ mergeMashData <- function(resData, oneData) {
     coverage,
     inputScale,
     seed,
-    independentVariants = NULL
+    independentVariants = NULL,
+    jointSpecification = NULL,
+    label = "region"
 ) {
     mats <- .mashObjectMatrices(
         obj,
         inputScale = inputScale,
-        coverage = coverage
+        coverage = coverage,
+        jointSpecification = jointSpecification,
+        label = label
     )
     keepCols <- setdiff(colnames(mats$b), excludeCondition)
     if (length(keepCols) < 2L) {
@@ -2895,7 +3319,20 @@ mergeMashData <- function(resData, oneData) {
         excludeCondition = excludeCondition,
         seed = seed
     )
-    .mashPartitionOut(mats, keepCols, rn)
+    list(
+        partitions = .mashPartitionOut(mats, keepCols, rn),
+        selected = list(
+            strong = rownames(mats$b)[mats$strongRows],
+            random = rownames(rn$random$bhat),
+            null = rownames(rn$null$bhat)
+        ),
+        layout = list(
+            rowNames = rownames(mats$b),
+            rowKeys = mats$rowKeys,
+            tupleBlocks = mats$tupleBlocks,
+            sumStats = mats$sumStats
+        )
+    )
 }
 
 # Random / null candidate pool, optionally restricted to LD-independent
@@ -2980,8 +3417,10 @@ mergeMashData <- function(resData, oneData) {
 #'   fine-mapping result objects, one per region. Names disambiguate
 #'   rownames across regions (defaults to \code{region1}, \code{region2}, ...).
 #'   For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
-#'   run (the matrix builder rejects un-QC'd SumStats). The conditions are a
-#'   QTL object's contexts and a GWAS object's studies.
+#'   run (the matrix builder rejects un-QC'd SumStats). A fine-mapping
+#'   result's marginal effects are taken as the summary statistics they are,
+#'   which needs its genome build. Without a \code{jointSpecification} the
+#'   conditions are a QTL object's contexts and a GWAS object's studies.
 #' @param nRandom,nNull Per-object random / null sample sizes (default 10 each).
 #' @param excludeCondition Character vector of condition (column) names to drop.
 #' @param coverage Credible-set coverage for the strong selection on
@@ -2990,9 +3429,14 @@ mergeMashData <- function(resData, oneData) {
 #'   (the \code{.b}/\code{.s} matrices are dropped after z is derived).
 #' @param sigPCutoff Significance cutoff applied to the strong partition
 #'   (default 1e-6).
-#' @param inputScale Matrix scale for \code{QtlSumStats} inputs
-#'   (\code{"auto"}/\code{"beta"}/\code{"z"}); ignored for
-#'   fine-mapping results (always effect-size scale).
+#' @param inputScale Matrix scale, for summary statistics and a fine-mapping
+#'   result's marginal effects alike (\code{"auto"} / \code{"beta"} /
+#'   \code{"z"} / \code{"standardized"}; see \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   how each object is laid out -- its conditions the combinations of the
+#'   spec's axes, the other axes blocks of rows, studies joined by allele.
+#'   \code{NULL} (the default) takes a QTL object's contexts, a GWAS object's
+#'   studies.
 #' @param independentVariants Optional character vector of variant ids (e.g. an
 #'   LD-pruned independent SNP list). When supplied, the \emph{random} and
 #'   \emph{null} background of every object is restricted to variants that match
@@ -3007,7 +3451,10 @@ mergeMashData <- function(resData, oneData) {
 #'   \code{strong.z}, \code{random.*}, \code{null.*} (each a \code{variants x
 #'   conditions} matrix) and \code{XtX} (a \code{conditions x conditions}
 #'   matrix). The \code{.b} / \code{.s} matrices are omitted when \code{zOnly =
-#'   TRUE}.
+#'   TRUE}. And \code{sumStatsList}: the partitions as the summary statistics
+#'   they were taken from (\code{strong}, \code{random}, \code{null}), each
+#'   kept to its variants and still missing where a study lacks one, for
+#'   \code{\link{mashPipeline}} with the same \code{jointSpecification}.
 #' @seealso \code{\link{mashRandNullSample}}, \code{\link{mergeMashData}},
 #'   \code{\link{filterInvalidSummaryStat}}
 #' @examples
@@ -3023,26 +3470,30 @@ mashInput <- function(
     coverage = 0.95,
     zOnly = FALSE,
     sigPCutoff = 1e-6,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     independentVariants = NULL,
     seed = 999L
 ) {
     inputScale <- arg_match(inputScale)
-    if (!is.null(independentVariants)) {
-        independentVariants <- as.character(independentVariants)
-    }
-    objects <- .mashPrepObjects(objects)
     cfg <- list(
         nRandom = nRandom,
         nNull = nNull,
         excludeCondition = excludeCondition,
         coverage = coverage,
         inputScale = inputScale,
+        jointSpecification = jointSpecification,
         seed = seed,
-        independentVariants = independentVariants
+        independentVariants = if (!is.null(independentVariants)) {
+            as.character(independentVariants)
+        }
     )
-    combined <- .mashCombinePartitions(objects, cfg)
-    .mashFinalizeCombined(combined, sigPCutoff, zOnly)
+    parts <- .mashCombinePartitions(.mashPrepObjects(objects), cfg)
+    finalized <- .mashFinalizeCombined(parts$combined, sigPCutoff, zOnly)
+    list_assign(
+        finalized,
+        sumStatsList = .mashInputSumStats(finalized, parts$regions)
+    )
 }
 
 # `objects` must be a non-empty list; unnamed lists get synthetic region names.
@@ -3062,22 +3513,27 @@ mashInput <- function(
 }
 
 # Extract + merge each object's strong/random/null partitions, disambiguating
-# rownames by region before accumulating.
+# rownames by region before accumulating; each region's selection and layout
+# kept for its summary statistics (.mashInputSumStats()).
 # @noRd
 .mashCombinePartitions <- function(objects, cfg) {
-    reduce(
-        map(
-            names(objects),
-            .mashRegionPartitions,
-            objects = objects,
-            cfg = cfg
+    regions <- map(
+        names(objects),
+        .mashRegionPartitions,
+        objects = objects,
+        cfg = cfg
+    )
+    list(
+        combined = reduce(
+            map(regions, "matrices"),
+            mergeMashData,
+            .init = list()
         ),
-        mergeMashData,
-        .init = list()
+        regions = map(regions, "region")
     )
 }
 
-# One region's partitions, with its rownames region-prefixed so the merge can
+# One region's partitions, with its rownames region-tagged so the merge can
 # tell same-named variants from different regions apart.
 # @noRd
 .mashRegionPartitions <- function(nm, objects, cfg) {
@@ -3089,9 +3545,161 @@ mashInput <- function(
         coverage = cfg$coverage,
         inputScale = cfg$inputScale,
         seed = cfg$seed,
-        independentVariants = cfg$independentVariants
+        independentVariants = cfg$independentVariants,
+        jointSpecification = cfg$jointSpecification,
+        label = nm
     )
-    map(part, .mashPrefixRownames, nm = nm)
+    list(
+        matrices = map(part$partitions, .mashPrefixRownames, nm = nm),
+        region = list_assign(part[c("selected", "layout")], name = nm)
+    )
+}
+
+# The partitions as the summary statistics they were taken from, which
+# mashPipeline() lays out by the same spec: each region's own entries, kept to
+# the variants a partition took and that survived its filters, still missing
+# where a study lacks a variant, the regions combined.
+# @noRd
+.mashInputSumStats <- function(finalized, regions) {
+    parts <- c("strong", "random", "null")
+    compact(set_names(
+        map(
+            parts,
+            .mashPartitionSumStats,
+            finalized = finalized,
+            regions = regions
+        ),
+        parts
+    ))
+}
+
+# @noRd
+.mashPartitionSumStats <- function(p, finalized, regions) {
+    surviving <- rownames(finalized[[str_c(p, ".z")]])
+    if (length(surviving) == 0L) {
+        return(NULL)
+    }
+    .mashCombineSumStats(map(
+        regions,
+        .mashRegionSubset,
+        p = p,
+        surviving = surviving
+    ))
+}
+
+# One region's summary statistics for partition `p`: the layout rows it took
+# that survived, by their region-tagged names (.mashPrefixRownames()).
+# @noRd
+.mashRegionSubset <- function(region, p, surviving) {
+    picked <- region$selected[[p]]
+    kept <- picked[is_in(str_c(picked, region$name, sep = "_"), surviving)]
+    layout <- region$layout
+    .mashSubsetSumStats(
+        layout$sumStats,
+        layout$rowKeys[match(kept, layout$rowNames), , drop = FALSE],
+        layout$tupleBlocks
+    )
+}
+
+# The summary statistics `ss` keeps for the layout rows `keys` (each a block
+# and the variant joined there): each in-scope tuple's own variants matched to
+# its block's, by allele. A tuple none of whose variants was taken keeps an
+# empty entry, so every partition has the same conditions.
+# @noRd
+.mashSubsetSumStats <- function(ss, keys, tupleBlocks) {
+    entries <- .collectionEntries(ss)
+    keeps <- map2(
+        tupleBlocks$row,
+        tupleBlocks$block,
+        .mashEntryKeep,
+        entries = entries,
+        keys = keys
+    )
+    .rtlRebuild(
+        ss,
+        map2(entries[tupleBlocks$row], keeps, .mashKeepEntryRows),
+        tupleBlocks$row
+    )
+}
+
+# The positions in tuple `row`'s entry of the variants taken in its block.
+# @noRd
+.mashEntryKeep <- function(row, block, entries, keys) {
+    union <- keys$variant[keys$block == block]
+    if (length(union) == 0L) {
+        return(integer(0))
+    }
+    ids <- .entryToSumstatDf(entries[[row]])$variant_id
+    m <- matchVariants(ids, union, removeStrandAmbiguous = FALSE)
+    sort(unique(m$idxA))
+}
+
+# @noRd
+.mashKeepEntryRows <- function(entry, keep) {
+    entry[keep]
+}
+
+# One collection of the regions' summary statistics, a row two regions repeat
+# kept once (.mashMergeRepeatedRows()).
+# @noRd
+.mashCombineSumStats <- function(parts) {
+    present <- compact(parts)
+    if (length(present) == 0L) {
+        return(NULL)
+    }
+    isGwas <- all(map_lgl(present, methods::is, "GwasSumStats"))
+    if (!isGwas && !all(map_lgl(present, methods::is, "QtlSumStats"))) {
+        abort(glue(
+            "mashInput: the regions mix QTL and GWAS inputs, whose summary ",
+            "statistics are not one collection."
+        ))
+    }
+    tupleCols <- if (isGwas) "study" else c("study", "context", "trait")
+    distinct <- .mashMergeRepeatedRows(present, tupleCols)
+    if (isGwas) combineGwasSumStats(distinct) else combineQtlSumStats(distinct)
+}
+
+# Parts with each row another repeats -- a tuple over one span in two
+# regions, overlapping or passed twice -- kept once, where it first appears,
+# with the variants every copy took.
+# @noRd
+.mashMergeRepeatedRows <- function(parts, tupleCols) {
+    keys <- map(parts, .ssRowKeys, tupleCols = tupleCols)
+    flat <- list_c(keys)
+    if (anyDuplicated(flat) == 0L) {
+        return(parts)
+    }
+    entries <- list_flatten(map(parts, .collectionEntries))
+    merged <- map(
+        split(entries, factor(flat, levels = unique(flat))),
+        .mashUnionEntries
+    )
+    partOf <- factor(rep(seq_along(parts), lengths(keys)), seq_along(parts))
+    compact(map(
+        seq_along(parts),
+        .mashKeepFirstRows,
+        parts = parts,
+        keys = keys,
+        first = split(!duplicated(flat), partOf),
+        merged = merged
+    ))
+}
+
+# @noRd
+.mashKeepFirstRows <- function(i, parts, keys, first, merged) {
+    keep <- which(first[[i]])
+    if (length(keep) == 0L) {
+        return(NULL)
+    }
+    .rtlRebuild(parts[[i]], unname(merged[keys[[i]][keep]]), keep)
+}
+
+# One entry of the variants several copies of a row hold.
+# @noRd
+.mashUnionEntries <- function(entries) {
+    pieces <- unname(entries)
+    joined <- exec(c, !!!pieces)
+    joined[!duplicated(.entryToSumstatDf(joined)$variant_id)]
 }
 
 # Coerce to data.frame, clean each partition + derive z (random/null before
@@ -3480,7 +4088,12 @@ qtlSumStatsFromBetaMatrix <- function(
     inputScale <- arg_match(inputScale)
     .mashValidateInput(x, role)
     setup <- .mashBlockSetup(x, spec)
-    resolvedScale <- .mashResolveScale(x, role, inputScale)
+    resolvedScale <- .mashResolveScale(
+        x,
+        role,
+        inputScale,
+        acrossStudies = setup$joinByAllele
+    )
     blocks <- .mashBuildBlockMatrices(x, setup, resolvedScale)
     bhatBlocks <- blocks$bhat
     bhat <- exec(rbind, !!!bhatBlocks)
@@ -3490,11 +4103,20 @@ qtlSumStatsFromBetaMatrix <- function(
     # zero_Bhat_Shat_reset convention; missing-cell variants do not drive the
     # fit). The scale and each column's condition and sample size go with
     # them, for the prior a fit on them is (mashPipeline()).
+    # Each row's block and the variant joined there, and each tuple's block,
+    # say which of the inputs' variants a row is (.mashSubsetSumStats()).
+    rowKeyParts <- blocks$rowKeys
     list(
         b = replace(bhat, is.na(bhat), 0),
         s = replace(shat, is.na(shat) | shat <= 0, 1000),
+        observed = !is.na(bhat) & !is.na(shat) & shat > 0,
         scale = resolvedScale,
-        conditions = mutate(setup$conditions, n = .mashColumnN(blocks$n))
+        conditions = mutate(setup$conditions, n = .mashColumnN(blocks$n)),
+        rowKeys = list_rbind(rowKeyParts),
+        tupleBlocks = tibble(
+            row = setup$rows,
+            block = setup$blockKeys[setup$rows]
+        )
     )
 }
 
@@ -3650,15 +4272,24 @@ qtlSumStatsFromBetaMatrix <- function(
     cols[[axis]][rows]
 }
 
-# Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE) or "z"
-# (Z, Shat=1).
-# "auto" picks beta when every entry has BETA+SE, else z; mixed inputs error.
+# Resolve which (Bhat, Shat) source to pull: "beta" (BETA/SE), "z" (Z,
+# Shat=1) or "standardized" (the per-SD effect from Z and N). "auto" picks
+# beta when every entry has BETA+SE, else z; mixed inputs error. Across
+# studies (`acrossStudies`, the study among the spec's axes) it puts the
+# effects on the per-SD scale instead (.mashScaleAcrossStudies()).
 # @noRd
-.mashResolveScale <- function(x, role, inputScale) {
+.mashResolveScale <- function(x, role, inputScale, acrossStudies = FALSE) {
     entries <- .collectionEntries(x)
     caps <- map(entries, .mashEntryCaps)
     allHaveBetaSe <- all(map_lgl(caps, "hasBetaSe"))
     allHaveZ <- all(map_lgl(caps, "hasZ"))
+    if (identical(inputScale, "auto") && acrossStudies) {
+        return(.mashScaleAcrossStudies(
+            allHaveZ,
+            all(map_lgl(caps, "hasN")),
+            role
+        ))
+    }
     switch(
         inputScale,
         beta = .mashScaleBeta(allHaveBetaSe, role),
@@ -3666,6 +4297,26 @@ qtlSumStatsFromBetaMatrix <- function(
         standardized = .mashScaleStandardized(allHaveZ, role),
         auto = .mashScaleAuto(allHaveBetaSe, allHaveZ, role)
     )
+}
+
+# "auto" across studies: per-allele effects differ between studies with
+# allele frequency and phenotype scale, so the effects go on the per-SD
+# scale, from each variant's Z and N; without N, on the z scale, whose prior
+# is put on the per-SD scale by the conditions' sample sizes where it is
+# applied (.mashPriorScaleFactor()).
+# @noRd
+.mashScaleAcrossStudies <- function(allHaveZ, allHaveN, role) {
+    if (allHaveZ && allHaveN) {
+        return("standardized")
+    }
+    if (allHaveZ) {
+        return("z")
+    }
+    abort(glue(
+        "mashPipeline: across studies, inputScale = 'auto' needs every ",
+        "'{role}' entry to carry a Z mcol (and N, for the per-SD scale): ",
+        "per-allele effects (BETA, SE) are not comparable between studies."
+    ))
 }
 
 # The per-SD scale: Bhat = Z / sqrt(N - 2 + Z^2), the correlation of the
@@ -3738,7 +4389,8 @@ qtlSumStatsFromBetaMatrix <- function(
     list(
         bhat = map(blocks, "b"),
         shat = map(blocks, "s"),
-        n = map(blocks, "n")
+        n = map(blocks, "n"),
+        rowKeys = map(blocks, "rowKeys")
     )
 }
 
@@ -3881,7 +4533,11 @@ qtlSumStatsFromBetaMatrix <- function(
     list(
         b = .mashContextMatrix(pc$perContextB, pc$variantOrder, dims),
         s = .mashContextMatrix(pc$perContextSe, pc$variantOrder, dims),
-        n = unname(pc$perContextN[setup$columnLabels])
+        n = unname(pc$perContextN[setup$columnLabels]),
+        rowKeys = tibble(
+            block = rep(bkey, length(pc$variantOrder)),
+            variant = pc$variantOrder
+        )
     )
 }
 
@@ -4046,6 +4702,7 @@ qtlSumStatsFromBetaMatrix <- function(
     mc <- S4Vectors::mcols(e)
     list(
         hasBetaSe = all(is_in(c("BETA", "SE"), colnames(mc))),
-        hasZ = is_in("Z", colnames(mc))
+        hasZ = is_in("Z", colnames(mc)),
+        hasN = is_in("N", colnames(mc))
     )
 }

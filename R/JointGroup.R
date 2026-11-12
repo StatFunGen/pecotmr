@@ -248,8 +248,9 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
     if (.jgIsPerConditionLd(refs)) refs[[k]] else refs
 }
 
-# The group's one LD reference, for a fit that takes one LD matrix (mr.mash,
-# mvsusie); a group whose studies are each on their own reference has none.
+# The group's one LD reference, for a fit that takes one LD matrix (mr.mash
+# and mvsusie take one per condition, .rssConditionLd()); a group whose
+# studies are each on their own reference has none.
 # @noRd
 .jgOneLdRef <- function(g, label) {
     refs <- .jgLdRef(g)
@@ -271,20 +272,6 @@ setClass("TwasJointPipeline", contains = "JointPipeline")
         ),
         i = "Fit them separately, or give them one LD reference."
     ))
-}
-
-# The group's LD matrix, derived from its sketch.
-#
-# Callers must derive ONCE per group and pass the result down: the per-
-# condition entry builder runs once per Z column, so calling this from there
-# would recompute the same matrix for every condition.
-# @noRd
-.jgLdMatrix <- function(g) {
-    .ldFromRef(
-        .jgOneLdRef(g, "jointEngine"),
-        .jgVariantIds(g),
-        label = "jointEngine"
-    )
 }
 
 # @noRd

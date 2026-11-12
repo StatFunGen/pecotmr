@@ -56,6 +56,24 @@ test_that("MashPrior: each prior must say what its rows are", {
         ),
         "list of 2 x 2 matrices"
     )
+    # A residual correlation is optional (earlier mashPipeline() output has
+    # none), but when present it is one row and column per condition.
+    expect_s4_class(
+        MashPrior(
+            fullFit = list(
+                context = list_assign(prior, residualCorrelation = diag(2))
+            )
+        ),
+        "MashPrior"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(
+                context = list_assign(prior, residualCorrelation = diag(3))
+            )
+        ),
+        "residualCorrelation must be a 2 x 2 matrix"
+    )
     expect_error(
         MashPrior(
             fullFit = list(context = list_assign(prior, axes = "tissue"))

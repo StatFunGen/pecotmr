@@ -705,14 +705,27 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 
 .jd_mockMvsusieRss <- function() {
     # The real mvsusie_rss passes its `...` on to mvsusie, which is how L and
-    # L_greedy (the pipeline's CredibleSetParam) arrive; recorded for tests.
-    function(Z, R, N, prior_variance, coverage, L = NULL, L_greedy = NULL) {
+    # L_greedy (the pipeline's CredibleSetParam) arrive; recorded for tests,
+    # as is the form the LD came in: the matrix R, or a genotype reference's
+    # factor X.
+    function(
+        Z,
+        R = NULL,
+        N,
+        prior_variance,
+        coverage,
+        L = NULL,
+        L_greedy = NULL,
+        X = NULL,
+        sample_groups = NULL
+    ) {
         list(
             token = "mvsusieRss",
             nVariants = nrow(Z),
             nOutcomes = ncol(Z),
             L = L,
-            L_greedy = L_greedy
+            L_greedy = L_greedy,
+            ldForm = if (is.null(X)) "R" else "X"
         )
     }
 }
@@ -824,6 +837,8 @@ test_that("fineMappingPipeline(QtlSumStats): context joint per study x trait", {
     expect_true(all(grepl("c1;c2|c2;c1", as.character(res$jointContexts))))
     # maxNumSingleEffects reaches the joint RSS fit, as it does susie_rss.
     expect_equal(susieFit(res[1, ])$payload$L, 3L)
+    # The genotype reference's LD reaches it as a factor.
+    expect_equal(susieFit(res[1, ])$payload$ldForm, "X")
 })
 
 test_that("fineMappingPipeline(QtlSumStats): one context skips context joint", {

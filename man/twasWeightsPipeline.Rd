@@ -109,9 +109,10 @@ the default, which either preset also names, is
 \code{c("lasso", "prsCs", "dprGibbs")}, which there run lassosum, PRS-CS
 and SDPR; the fine-mapping methods are not in it, and are requested by
 name together with a \code{fineMappingResult}. A
-multivariate method (\code{mrmash}, \code{mvsusie}, \code{fsusie}) fits
-the selected contexts and traits together and any other method each
-(context, trait) alone, so the two kinds can be requested at once.}
+multivariate method (\code{mrmash}, \code{mvsusie}, \code{mvsusieInf},
+\code{fsusie}) fits the selected contexts and traits together and any
+other method each (context, trait) alone, so the two kinds can be
+requested at once.}
 
 \item{backend}{The engine a method with several runs on, as a named
 character vector keyed by method, e.g.
@@ -176,8 +177,9 @@ concatenates the ranges' genotypes into one joint fit. Ignored for a
 single-range / cis request.}
 
 \item{jointSpecification}{Optional joint-fit specification saying which
-axes the joint methods -- \code{mrmash}, \code{mvsusie} and
-\code{fsusie} -- group conditions across. It means what it means to
+axes the joint methods -- \code{mrmash}, \code{mvsusie},
+\code{mvsusieInf} and \code{fsusie} -- group conditions across. It
+means what it means to
 \code{\link{fineMappingPipeline}}, so a run groups conditions exactly as
 a fine-mapping run given the same specification and selection did. When
 NULL (the default) they are grouped as fine-mapping groups them: across
@@ -190,8 +192,9 @@ from \code{"study"}, \code{"context"} and \code{"trait"}, or
 listed values, each of which must exist in \code{data}. A list-form
 spec always goes inside the outer list, even on its own. Other methods
 run per (study, context, trait) as usual. \code{mrmash} is fitted on
-each group; \code{mvsusie} and \code{fsusie} are read off
-\code{fineMappingResult}'s fit over exactly the group's conditions, each
+each group; \code{mvsusie}, \code{mvsusieInf} and \code{fsusie} are
+read off \code{fineMappingResult}'s fit over exactly the group's
+conditions, each
 condition's own column of it, and a group the result holds no such fit
 of stops the run: fine-map and build weights with the same
 \code{jointSpecification} and \code{contexts} / \code{traitId}
@@ -202,7 +205,8 @@ on its own samples only: the study axis alone makes one group per
 (context, trait) two or more of them carry, and a composed spec
 including \code{"study"} one group per value of the axes it leaves out
 (each trait for \code{c("study", "context")}). On those groups it reads
-\code{mvsusie} off the fine-mapping fits (no genotype is read) and fits
+the mvSuSiE methods off the fine-mapping fits (no genotype is read) and
+fits
 \code{mrmash}, each condition on its own samples (mr.mash's
 \code{missing_y_method = "approximate"}); on the study axis alone it
 also fits \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
@@ -210,9 +214,9 @@ across the studies under the penalty on the difference between their
 effects (see \code{studyCoupling}). The summary-statistics studies are
 fitted as well. On summary statistics the study axis also fits the
 penalized methods across the studies under that penalty, each study
-against its own LD reference, and \code{mrmash} takes each study's own
-reference too (see \code{\link{mrmashRssWeights}}); \code{mvsusie}
-needs the studies on one reference.
+against its own LD reference, and \code{mrmash} and the mvSuSiE methods
+take each study's own reference too (see \code{\link{mrmashRssWeights}}
+and \code{\link{mvsusieRssWeights}}).
 On individual-level data, \code{bayesC} and \code{bayesN} on
 \code{backend = "bglr"} also fit each group of two or more conditions
 at once, through BGLR's \code{Multitrait()} (see
@@ -348,7 +352,8 @@ components fitted per context when \code{usePCA = TRUE} (default
   posterior summaries, without any copy of \code{X} unless \code{retainX}
   asks for it. Every other method keeps its fit whole or not at all, except
   the fine-mapping methods (\code{susie}, \code{susieInf},
-  \code{susieAsh}, \code{mvsusie}, \code{fsusie}), whose rows keep none:
+  \code{susieAsh}, \code{mvsusie}, \code{mvsusieInf}, \code{fsusie}),
+  whose rows keep none:
   their weights come from the \code{fineMappingResult}'s fit, which is where
   \code{ctwasPipeline()} reads it. Requesting \code{"full"} for a run where
   no method can honour it is an error, and a mixed run warns rather than
@@ -461,12 +466,13 @@ Accepts:
 \details{
 Method-restriction rules (enforced):
 \itemize{
-  \item \code{mr.mash}, \code{mvsusie} and \code{fsusie} are grouped
-        across conditions as \code{\link{fineMappingPipeline}} groups
-        them (see \code{jointSpecification}) and follow the multi-trait /
+  \item \code{mr.mash}, \code{mvsusie}, \code{mvsusieInf} and
+        \code{fsusie} are grouped across conditions as
+        \code{\link{fineMappingPipeline}} groups them (see
+        \code{jointSpecification}) and follow the multi-trait /
         multi-context rules of the fine-mapping \code{mvsusie} family
         (require at least two traits OR at least two contexts), but for
-        \code{mvsusie} grouped across studies.
+        the mvSuSiE methods grouped across studies.
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run

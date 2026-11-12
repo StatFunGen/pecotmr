@@ -1805,7 +1805,7 @@ parseTraitIds <- function(traitId, data) {
         cfg$data,
         dataForm = "individual",
         pipeline = .fmJointPipeline(cfg, cfg$crossValidationParam),
-        jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
+        jointMethods = intersect(tokens, .fmMultivariateTokens()),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
         args = .fmJointIndividualArgs(cfg, methodArgs, region)
@@ -1827,7 +1827,10 @@ parseTraitIds <- function(traitId, data) {
             crossValidationParam = crossValidationParam,
             verbose = cfg$verbose,
             fitRetention = cfg$fitRetention,
-            seed = cfg$seed
+            seed = cfg$seed,
+            # The settled `h2` the summary-statistics fits scale V by
+            # (.jointRssH2())
+            h2 = cfg$h2Spec
         )
     )
 }
@@ -1867,7 +1870,7 @@ parseTraitIds <- function(traitId, data) {
         cfg$data,
         dataForm = "sumstats",
         pipeline = .fmJointPipeline(cfg, .cvResolve(CrossValidationParam())),
-        jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
+        jointMethods = intersect(tokens, .fmMultivariateTokens()),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
         args = list(
@@ -1952,15 +1955,15 @@ parseTraitIds <- function(traitId, data) {
     methodArgs,
     cfg
 ) {
-    jointTokens <- intersect(tokens, "mvsusie")
+    jointTokens <- intersect(tokens, .fmMvsusieTokens())
     if (length(studySpecs) == 0L || length(cfg$data) < 2L) {
         return(NULL)
     }
     if (is_in("fsusie", tokens) && (cfg$verbose %||% 1) >= 1) {
         inform(str_c(
             "jointCrossStudy: fsusie has no cross-study fit, so the ",
-            "individual-level studies are fitted across studies by mvsusie ",
-            "alone."
+            "individual-level studies are fitted across studies by the ",
+            "mvSuSiE methods alone."
         ))
     }
     if (length(jointTokens) == 0L) {
@@ -2422,18 +2425,20 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # The study-axis specs on a MultiStudyQtlDataset's individual-level studies:
-# mvsusie's weights over each group fineMappingPipeline() fits across them,
-# read off those fits (.twasAcrossStudyWeights()), each study taken with its
-# genotype-filter overrides applied, as fine-mapping took it. NULL when no
-# spec applies, fewer than two individual-level studies are present, or
-# mvsusie is not asked for: fsusie has no fit across studies, and mr.mash is
-# fitted on the groups here (.twasDispatchStudySpecsCoupled()).
+# the mvSuSiE methods' weights over each group fineMappingPipeline() fits
+# across them, read off those fits (.twasAcrossStudyWeights()), each study
+# taken with its genotype-filter overrides applied, as fine-mapping took it.
+# NULL when no spec applies, fewer than two individual-level studies are
+# present, or no mvSuSiE method is asked for: fsusie has no fit across
+# studies, and mr.mash is fitted on the groups here
+# (.twasDispatchStudySpecsCoupled()).
 # @noRd
 .twasDispatchStudySpecsIndividual <- function(studySpecs, tokens, cfg) {
+    mvTokens <- intersect(tokens, .fmMvsusieTokens())
     if (
         length(studySpecs) == 0L ||
             length(cfg$data) < 2L ||
-            !is_in("mvsusie", tokens)
+            length(mvTokens) == 0L
     ) {
         return(NULL)
     }
@@ -2446,7 +2451,8 @@ parseTraitIds <- function(traitId, data) {
     )
     .twasAcrossStudyWeights(
         .twasStudyAxisGroups(studySpecs, studies, cfg),
-        cfg
+        cfg,
+        mvTokens
     )
 }
 

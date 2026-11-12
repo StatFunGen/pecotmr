@@ -20,7 +20,10 @@ weights from one block are not comparable against another's.}
 
 \item{ldReference}{Optional LD reference for that block: a genotype
 panel, a \code{\link{GenotypeMixture}} or an \code{\link{LdMatrix}}.
-With one, the statistics' variants must also be in it. No LD is read.}
+With one, the statistics' variants must also be in it. A fit of
+conditions measured on different samples takes a list of one reference
+per column of \code{stat$z}, as it was fitted with; each must be a
+valid reference. No LD is read.}
 
 \item{mvsusieRssFit}{A fitted \code{mvsusieRss} object. Required: this
 extracts weights and never runs fine-mapping itself.}

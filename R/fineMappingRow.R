@@ -1336,7 +1336,15 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     varAlpha <- alpha[, seq_len(nKeep), drop = FALSE]
     subsetFields <- compact(list(
         alpha = alpha,
-        pip = as.numeric(1 - apply(1 - varAlpha, 2L, prod)),
+        # Each effect active with its slot weight's probability, as susieR
+        pip = as.numeric(
+            1 -
+                apply(
+                    1 - .fitSlotWeights(fit, nrow(varAlpha)) * varAlpha,
+                    2L,
+                    prod
+                )
+        ),
         null_index = if (length(spec$nullIdx) > 0L) nKeep + 1L,
         # Recorded BEFORE renormalization: after it every row sums to 1,
         # so the share that survived is only knowable at this point. This
@@ -1799,14 +1807,18 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     # Back on the scale buildTopLoci() reports, as mu and mu2 are stored in
     # the units of the standardized X.
     scaleFactors <- .fitScaleFactors(fit, ncol(alphaMat))
-    posteriorMean <- as.numeric(colSums(alphaMat * muMat) / scaleFactors)
+    slotWeights <- .fitSlotWeights(fit, nrow(alphaMat))
+    posteriorMean <- as.numeric(
+        colSums(slotWeights * alphaMat * muMat) / scaleFactors
+    )
     mu2Mat <- if (!is.null(fit[["mu2"]])) as.matrix(fit[["mu2"]]) else NULL
     sdCol <- compact(list(
         posterior_sd = if (
             !is.null(mu2Mat) && all(dim(alphaMat) == dim(mu2Mat))
         ) {
             as.numeric(
-                .susiePosteriorSd(alphaMat, muMat, mu2Mat) / scaleFactors
+                .susiePosteriorSd(alphaMat, muMat, mu2Mat, slotWeights) /
+                    scaleFactors
             )
         }
     ))

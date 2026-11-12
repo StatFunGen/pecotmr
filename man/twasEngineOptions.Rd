@@ -165,6 +165,14 @@ Options forwarded to the engine behind a TWAS weight method,
   contexts make it, the eigenvalues are raised to the floor, the covariance
   is not updated during the fit, and a warning says so.
 
+  It also takes \code{vInitMethod}, likewise the wrapper's: where the
+  residual covariance starts. \code{"data"} (the default) starts it at the
+  covariance of Y; \code{"mash"} at the residual correlation of the mash
+  prior (\code{\link{mashPipeline}}), which \code{twasWeightsPipeline}
+  passes in \code{dataDrivenPriorMatrices}, scaled by the standard
+  deviations of Y's columns. Either start is zero for a pair of conditions
+  never observed together, and is floored by \code{vEigenFloor}.
+
   \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
   only when \code{dprGibbs} is fitted across studies as SDPRX fits
   ancestries (\code{\link{twasWeightsPipeline}}'s \code{studyCoupling}):

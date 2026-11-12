@@ -8,11 +8,12 @@ mashPipeline(
   sumStatsList,
   alpha,
   residualCorrelation = NULL,
-  residualCorrelationMethod = c("identity", "simple", "simpleSpecific", "corshrink",
+  residualCorrelationMethod = c("simple", "identity", "simpleSpecific", "corshrink",
     "mle"),
   prior = MashPriorParam(),
   inputScale = c("auto", "beta", "z", "standardized"),
   jointSpecification = NULL,
+  sampleOverlap = FALSE,
   mashDataArgs = MashDataOptions(),
   mashArgs = MashOptions(),
   setSeed = 999
@@ -44,15 +45,23 @@ artefact (the legacy MWE pattern).}
   \code{\link{mashResidualCorrelation}}, which is where each estimator is
   described.
 
-  \code{"identity"} (the default) takes the residual correlation to be the
-  identity, needs no extra partition, and never depends on which partitions
-  were supplied. It is the safe default rather than the best one: it
-  assumes conditions share no residual correlation, which
+  \code{"simple"} (the default) estimates it from the \code{"null"}
+  partition, which it therefore requires: the correlation of the z-scores
+  of the variants with \eqn{|z| < 2} in every condition (mashr's
+  \code{estimate_null_correlation_simple()}). \code{"identity"} takes the
+  residual correlation to be the identity and needs no extra partition,
+  but assumes conditions share no residual correlation, which
   overlapping-sample designs -- the usual multi-context QTL case, where the
   same donors are measured in every context -- violate. Supplying a
-  \code{"null"} partition while leaving this at \code{"identity"} reports
-  that the partition is unused, since that combination is more often an
+  \code{"null"} partition while asking for \code{"identity"} reports that
+  the partition is unused, since that combination is more often an
   oversight than an intent.
+
+  Each prior keeps the \eqn{\hat V} it was fitted with
+  (\code{residualCorrelation}). \code{\link{twasWeightsPipeline}}'s
+  mr.mash fits take it as their residual covariance on summary statistics,
+  and can start from it on individual-level data
+  (\code{MrmashOptions(vInitMethod = "mash")}).
 
   The estimators differ in what they require: \code{"simple"},
   \code{"simpleSpecific"} and \code{"corshrink"} need a \code{"null"}
@@ -83,7 +92,9 @@ extracted from each sumstats entry:
   \item{\code{"auto"}}{Use BETA + SE when every entry carries both;
     otherwise fall back to (Z, 1) when every entry carries Z. Mixed
     inputs (some entries missing BETA, others missing Z) are a
-    hard error.}
+    hard error. For a joint spec with the study among its axes, whose
+    per-allele effects are not comparable between studies, use the
+    standardized scale when every entry carries Z and N, else (Z, 1).}
 }
 \code{alpha} should be chosen consistently with the resolved scale:
 typically \code{alpha = 0} for beta and standardized, \code{alpha = 1}
@@ -96,11 +107,20 @@ axes (\code{"study"}, \code{"context"}, \code{"trait"}), a
 spec's conditions are the combinations of its axes' values; the other
 axes are pooled, each combination of their values a block of rows, in
 which a condition it lacks is a missing cell. With the study among the
-axes a block's studies are matched by allele. \code{NULL} (the default)
+axes a block's studies are matched by allele, and share no samples
+unless \code{sampleOverlap} says they do: the residual correlation is
+estimated within each study and is zero between them
+(\code{\link{mashResidualCorrelation}}). \code{NULL} (the default)
 takes a \code{QtlSumStats}' contexts, or a \code{GwasSumStats}'
 studies. A supplied \code{residualCorrelation} or
 \code{priorCovariances} is over one spec's conditions, so it takes one
 spec.}
+
+\item{sampleOverlap}{Which studies may share samples, for the estimated
+residual correlation: \code{FALSE} (the default), \code{TRUE}, or a
+list of groups of studies (\code{\link{mashResidualCorrelation}}). Read
+with the study among a spec's axes, and not with a supplied
+\code{residualCorrelation}.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with
@@ -122,6 +142,7 @@ refused by the constructor.}
 A named list with one prior per spec, named by its axes joined by
   \code{"+"}. Each is a list of \code{U} (the combined covariance list:
   canonical + PCA + flash + ED), \code{w} (the estimated mixture weights),
+  \code{residualCorrelation} (the \eqn{\hat V} they were fitted with),
   \code{alpha}, \code{inputScale} (the resolved scale), \code{axes},
   \code{scope} and \code{conditions}: one row per row of each \code{U}
   matrix, its \code{study}, \code{context} and \code{trait} (\code{NA}
@@ -140,6 +161,6 @@ End-to-end driver: from `(strong, random, null)` sumstats
 \examples{
 data(qtlSumStatsMulticontextExample)
 ss <- qtlSumStatsMulticontextExample
-sumStatsList <- list(strong = ss, random = ss)
+sumStatsList <- list(strong = ss, random = ss, null = ss)
 mashPipeline(sumStatsList, alpha = 0, prior = MashPriorParam(nPcs = 2L))
 }

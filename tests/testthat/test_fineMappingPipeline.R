@@ -1410,6 +1410,46 @@ test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
     expect_null(lk(NULL, "S", "G")) # no TwasWeights supplied
 })
 
+test_that(".fmLookupMrmashFit: a cross-study group takes its studies' fit", {
+    mkEntry <- function(fits) {
+        TwasWeightsRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
+            weights = c(0.1, 0.2),
+            methodFits = fits
+        )
+    }
+    payloadOver <- function(conditions) {
+        U <- diag(2)
+        dimnames(U) <- list(conditions, conditions)
+        list(dataDrivenPriorMatrices = list(U = list(a = U)), w0 = c(a = 1))
+    }
+    # Study A's own fit over its contexts, and a fit over the studies A and B
+    # in context c1: both have a row keyed (c1, G).
+    withinA <- payloadOver(c("c1", "c2"))
+    acrossStudies <- payloadOver(c("A", "B"))
+    tw <- TwasWeights(
+        studyName = c("A", "A", "B"),
+        context = c("c1", "c2", "c1"),
+        trait = c("G", "G", "G"),
+        method = c("mrmash", "mrmash", "mrmash"),
+        entry = list(mkEntry(withinA), mkEntry(NULL), mkEntry(acrossStudies))
+    )
+    lk <- function(...) pecotmr:::.fmLookupMrmashFit(...)
+    # The group across studies keys on (context, trait), as .jointPriorKey()
+    # gives it, and takes only the fit over its studies.
+    key <- pecotmr:::.jointPriorKey(
+        tibble(study = c("A", "B"), context = "c1", trait = "G")
+    )
+    expect_null(key$study)
+    expect_identical(
+        lk(tw, key$study, key$trait, key$context, c("A", "B")),
+        acrossStudies
+    )
+    # Study A's group across its contexts takes its own.
+    expect_identical(lk(tw, "A", "G", NULL, c("c1", "c2")), withinA)
+    expect_null(lk(tw, NULL, "G", "c1", c("A", "C")))
+})
+
 test_that(".fmLookupMrmashCv finds the per-fold CV payload by study, trait", {
     mkEntry <- function(cv) {
         TwasWeightsRow(
@@ -5294,11 +5334,27 @@ test_that(".fmRssArgsResolved fills rFinite without leaving the class", {
 test_that("each input path offers only the methods it implements", {
     expect_setequal(
         pecotmr:::.fmMethodsFor("QtlDataset"),
-        c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")
+        c(
+            "susie",
+            "susieInf",
+            "susieAsh",
+            "mvsusie",
+            "mvsusieInf",
+            "mvsusieAsh",
+            "fsusie"
+        )
     )
     expect_setequal(
         pecotmr:::.fmMethodsFor("QtlSumStats"),
-        c("susie", "susieInf", "susieAsh", "ser", "mvsusie")
+        c(
+            "susie",
+            "susieInf",
+            "susieAsh",
+            "ser",
+            "mvsusie",
+            "mvsusieInf",
+            "mvsusieAsh"
+        )
     )
     # fsusie has no summary-statistics implementation; ser no individual one.
     expect_null(pecotmr:::.fmMethodCalleeFor("fsusie", "QtlSumStats"))
@@ -6309,6 +6365,232 @@ test_that("mvsusie on QtlSumStats refuses contexts on two LD references", {
         suppressMessages(fineMappingPipeline(ss, methods = "mvsusie")),
         "a joint fit uses one LD matrix"
     )
+})
+
+# Two studies of one trait in one context on their own LD references: S2
+# lacks the last of the five variants, and its LD decays faster.
+.fmp_twoStudyLdSs <- function() {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    entry <- function(z, keep, n) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100L * keep, width = 1L)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = ids[keep],
+            A1 = "A",
+            A2 = "G",
+            Z = z,
+            N = n
+        )
+        gr
+    }
+    ldm <- function(rho, keep) {
+        LdMatrix(
+            `dimnames<-`(
+                rho^abs(outer(keep, keep, "-")),
+                list(ids[keep], ids[keep])
+            ),
+            nSamples = 1000L
+        )
+    }
+    QtlSumStats(
+        studyName = c("S1", "S2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(
+            entry(c(6, 5.5, 1, 0.5, 0.2), 1:5, 1000L),
+            entry(c(5, 2, 0.4, 0.3), 1:4, 800L)
+        ),
+        genome = "hg19",
+        ldReference = list(ldm(0.6, 1:5), ldm(0.2, 1:4)),
+        qcOptions = list(step1 = "ok")
+    )
+}
+
+test_that("mvsusie across studies fits each on its own LD reference", {
+    skip_if_not_installed("mvsusieR")
+    # mvsusie_rss() takes one LD matrix per outcome from the version with
+    # per-outcome sufficient statistics on.
+    skip_if_not(
+        exists("compute_outcome_groups", asNamespace("mvsusieR")),
+        "mvsusieR predates one LD matrix per outcome"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusie",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(nrow(res), 2L)
+    expect_setequal(as.character(res$study), c("S1", "S2"))
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    # The variant S2 lacks has effect 0 there.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_false(fit$coef[ids[5L], "S1"] == 0)
+})
+
+test_that("a credible set's member a study lacks leaves its purity there", {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        exists("compute_outcome_groups", asNamespace("mvsusieR")),
+        "mvsusieR predates one LD matrix per outcome"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    entry <- function(z, keep, n) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100L * keep, width = 1L)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = ids[keep],
+            A1 = "A",
+            A2 = "G",
+            Z = z,
+            N = n
+        )
+        gr
+    }
+    ldm <- function(R, keep) {
+        LdMatrix(`dimnames<-`(R, list(ids[keep], ids[keep])), nSamples = 1000L)
+    }
+    # One effect at variants 4 and 5 (r = 0.95 in S1); S2 lacks variant 5.
+    R1 <- 0.2^abs(outer(1:5, 1:5, "-"))
+    R1[4L, 5L] <- R1[5L, 4L] <- 0.95
+    fit <- function(z1, z2) {
+        ss <- QtlSumStats(
+            studyName = c("S1", "S2"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            entry = list(
+                entry(z1, 1:5, 1000L),
+                entry(c(0.2, 0.4, 0.3, z2), 1:4, 800L)
+            ),
+            genome = "hg19",
+            ldReference = list(
+                ldm(R1, 1:5),
+                ldm(0.2^abs(outer(1:4, 1:4, "-")), 1:4)
+            ),
+            qcOptions = list(step1 = "ok")
+        )
+        res <- suppressMessages(
+            fineMappingPipeline(
+                ss,
+                methods = "mvsusie",
+                jointSpecification = "study"
+            )
+        )
+        map(1:2, function(i) {
+            pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        })
+    }
+    tl <- fit(c(0.3, 0.1, 1, 7.2, 7.6), 3)
+    # The set {4, 5} stands in both rows: S2's purity is read over variant
+    # 4 alone, where the lacked variant 5 used to make it 0 and drop it.
+    expect_equal(tl[[1L]]$cs_95_purity[4:5], c(0.95, 0.95))
+    expect_equal(tl[[2L]]$cs_95[4:5], tl[[1L]]$cs_95[4:5])
+    expect_equal(tl[[2L]]$cs_95_purity[4:5], c(1, 1))
+    expect_gt(tl[[2L]]$posterior_mean[4L], 0)
+    # The variant S2 lacks has an effect of 0 there: no SD and no lfsr.
+    expect_equal(tl[[2L]]$posterior_mean[5L], 0)
+    expect_equal(tl[[2L]]$posterior_sd[5L], 0)
+    expect_true(is.na(tl[[2L]]$lfsr[5L]))
+    expect_false(is.na(tl[[1L]]$lfsr[5L]))
+    # A set of variant 5 alone holds nothing of S2's, so S2's row drops it.
+    alone <- fit(c(0.3, 0.1, 1, 7.2, 8), 1.5)
+    expect_true(any(alone[[1L]]$cs_95_purity > 0))
+    expect_true(all(alone[[2L]]$cs_95_purity == 0))
+})
+
+test_that("mvsusieInf across studies keeps their unmappable effects apart", {
+    .fm_skipIfNoMvsusieInf()
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusieInf",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(as.character(res$study), c("S1", "S2"))
+    expect_setequal(methodNames(res), "mvsusieInf")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    # The studies' unmappable effects are uncorrelated, the default.
+    expect_equal(dim(fit$tau2), c(2L, 2L))
+    expect_equal(fit$tau2[1L, 2L], 0)
+    expect_equal(dim(fit$theta), c(5L, 2L))
+    # The variant S2 lacks has effect 0 there, its unmappable part too.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_equal(fit$theta[5L, 2L], 0)
+})
+
+test_that("mvsusieAsh across studies keeps their unmappable effects apart", {
+    .fm_skipIfNoMvsusieAsh()
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusieAsh",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(as.character(res$study), c("S1", "S2"))
+    expect_setequal(methodNames(res), "mvsusieAsh")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    expect_equal(dim(fit$theta), c(5L, 2L))
+    expect_equal(dim(fit$tau2), c(2L, 2L))
+    # The studies' residuals are on different samples
+    expect_equal(fit$sigma2[1L, 2L], 0)
+    # The variant S2 lacks has effect 0 there, its unmappable part too.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_equal(fit$theta[5L, 2L], 0)
+})
+
+test_that("mvsusieInf fits the studies' contexts across individuals", {
+    .fm_skipIfNoMvsusieInf()
+    res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        .fm_disjointTwoContextStudies(),
+        methods = FineMappingMethodsParam(
+            qtlDatasetMethods = list(
+                mvsusieInf = MvsusieInfOptions(
+                    verbose = FALSE,
+                    estimate_unmappable_correlation = TRUE
+                )
+            )
+        ),
+        jointSpecification = list(c("study", "context")),
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+        verbose = 0
+    )))
+    md <- S4Vectors::mcols(res, use.names = FALSE)
+    expect_equal(as.character(md$study), rep(c("study1", "study2"), each = 2L))
+    expect_setequal(methodNames(res), "mvsusieInf")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    # Each study's contexts share samples, so the covariance of their
+    # unmappable effects is estimated; between the studies it is zero.
+    expect_equal(dim(fit$tau2), c(4L, 4L))
+    expect_equal(fit$tau2[1:2, 3:4], matrix(0, 2L, 2L))
+    expect_gt(fit$tau2[1L, 2L], 0)
+    expect_gte(min(eigen(fit$tau2, only.values = TRUE)$values), -1e-12)
+    # Each row's posterior effects include its condition's unmappable part.
+    scale <- pecotmr:::.fitScaleFactors(fit, nrow(fit$theta))
+    for (i in seq_len(nrow(res))) {
+        tl <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        at <- match(tl$variant_id, rownames(fit$coef))
+        expect_equal(
+            tl$posterior_theta,
+            unname(fit$theta[at, md$jointIndex[[i]]] / scale[at]),
+            tolerance = 1e-12
+        )
+    }
+    expect_true(any(fit$theta != 0))
 })
 
 # ===========================================================================

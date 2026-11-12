@@ -620,6 +620,10 @@ reference:
       - susieAshRssWeights
       - mvsusieWeights
       - mvsusieRssWeights
+      - mvsusieInfWeights
+      - mvsusieInfRssWeights
+      - mvsusieAshWeights
+      - mvsusieAshRssWeights
       - fsusieWeights
       - fitMvsusie
       - fitMvsusieRss

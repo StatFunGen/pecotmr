@@ -3158,6 +3158,41 @@ test_that("a group takes the prior over its axes, on its own conditions", {
     )
 })
 
+test_that("a group takes the residual correlation on its conditions", {
+    V <- matrix(c(1, 0.2, 0.3, 0.2, 1, 0.4, 0.3, 0.4, 1), 3L, 3L)
+    # On the z scale U is divided by sqrt(n_k n_l); the residual correlation,
+    # a correlation, is taken as it is.
+    prior <- list_assign(
+        mashPriorPayload(
+            c("brain", "liver", "lung"),
+            U = list(a = diag(3)),
+            alpha = 1,
+            n = c(100, 400, 900)
+        ),
+        residualCorrelation = V
+    )
+    cond <- data.frame(study = "s1", context = c("lung", "brain"), trait = "g")
+    labels <- c("Y_lung", "Y_brain")
+    out <- pecotmr:::.mashPriorForGroup(
+        list(context = prior),
+        cond,
+        "context",
+        labels
+    )
+    expect_equal(
+        out$residualCorrelation,
+        matrix(c(1, 0.3, 0.3, 1), 2L, 2L, dimnames = list(labels, labels))
+    )
+    # A prior from an earlier mashPipeline() has none, and passes none on.
+    earlier <- pecotmr:::.mashPriorForGroup(
+        list(context = discard_at(prior, "residualCorrelation")),
+        cond,
+        "context",
+        labels
+    )
+    expect_named(earlier, c("U", "w"))
+})
+
 test_that("a prior fitted on the z scale is put on the per-SD scale", {
     U <- list(a = matrix(c(4, 2, 2, 9), 2L, 2L))
     cond <- data.frame(study = "s1", context = c("brain", "liver"), trait = "g")
@@ -3753,7 +3788,10 @@ test_that("a full mashPrior reaches mr.mash's arguments", {
     cx <- c("brain", "liver")
     expect_equal(
         captured,
-        list(U = list(comp = diag(c(2, 1)) |> `dimnames<-`(list(cx, cx))))
+        list(
+            U = list(comp = diag(c(2, 1)) |> `dimnames<-`(list(cx, cx))),
+            w = prior$w
+        )
     )
 })
 
@@ -3805,7 +3843,8 @@ test_that("a summary-statistics mr.mash group takes its own prior", {
                     U[2:1, 2:1] / sqrt(outer(n[2:1], n[2:1])),
                     list(labels, labels)
                 )
-            )
+            ),
+            w = priors$context$w
         )
     )
 })
@@ -4387,6 +4426,86 @@ test_that("mvsusie weights are read off a fit across studies", {
         )
         expect_equal(unname(weights(cell)), unname(.tp_xsColumn(fit, s)))
         expect_true(weightStandardized(cell))
+    }
+})
+
+# .tp_xsFm's run of mvsusieInf: mvSuSiE across the two studies with
+# unmappable effects, cross-validated on three folds.
+delayedAssign(
+    ".tp_xsFmInf",
+    suppressWarnings(suppressMessages(fineMappingPipeline(
+        .fm_disjointStudies(),
+        methods = FineMappingMethodsParam(
+            qtlDatasetMethods = list(
+                mvsusieInf = MvsusieInfOptions(verbose = FALSE)
+            )
+        ),
+        jointSpecification = "study",
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+        crossValidationParam = CrossValidationParam(folds = 3),
+        verbose = 0
+    )))
+)
+
+test_that("mvsusieInf weights are read off a fit across studies", {
+    .fm_skipIfNoMvsusieInf()
+    tw <- .tp_xsTwas(
+        "mvsusieInf",
+        fineMappingResult = .tp_xsFmInf,
+        cisWindow = 50000L,
+        crossValidationParam = CrossValidationParam(folds = 3)
+    )
+    expect_equal(as.character(tw$jointStudies), rep("study1;study2", 2L))
+    fit <- susieFit(.tp_xsFmRow(.tp_xsFmInf, "study1", "mvsusieInf"))
+    # The studies' unmappable effects are uncorrelated, the default.
+    expect_equal(fit$tau2[1L, 2L], 0)
+    for (s in c("study1", "study2")) {
+        cell <- .tp_xsCell(tw, s, "mvsusieInf")
+        expect_equal(
+            unname(weights(cell)),
+            unname(mvsusieInfWeights(mvsusieInfFit = fit)[, s])
+        )
+        # Its scores are the fine-mapping run's, from folds that fit
+        # mvsusieInf itself.
+        fmCv <- cvResult(.tp_xsFmRow(.tp_xsFmInf, s, "mvsusieInf"))
+        expect_equal(
+            unname(cvResult(cell)$metrics),
+            unname(fmCv$performance$mvsusie_inf_performance[1L, ])
+        )
+    }
+})
+
+test_that("mvsusieInf weights on a genotype panel are its fit's", {
+    .fm_skipIfNoMvsusieInf()
+    # The panel's LD reaches mvsusie_rss as a factor.
+    skip_if_not(
+        is_in("X", names(formals(mvsusieR::mvsusie_rss))),
+        "mvsusieR predates an LD factor"
+    )
+    data(qtlSumStatsMulticontextExample, envir = environment())
+    ss <- qtlSumStatsMulticontextExample
+    fm <- suppressMessages(fineMappingPipeline(ss, methods = "mvsusieInf"))
+    tw <- suppressMessages(twasWeightsPipeline(
+        ss,
+        methods = "mvsusieInf",
+        fineMappingResult = fm,
+        verbose = 0
+    ))
+    fit <- susieFit(pecotmr:::.fmrRowParts(fm, 1L))
+    contexts <- as.character(fm$context)
+    expect_equal(dim(fit$tau2), rep(length(contexts), 2L))
+    for (k in seq_along(contexts)) {
+        cell <- pecotmr:::.twrCellParts(
+            tw,
+            which(tw$context == contexts[[k]]),
+            "mvsusieInf"
+        )
+        expect_equal(
+            unname(weights(cell)),
+            unname(fit$coef[pecotmr:::.twrPartsVariantIds(cell), k])
+        )
     }
 })
 

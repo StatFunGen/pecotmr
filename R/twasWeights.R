@@ -1903,6 +1903,16 @@ setMethod("show", "TwasWeights", function(object) {
         # No fitting defaults: mvsusieWeights extracts from a supplied fit.
         args = list()
     ),
+    mvsusieInf = list(
+        fn = "mvsusie_inf_weights",
+        impl = "mvsusieInfWeights",
+        args = list()
+    ),
+    mvsusieAsh = list(
+        fn = "mvsusie_ash_weights",
+        impl = "mvsusieAshWeights",
+        args = list()
+    ),
     mrmash = list(
         fn = "mrmash_weights",
         impl = "mrmashWeights",
@@ -3149,8 +3159,12 @@ twasWeightsCv <- function(
 .twasCvMultivariateMethods <- c(
     "mrmash_weights",
     "mvsusie_weights",
+    "mvsusie_inf_weights",
+    "mvsusie_ash_weights",
     "mrmashWeights",
-    "mvsusieWeights"
+    "mvsusieWeights",
+    "mvsusieInfWeights",
+    "mvsusieAshWeights"
 )
 
 # Refuse per-fold fits that were not produced on the folds being scored. A
@@ -3359,9 +3373,13 @@ twasWeightsCv <- function(
 .twasMultivariateWeightMethods <- c(
     "mrmash_weights",
     "mvsusie_weights",
+    "mvsusie_inf_weights",
+    "mvsusie_ash_weights",
     "fsusie_weights",
     "mrmashWeights",
     "mvsusieWeights",
+    "mvsusieInfWeights",
+    "mvsusieAshWeights",
     "fsusieWeights"
 )
 

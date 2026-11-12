@@ -12,8 +12,12 @@ NULL
 #'   formed from the reference over these variants.
 #' @param varY Variance of the phenotype, or \code{NULL} (default) to fit on
 #'   the standardized scale. Used only with \code{b} and \code{seb}.
-#' @param sigma2E Initial residual variance, or \code{NULL} (default) for
-#'   \code{mr.ash.rss}'s own.
+#' @param sigma2E The residual variance, or \code{NULL} (default) for
+#'   \code{varY} when it is finite, else 1 (the standardized scale). It is
+#'   held fixed, as the other summary-statistics fits hold theirs: against a
+#'   reference LD, an estimate absorbs LD mismatch.
+#'   \code{MrashRssOptions(update_sigma = TRUE)} estimates it from this
+#'   start, as \code{mr.ash.rss} does by default.
 #' @param s0 Prior variances of the mixture components, relative to the
 #'   residual variance, or \code{NULL} (default) for the grid
 #'   \code{susieR::mr.ash} uses by default, built for these statistics.
@@ -162,6 +166,9 @@ mrashRssWeights <- function(
             var_y = inp$varY,
             n = inp$n,
             sigma2_e = inp$sigma2E,
+            # Held fixed, as the other RSS fits hold the residual variance:
+            # against a reference LD, an estimate absorbs LD mismatch.
+            update_sigma = FALSE,
             s0 = prior$s0,
             # A copy: mr.ash.rss() writes its fitted weights over the vector
             # it is given, which would otherwise be the caller's.
@@ -846,8 +853,10 @@ sdprWeights <- function(
 #'   prior = MrmashPriorParam(canonicalPriorMatrices = TRUE))
 #' mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 #' @param dataDrivenPriorMatrices Optional list of data-driven prior
-#'   covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
-#'   and retained in the payload for mvSuSiE prior reconstruction.
+#'   covariance matrices (\code{U}), and of the mash prior's residual
+#'   correlation (\code{residualCorrelation}); forwarded to
+#'   \code{mrmashWrapper} when it has to fit, and retained in the payload for
+#'   mvSuSiE prior reconstruction.
 #' @export
 mrmashWeights <- function(
     mrmashFit = NULL,
@@ -992,26 +1001,42 @@ mrmashWeights <- function(
 #'
 #' @param stat A list with \code{z} (variants x conditions matrix),
 #'   \code{n} (per-context numeric vector or scalar) and \code{variantNames}.
-#'   May also include \code{Bhat}, \code{Shat} matrices.
+#'   May also include \code{Bhat}, \code{Shat} matrices, and
+#'   \code{sampleGroups}, one label per column of \code{z} naming the
+#'   samples it is measured on (such as its study): conditions with
+#'   different labels are fitted as different samples even when they share
+#'   an LD reference; and \code{h2}, one heritability per column of
+#'   \code{z} (\code{NA} for none), which the residual covariance the fit
+#'   starts from then carries: each condition's variance is
+#'   \eqn{1 - h^2}, as SuSiE-RSS's residual variance, its correlations
+#'   kept (a \code{V} given in \code{methodArgs} wins).
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
-#'   \code{\link{LdMatrix}}. \code{mr.mash.rss} takes an LD matrix, which is
-#'   formed from the reference over these variants; it is not read when
+#'   \code{\link{LdMatrix}}. \code{mr.mash.rss} is given the LD over these
+#'   variants: a factor of it for a genotype panel or a
+#'   \code{GenotypeMixture} (its \code{X}), so the variants x variants
+#'   matrix is never formed, and the matrix of an \code{LdMatrix} (its
+#'   \code{R}). It is not read when
 #'   \code{mrmashRssFit} is supplied. Conditions measured on different
 #'   samples, such as studies of different ancestries, take a list of one
 #'   reference per column of \code{stat$z}, the same reference for the
-#'   conditions of one study. Each reference's LD is then formed over the
-#'   variants its conditions carry (a non-missing z-score in any of them),
-#'   a variant they lack carrying no information in them; the conditions on
-#'   different references are fitted as different samples, with a residual
-#'   covariance \code{V} and \code{covY} of zero between them, and the
-#'   conditions on one reference share the median of their sample sizes.
+#'   conditions of one study. Each reference's LD is then taken over the
+#'   variants its conditions carry (a non-missing z-score in any of them)
+#'   that it holds, a variant they lack carrying no information in them,
+#'   as factors when every reference has one and as matrices otherwise;
+#'   the conditions on different references, or with different
+#'   \code{stat$sampleGroups}, are fitted as different samples, with a
+#'   residual covariance \code{V} and \code{covY} of zero between them, and
+#'   the conditions of one sample share the median of their sample sizes.
 #' @param mrmashRssFit Optional pre-fitted \code{mr.mash.rss} object; skips
 #'   fitting when supplied.
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
 #'   raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
-#'   alongside the canonical mixture.
+#'   alongside the canonical mixture. It may also carry
+#'   \code{residualCorrelation}, the residual correlation of the mash prior
+#'   \code{U} comes from (conditions x conditions), the default \code{V} and
+#'   \code{covY}.
 #' @param canonicalPriorMatrices Logical. When TRUE (default), include the
 #'   standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
 #'   When FALSE, \code{dataDrivenPriorMatrices} must be supplied.
@@ -1019,10 +1044,18 @@ mrmashWeights <- function(
 #'   canonical / data-driven construction.
 #' @param w0 Optional prior mixture weights; defaults to \code{computeW0(Bhat,
 #'   length(S0))}.
-#' @param V Optional residual covariance matrix (K x K). When NULL, defaults to
-#'   the identity matrix of size K.
-#' @param covY Optional response covariance matrix (K x K). When NULL, defaults
-#'   to the identity matrix of size K.
+#' @param V Optional residual covariance matrix (K x K). When NULL, the
+#'   residual correlation of the mash prior, \code{dataDrivenPriorMatrices$
+#'   residualCorrelation} (\code{\link{mashPipeline}}); without one, the
+#'   correlation of the z-scores of the variants near-null (\eqn{|z| < 2}) in
+#'   every condition on one LD reference, over the variants those conditions
+#'   all carry, by mashr's \code{estimate_null_correlation_simple()}. Fewer
+#'   than \eqn{\max(2K_g, 20)} such variants, for the \eqn{K_g} conditions
+#'   on a reference, give the identity there, with a warning. Either is zero
+#'   between conditions on different references, which are fitted as
+#'   different samples.
+#' @param covY Optional response covariance matrix (K x K). When NULL, the
+#'   same matrix as \code{V}.
 #' @param fitRetention How much of the mr.mash fit is kept as the
 #'   \code{"fit"} attribute of the returned weights. \code{"none"} (default)
 #'   attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
@@ -1074,7 +1107,7 @@ mrmashRssWeights <- function(
     if (is.null(mrmashRssFit)) {
         mrmashRssFit <- .mrmashRssComputeFit(
             stat,
-            .mrmashRssLd(stat, ldReference),
+            .rssConditionLd(stat, ldReference, "mrmashRssWeights"),
             dataDrivenPriorMatrices,
             canonicalPriorMatrices,
             S0,
@@ -1125,107 +1158,6 @@ mrmashRssWeights <- function(
     list(Z = Z, K = K, nVec = nVec, Bhat = Bhat, Shat = Shat)
 }
 
-# The LD mr.mash.rss is given, as list(R, n): one reference's LD matrix over
-# the statistics' variants (n left to .mrmashRssComputeFit()), or, for a list
-# of one reference per condition, one matrix per reference over the variants
-# its conditions carry (.mrmashRssGroupLd()), and each condition the median
-# sample size of the conditions sharing its reference, which mr.mash.rss
-# fits as one sample.
-# @noRd
-#' @importFrom stats ave median
-.mrmashRssLd <- function(stat, ldReference) {
-    if (!.jgIsPerConditionLd(ldReference)) {
-        return(list(
-            R = .rssLdMatrix(stat, ldReference, "mrmashRssWeights"),
-            n = NULL
-        ))
-    }
-    Z <- as.matrix(stat$z)
-    if (length(ldReference) != ncol(Z)) {
-        abort(glue(
-            "mrmashRssWeights: a list `ldReference` holds one LD reference ",
-            "per column of stat$z ({ncol(Z)}); got {length(ldReference)}."
-        ))
-    }
-    groups <- .mrmashRssRefGroups(ldReference)
-    ld <- map(
-        seq_len(max(groups)),
-        .mrmashRssGroupLd,
-        groups = groups,
-        refs = ldReference,
-        Z = Z,
-        ids = .rssStatVariantIds(stat, "mrmashRssWeights")
-    )
-    list(
-        R = ld[groups],
-        n = ave(rep_len(as.numeric(stat$n), ncol(Z)), groups, FUN = median)
-    )
-}
-
-# Each condition's reference group: conditions with one (identical) reference
-# share a group, numbered in order of first appearance.
-# @noRd
-#' @importFrom purrr detect_index
-.mrmashRssRefGroups <- function(refs) {
-    first <- map_int(seq_along(refs), .mrmashRssFirstRef, refs = refs)
-    match(first, unique(first))
-}
-
-# @noRd
-.mrmashRssFirstRef <- function(i, refs) {
-    detect_index(refs, identical, refs[[i]])
-}
-
-# The LD of the conditions in group `g`: their reference's over the variants
-# they carry, laid on the statistics' variants with zero rows and columns
-# (and diagonal) for the rest, which carry no information in them.
-# @noRd
-.mrmashRssGroupLd <- function(g, groups, refs, Z, ids) {
-    cols <- which(groups == g)
-    carried <- ids[rowSums(!is.na(Z[, cols, drop = FALSE])) > 0L]
-    ld <- if (length(carried) > 0L) {
-        .ldFromRef(
-            refs[[cols[[1L]]]],
-            carried,
-            "mrmashRssWeights",
-            onMissing = "drop"
-        )
-    }
-    .mrmashRssEmbedLd(ld, ids)
-}
-
-# `ld` laid on the variants `ids`: zero where it holds no row.
-# @noRd
-.mrmashRssEmbedLd <- function(ld, ids) {
-    if (is.null(ld)) {
-        return(matrix(0, length(ids), length(ids), dimnames = list(ids, ids)))
-    }
-    at <- match(ids, rownames(ld))
-    embedded <- unname(as.matrix(ld)[at, at, drop = FALSE])
-    `dimnames<-`(replace(embedded, is.na(embedded), 0), list(ids, ids))
-}
-
-# The statistics as mr.mash.rss is given them: under one reference per
-# condition, a variant a condition lacks has z and Bhat 0 and Shat 1, its LD
-# there being zero (.mrmashRssGroupLd()).
-# @noRd
-.mrmashRssCarriedStat <- function(stat, LD) {
-    if (!is.list(LD$R)) {
-        return(stat)
-    }
-    held <- intersect(c("z", "Bhat", "Shat"), names(compact(stat)))
-    list_assign(
-        stat,
-        !!!set_names(map(held, .mrmashRssFillNa, stat = stat), held)
-    )
-}
-
-# @noRd
-.mrmashRssFillNa <- function(field, stat) {
-    values <- as.matrix(stat[[field]])
-    replace(values, is.na(values), if (identical(field, "Shat")) 1 else 0)
-}
-
 # Fit mr.mash.rss, defaulting the prior / w0 / V / covY when not supplied.
 # @noRd
 .mrmashRssComputeFit <- function(
@@ -1239,32 +1171,40 @@ mrmashRssWeights <- function(
     covY,
     dots
 ) {
-    ss <- .mrmashRssStats(.mrmashRssCarriedStat(stat, LD))
+    ss <- .mrmashRssStats(.rssCarriedStat(stat, LD))
+    residual <- .mrmashRssResidual(stat, LD, dataDrivenPriorMatrices, V, covY)
     prior <- .mrmashRssDefaults(
         ss,
         dataDrivenPriorMatrices,
         canonicalPriorMatrices,
         S0,
         w0,
-        V,
-        covY
+        gridSd = .mrmashGridSd(dots, residual$V)
     )
     # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
     # Bhat/Shat. On one reference, n is one sample's: the median of the
-    # conditions'.
+    # conditions'. The LD is its matrix (R) or, unformed, its factor (X).
     callArgs <- c(
         list(
             Bhat = ss$Bhat,
             Shat = ss$Shat,
-            R = LD$R,
             n = LD$n %||% as.numeric(stats::median(ss$nVec)),
-            covY = prior$covY,
-            V = prior$V,
+            covY = residual$covY,
+            V = residual$V,
             S0 = prior$S0,
             w0 = prior$w0,
             # One thread: see .mrmashUnavailable().
             nthreads = 1L
         ),
+        # The conditions' sample groups: mr.mash.rss would otherwise take
+        # those on one reference with one n as one sample. The prior is
+        # relative to the residual standard deviations unless `dots` says.
+        compact(list(
+            R = LD$R,
+            X = LD$X,
+            sample_groups = LD$group,
+            relative_S0 = if (is.null(as.list(dots)$relative_S0)) TRUE
+        )),
         # `dots` is the caller's MrmashOptions() record; c() would append it as
         # one opaque element instead of splicing its entries.
         as.list(dots)
@@ -1272,9 +1212,8 @@ mrmashRssWeights <- function(
     exec(mr.mashr::mr.mash.rss, !!!callArgs)
 }
 
-# The prior (S0, w0) and the residual and Y covariances (V, covY) mr.mash.rss
-# is given: each as supplied, else its default for the statistics `ss`
-# (.mrmashRssStats()).
+# The prior (S0, w0) mr.mash.rss is given: each as supplied, else its default
+# for the statistics `ss` (.mrmashRssStats()).
 # @noRd
 .mrmashRssDefaults <- function(
     ss,
@@ -1282,28 +1221,112 @@ mrmashRssWeights <- function(
     canonicalPriorMatrices,
     S0,
     w0,
-    V,
-    covY
+    gridSd = 1
 ) {
-    if (is.null(S0)) {
-        S0 <- buildMrmashPriorMatrices(
-            Bhat = ss$Bhat,
-            Shat = ss$Shat,
+    priorS0 <- S0 %||%
+        buildMrmashPriorMatrices(
+            Bhat = t(t(ss$Bhat) / gridSd),
+            Shat = t(t(ss$Shat) / gridSd),
             K = ss$K,
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             canonicalPriorMatrices = canonicalPriorMatrices
         )$S0
+    list(S0 = priorS0, w0 = w0 %||% computeW0(ss$Bhat, length(priorS0)))
+}
+
+# The residual and Y covariances mr.mash.rss is given: each as supplied, else
+# the residual correlation the run's mash prior was fitted with, or, without
+# one, that of the near-null z-scores (.mrmashRssNullCorrelation()). Either is
+# zero between conditions on different LD references (`LD$group`), which are
+# fitted as different samples.
+# @noRd
+#' @importFrom checkmate assertMatrix
+.mrmashRssResidual <- function(stat, LD, dataDrivenPriorMatrices, V, covY) {
+    if (!is.null(V) && !is.null(covY)) {
+        return(list(V = V, covY = covY))
     }
-    if (is.null(w0)) {
-        w0 <- computeW0(ss$Bhat, length(S0))
+    K <- ncol(as.matrix(stat$z))
+    group <- LD$group %||% rep(1L, K)
+    mash <- dataDrivenPriorMatrices$residualCorrelation
+    if (!is.null(mash)) {
+        assertMatrix(
+            mash,
+            nrows = K,
+            ncols = K,
+            .var.name = "dataDrivenPriorMatrices$residualCorrelation"
+        )
     }
-    if (is.null(V)) {
-        V <- diag(ss$K)
+    estimated <- if (is.null(mash)) {
+        .mrmashRssNullCorrelation(stat, LD, group)
+    } else {
+        .rssMaskBetweenRefs(unname(mash), group)
     }
-    if (is.null(covY)) {
-        covY <- diag(ss$K)
+    # V carries each condition's heritability (`stat$h2`), as SuSiE-RSS's
+    # 1 - h2; covY stays the correlation
+    list(
+        V = V %||% .rssH2Scaled(estimated, stat$h2),
+        covY = covY %||% estimated
+    )
+}
+
+# The correlation of the z-scores of the variants near-null (|z| < 2) in every
+# condition on one LD reference, over the variants those conditions all carry
+# (mashr's estimate_null_correlation_simple(), .mashResidCorSimple()), zero
+# between references. A reference with fewer than max(2 K_g, 20) such
+# variants for its K_g conditions -- mvsusieR's rule for the same estimate --
+# gets the identity, with a warning.
+# @noRd
+.mrmashRssNullCorrelation <- function(stat, LD, group) {
+    Z <- as.matrix(stat$z)
+    lacked <- if (is.list(LD$R) || is.list(LD$X)) .rssLackedVariants(LD)
+    carried <- !is.na(Z) & !(lacked %||% FALSE)
+    blocks <- unname(split(seq_along(group), group))
+    estimates <- map(
+        blocks,
+        .mrmashRssNullBlock,
+        Z = Z,
+        carried = carried
+    )
+    .mashBlockDiagonal(estimates, blocks, NULL)
+}
+
+# The near-null z correlation of the conditions `cols`, sharing a reference.
+# @noRd
+.mrmashRssNullBlock <- function(cols, Z, carried) {
+    if (length(cols) == 1L) {
+        return(matrix(1))
     }
-    list(S0 = S0, w0 = w0, V = V, covY = covY)
+    rows <- rowSums(!carried[, cols, drop = FALSE]) == 0L
+    z <- unname(Z[rows, cols, drop = FALSE])
+    nNull <- sum(apply(abs(z), 1L, max) < 2)
+    needed <- max(2L * length(cols), 20L)
+    if (nNull < needed) {
+        warn(glue(
+            "mrmashRssWeights: {nNull} variants are near-null (|z| < 2) in ",
+            "every condition on one LD reference ",
+            "({str_flatten(colnames(Z)[cols], ', ')}), fewer than the ",
+            "{needed} their residual correlation is estimated from; taking it ",
+            "to be the identity there. Supply `V` and `covY`, or a mash ",
+            "prior's residual correlation, to set it."
+        ))
+        return(diag(length(cols)))
+    }
+    .rssPdCorrelation(.mashResidCorSimple(
+        list(b = z, s = matrix(1, nrow(z), ncol(z))),
+        alpha = 0,
+        mashDataArgs = list(),
+        corArgs = list()
+    ))
+}
+
+# A correlation matrix as it is when positive definite, else the nearest one
+# that is.
+# @noRd
+.rssPdCorrelation <- function(V) {
+    if (min(eigen(V, symmetric = TRUE, only.values = TRUE)$values) > 0) {
+        return(V)
+    }
+    as.matrix(Matrix::nearPD(V, corr = TRUE)$mat)
 }
 
 
@@ -1435,6 +1458,14 @@ mrmashRssWeights <- function(
 #'   its spectral norm. Default \code{1e-3}. Below it, as near-duplicate
 #'   contexts make it, the eigenvalues are raised to the floor, the covariance
 #'   is not updated during the fit, and a warning says so.
+#'
+#'   It also takes \code{vInitMethod}, likewise the wrapper's: where the
+#'   residual covariance starts. \code{"data"} (the default) starts it at the
+#'   covariance of Y; \code{"mash"} at the residual correlation of the mash
+#'   prior (\code{\link{mashPipeline}}), which \code{twasWeightsPipeline}
+#'   passes in \code{dataDrivenPriorMatrices}, scaled by the standard
+#'   deviations of Y's columns. Either start is zero for a pair of conditions
+#'   never observed together, and is floored by \code{vEigenFloor}.
 #'
 #'   \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
 #'   only when \code{dprGibbs} is fitted across studies as SDPRX fits
@@ -1963,6 +1994,7 @@ MrmashOptions <- function(...) {
     )
     .configRefuseUnavailable(extra, .mrmashUnavailable(), "MrmashOptions")
     .mrmashCheckVEigenFloor(extra$vEigenFloor)
+    .mrmashCheckVInitMethod(extra$vInitMethod)
     .newMethodOptions(
         "mr.mashr::mr.mash",
         defaults = list(),
@@ -1973,13 +2005,28 @@ MrmashOptions <- function(...) {
         # routes the prior-covariance names to MrmashPriorParam() and the rest
         # to mr.mash. So the accepted set is both, read from the live
         # formals of each rather than transcribed, plus the wrapper's own
-        # vEigenFloor, which never reaches mr.mash.
+        # vEigenFloor and vInitMethod, which never reach mr.mash.
         accepted = unique(c(
             .engineAcceptedNames("mr.mashr::mr.mash"),
             names(formals(MrmashPriorParam)),
-            "vEigenFloor"
+            "vEigenFloor",
+            "vInitMethod"
         ))
     )
+}
+
+# @noRd
+.mrmashCheckVInitMethod <- function(vInitMethod) {
+    if (is.null(vInitMethod)) {
+        return(invisible(NULL))
+    }
+    isMethod <- is.character(vInitMethod) &&
+        length(vInitMethod) == 1L &&
+        is_in(vInitMethod, c("data", "mash"))
+    if (!isMethod) {
+        abort("MrmashOptions: `vInitMethod` must be \"data\" or \"mash\".")
+    }
+    invisible(NULL)
 }
 
 # @noRd
@@ -2008,6 +2055,7 @@ MrmashRssOptions <- function(...) {
             Bhat = "supplied from the data by the pipeline",
             Shat = "supplied from the data by the pipeline",
             R = "supplied from the data by the pipeline",
+            X = "supplied from the data by the pipeline",
             n = "supplied from the data by the pipeline",
             covY = "supplied from the data by the pipeline",
             V = "supplied from the data by the pipeline",
@@ -5365,6 +5413,208 @@ lassosumRss <- function(
     .ldFromRef(ldReference, ids[perm %||% seq_along(ids)], label)
 }
 
+# The LD a fit taking one LD per condition (mr.mash.rss, mvsusie_rss) is
+# given, as list(R, X, n, group): a factor of it (X) when every reference is a
+# genotype reference, so the p x p matrix is never formed, or else the
+# matrix (R). One reference's LD is over the statistics' variants (n and group
+# NULL, left to the caller); for a list of one reference per condition, there
+# is one LD per reference over the variants its conditions carry
+# (.rssGroupLd()), each condition the median sample size of the conditions
+# of its sample group, which the fit takes as one sample, and that group
+# (.rssSampleGroups()): the conditions on one reference, split by
+# `stat$sampleGroups` when given (one label per condition, such as its
+# study), as studies that share a reference panel are on different samples.
+# One reference shared by several sample groups is taken as one per
+# condition.
+# @noRd
+#' @importFrom stats ave median
+.rssConditionLd <- function(stat, ldReference, label) {
+    Z <- as.matrix(stat$z)
+    perCondition <- .jgIsPerConditionLd(ldReference)
+    if (!perCondition && length(unique(stat$sampleGroups)) <= 1L) {
+        return(.rssOneLd(stat, ldReference, label))
+    }
+    refs <- if (perCondition) {
+        ldReference
+    } else {
+        rep(list(ldReference), ncol(Z))
+    }
+    if (length(refs) != ncol(Z)) {
+        abort(glue(
+            "{label}: a list `ldReference` holds one LD reference ",
+            "per column of stat$z ({ncol(Z)}); got {length(refs)}."
+        ))
+    }
+    refGroups <- .rssRefGroups(refs)
+    useFactor <- all(map_lgl(refs, .ldIsGenotypeRef))
+    ld <- map(
+        seq_len(max(refGroups)),
+        .rssGroupLd,
+        groups = refGroups,
+        refs = refs,
+        Z = Z,
+        ids = .rssStatVariantIds(stat, label),
+        label = label,
+        useFactor = useFactor
+    )
+    groups <- .rssSampleGroups(refGroups, stat$sampleGroups)
+    n <- ave(rep_len(as.numeric(stat$n), ncol(Z)), groups, FUN = median)
+    if (useFactor) {
+        list(X = ld[refGroups], n = n, group = groups)
+    } else {
+        list(R = ld[refGroups], n = n, group = groups)
+    }
+}
+
+# The groups of conditions a fit takes as measured on the same samples: the
+# conditions on one LD reference (`refGroups`), split by `sampleGroups` (one
+# label per condition) when given. Numbered in order of first appearance.
+# @noRd
+.rssSampleGroups <- function(refGroups, sampleGroups) {
+    if (is.null(sampleGroups)) {
+        return(refGroups)
+    }
+    key <- paste(refGroups, sampleGroups, sep = "\r")
+    match(key, unique(key))
+}
+
+# `V` with each condition's variance scaled by 1 - h2 (`h2`, one per
+# condition, NA for none) and its correlations kept: the residual variance
+# a condition's heritability implies on the z scale, as SuSiE-RSS's 1 - h2.
+# @noRd
+.rssH2Scaled <- function(V, h2) {
+    if (is.null(V) || is.null(h2)) {
+        return(V)
+    }
+    s <- sqrt(1 - replace(h2, is.na(h2), 0))
+    t(V * s) * s
+}
+
+# `V` with zero between conditions on different samples (`group`, as
+# .rssConditionLd() gives it: on different LD references, or in different
+# sample groups); as it is when they share their samples (`group` NULL).
+# @noRd
+.rssMaskBetweenRefs <- function(V, group) {
+    if (is.null(V) || is.null(group)) {
+        return(V)
+    }
+    replace(V, outer(group, group, "!="), 0)
+}
+
+# One reference's LD over the statistics' variants, as .rssConditionLd()
+# gives it: its factor for a genotype reference, else its matrix.
+# @noRd
+.rssOneLd <- function(stat, ldReference, label) {
+    if (!.ldIsGenotypeRef(ldReference)) {
+        return(list(R = .rssLdMatrix(stat, ldReference, label), n = NULL))
+    }
+    ids <- .rssStatVariantIds(stat, label)
+    list(X = .ldFactorFromRef(ldReference, ids, label), n = NULL)
+}
+
+# Each condition's reference group: conditions with one (identical) reference
+# share a group, numbered in order of first appearance.
+# @noRd
+#' @importFrom purrr detect_index
+.rssRefGroups <- function(refs) {
+    first <- map_int(seq_along(refs), .rssFirstRef, refs = refs)
+    match(first, unique(first))
+}
+
+# @noRd
+.rssFirstRef <- function(i, refs) {
+    detect_index(refs, identical, refs[[i]])
+}
+
+# The LD of the conditions in group `g`: their reference's over the variants
+# they carry that it holds, laid on the statistics' variants with zero rows
+# and columns (and diagonal) for the rest, which carry no information in
+# them. With `useFactor`, its factor, with zero columns for the rest.
+# @noRd
+.rssGroupLd <- function(g, groups, refs, Z, ids, label, useFactor = FALSE) {
+    cols <- which(groups == g)
+    carried <- ids[rowSums(!is.na(Z[, cols, drop = FALSE])) > 0L]
+    fromRef <- if (useFactor) .ldFactorFromRef else .ldFromRef
+    ld <- if (length(carried) > 0L) {
+        fromRef(refs[[cols[[1L]]]], carried, label, onMissing = "drop")
+    }
+    if (useFactor) .rssEmbedFactor(ld, ids) else .rssEmbedLd(ld, ids)
+}
+
+# A factor `ldFactor` of LD laid on the variants `ids`: a zero column where
+# it holds none (one row of zeros when it holds no variant at all), which
+# gives that variant a zero row and column of the LD.
+# @noRd
+#' @importFrom dplyr coalesce
+.rssEmbedFactor <- function(ldFactor, ids) {
+    if (is.null(ldFactor)) {
+        return(matrix(0, 1L, length(ids), dimnames = list(NULL, ids)))
+    }
+    padded <- cbind(ldFactor, 0)
+    at <- coalesce(match(ids, colnames(ldFactor)), ncol(padded))
+    `dimnames<-`(padded[, at, drop = FALSE], list(NULL, ids))
+}
+
+# `ld` laid on the variants `ids`: zero where it holds no row.
+# @noRd
+.rssEmbedLd <- function(ld, ids) {
+    if (is.null(ld)) {
+        return(matrix(0, length(ids), length(ids), dimnames = list(ids, ids)))
+    }
+    at <- match(ids, rownames(ld))
+    embedded <- unname(as.matrix(ld)[at, at, drop = FALSE])
+    `dimnames<-`(replace(embedded, is.na(embedded), 0), list(ids, ids))
+}
+
+# The statistics as a fit on one LD per condition is given them
+# (.rssConditionLd()): a variant a condition lacks -- no statistic there, or
+# no LD, its reference not holding it -- has z and Bhat 0 and Shat 1,
+# carrying no information there.
+# @noRd
+.rssCarriedStat <- function(stat, LD) {
+    if (!is.list(LD$R) && !is.list(LD$X)) {
+        return(stat)
+    }
+    lacked <- .rssLackedVariants(LD)
+    held <- intersect(c("z", "Bhat", "Shat"), names(compact(stat)))
+    list_assign(
+        stat,
+        !!!set_names(
+            map(held, .rssFillLacked, stat = stat, lacked = lacked),
+            held
+        )
+    )
+}
+
+# The variants each condition's LD lacks (variants x conditions), from the
+# per-condition LD of .rssConditionLd(): a zero diagonal of its matrix, or a
+# zero column of its factor.
+# @noRd
+.rssLackedVariants <- function(LD) {
+    diagonals <- if (is.null(LD$X)) {
+        map(LD$R, diag)
+    } else {
+        map(LD$X, .rssFactorDiagonal)
+    }
+    matrix(list_c(diagonals), ncol = length(diagonals)) == 0
+}
+
+# The diagonal of the LD a factor gives, up to its scale.
+# @noRd
+.rssFactorDiagonal <- function(ldFactor) {
+    colSums(ldFactor^2)
+}
+
+# @noRd
+.rssFillLacked <- function(field, stat, lacked) {
+    values <- as.matrix(stat[[field]])
+    replace(
+        values,
+        is.na(values) | lacked,
+        if (identical(field, "Shat")) 1 else 0
+    )
+}
+
 # The variant ids an LD reference is matched on.
 # @noRd
 .rssStatVariantIds <- function(stat, label) {
@@ -5382,8 +5632,22 @@ lassosumRss <- function(
 # check a fit against them: their variant ids, all of which must be in
 # `ldReference` when one is given, or else their z-scores or effects (rows,
 # for a multi-condition matrix). NA when the statistics carry none of these.
+# A list of one reference per condition holds one per column of `stat$z`,
+# each a valid reference; the variants a condition's reference lacks are
+# missing there, as the fit had them (.rssConditionLd()).
 # @noRd
 .rssVariantCount <- function(stat, ldReference, label) {
+    if (.jgIsPerConditionLd(ldReference)) {
+        nCond <- NCOL(stat$z)
+        if (length(ldReference) != nCond) {
+            abort(glue(
+                "{label}: a list `ldReference` holds one LD reference ",
+                "per column of stat$z ({nCond}); got {length(ldReference)}."
+            ))
+        }
+        walk(ldReference, .ldFromRefValidate, label = label)
+        return(length(.rssStatVariantIds(stat, label)))
+    }
     if (!is.null(ldReference)) {
         ids <- .rssStatVariantIds(stat, label)
         .ldFromRefValidate(ldReference, label)
@@ -8868,7 +9132,8 @@ sparsevbWeights <- function(
     bInitMethod,
     sumstats,
     standardize,
-    threads
+    threads,
+    gridSd = 1
 ) {
     .mrmashRequirePackages()
     .assertMethodParam(prior, "MrmashPriorParam")
@@ -8883,13 +9148,15 @@ sparsevbWeights <- function(
     if (is.null(sumstats)) {
         sumstats <- .mrmashComputeSumstats(X, Y, standardize, threads)
     }
+    # The grid is in units of the residual standard deviations `gridSd`
+    # when the prior is relative to them (.mrmashGridSd())
     list(
         bInitMethod = .mrmashResolveBInit(Y, bInitMethod),
         # Shared prior-covariance builder (also used by mrmashRssWeights).
         priorBuilt = exec(
             buildMrmashPriorMatrices,
-            Bhat = sumstats$Bhat,
-            Shat = sumstats$Shat,
+            Bhat = t(t(sumstats$Bhat) / gridSd),
+            Shat = t(t(sumstats$Shat) / gridSd),
             K = ncol(Y),
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             !!!priorOpts
@@ -8910,8 +9177,11 @@ sparsevbWeights <- function(
 #'   fitted on the individuals it is observed in (mr.mash's
 #'   \code{missing_y_method = "approximate"}), as when studies on different
 #'   individuals are stacked.
-#' @param dataDrivenPriorMatrices A list of data-driven covariance matrices.
-#'   Default is NULL.
+#' @param dataDrivenPriorMatrices A list of data-driven covariance matrices
+#'   (\code{U}), and optionally the residual correlation of the mash prior
+#'   they come from (\code{residualCorrelation}, conditions x conditions),
+#'   which \code{MrmashOptions(vInitMethod = "mash")} starts the residual
+#'   covariance from. Default is NULL.
 #' @param prior Prior-covariance construction options, built with
 #'   \code{\link{MrmashPriorParam}}.
 #' @param bInitMethod The method for initializing the coefficient matrix.
@@ -8936,11 +9206,13 @@ sparsevbWeights <- function(
 #'   \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 #'   residual covariance, the coefficient initialisation --- cannot be set
 #'   here. It also takes the wrapper's own \code{vEigenFloor}, the floor on
-#'   the estimated residual covariance's eigenvalues; see
-#'   \code{\link{twasEngineOptions}}.
+#'   the estimated residual covariance's eigenvalues, and \code{vInitMethod},
+#'   where that covariance starts; see \code{\link{twasEngineOptions}}.
 #'
 #' @param V Optional residual covariance matrix (conditions x conditions), or
-#'   \code{NULL} to estimate it.
+#'   \code{NULL} to estimate it, starting where \code{vInitMethod} says. A
+#'   supplied \code{V} is its own start, so it cannot be given with
+#'   \code{vInitMethod}.
 #' @param sumstats Optional list of summary statistics for the RSS variant of
 #'   mr.mash, or \code{NULL} for the individual-data variant.
 #' @return A mr.mash fit, stored as a list with some or all of the following
@@ -9006,21 +9278,22 @@ mrmashWrapper <- function(
         bInitMethod = bInitMethod,
         sumstats = sumstats,
         standardize = standardize,
-        threads = threads
+        threads = threads,
+        gridSd = .mrmashGridSd(methodArgs, V, Y)
     )
-    bInitMethod <- setup$bInitMethod
-    priorBuilt <- setup$priorBuilt
     time1 <- proc.time()
-    bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, BPPARAM)
+    bInit <- .mrmashInitB(X, Y, setup$bInitMethod, standardize, BPPARAM)
     vInit <- .mrmashInitV(
         Y,
         V,
         updateV,
         updateVMethod,
-        as.list(methodArgs)$vEigenFloor %||% 1e-3
+        as.list(methodArgs)$vEigenFloor %||% 1e-3,
+        as.list(methodArgs)$vInitMethod,
+        dataDrivenPriorMatrices$residualCorrelation
     )
     fitMrmash <- .mrmashFit(
-        priorBuilt$S0,
+        setup$priorBuilt$S0,
         bInit,
         vInit,
         X = X,
@@ -9127,37 +9400,98 @@ mrmashWrapper <- function(
     )
 }
 
-# Robust residual-covariance init. Returns list(V, updateV); a V whose smallest
-# eigenvalue is under vEigenFloor times its spectral norm has its eigenvalues
-# raised to that floor and its update disabled, since updating would take it
-# back to singular. Near-duplicate contexts make such a V, and mr.mash's ELBO
-# can turn NaN on one.
+# Robust residual-covariance init. Returns list(V, updateV): a supplied V as
+# it is, else the start `vInitMethod` names (.mrmashVStart()), whose
+# eigenvalues are floored (.mrmashFloorV()).
 # @noRd
-.mrmashInitV <- function(Y, V, updateV, updateVMethod, vEigenFloor) {
+.mrmashInitV <- function(
+    Y,
+    V,
+    updateV,
+    updateVMethod,
+    vEigenFloor,
+    vInitMethod = NULL,
+    residualCorrelation = NULL
+) {
     if (!is.null(V)) {
+        if (!is.null(vInitMethod)) {
+            abort(glue(
+                "mrmashWrapper: a supplied `V` is where the residual ",
+                "covariance starts, so `vInitMethod` in MrmashOptions() ",
+                "cannot also be given."
+            ))
+        }
         return(list(V = V, updateV = updateV))
     }
-    V <- .mrmashComputeVInit(Y)
+    start <- .mrmashVStart(Y, vInitMethod %||% "data", residualCorrelation)
     if (updateVMethod == "diagonal") {
-        return(list(V = diag(diag(V)), updateV = updateV))
+        return(list(
+            V = diag(diag(start), nrow = nrow(start)),
+            updateV = updateV
+        ))
     }
+    .mrmashFloorV(start, updateV, vEigenFloor)
+}
+
+# A starting V whose smallest eigenvalue is under vEigenFloor times its
+# spectral norm has its eigenvalues raised to that floor and its update
+# disabled, since updating would take it back to singular. Near-duplicate
+# contexts make such a V, and mr.mash's ELBO can turn NaN on one.
+# @noRd
+.mrmashFloorV <- function(V, updateV, vEigenFloor) {
     eigenvalues <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
     floorValue <- vEigenFloor * max(eigenvalues)
-    if (min(eigenvalues) < floorValue) {
-        warn(glue(
-            "mrmashWrapper: the residual covariance of Y is close to singular ",
-            "(smallest / largest eigenvalue ",
-            "{signif(min(eigenvalues) / max(eigenvalues), 3)}), as ",
-            "near-duplicate contexts make it. Raising its eigenvalues to ",
-            "vEigenFloor = {vEigenFloor} of the largest and not updating it ",
-            "during the fit; `vEigenFloor` in MrmashOptions() sets the floor."
-        ))
-        return(list(
-            V = V + diag(floorValue - min(eigenvalues), nrow(V)),
-            updateV = FALSE
+    if (min(eigenvalues) >= floorValue) {
+        return(list(V = V, updateV = updateV))
+    }
+    warn(glue(
+        "mrmashWrapper: the residual covariance of Y is close to singular ",
+        "(smallest / largest eigenvalue ",
+        "{signif(min(eigenvalues) / max(eigenvalues), 3)}), as ",
+        "near-duplicate contexts make it. Raising its eigenvalues to ",
+        "vEigenFloor = {vEigenFloor} of the largest and not updating it ",
+        "during the fit; `vEigenFloor` in MrmashOptions() sets the floor."
+    ))
+    list(
+        V = V + diag(floorValue - min(eigenvalues), nrow(V)),
+        updateV = FALSE
+    )
+}
+
+# Where the residual covariance starts (MrmashOptions(vInitMethod)): the
+# covariance of Y ("data", .mrmashComputeVInit()), or the mash prior's
+# residual correlation scaled by the standard deviations of Y's columns
+# ("mash"), zero for a pair of responses never observed together and only
+# its diagonal when that is not positive definite, as the covariance of Y is.
+# @noRd
+#' @importFrom checkmate assertMatrix
+#' @importFrom stats sd
+.mrmashVStart <- function(Y, vInitMethod, residualCorrelation) {
+    if (identical(vInitMethod, "data")) {
+        return(.mrmashComputeVInit(Y))
+    }
+    if (is.null(residualCorrelation)) {
+        abort(glue(
+            "mrmashWrapper: vInitMethod = \"mash\" starts the residual ",
+            "covariance at the mash prior's residual correlation, but ",
+            "`dataDrivenPriorMatrices` carries no `residualCorrelation` (a ",
+            "MashPrior from mashPipeline() gives one)."
         ))
     }
-    list(V = V, updateV = updateV)
+    assertMatrix(
+        residualCorrelation,
+        nrows = ncol(Y),
+        ncols = ncol(Y),
+        .var.name = "dataDrivenPriorMatrices$residualCorrelation"
+    )
+    sds <- unname(apply(Y, 2L, sd, na.rm = TRUE))
+    together <- crossprod(!is.na(Y)) > 0L
+    scaled <- replace(
+        unname(residualCorrelation) * tcrossprod(sds),
+        !together,
+        0
+    )
+    .mrmashPdOrDiagonal(`dimnames<-`(scaled, list(colnames(Y), colnames(Y))))
 }
 
 # The residual covariance mr.mash starts from, its coefficients starting at
@@ -9172,11 +9506,16 @@ mrmashWrapper <- function(
         return(cov(Y))
     }
     pairwise <- cov(Y, use = "pairwise.complete.obs")
-    V <- replace(pairwise, is.na(pairwise), 0)
+    .mrmashPdOrDiagonal(replace(pairwise, is.na(pairwise), 0))
+}
+
+# A starting V as it is when positive definite, else its diagonal.
+# @noRd
+.mrmashPdOrDiagonal <- function(V) {
     if (min(eigen(V, symmetric = TRUE, only.values = TRUE)$values) > 0) {
         return(V)
     }
-    diag(diag(V), nrow = ncol(Y))
+    `dimnames<-`(diag(diag(V), nrow = nrow(V)), dimnames(V))
 }
 
 # Run mr.mash with the resolved prior / init / V. Everything pecotmr derives --
@@ -9209,8 +9548,9 @@ mrmashWrapper <- function(
         # One thread: see .mrmashUnavailable().
         nthreads = 1L
     )
-    # vEigenFloor is the wrapper's own, read by .mrmashInitV().
-    user <- discard_at(as.list(methodArgs), "vEigenFloor")
+    # vEigenFloor and vInitMethod are the wrapper's own, read by
+    # .mrmashInitV().
+    user <- discard_at(as.list(methodArgs), c("vEigenFloor", "vInitMethod"))
     clash <- intersect(names(user), names(derived))
     if (length(clash) > 0L) {
         abort(glue(
@@ -9221,6 +9561,8 @@ mrmashWrapper <- function(
             "`methodArgs`."
         ))
     }
+    # The prior is relative to the residual standard deviations (its grid
+    # built in their units, .mrmashGridSd()); DAAREM cannot drop components
     defaults <- list(
         update_w0 = TRUE,
         tol = 0.01,
@@ -9228,10 +9570,23 @@ mrmashWrapper <- function(
         convergence_criterion = "ELBO",
         compute_ELBO = TRUE,
         verbose = FALSE,
-        w0_threshold = 1e-8
+        w0_threshold = if (identical(user$acceleration, "daarem")) 0 else 1e-8,
+        relative_S0 = TRUE
     )
     mrMashArgs <- c(derived, list_modify(defaults, !!!user))
     exec(mr.mashr::mr.mash, !!!mrMashArgs)
+}
+
+# The residual standard deviations mr.mash's prior grid is built in units
+# of when the prior is relative to them (mr.mash's relative_S0, the
+# wrappers' default): those of the residual covariance the fit starts from
+# (.residualSd()); 1 when the prior is not relative.
+# @noRd
+.mrmashGridSd <- function(methodArgs, V, Y = NULL) {
+    if (!isTRUE(as.list(methodArgs)$relative_S0 %||% TRUE)) {
+        return(1)
+    }
+    .residualSd(V, Y)
 }
 
 # @noRd

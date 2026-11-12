@@ -13,29 +13,10 @@
 # engine themselves.
 # =============================================================================
 
-# method 'simple': mashr's estimate_null_correlation_simple on the null set.
+# method 'simple': mashr's estimate_null_correlation_simple on the null set's
+# matrices.
 # @noRd
-.mashResidCorSimple <- function(
-    sumStatsList,
-    alpha,
-    inputScale,
-    mashDataArgs,
-    corArgs,
-    spec = NULL
-) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'simple' requires a 'null' entry ",
-            "in `sumStatsList`."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale,
-        spec = spec
-    )
+.mashResidCorSimple <- function(nullMats, alpha, mashDataArgs, corArgs) {
     user <- as.list(corArgs)
     exec(
         mashr::estimate_null_correlation_simple,
@@ -56,27 +37,18 @@
     exec(mashr::mash_set_data, !!!args)
 }
 
-# method 'mle': EM refinement of V against the prior U over a random subset.
+# method 'mle': EM refinement of V against the prior U over a random subset of
+# the random set's matrices.
 # @noRd
 .mashResidCorMle <- function(
-    sumStatsList,
+    randomMats,
     alpha,
-    inputScale,
     priorCovariances,
     nSubset,
     maxIter,
     mashDataArgs,
-    corArgs,
-    spec = NULL
+    corArgs
 ) {
-    .mashCheckMleInputs(sumStatsList, priorCovariances)
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    randomMats <- .mashSumStatsToMatrices(
-        sumStatsList$random,
-        "random",
-        inputScale = inputScale,
-        spec = spec
-    )
     n <- nrow(randomMats$b)
     idx <- sample(seq_len(n), min(nSubset, n))
     dsub <- .mashSetData(
@@ -124,26 +96,7 @@
 # `null` partition is already the null variants (max|z| < 2), so no
 # re-thresholding is needed.
 # @noRd
-.mashResidCorNullBased <- function(
-    sumStatsList,
-    inputScale,
-    method,
-    corArgs,
-    spec = NULL
-) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method '{method}' requires a 'null' ",
-            "entry in `sumStatsList` (the null variants V is estimated on)."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale,
-        spec = spec
-    )
+.mashResidCorNullBased <- function(nullMats, method, corArgs) {
     nullZ <- nullMats$b / nullMats$s
     if (method == "simpleSpecific") {
         return(as.matrix(

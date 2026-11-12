@@ -60,6 +60,34 @@ test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
     expect_false(identical(unname(origPips[keep]), susieFit(adj)$pip))
 })
 
+test_that("adjustPips weights each effect by its slot weight", {
+    vids <- paste0("chr1:", 1:6, ":A:G")
+    entry <- .makeAdjustEntry(vids)
+    slotWeights <- c(1, 0.3)
+    mu <- matrix(seq_len(12L) / 10, 2L)
+    weighted <- FineMappingRow(
+        variantIds = vids,
+        susieFit = utils::modifyList(
+            susieFit(entry),
+            list(slot_weights = slotWeights, mu = mu, mu2 = mu^2 + 0.01)
+        ),
+        topLoci = .fmrPartsTopLoci(entry)
+    )
+    keep <- vids[2:5]
+    adj <- adjustPips(weighted, keep)
+    fit <- susieFit(adj)
+    # Each effect counts with the probability that it is active, as susieR
+    expect_equal(
+        unname(fit$pip),
+        unname(1 - apply(1 - slotWeights * fit$alpha, 2L, prod))
+    )
+    expect_equal(.fmrPartsTopLoci(adj)$pip, fit$pip)
+    expect_equal(
+        unname(.fmrPartsTopLoci(adj)$posterior_mean),
+        unname(colSums(slotWeights * fit$alpha * fit$mu))
+    )
+})
+
 test_that("adjustPips errors when the intersection is empty", {
     vids <- paste0("chr1:", 1:4, ":A:G")
     entry <- .makeAdjustEntry(vids)

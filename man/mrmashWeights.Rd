@@ -31,8 +31,10 @@ additionally retains the complete fit under \code{$fit}, at the cost of
 a larger payload.}
 
 \item{dataDrivenPriorMatrices}{Optional list of data-driven prior
-covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
-and retained in the payload for mvSuSiE prior reconstruction.}
+covariance matrices (\code{U}), and of the mash prior's residual
+correlation (\code{residualCorrelation}); forwarded to
+\code{mrmashWrapper} when it has to fit, and retained in the payload for
+mvSuSiE prior reconstruction.}
 
 \item{methodArgs}{Options forwarded to \code{mr.mashr::mr.mash}, built
 with \code{\link{MrmashOptions}}. A bare list is refused: it cannot be

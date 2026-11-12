@@ -42,7 +42,12 @@ checked against the engine, so a misspelled option would be silently
 ignored.}
 }
 \value{
-The fit object returned by \code{mvsusieR::mvsusie}.
+The fit object returned by \code{mvsusieR::mvsusie}. A variant
+  with no data for a condition --- constant in the samples observing it,
+  as a variant a study lacks is in a design stacked across studies --- has
+  posterior mean 0 there: mvsusieR gives it its prior's prediction from
+  the other conditions, which as that condition's effect (or TWAS weight)
+  is on a scale the condition does not have.
 }
 \description{
 Wrapper around \code{mvsusieR::mvsusie} with the canonical argument set used

@@ -1288,9 +1288,64 @@ test_that("mrashRssWeights defaults to mr.ash's own prior grid", {
 test_that("mrmashRssWeights fits mr.mash.rss and returns p x K weights", {
     skip_if_not_installed("mr.mashr")
     m <- .rrwMulti(n = 60, p = 6, K = 3)
-    w <- mrmashRssWeights(m$stat, m$ldReference)
+    # Six variants are too few to estimate the residual correlation from.
+    expect_warning(
+        w <- mrmashRssWeights(m$stat, m$ldReference),
+        "taking it to be the identity"
+    )
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
+})
+
+test_that("mrmashRssWeights reads a genotype panel's LD as a factor", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("X", names(formals(mr.mashr::mr.mash.rss))),
+        "mr.mashr predates an LD factor"
+    )
+    d <- .rrwPanelStat()
+    withr::local_seed(4L)
+    stat <- list_assign(
+        d$stat,
+        z = cbind(a = d$stat$z, b = d$stat$z + stats::rnorm(40L))
+    )
+    # The panel's genotypes as the factor fit as the matrix they give.
+    opts <- MrmashRssOptions(verbose = FALSE)
+    expect_equal(
+        mrmashRssWeights(
+            stat,
+            d$panel,
+            V = diag(2),
+            covY = diag(2),
+            methodArgs = opts
+        ),
+        mrmashRssWeights(
+            stat,
+            d$ldMatrix,
+            V = diag(2),
+            covY = diag(2),
+            methodArgs = opts
+        ),
+        tolerance = 1e-6
+    )
+    ld <- pecotmr:::.rssConditionLd(stat, d$panel, "mrmashRssWeights")
+    expect_equal(ncol(ld$X), 40L)
+    expect_null(ld$R)
+    # One reference per condition, the second lacking the last variant: a
+    # zero column of its factor, which the statistics' carrying reads.
+    partial <- d$panel[seq_len(39L), ]
+    perCondition <- pecotmr:::.rssConditionLd(
+        stat,
+        list(d$panel, partial),
+        "mrmashRssWeights"
+    )
+    expect_equal(unname(perCondition$X[[2L]][, 40L]), rep(0, ncol(d$panel)))
+    lacked <- pecotmr:::.rssLackedVariants(perCondition)
+    expect_equal(which(lacked), 80L)
+    expect_equal(
+        unname(pecotmr:::.rssCarriedStat(stat, perCondition)$z[40L, 2L]),
+        0
+    )
 })
 
 test_that("mrmashRssWeights errors on single-context stat$z", {
@@ -1312,14 +1367,21 @@ test_that("mrmashRssWeights takes one LD reference per condition", {
     )
     m <- .rrwMulti(n = 60, p = 6, K = 3)
     opts <- MrmashRssOptions(verbose = FALSE)
+    # Six variants are too few to estimate the residual correlation from, so
+    # it is given.
+    fitOn <- function(stat, ldReference) {
+        mrmashRssWeights(
+            stat,
+            ldReference,
+            V = diag(3),
+            covY = diag(3),
+            methodArgs = opts
+        )
+    }
     # The same reference for every condition is the one-reference fit.
     expect_equal(
-        mrmashRssWeights(
-            m$stat,
-            rep(list(m$ldReference), 3L),
-            methodArgs = opts
-        ),
-        mrmashRssWeights(m$stat, m$ldReference, methodArgs = opts),
+        fitOn(m$stat, rep(list(m$ldReference), 3L)),
+        fitOn(m$stat, m$ldReference),
         tolerance = 1e-8
     )
     # Two studies on their own references: the third condition's study lacks
@@ -1331,7 +1393,7 @@ test_that("mrmashRssWeights takes one LD reference per condition", {
     stat <- m$stat
     stat$z[6L, 3L] <- NA
     refs <- list(m$ldReference, m$ldReference, other)
-    w <- mrmashRssWeights(stat, refs, methodArgs = opts)
+    w <- fitOn(stat, refs)
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
 })
@@ -1346,41 +1408,174 @@ test_that("one LD reference per condition is laid on the variants", {
     stat <- m$stat
     stat$z[6L, 3L] <- NA
     refs <- list(m$ldReference, m$ldReference, other)
-    ld <- pecotmr:::.mrmashRssLd(stat, refs)
+    ld <- pecotmr:::.rssConditionLd(stat, refs, "mrmashRssWeights")
     expect_identical(ld$R[[1L]], ld$R[[2L]])
     expect_equal(unname(ld$R[[3L]][6L, ]), rep(0, 6L))
     expect_equal(unname(ld$R[[3L]][1:5, 1:5]), 0.5^abs(outer(1:5, 1:5, "-")))
     expect_equal(ld$n, rep(60, 3L))
     expect_error(
-        pecotmr:::.mrmashRssLd(stat, refs[1:2]),
+        pecotmr:::.rssConditionLd(stat, refs[1:2], "mrmashRssWeights"),
         "one LD reference per column of stat\\$z \\(3\\); got 2"
     )
     # A statistic a condition lacks carries no information: z and Bhat 0,
     # Shat 1, where its LD is zero.
     expect_equal(
-        unname(pecotmr:::.mrmashRssCarriedStat(stat, ld)$z[6L, 3L]),
+        unname(pecotmr:::.rssCarriedStat(stat, ld)$z[6L, 3L]),
         0
     )
-    withSe <- pecotmr:::.mrmashRssCarriedStat(
+    withSe <- pecotmr:::.rssCarriedStat(
         list(Bhat = matrix(c(NA, 1), 2L), Shat = matrix(c(NA, 2), 2L)),
-        ld
+        list(R = list(diag(2)))
     )
     expect_equal(withSe$Bhat[, 1L], c(0, 1))
     expect_equal(withSe$Shat[, 1L], c(1, 2))
     # On one reference the statistics go as they are.
     expect_identical(
-        pecotmr:::.mrmashRssCarriedStat(stat, list(R = diag(6))),
+        pecotmr:::.rssCarriedStat(stat, list(R = diag(6))),
         stat
     )
+})
+
+test_that("a variant its reference lacks carries no information there", {
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    ids <- m$stat$variantNames
+    # The third condition's reference holds only the first five variants,
+    # though that condition has a z-score at the sixth.
+    partial <- LdMatrix(`dimnames<-`(
+        0.5^abs(outer(1:5, 1:5, "-")),
+        list(ids[1:5], ids[1:5])
+    ))
+    refs <- list(m$ldReference, m$ldReference, partial)
+    ld <- pecotmr:::.rssConditionLd(m$stat, refs, "mrmashRssWeights")
+    expect_equal(unname(diag(ld$R[[3L]])), c(rep(1, 5L), 0))
+    carried <- pecotmr:::.rssCarriedStat(m$stat, ld)
+    expect_equal(unname(carried$z[6L, 3L]), 0)
+    expect_equal(unname(carried$z[6L, 1:2]), unname(m$stat$z[6L, 1:2]))
+    expect_equal(
+        pecotmr:::.rssLackedVariants(ld),
+        cbind(rep(FALSE, 6L), rep(FALSE, 6L), c(rep(FALSE, 5L), TRUE))
+    )
+})
+
+test_that("mr.mash.rss takes the mash prior's residual correlation", {
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    R <- 0.3 + diag(0.7, 3)
+    prior <- list(U = list(shared = matrix(1, 3L, 3L)), residualCorrelation = R)
+    oneRef <- list(R = diag(6))
+    out <- pecotmr:::.mrmashRssResidual(m$stat, oneRef, prior, NULL, NULL)
+    expect_equal(out$V, R)
+    expect_identical(out$covY, out$V)
+    # Zero between conditions on different references, fitted as different
+    # samples.
+    perRef <- list(R = rep(list(diag(6)), 3L), group = c(1L, 1L, 2L))
+    masked <- pecotmr:::.mrmashRssResidual(m$stat, perRef, prior, NULL, NULL)$V
+    expect_equal(masked[1:2, 3L], c(0, 0))
+    expect_equal(masked[1L, 2L], 0.3)
+    # Each supplied one is used as it is.
+    own <- pecotmr:::.mrmashRssResidual(m$stat, oneRef, prior, diag(3), NULL)
+    expect_equal(own$V, diag(3))
+    expect_equal(own$covY, R)
+    expect_error(
+        pecotmr:::.mrmashRssResidual(
+            m$stat,
+            oneRef,
+            list(residualCorrelation = diag(2)),
+            NULL,
+            NULL
+        ),
+        "residualCorrelation"
+    )
+})
+
+test_that("without a mash prior, mr.mash.rss takes the near-null correlation", {
+    skip_if_not_installed("mashr")
+    set.seed(7)
+    p <- 200L
+    common <- rnorm(p)
+    z <- cbind(
+        a = common + rnorm(p, sd = 0.5),
+        b = common + rnorm(p, sd = 0.5),
+        c = rnorm(p)
+    )
+    z[1:5, ] <- 6
+    nearNullCor <- function(cols) {
+        z <- z[, cols, drop = FALSE]
+        unname(cor(z[apply(abs(z), 1, max) < 2, , drop = FALSE]))
+    }
+    out <- pecotmr:::.mrmashRssResidual(
+        list(z = z, n = 100),
+        list(R = diag(p)),
+        NULL,
+        NULL,
+        NULL
+    )
+    expect_equal(out$V, nearNullCor(1:3))
+    expect_identical(out$covY, out$V)
+    # Per reference, over the variants its conditions all carry, zero between
+    # references; one condition on its own is 1.
+    gappy <- z
+    gappy[6:20, 2L] <- NA
+    perRef <- list(R = rep(list(diag(p)), 3L), group = c(1L, 1L, 2L))
+    blocks <- pecotmr:::.mrmashRssResidual(
+        list(z = gappy, n = 100),
+        perRef,
+        NULL,
+        NULL,
+        NULL
+    )$V
+    carried <- z[-(6:20), 1:2]
+    expect_equal(
+        blocks[1:2, 1:2],
+        unname(cor(carried[apply(abs(carried), 1, max) < 2, ]))
+    )
+    expect_equal(blocks[1:2, 3L], c(0, 0))
+    expect_equal(blocks[3L, 3L], 1)
+    # Too few near-null variants for mvsusieR's rule: the identity, warned.
+    expect_warning(
+        few <- pecotmr:::.mrmashRssResidual(
+            list(z = z[1:15, ], n = 100),
+            list(R = diag(15)),
+            NULL,
+            NULL,
+            NULL
+        ),
+        "fewer than the 20"
+    )
+    expect_equal(few$V, diag(3))
+})
+
+test_that("the mash prior's residual correlation reaches mr.mash.rss", {
+    skip_if_not_installed("mr.mashr")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    R <- 0.3 + diag(0.7, 3)
+    w <- mrmashRssWeights(
+        m$stat,
+        m$ldReference,
+        dataDrivenPriorMatrices = list(
+            U = list(shared = matrix(1, 3L, 3L)),
+            residualCorrelation = R
+        ),
+        fitRetention = "slim",
+        methodArgs = MrmashRssOptions(verbose = FALSE)
+    )
+    # mr.mash.rss does not update V, so the fit's V is the one it was given,
+    # and the payload keeps the correlation with the prior.
+    expect_equal(unname(attr(w, "fit")$V), R)
+    expect_equal(attr(w, "fit")$dataDrivenPriorMatrices$residualCorrelation, R)
 })
 
 test_that("conditions share a reference group only with an identical one", {
     a <- .rrwLdMatrix(diag(2))
     b <- .rrwLdMatrix(0.5 + diag(0.5, 2))
-    expect_equal(pecotmr:::.mrmashRssRefGroups(list(a, b, a, b)), c(1, 2, 1, 2))
+    expect_equal(pecotmr:::.rssRefGroups(list(a, b, a, b)), c(1, 2, 1, 2))
+    expect_equal(
+        pecotmr:::.rssMaskBetweenRefs(matrix(0.5, 3L, 3L), c(1L, 2L, 1L)),
+        matrix(c(0.5, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0.5), 3L, 3L)
+    )
+    expect_identical(pecotmr:::.rssMaskBetweenRefs(diag(2), NULL), diag(2))
     # A reference holding none of the variants contributes zero LD.
     expect_equal(
-        pecotmr:::.mrmashRssEmbedLd(NULL, c("v1", "v2")),
+        pecotmr:::.rssEmbedLd(NULL, c("v1", "v2")),
         matrix(0, 2L, 2L, dimnames = list(c("v1", "v2"), c("v1", "v2")))
     )
 })
@@ -1946,6 +2141,113 @@ test_that("V starts at the pairwise covariance, or at its diagonal", {
         pecotmr:::.mrmashComputeVInit(clash),
         diag(diag(pairwise))
     )
+})
+
+test_that("V can start at the mash prior's residual correlation", {
+    set.seed(5)
+    Y <- cbind(a = rnorm(40, sd = 2), b = rnorm(40, sd = 3), c = rnorm(40))
+    R <- matrix(c(1, 0.5, 0.2, 0.5, 1, 0.3, 0.2, 0.3, 1), 3L, 3L)
+    initV <- function(Y, ..., floorValue = 1e-3) {
+        pecotmr:::.mrmashInitV(Y, NULL, TRUE, "full", floorValue, ...)
+    }
+    # The correlation on Y's scale, updated as the covariance of Y would be.
+    start <- initV(Y, "mash", R)
+    sds <- apply(Y, 2, sd)
+    expect_equal(
+        start$V,
+        `dimnames<-`(R * tcrossprod(sds), list(colnames(Y), colnames(Y)))
+    )
+    expect_true(start$updateV)
+    # The default is the covariance of Y.
+    expect_equal(initV(Y)$V, cov(Y))
+    expect_equal(initV(Y, "data", R)$V, cov(Y))
+    # Two studies never observed together: zero between them, as the
+    # covariance of Y is.
+    blocks <- Y
+    blocks[21:40, 1] <- NA
+    blocks[1:20, 2:3] <- NA
+    V <- initV(blocks, "mash", R)$V
+    expect_equal(unname(V[1L, 2:3]), c(0, 0))
+    expect_equal(
+        unname(V[2L, 3L]),
+        R[2L, 3L] *
+            sd(blocks[, 2L], na.rm = TRUE) *
+            sd(blocks[, 3L], na.rm = TRUE)
+    )
+    # A near-singular correlation is floored like a near-singular covariance.
+    nearDuplicate <- matrix(c(1, 1 - 1e-9, 1 - 1e-9, 1), 2L, 2L)
+    expect_warning(
+        floored <- initV(Y[, 1:2], "mash", nearDuplicate),
+        "close to singular"
+    )
+    expect_false(floored$updateV)
+})
+
+test_that("a mash start needs the correlation; a supplied V is its own", {
+    Y <- matrix(rnorm(60), 20L, 3L)
+    expect_error(
+        pecotmr:::.mrmashInitV(Y, NULL, TRUE, "full", 1e-3, "mash", NULL),
+        "carries no `residualCorrelation`"
+    )
+    expect_error(
+        pecotmr:::.mrmashInitV(Y, NULL, TRUE, "full", 1e-3, "mash", diag(2)),
+        "residualCorrelation"
+    )
+    expect_error(
+        pecotmr:::.mrmashInitV(Y, diag(3), TRUE, "full", 1e-3, "data", NULL),
+        "cannot also be given"
+    )
+    expect_identical(
+        pecotmr:::.mrmashInitV(Y, diag(3), FALSE, "full", 1e-3)$V,
+        diag(3)
+    )
+    # The diagonal update method keeps only the start's variances.
+    R <- 0.5 + diag(0.5, 3)
+    expect_equal(
+        unname(pecotmr:::.mrmashInitV(Y, NULL, TRUE, "diagonal", 1e-3)$V),
+        diag(apply(Y, 2, var))
+    )
+    expect_equal(
+        unname(
+            pecotmr:::.mrmashInitV(Y, NULL, TRUE, "diagonal", 1e-3, "mash", R)$V
+        ),
+        diag(apply(Y, 2, var))
+    )
+})
+
+test_that("vInitMethod reaches the wrapper and stops short of mr.mash", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    R <- 0.3 + diag(0.7, 3)
+    # With the update off, the V mr.mash fits with is the start.
+    fit <- suppressMessages(mrmashWrapper(
+        m$X,
+        m$Y,
+        dataDrivenPriorMatrices = list(
+            U = list(shared = matrix(1, 3L, 3L)),
+            residualCorrelation = R
+        ),
+        prior = MrmashPriorParam(canonicalPriorMatrices = TRUE),
+        updateV = FALSE,
+        methodArgs = MrmashOptions(vInitMethod = "mash", max_iter = 20)
+    ))
+    expect_equal(unname(fit$V), R * tcrossprod(apply(m$Y, 2, sd)))
+})
+
+test_that("vInitMethod must be data or mash, on the individual path only", {
+    skip_if_not_installed("mr.mashr")
+    for (bad in list("Mash", c("data", "mash"), NA_character_, 1)) {
+        expect_error(
+            MrmashOptions(vInitMethod = bad),
+            "must be \"data\" or \"mash\""
+        )
+    }
+    expect_identical(
+        as.list(MrmashOptions(vInitMethod = "mash"))$vInitMethod,
+        "mash"
+    )
+    expect_error(MrmashRssOptions(vInitMethod = "mash"))
 })
 
 test_that("mrmashWrapper fits studies stacked with block-missing Y", {
@@ -2676,4 +2978,19 @@ test_that("each study picks its own (s, c, lambda) from summary statistics", {
     )
     expect_null(attr(l0, "fit"))
     expect_equal(dim(l0), c(length(ids), 2L))
+})
+
+test_that(".rssSampleGroups splits a reference's conditions by sample group", {
+    expect_equal(.rssSampleGroups(c(1, 1, 2), NULL), c(1, 1, 2))
+    expect_equal(.rssSampleGroups(c(1, 1, 1), c("s1", "s2", "s2")), c(1, 2, 2))
+    expect_equal(.rssSampleGroups(c(1, 2, 1), c("s1", "s1", "s1")), c(1, 2, 1))
+})
+
+test_that(".rssH2Scaled scales variances by 1 - h2, keeping correlations", {
+    C <- matrix(c(1, 0.4, 0.4, 1), 2)
+    V <- .rssH2Scaled(C, c(0.2, NA))
+    expect_equal(diag(V), c(0.8, 1))
+    expect_equal(cov2cor(V), C)
+    expect_identical(.rssH2Scaled(C, NULL), C)
+    expect_null(.rssH2Scaled(NULL, c(0.1, 0.1)))
 })

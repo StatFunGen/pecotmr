@@ -113,8 +113,9 @@ spanning more than 20 Mb, as a whole chromosome does, draws a warning.}
 \itemize{
   \item A character vector of method tokens, e.g.
         \code{c("susie", "susieInf", "mvsusie")} (any subset of
-        \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
-        subject to per-class compatibility).
+        \code{c("susie", "susieInf", "susieAsh", "mvsusie",
+        "mvsusieInf", "mvsusieAsh", "fsusie")}, subject to
+        per-class compatibility).
   \item A \code{\link{FineMappingMethodsParam}} record keyed by method
         token, where each value is a list of per-method kwargs to
         splice into the underlying fitter, e.g.
@@ -177,7 +178,8 @@ genotypes into one joint fit. Ignored for a single-range / cis
 (\code{traitId} + \code{cisWindow}) request.}
 
 \item{jointSpecification}{Optional joint-fit specification saying which
-axes \code{mvsusie} / \code{fsusie} fit across. When NULL (the default)
+axes the joint methods (\code{mvsusie}, \code{mvsusieInf},
+\code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the default)
 they fit across traits if the input has two or more, else across
 contexts. Otherwise give a character vector of axes (one spec) or a list
 of specs. A spec is a character vector drawn from \code{"study"},
@@ -199,9 +201,12 @@ Their samples must be disjoint. The fit stacks them, each study's
 conditions observed on its own samples only (a study's conditions on the
 samples it observes for all of them), over the union of the studies'
 variants, which are matched by allele; a variant a study lacks carries no
-evidence for it. Each study keeps its own residualization, genotype
-filters and scaling, and its rows report its own samples' allele
-frequencies and credible-set purity. While the residualizer scales X and
+evidence for it, and has effect 0 there. Each study keeps its own
+residualization, genotype filters and scaling, and its rows report its
+own samples' allele frequencies and credible-set purity.
+Summary-statistics studies are fitted alike, each on its own LD
+reference and sample size, its rows' credible-set purity read on its own
+LD. While the residualizer scales X and
 Y (\code{ResidualizationParam(scaleResiduals = TRUE)}, the default),
 every joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so
 its prior describes per-SD effects and a component shared across studies
@@ -321,8 +326,11 @@ reproducible fits; the global RNG state is restored on return. Default
 \item{mrmashPrior}{Optional \code{\link{TwasWeights}} from a previous
 mr.mash \code{\link{twasWeightsPipeline}} run, mined for the mvSuSiE
 data-driven prior: the retained \code{mrmash} fits supply the prior
-mixture, and their cross-validation payload supplies honest per-fold
-priors. \code{NULL} uses the canonical prior instead.}
+mixture and the residual covariance mvSuSiE starts from (on summary
+statistics, where it is held fixed, also Y's covariance,
+\code{varY}), and their cross-validation payload supplies honest
+per-fold priors. \code{NULL} uses the canonical prior instead, and
+mvSuSiE's own residual covariance.}
 
 \item{dataDrivenPriorWeightsCutoff}{Numeric or \code{NULL}. Cutoff below
 which data-driven prior weights are zeroed; \code{NULL} disables the
@@ -453,6 +461,24 @@ S4-dispatched per-region fine-mapping entry point that
           \code{mvsusieR::mvsusie_rss} on sumstat input (requires
           multi-context within a single (study, trait) group).
           Errors on \code{GwasSumStats} input.}
+    \item{\code{mvsusieInf}}{\code{unmappable_effects = "inf"} variant
+          of \code{mvsusie}, set by \code{\link{MvsusieInfOptions}}:
+          the polygenic effects are integrated out, with a covariance
+          across conditions that is estimated, zero between studies by
+          default. A study's conditions must be observed on the same
+          samples, as the pipeline fits them; \code{\link{fitMvsusie}}
+          refuses missing phenotypes within a study.}
+    \item{\code{mvsusieAsh}}{\code{unmappable_effects = "ash"} variant
+          of \code{mvsusie}, set by \code{\link{MvsusieAshOptions}}: as
+          susieAsh, the unmappable effects are fitted by mr.mash to the
+          residuals of the confident sparse effects, outside the LD
+          neighborhoods of the signals still being resolved, with a
+          Beta-Binomial slot prior on the single effects. Their prior
+          is the one \code{MvsusieAshOptions(unmappable_prior = )}
+          gives, else the run's mr.mash prior (the data-driven
+          matrices of its mr.mash fit and the canonical ones, over its
+          grid) when the run has one, else mvsusieR's. The same
+          observation rule as \code{mvsusieInf} applies.}
     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
           per context. Individual-level only; errors on any
           SumStats input.}
