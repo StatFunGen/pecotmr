@@ -341,6 +341,7 @@ reference:
       - cvResult
       - fineMappingResult
       - pip
+      - selectWeights
       - traitNames
 
   - subtitle: "GwasFineMappingResult"
@@ -421,6 +422,7 @@ reference:
       - variantIds
       - weights-methods
       - resolveWeights
+      - selectWeights
       - writeGwasVcf
       - writeBed
       - readTwasWeights

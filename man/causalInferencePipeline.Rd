@@ -66,7 +66,10 @@ alleles only, so a ref/alt swap is treated as a distinct variant.}
 \value{
 A \code{GRanges} as described above, its \code{seqinfo()} naming
   the genome build the inputs name (inputs naming different builds are
-  refused).
+  refused). Empty, with the same columns, when nothing can be scored, and a
+  message says why: there is no TWAS weight set to score (the weights hold
+  none, or none clears \code{weightSelectionParam}) and no MR to run, or no
+  tuple can be scored against the GWAS (an empty \code{gwasSumStats}, say).
 }
 \description{
 Per-region pipeline that pairs QTL-derived weight vectors

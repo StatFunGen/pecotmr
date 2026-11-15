@@ -1522,6 +1522,7 @@ test_that(".ctwasKeepChosen cuts a source to the run's chosen weight sets", {
     twSub <- pecotmr:::.ctwasKeepChosen(tw, chosen)
     expect_equal(nrow(twSub), 1L)
     expect_equal(methodNames(twSub), "susie")
+    expect_null(pecotmr:::.ctwasKeepChosen(tw, mutate(chosen, trait = "t9")))
     # A fine-mapping source is cut to its chosen rows.
     src <- .ctp_makeFmrWeightSource()
     expect_equal(nrow(pecotmr:::.ctwasKeepChosen(src, chosen)), 1L)

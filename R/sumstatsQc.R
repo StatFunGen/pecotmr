@@ -5689,7 +5689,7 @@ effectiveN <- function(nCase, nControl) {
         context = as.character(sumstats$context),
         trait = as.character(sumstats$trait),
         entry = newEntries,
-        genome = unique(unname(GenomeInfoDb::genome(sumstats))),
+        genome = .ssqcGenome(sumstats),
         ldReference = newLdReference,
         varY = as.numeric(sumstats$varY),
         nSample = .ssqcNumericColumn(sumstats, "nSample"),
@@ -5704,7 +5704,7 @@ effectiveN <- function(nCase, nControl) {
     GwasSumStats(
         studyName = as.character(sumstats$study),
         entry = newEntries,
-        genome = unique(unname(GenomeInfoDb::genome(sumstats))),
+        genome = .ssqcGenome(sumstats),
         ldReference = newLdReference,
         varY = as.numeric(sumstats$varY),
         nCase = .ssqcNumericColumn(sumstats, "nCase"),
@@ -5717,6 +5717,15 @@ effectiveN <- function(nCase, nControl) {
         blockId = .ssqcColumnOrNull(sumstats, "blockId"),
         extraCols = .ssqcExtraCols(sumstats, .SSQC_GWAS_COLUMNS)
     )
+}
+
+# The build the rebuilt object carries: the one `sumstats` names, or NA when
+# it names none. A collection holding no variants -- a window with none -- has
+# no seqlevels, so its seqinfo holds no build to carry across.
+# @noRd
+.ssqcGenome <- function(sumstats) {
+    build <- unique(unname(GenomeInfoDb::genome(sumstats)))
+    if (length(build) == 0L) NA_character_ else build
 }
 
 # The columns each constructor builds from its own arguments. Anything else a

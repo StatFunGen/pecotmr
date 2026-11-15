@@ -2824,6 +2824,36 @@ test_that("summaryStatsQc: round-trips QtlSumStats inputs", {
     expect_true(is.na(dataType(res)))
 })
 
+test_that("summaryStatsQc: a collection with no variants comes back empty", {
+    # A window with no variants: the study's row holds none, or there is no
+    # row at all. Either way the collection has no seqlevels, so seqinfo()
+    # holds no genome build for the rebuild to carry across.
+    none <- .ssQ_makeEntryGr(character(0), integer(0))
+    gwas <- GwasSumStats(
+        studyName = "g1",
+        entry = list(none),
+        genome = "hg19",
+        ldReference = .ssQ_makeHandle()
+    )
+    qtl <- QtlSumStats(
+        studyName = "s1",
+        context = "c1",
+        trait = "t1",
+        entry = list(none),
+        genome = "hg19",
+        ldReference = .ssQ_makeHandle()
+    )
+    for (ss in list(gwas, qtl, gwas[0L], qtl[0L])) {
+        res <- summaryStatsQc(ss)
+        expect_s4_class(res, class(ss))
+        expect_length(res, length(ss))
+        expect_equal(sum(lengths(res)), 0L)
+        # QC'd, so the pipelines take it, and QC'ing it again is a no-op.
+        expect_true("options" %in% names(qcOptions(res)))
+        expect_length(summaryStatsQc(res), length(ss))
+    }
+})
+
 # ===========================================================================
 # effectiveN helper + case/control N canonicalization in summaryStatsQc
 # ===========================================================================

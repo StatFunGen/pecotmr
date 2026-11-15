@@ -2762,27 +2762,11 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # (study, context, trait)" semantics -- the legacy pipeline fed a single
 # best-CV-method weight per gene; the S4 TwasWeights may carry many methods,
 # but a run should only see one per gene. A TwasWeights is cut to its chosen
-# cells, a fine-mapping result to its chosen rows.
+# cells, a fine-mapping result to its chosen rows (.keepWeightSets()).
 # @noRd
 .ctwasKeepChosen <- function(tw, chosen) {
-    if (methods::is(tw, "TwasWeights")) {
-        cells <- .twasCells(tw)
-        kept <- cells[is_in(.cellKey(cells), .cellKey(chosen)), ]
-        if (nrow(kept) == 0L) {
-            return(NULL)
-        }
-        return(.twasKeepCells(tw, kept))
-    }
-    keep <- which(is_in(
-        .cellKey(.weightRowIds(tw)),
-        .cellKey(chosen)
-    ))
-    if (length(keep) == 0L) {
-        return(NULL)
-    }
-    # Row subset carries every column forward (joint* / region / ...); the old
-    # hand-listed rebuild silently dropped them.
-    methods::initialize(tw[keep, ], ldReference = ldReference(tw))
+    kept <- .keepWeightSets(tw, chosen)
+    if (length(kept) == 0L) NULL else kept
 }
 
 # Match variant ids against the LD panel's ids the way every other LD consumer

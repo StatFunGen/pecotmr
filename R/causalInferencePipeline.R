@@ -119,7 +119,10 @@ NULL
 #'   alleles only, so a ref/alt swap is treated as a distinct variant.
 #' @return A \code{GRanges} as described above, its \code{seqinfo()} naming
 #'   the genome build the inputs name (inputs naming different builds are
-#'   refused).
+#'   refused). Empty, with the same columns, when nothing can be scored, and a
+#'   message says why: there is no TWAS weight set to score (the weights hold
+#'   none, or none clears \code{weightSelectionParam}) and no MR to run, or no
+#'   tuple can be scored against the GWAS (an empty \code{gwasSumStats}, say).
 #' @examples
 #' data(qtlDatasetExample)
 #' data(gwasSumStatsS4Example)
@@ -201,11 +204,43 @@ causalInferencePipeline <- function(
         mrParam = mrParam
     ))
     if (length(twasRows) + length(mrRows) == 0L) {
-        abort(
-            "causalInferencePipeline: no (qtl, gwas) tuples produced a result."
-        )
+        # .cipChosenCells() has said why when it chose no TWAS weights and
+        # there is no MR to run.
+        if (nrow(cells) > 0L || length(mrTuples) > 0L) {
+            inform(
+                "causalInferencePipeline: no (qtl, gwas) tuple produced a result."
+            )
+        }
+        return(.cipEmptyResult())
     }
     .cipFinalize(c(twasRows, mrRows), combineMethods)
+}
+
+# The result of a run that scored nothing: no rows, and the columns a scored
+# one carries (.cipRecord()), typed as its all-NA cells are.
+# @noRd
+.cipEmptyResult <- function() {
+    tuple <- list(
+        qStudy = NA_character_,
+        qContext = NA_character_,
+        qTrait = NA_character_,
+        qMethod = NA_character_,
+        qJoint = .noJointKey()
+    )
+    at <- list(
+        chrom = NA_character_,
+        startPos = NA_integer_,
+        endPos = NA_integer_
+    )
+    proto <- .cipRecord(
+        tuple,
+        NA_character_,
+        NA_character_,
+        .cipEmptyTwas(),
+        .cipEmptyMr(),
+        at
+    )
+    .cipDfToGranges(.cipRowsToDf(list(proto))[0L, ])
 }
 
 # Validate the object classes + QC state of the pipeline inputs.
@@ -281,16 +316,19 @@ causalInferencePipeline <- function(
 }
 
 # The (gene, method) weight sets of `weightSource` the run scores: every one it
-# holds, narrowed by `weightSelectionParam` (.selectWeightCells()). An error
-# when the source holds none, or the choice leaves none.
+# holds, narrowed by `weightSelectionParam` (.selectWeightCells()). None, with
+# a message saying why, when the source holds none or the choice leaves none;
+# the run then scores no TWAS, though MR still runs from a fine-mapping result.
 # @noRd
 .cipChosenCells <- function(weightSource, weightSelectionParam) {
     cells <- .weightCells(weightSource, weightSelectionParam)
     if (nrow(cells) == 0L) {
-        abort(glue(
-            "causalInferencePipeline: no QTL tuples to score (the supplied ",
-            "twasWeights / fineMappingResult collections are empty)."
+        inform(glue(
+            "causalInferencePipeline: no QTL tuples to score (the TWAS ",
+            "weights -- twasWeights, else fineMappingResult -- hold none); no ",
+            "TWAS is scored."
         ))
+        return(cells)
     }
     .selectionCoverageCheck(
         list(weightSource),
@@ -303,11 +341,11 @@ causalInferencePipeline <- function(
         "causalInferencePipeline"
     )
     if (nrow(chosen) == 0L) {
-        abort(glue(
+        inform(glue(
             "causalInferencePipeline: every QTL tuple was filtered out by ",
             "WeightSelectionParam(cutoff = {weightSelectionParam$cutoff}, ",
             "pvalCutoff = {weightSelectionParam$pvalCutoff}) ",
-            "(no method cleared the CV cutoffs)."
+            "(no method cleared the CV cutoffs); no TWAS is scored."
         ))
     }
     chosen
@@ -957,6 +995,23 @@ causalInferencePipeline <- function(
         "{str_flatten(unknown, ', ')}, which the weights do not hold ",
         "(they hold {str_flatten(unique(available), ', ')})."
     ))
+}
+
+# `source` cut to the weight sets `chosen` names (.selectWeightCells()): a
+# TwasWeights to those cells, so each gene's row keeps only its chosen
+# methods; a fine-mapping result to those rows. Empty, of the same class, when
+# it holds none of them.
+# @noRd
+.keepWeightSets <- function(source, chosen) {
+    if (methods::is(source, "TwasWeights")) {
+        cells <- .twasCells(source)
+        kept <- cells[is_in(.cellKey(cells), .cellKey(chosen)), ]
+        return(.twasKeepCells(source, kept))
+    }
+    keep <- which(is_in(.cellKey(.weightRowIds(source)), .cellKey(chosen)))
+    # Row subset carries every column forward (joint* / region / ...); the old
+    # hand-listed rebuild silently dropped them.
+    methods::initialize(source[keep, ], ldReference = ldReference(source))
 }
 
 # The first row of fine-mapping result `fmr` with weight set `tuple`'s full
@@ -2063,6 +2118,51 @@ WeightSelectionParam <- function(
         pvalCutoff = pvalCutoff,
         metric = metric,
         pvalMetric = pvalMetric
+    )
+}
+
+#' @title Keep the TWAS Weight Sets a Selection Chooses
+#' @description The weight sets of \code{x} that
+#'   \code{weightSelectionParam} chooses, by the rule
+#'   \code{\link{causalInferencePipeline}} and \code{\link{ctwasPipeline}}
+#'   apply before they score anything (see \code{\link{WeightSelectionParam}}).
+#'   The choice reads only the weights' \code{cvResult}, never a GWAS study,
+#'   so it can run before any GWAS data is read: for instance, to leave out
+#'   the genes that have no weight set to score.
+#' @param x A \code{\link{TwasWeights}} or a
+#'   \code{\link{QtlFineMappingResult}}.
+#' @param weightSelectionParam The choice, built with
+#'   \code{\link{WeightSelectionParam}}.
+#' @return \code{x} cut to the chosen weight sets: a \code{TwasWeights} keeps
+#'   each gene's row with only its chosen methods, a fine-mapping result its
+#'   chosen rows. Empty, of the same class, when no weight set is chosen. As in
+#'   the pipelines, a choice that reads the CV metrics warns about rows
+#'   narrowed since their fits (condition class \code{pecotmrFitCoverage}).
+#' @examples
+#' cvRow <- function(rsq) {
+#'   TwasWeightsRow(
+#'     variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
+#'     weights = rep(0.1, 3),
+#'     cvResult = list(metrics = c(rsq = rsq, pval = 0.01)))
+#' }
+#' tw <- TwasWeights(studyName = rep("s1", 3), context = rep("brain", 3),
+#'   trait = c("g1", "g1", "g2"), method = c("lasso", "susie", "lasso"),
+#'   entry = list(cvRow(0.2), cvRow(0.3), cvRow(0.001)))
+#' # g1 keeps its best method, susie; no method of g2 reaches the cutoff.
+#' selectWeights(tw, WeightSelectionParam(cutoff = 0.01))
+#' @importFrom checkmate assertMultiClass
+#' @export
+selectWeights <- function(x, weightSelectionParam = WeightSelectionParam()) {
+    assertMultiClass(x, c("TwasWeights", "QtlFineMappingResult"))
+    .assertMethodParam(weightSelectionParam, "WeightSelectionParam")
+    cells <- .weightCells(x, weightSelectionParam)
+    if (nrow(cells) == 0L) {
+        return(x)
+    }
+    .selectionCoverageCheck(list(x), weightSelectionParam, "selectWeights()")
+    .keepWeightSets(
+        x,
+        .selectWeightCells(cells, weightSelectionParam, "selectWeights")
     )
 }
 
