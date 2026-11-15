@@ -21,15 +21,18 @@ mrmashRssWeights(
 \arguments{
 \item{stat}{A list with \code{z} (variants x conditions matrix),
 \code{n} (per-context numeric vector or scalar) and \code{variantNames}.
-May also include \code{Bhat}, \code{Shat} matrices, and
+May also include \code{Bhat}, \code{Shat} matrices, which with
+\code{covY} put the fit on their scale (without \code{covY} it is on
+the standardized scale of \code{z}: effects per standard deviation of
+the variant and of the condition), and
 \code{sampleGroups}, one label per column of \code{z} naming the
 samples it is measured on (such as its study): conditions with
 different labels are fitted as different samples even when they share
 an LD reference; and \code{h2}, one heritability per column of
-\code{z} (\code{NA} for none), which the residual covariance the fit
-starts from then carries: each condition's variance is
-\eqn{1 - h^2}, as SuSiE-RSS's residual variance, its correlations
-kept (a \code{V} given in \code{methodArgs} wins).}
+\code{z} (\code{NA} for none), which sets each condition's residual
+variance to \eqn{1 - h^2} of its variance, as SuSiE-RSS's residual
+variance, with the correlations of \code{covY} (a given \code{V}
+wins).}
 
 \item{ldReference}{The LD reference the statistics' variants are matched
 to by \code{stat$variantNames}: a genotype panel (see
@@ -72,18 +75,20 @@ canonical / data-driven construction.}
 length(S0))}.}
 
 \item{V}{Optional residual covariance matrix (K x K). When NULL, the
-residual correlation of the mash prior, \code{dataDrivenPriorMatrices$
-residualCorrelation} (\code{\link{mashPipeline}}); without one, the
-correlation of the z-scores of the variants near-null (\eqn{|z| < 2}) in
-every condition on one LD reference, over the variants those conditions
-all carry, by mashr's \code{estimate_null_correlation_simple()}. Fewer
-than \eqn{\max(2K_g, 20)} such variants, for the \eqn{K_g} conditions
-on a reference, give the identity there, with a warning. Either is zero
-between conditions on different references, which are fitted as
-different samples.}
+residual variances \code{stat$h2} implies, or without it
+\code{mr.mash.rss}'s default, \code{covY} (its correlations on the
+standardized scale).}
 
 \item{covY}{Optional response covariance matrix (K x K). When NULL, the
-same matrix as \code{V}.}
+residual correlation of the mash prior, \code{dataDrivenPriorMatrices$
+residualCorrelation} (\code{\link{mashPipeline}}), zero between
+conditions on different references, which are fitted as different
+samples; without one, \code{mr.mash.rss} estimates it from the
+z-scores of the variants near-null (\eqn{|z| < 2}) in every condition
+on one reference, over the variants their reference holds, by mashr's
+\code{estimate_null_correlation_simple()} (fewer than
+\eqn{\max(2K_g, 20)} such variants, for the \eqn{K_g} conditions on a
+reference, give the identity there, with a warning).}
 
 \item{fitRetention}{How much of the mr.mash fit is kept as the
 \code{"fit"} attribute of the returned weights. \code{"none"} (default)

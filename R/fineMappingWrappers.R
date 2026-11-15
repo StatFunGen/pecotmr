@@ -2985,6 +2985,7 @@ fitMvsusie <- function(
         ),
         !!!user
     )
+    .engineRequire("mvsusieR::mvsusie", names(callArgs), "fitMvsusie()")
     if (!anyNA(Y)) {
         return(exec(mvsusieR::mvsusie, !!!callArgs))
     }
@@ -2992,7 +2993,7 @@ fitMvsusie <- function(
     # loop that calls susieR's block_coordinate_ascent() without importing
     # it, so the call finds it only on the search path. susieR is attached
     # for this call alone, and detached after unless it already was. Drop
-    # this once mvsusieR imports the function.
+    # this once a released mvsusieR imports the function.
     fit <- withr::with_package(
         "susieR",
         exec(mvsusieR::mvsusie, !!!callArgs)
@@ -3118,6 +3119,36 @@ fitMvsusieRss <- function(
     methodArgs = MvsusieRssOptions(),
     X = NULL
 ) {
+    .fitMvsusieRss(
+        Z = Z,
+        R = R,
+        N = N,
+        prior_variance = prior_variance,
+        coverage = coverage,
+        L = L,
+        L_greedy = L_greedy,
+        methodArgs = methodArgs,
+        X = X
+    )
+}
+
+# fitMvsusieRss() with the LD-reference settings SusieRssParam owns
+# (`rssArgs`: R_finite, R_mismatch, control), which pecotmr supplies and
+# MvsusieRssOptions() refuses. An element of R or X may be a list of panels
+# whose weights the fit estimates (SusieRssParam's estimateMixtureWeights).
+# @noRd
+.fitMvsusieRss <- function(
+    Z,
+    R = NULL,
+    N,
+    prior_variance,
+    coverage = 0.95,
+    L = 10L,
+    L_greedy = NULL,
+    methodArgs = MvsusieRssOptions(),
+    X = NULL,
+    rssArgs = list()
+) {
     .assertMethodOptions(methodArgs, "MvsusieRssOptions", "methodArgs")
     assertNumeric(
         N,
@@ -3140,15 +3171,73 @@ fitMvsusieRss <- function(
                 coverage = coverage,
                 L = L
             ),
-            compact(list(R = R, X = X, L_greedy = L_greedy))
+            compact(list(R = R, X = X, L_greedy = L_greedy)),
+            compact(rssArgs)
         ),
         !!!user
     )
-    fit <- exec(mvsusieR::mvsusie_rss, !!!callArgs)
+    .mvsusieRssRequire(callArgs, R, X, N)
+    .mvsusieRssZeroLacked(exec(mvsusieR::mvsusie_rss, !!!callArgs), R, X)
+}
+
+# Whether the installed mvsusieR fits summary statistics across studies:
+# an LD reference per study or a mixture of panels, a sample size per
+# outcome, an LD factor (X) and the reference-LD settings (R_finite,
+# R_mismatch, control), which the mvsusieR that has them marks by
+# mvsusie_ss's sample_groups (mvsusie_rss reads most of them through its
+# `...`, so its own formals cannot say).
+# @noRd
+.mvsusieFitsStudies <- function() {
+    .engineTakes("mvsusieR::mvsusie_ss", "sample_groups")
+}
+
+# Stop unless the installed mvsusieR fits the summary statistics of
+# `callArgs`: with an mvsusieR that predates fits across studies
+# (.mvsusieFitsStudies()), no LD reference per study or panels (R or X a
+# list) or sample size per outcome (N), and only what mvsusie_rss and
+# mvsusie_ss take.
+# @noRd
+.mvsusieRssRequire <- function(callArgs, R, X, N) {
+    if (.mvsusieFitsStudies()) {
+        return(invisible(NULL))
+    }
+    if (is.list(R) || is.list(X) || length(unique(N)) > 1L) {
+        abort(glue(
+            "fitMvsusieRss() with an LD reference per study, LD panels or ",
+            "a sample size per outcome needs a newer mvsusieR than the ",
+            "installed mvsusieR {packageVersion('mvsusieR')}."
+        ))
+    }
+    .engineRequire(
+        c("mvsusieR::mvsusie_rss", "mvsusieR::mvsusie_ss"),
+        names(callArgs),
+        "fitMvsusieRss()"
+    )
+}
+
+# An mvsusie_rss fit on one LD per condition (`R` or `X` a list), with the
+# variants each condition's LD lacks given posterior mean 0 there
+# (.mvsusieZeroLackedFit()); as it is on one LD. A list of panels lacks the
+# variants its first panel does: every panel of a mixture holds the same
+# variants.
+# @noRd
+.mvsusieRssZeroLacked <- function(fit, R, X) {
     if (!is.list(R) && !is.list(X)) {
         return(fit)
     }
-    .mvsusieZeroLackedFit(fit, .rssLackedVariants(list(R = R, X = X)))
+    .mvsusieZeroLackedFit(
+        fit,
+        .rssLackedVariants(list(
+            R = if (is.list(R)) map(R, .rssFirstPanel),
+            X = if (is.list(X)) map(X, .rssFirstPanel)
+        ))
+    )
+}
+
+# A condition's LD, or the first of its list of panels.
+# @noRd
+.rssFirstPanel <- function(ld) {
+    if (.rssIsPanels(ld)) ld[[1L]] else ld
 }
 
 # fitMvsusieRss() reads the LD as its matrix `R` or its factor `X`, exactly
@@ -3816,8 +3905,6 @@ susieAshRssWeights <- function(
 #'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
 #' \donttest{
-#' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
-#' library(susieR)
 #' data(multiTraitData)
 #' X <- multiTraitData$X[, 1:60]
 #' Y <- multiTraitData$Y
@@ -3856,17 +3943,19 @@ mvsusieWeights <- function(
 #'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
 #' \donttest{
-#' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
-#' library(susieR)
 #' data(multiTraitData)
 #' # The unmappable effects take conditions observed on the same samples.
 #' observed <- stats::complete.cases(multiTraitData$Y)
 #' X <- multiTraitData$X[observed, 1:60]
 #' Y <- multiTraitData$Y[observed, ]
-#' fit <- fitMvsusie(X = X, Y = Y,
-#'   prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
-#'   methodArgs = MvsusieInfOptions(max_iter = 50))
-#' mvsusieInfWeights(mvsusieInfFit = fit)
+#' # With an mvsusieR that fits unmappable effects
+#' if (requireNamespace("mvsusieR", quietly = TRUE) &&
+#'   "unmappable_effects" %in% names(formals(mvsusieR::mvsusie))) {
+#'   fit <- fitMvsusie(X = X, Y = Y,
+#'     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
+#'     methodArgs = MvsusieInfOptions(max_iter = 50))
+#'   mvsusieInfWeights(mvsusieInfFit = fit)
+#' }
 #' }
 #' @export
 mvsusieInfWeights <- function(
@@ -3899,17 +3988,19 @@ mvsusieInfWeights <- function(
 #'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
 #' \donttest{
-#' # Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
-#' library(susieR)
 #' data(multiTraitData)
 #' # The unmappable effects take conditions observed on the same samples.
 #' observed <- stats::complete.cases(multiTraitData$Y)
 #' X <- multiTraitData$X[observed, 1:60]
 #' Y <- multiTraitData$Y[observed, ]
-#' fit <- fitMvsusie(X = X, Y = Y,
-#'   prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
-#'   methodArgs = MvsusieAshOptions(max_iter = 20))
-#' mvsusieAshWeights(mvsusieAshFit = fit)
+#' # With an mvsusieR that fits unmappable effects
+#' if (requireNamespace("mvsusieR", quietly = TRUE) &&
+#'   "unmappable_effects" %in% names(formals(mvsusieR::mvsusie))) {
+#'   fit <- fitMvsusie(X = X, Y = Y,
+#'     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
+#'     methodArgs = MvsusieAshOptions(max_iter = 20))
+#'   mvsusieAshWeights(mvsusieAshFit = fit)
+#' }
 #' }
 #' @export
 mvsusieAshWeights <- function(
@@ -4336,9 +4427,13 @@ mvsusieRssWeights <- function(
 #'   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
 #'   n = rep(nrow(X), ncol(X)))
 #' LD <- cor(X)
-#' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
-#'   prior_variance = 1, methodArgs = MvsusieInfRssOptions())
-#' mvsusieInfRssWeights(stat, mvsusieInfRssFit = fit)
+#' # With an mvsusieR that fits unmappable effects
+#' if (requireNamespace("mvsusieR", quietly = TRUE) &&
+#'   "unmappable_effects" %in% names(formals(mvsusieR::mvsusie_ss))) {
+#'   fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+#'     prior_variance = 1, methodArgs = MvsusieInfRssOptions())
+#'   mvsusieInfRssWeights(stat, mvsusieInfRssFit = fit)
+#' }
 #' @export
 mvsusieInfRssWeights <- function(
     stat,
@@ -4386,9 +4481,13 @@ mvsusieInfRssWeights <- function(
 #'   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
 #'   n = rep(nrow(X), ncol(X)))
 #' LD <- cor(X)
-#' fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
-#'   prior_variance = 1, methodArgs = MvsusieAshRssOptions(max_iter = 20))
-#' mvsusieAshRssWeights(stat, mvsusieAshRssFit = fit)
+#' # With an mvsusieR that fits unmappable effects
+#' if (requireNamespace("mvsusieR", quietly = TRUE) &&
+#'   "unmappable_effects" %in% names(formals(mvsusieR::mvsusie_ss))) {
+#'   fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+#'     prior_variance = 1, methodArgs = MvsusieAshRssOptions(max_iter = 20))
+#'   mvsusieAshRssWeights(stat, mvsusieAshRssFit = fit)
+#' }
 #' }
 #' @export
 mvsusieAshRssWeights <- function(
@@ -5469,7 +5568,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     infFit <- .fmRssInfFit(
         chainLocal,
         z = z,
-        R = ld$R,
+        R = .fmRssFitLd(ld)$R,
         n = n,
         coverage = credibleSetParam$coverage,
         methodArgs = methodArgs,
@@ -5614,9 +5713,10 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         inform(msg)
     }
     useFactor <- tk == "susie" && !is.null(ld$X)
+    fitLd <- .fmRssFitLd(ld)
     fit <- .fmFitSusieRss(
         z,
-        if (useFactor) NULL else ld$R,
+        if (useFactor) NULL else fitLd$R,
         n,
         tk,
         chainFromInf = chainFrom,
@@ -5625,17 +5725,26 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         rFinite = susieRssParam$rFinite,
         rMismatch = susieRssParam$rMismatch,
         rssControl = .rssControlList(susieRssParam$control),
-        X = if (useFactor) ld$X
+        X = if (useFactor) fitLd$X
     )
     .fmRssSerFallback(fit, susieRssParam)
 }
 
-# An unreliable LD matrix makes the multi-effect fit untrustworthy, so with
-# `serFallback` the single-effect model susie_rss already produced is
-# returned instead -- with the multi-effect fit kept alongside it, since
-# the caller may still want to inspect what was rejected.
+# The LD the RSS fits read: the block's, or the mixture's panels when the
+# fits estimate their weights (.fmRssLd()'s `panels`).
 # @noRd
-.fmRssSerFallback <- function(fit, susieRssParam) {
+.fmRssFitLd <- function(ld) {
+    if (is.null(ld$panels)) ld else ld$panels
+}
+
+# An unreliable LD matrix makes the multi-effect fit untrustworthy, so with
+# `serFallback` the single-effect model the fit already produced (susie_rss
+# or mvsusie_rss, `fitClass` its class) is returned instead -- with the
+# multi-effect fit kept alongside it, since the caller may still want to
+# inspect what was rejected. The single-effect model keeps the mixture
+# weights the fit estimated, which its credible sets' purity reads.
+# @noRd
+.fmRssSerFallback <- function(fit, susieRssParam, fitClass = "susieRss") {
     rfd <- fit$R_finite_diagnostics
     flag <- if (!is.null(rfd) && !is.null(rfd$R_reliability_flag)) {
         isTRUE(rfd$R_reliability_flag)
@@ -5649,8 +5758,12 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     ) {
         return(list(fit = fit, flag = flag, multiFit = NULL))
     }
+    single <- list_assign(
+        rfd$ser_model,
+        !!!compact(list(omega_weights = fit$omega_weights))
+    )
     list(
-        fit = .setFinemappingFitClass(rfd$ser_model, "susieRss"),
+        fit = .setFinemappingFitClass(single, fitClass),
         flag = flag,
         multiFit = fit
     )
@@ -5707,7 +5820,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 
 # Post-process one RSS fit into a finemapping entry. The credible sets'
 # purity reads the LD reference's factor when there is one (only the sets'
-# own columns are correlated), else the LD matrix.
+# own columns are correlated), else the LD matrix (.rssPurityLd()).
 .fmRssPostprocess <- function(
     fit,
     ld,
@@ -5718,10 +5831,11 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     fitRetention,
     region = NULL
 ) {
+    purity <- .rssPurityLd(ld, fit$omega_weights)
     .fmPostprocessOne(
         fit = fit,
         method = "susieRss",
-        dataX = ld$X %||% ld$R,
+        dataX = purity$X %||% purity$R,
         dataY = list(z = z),
         af = af,
         # Per-variant effective N (reporting-only, top_loci$N). NULL on any
@@ -5729,7 +5843,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         # never 1. This is NOT `n` (the scalar median the RSS fit consumes).
         n = nVar,
         region = region,
-        csInput = if (is.null(ld$X)) "Xcorr" else "X",
+        csInput = if (is.null(purity$X)) "Xcorr" else "X",
         credibleSetParam = credibleSetParam,
         fitRetention = fitRetention
     )
@@ -6100,7 +6214,9 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # is relative to them (mvsusieR's relative_unmappable_prior, its default).
 # NULL leaves mvsusieR's default, or the one the method's options give
 # (`userArgs`), which then replaces it whole rather than being merged into
-# it. `sumstats` is only computed when it is used.
+# it; and with unmappable_scale = "single", where mvsusieR builds the prior
+# from the shape (.fmUnmappableShape()). `sumstats` is only computed when
+# it is used.
 # @noRd
 .fmAshThetaPrior <- function(
     token,
@@ -6111,8 +6227,14 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     residualSd = 1
 ) {
     U <- pluck(mvPrior, "dataDrivenPriorMatrices", "U")
-    given <- as.list(userArgs)$unmappable_prior
-    if (!identical(token, "mvsusieAsh") || is.null(U) || !is.null(given)) {
+    user <- as.list(userArgs)
+    single <- identical(user$unmappable_scale, "single")
+    if (
+        !identical(token, "mvsusieAsh") ||
+            is.null(U) ||
+            !is.null(user$unmappable_prior) ||
+            single
+    ) {
         return(NULL)
     }
     conditionU <- if (is.null(colnames(U[[1L]]))) {
@@ -6120,7 +6242,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     } else {
         map(U, .mashSubsetMatrix, conditionsToKeep = conditionNames)
     }
-    relative <- as.list(userArgs)$relative_unmappable_prior %||% TRUE
+    relative <- user$relative_unmappable_prior %||% TRUE
     gridSd <- if (isTRUE(relative)) residualSd else 1
     buildMrmashPriorMatrices(
         Bhat = t(t(sumstats$Bhat) / gridSd),
@@ -6131,11 +6253,15 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 }
 
 # The residual standard deviations of a fit's outcomes (for theta's prior,
-# .fmAshThetaPrior()): those of the residual variance it starts from, or of
-# the outcomes `Y` when it starts from their covariance, as mvsusieR does;
-# 1 (the z scale) when it has neither.
+# .fmAshThetaPrior()): those of the residual variance it starts from (a
+# matrix, or one variance per outcome), or of the outcomes `Y` when it
+# starts from their covariance, as mvsusieR does; 1 (the z scale) when it
+# has neither.
 # @noRd
 .residualSd <- function(residualVariance, Y = NULL) {
+    if (is.null(dim(residualVariance)) && !is.null(residualVariance)) {
+        return(sqrt(residualVariance))
+    }
     if (!is.null(residualVariance)) {
         return(sqrt(diag(as.matrix(residualVariance))))
     }
@@ -6145,19 +6271,27 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     apply(Y, 2L, stats::sd, na.rm = TRUE)
 }
 
-# The covariance of the polygenic effects of `token`'s fit (mvsusieR's
-# unmappable_variance). For mvsusieInf with the data-driven matrices of the
+# The covariance of the unmappable effects of `token`'s fit, or its shape
+# (mvsusieR's unmappable_variance). With the data-driven matrices of the
 # run's mash prior (carried on `mvPrior`), that mixture collapsed over its
 # weights, sum_k w_k U_k (.mashCollapseWeights()), on the conditions
-# `conditionNames`: learned genome-wide, it gives the polygenic effects
-# their correlations, while the fit estimates each condition's variance.
-# NULL leaves mvsusieR's default (no correlation), or the one the method's
-# options give (`userArgs`).
+# `conditionNames`, learned genome-wide. For mvsusieInf it gives the
+# polygenic effects their correlations, while the fit estimates each
+# condition's variance; with unmappable_scale = "single" or "shrink" in the
+# method's options (`userArgs`), it is the shape whose scale the fit learns
+# over all the conditions, for mvsusieAsh as well. NULL leaves mvsusieR's
+# default (no correlation), or the one the method's options give.
 # @noRd
-.fmInfUnmappableVariance <- function(token, mvPrior, conditionNames, userArgs) {
+.fmUnmappableShape <- function(token, mvPrior, conditionNames, userArgs) {
     ddpm <- pluck(mvPrior, "dataDrivenPriorMatrices")
-    given <- as.list(userArgs)$unmappable_variance
-    if (!identical(token, "mvsusieInf") || is.null(ddpm$U) || !is.null(given)) {
+    user <- as.list(userArgs)
+    pooled <- is_in(
+        user$unmappable_scale %||% "per_outcome",
+        c("single", "shrink")
+    )
+    wanted <- identical(token, "mvsusieInf") ||
+        (identical(token, "mvsusieAsh") && pooled)
+    if (!wanted || is.null(ddpm$U) || !is.null(user$unmappable_variance)) {
         return(NULL)
     }
     collapsed <- reduce(map2(ddpm$U, .mashCollapseWeights(ddpm), `*`), `+`)
@@ -6280,7 +6414,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
             userArgs,
             .residualSd(mvPrior$residualVariance, Ytr)
         ),
-        unmappable_variance = .fmInfUnmappableVariance(
+        unmappable_variance = .fmUnmappableShape(
             token,
             mvPrior,
             colnames(Ytr),

@@ -1286,12 +1286,13 @@ test_that("mrashRssWeights defaults to mr.ash's own prior grid", {
 
 
 test_that("mrmashRssWeights fits mr.mash.rss and returns p x K weights", {
-    skip_if_not_installed("mr.mashr")
+    .skipIfMrmashCannotFitStudies()
     m <- .rrwMulti(n = 60, p = 6, K = 3)
-    # Six variants are too few to estimate the residual correlation from.
+    # Six variants are too few for mr.mash.rss to estimate the residual
+    # correlation from.
     expect_warning(
         w <- mrmashRssWeights(m$stat, m$ldReference),
-        "taking it to be the identity"
+        "near-null variables"
     )
     expect_equal(dim(w), c(m$p, m$K))
     expect_true(all(is.finite(w)))
@@ -1429,11 +1430,14 @@ test_that("one LD reference per condition is laid on the variants", {
     )
     expect_equal(withSe$Bhat[, 1L], c(0, 1))
     expect_equal(withSe$Shat[, 1L], c(1, 2))
-    # On one reference the statistics go as they are.
-    expect_identical(
-        pecotmr:::.rssCarriedStat(stat, list(R = diag(6))),
-        stat
+    # On one reference, a missing statistic carries no information either;
+    # the z-scores the fit reads keep it missing (.rssFitZ()).
+    oneRef <- list(R = diag(6))
+    expect_equal(
+        unname(pecotmr:::.rssCarriedStat(stat, oneRef)$z[6L, 3L]),
+        0
     )
+    expect_true(is.na(pecotmr:::.rssFitZ(stat, oneRef)[6L, 3L]))
 })
 
 test_that("a variant its reference lacks carries no information there", {
@@ -1458,19 +1462,23 @@ test_that("a variant its reference lacks carries no information there", {
 })
 
 test_that("mr.mash.rss takes the mash prior's residual correlation", {
+    .skipIfMrmashCannotFitStudies()
     m <- .rrwMulti(n = 60, p = 6, K = 3)
     R <- 0.3 + diag(0.7, 3)
     prior <- list(U = list(shared = matrix(1, 3L, 3L)), residualCorrelation = R)
     oneRef <- list(R = diag(6))
     out <- pecotmr:::.mrmashRssResidual(m$stat, oneRef, prior, NULL, NULL)
-    expect_equal(out$V, R)
-    expect_identical(out$covY, out$V)
+    # covY, whose correlations V takes; without h2, mr.mash.rss starts V
+    # from covY itself.
+    expect_equal(out$covY, R)
+    expect_null(out$V)
+    expect_false(out$originalScale)
     # Zero between conditions on different references, fitted as different
     # samples.
     perRef <- list(R = rep(list(diag(6)), 3L), group = c(1L, 1L, 2L))
-    masked <- pecotmr:::.mrmashRssResidual(m$stat, perRef, prior, NULL, NULL)$V
-    expect_equal(masked[1:2, 3L], c(0, 0))
-    expect_equal(masked[1L, 2L], 0.3)
+    masked <- pecotmr:::.mrmashRssResidual(m$stat, perRef, prior, NULL, NULL)
+    expect_equal(masked$covY[1:2, 3L], c(0, 0))
+    expect_equal(masked$covY[1L, 2L], 0.3)
     # Each supplied one is used as it is.
     own <- pecotmr:::.mrmashRssResidual(m$stat, oneRef, prior, diag(3), NULL)
     expect_equal(own$V, diag(3))
@@ -1487,65 +1495,155 @@ test_that("mr.mash.rss takes the mash prior's residual correlation", {
     )
 })
 
-test_that("without a mash prior, mr.mash.rss takes the near-null correlation", {
-    skip_if_not_installed("mashr")
+test_that("without a mash prior, mr.mash.rss estimates the correlation", {
+    .skipIfMrmashCannotFitStudies()
     set.seed(7)
-    p <- 200L
-    common <- rnorm(p)
-    z <- cbind(
-        a = common + rnorm(p, sd = 0.5),
-        b = common + rnorm(p, sd = 0.5),
-        c = rnorm(p)
+    n <- 300L
+    p <- 120L
+    X <- matrix(
+        rnorm(n * p),
+        n,
+        p,
+        dimnames = list(NULL, sprintf("chr1:%d:A:G", 100L * seq_len(p)))
     )
-    z[1:5, ] <- 6
-    nearNullCor <- function(cols) {
-        z <- z[, cols, drop = FALSE]
-        unname(cor(z[apply(abs(z), 1, max) < 2, , drop = FALSE]))
-    }
+    E <- matrix(rnorm(n * 2L), n, 2L) %*% chol(0.5 + diag(0.5, 2L))
+    Y <- cbind(a = 0.5 * X[, 1L] + E[, 1L], b = 0.4 * X[, 1L] + E[, 2L])
+    r <- cor(X, Y)
+    stat <- list(
+        z = sqrt(n - 2) * r / sqrt(1 - r^2),
+        n = n,
+        variantNames = colnames(X)
+    )
+    # Nothing given: mr.mash.rss estimates both from the near-null z-scores
     out <- pecotmr:::.mrmashRssResidual(
-        list(z = z, n = 100),
-        list(R = diag(p)),
+        stat,
+        list(R = cor(X)),
         NULL,
         NULL,
         NULL
     )
-    expect_equal(out$V, nearNullCor(1:3))
-    expect_identical(out$covY, out$V)
-    # Per reference, over the variants its conditions all carry, zero between
-    # references; one condition on its own is 1.
-    gappy <- z
-    gappy[6:20, 2L] <- NA
-    perRef <- list(R = rep(list(diag(p)), 3L), group = c(1L, 1L, 2L))
-    blocks <- pecotmr:::.mrmashRssResidual(
-        list(z = gappy, n = 100),
-        perRef,
-        NULL,
-        NULL,
-        NULL
-    )$V
-    carried <- z[-(6:20), 1:2]
+    expect_null(out$covY)
+    expect_null(out$V)
+    fitV <- function(stat) {
+        w <- mrmashRssWeights(
+            stat,
+            LdMatrix(cor(X)),
+            fitRetention = "slim",
+            methodArgs = MrmashRssOptions(verbose = FALSE)
+        )
+        unname(attr(w, "fit")$V)
+    }
+    zAdj <- sqrt((n - 1) / (stat$z^2 + n - 2)) * stat$z
+    nearNull <- unname(mashr::estimate_null_correlation_simple(
+        mashr::mash_set_data(zAdj)
+    ))
+    expect_equal(fitV(stat), nearNull)
+    # The conditions' heritabilities give V their 1 - h2, with those
+    # correlations
+    s <- sqrt(c(0.7, 1))
+    expect_equal(fitV(c(stat, list(h2 = c(0.3, NA)))), nearNull * outer(s, s))
+    # A z-score missing in one condition is left out of the estimate (a 0
+    # would pull the correlation toward 0), without a warning
+    gappy <- stat
+    gappy$z[3:12, "b"] <- NA
+    expect_silent(gappyV <- fitV(gappy))
     expect_equal(
-        blocks[1:2, 1:2],
-        unname(cor(carried[apply(abs(carried), 1, max) < 2, ]))
+        gappyV,
+        unname(mashr::estimate_null_correlation_simple(
+            mashr::mash_set_data(zAdj[-(3:12), ])
+        ))
     )
-    expect_equal(blocks[1:2, 3L], c(0, 0))
-    expect_equal(blocks[3L, 3L], 1)
-    # Too few near-null variants for mvsusieR's rule: the identity, warned.
-    expect_warning(
-        few <- pecotmr:::.mrmashRssResidual(
-            list(z = z[1:15, ], n = 100),
-            list(R = diag(15)),
-            NULL,
-            NULL,
-            NULL
+})
+
+test_that("the RSS fits read a missing z-score as missing, a lacked one as 0", {
+    z <- cbind(a = c(1, NA, 2), b = c(NA, 1, 3))
+    stat <- list(z = z)
+    # One LD for both conditions: missing stays missing
+    expect_identical(pecotmr:::.rssFitZ(stat, list(R = diag(3))), z)
+    # One LD per condition: a variant the reference of b lacks is 0
+    perCondition <- list(R = list(diag(3), diag(c(0, 1, 1))))
+    expect_equal(
+        pecotmr:::.rssFitZ(stat, perCondition),
+        cbind(a = c(1, NA, 2), b = c(0, 1, 3))
+    )
+    # The statistics the prior grid and h2 read carry no missing values
+    expect_equal(
+        pecotmr:::.rssCarriedStat(stat, list(R = diag(3)))$z,
+        replace(z, is.na(z), 0)
+    )
+})
+
+test_that(".mrmashRssStats reads sample sizes per variant, condition or both", {
+    z <- matrix(c(1, -2, 0.5, 3, 1, -1), 3L, 2L)
+    perVariant <- pecotmr:::.mrmashRssStats(list(z = z, n = c(100, 400, 900)))
+    expect_equal(perVariant$Bhat, z / c(10, 20, 30))
+    expect_equal(perVariant$Shat, matrix(1 / c(10, 20, 30), 3L, 2L))
+    expect_equal(perVariant$nVec, c(400, 400))
+    perCondition <- pecotmr:::.mrmashRssStats(list(z = z, n = c(100, 400)))
+    expect_equal(
+        perCondition$Shat,
+        matrix(1 / c(10, 20), 3L, 2L, byrow = TRUE)
+    )
+    expect_equal(perCondition$nVec, c(100, 400))
+    both <- matrix(c(100, 200, 300, 400, 500, 600), 3L, 2L)
+    expect_equal(
+        pecotmr:::.mrmashRssStats(list(z = z, n = both))$nVec,
+        c(200, 500)
+    )
+    expect_error(
+        pecotmr:::.mrmashRssStats(list(z = z, n = 1:4)),
+        "one per variant"
+    )
+})
+
+test_that("mr.mash.rss fits z-scores on the standardized scale", {
+    .skipIfNoMrmashRelativeS0()
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    prior <- pecotmr:::.mrmashRssDefaults(
+        pecotmr:::.mrmashRssStats(m$stat),
+        NULL,
+        TRUE,
+        NULL,
+        NULL
+    )
+    w <- mrmashRssWeights(
+        m$stat,
+        m$ldReference,
+        S0 = prior$S0,
+        w0 = prior$w0,
+        covY = diag(3),
+        methodArgs = MrmashRssOptions(verbose = FALSE)
+    )
+    direct <- mr.mashr::mr.mash.rss(
+        Z = m$stat$z,
+        R = m$LD,
+        n = 60,
+        S0 = prior$S0,
+        w0 = prior$w0,
+        covY = diag(3),
+        relative_S0 = TRUE,
+        verbose = FALSE,
+        nthreads = 1L
+    )
+    expect_equal(unname(w[,]), unname(mr.mashr::coef.mr.mash.rss(direct)))
+    # With Bhat, Shat and covY, the fit is on their scale, where h2 leaves
+    # 1 - h2 of each condition's variance
+    scaled <- pecotmr:::.mrmashRssResidual(
+        c(
+            m$stat,
+            list(Bhat = m$stat$z, Shat = 1 + 0 * m$stat$z, h2 = c(0.5, NA, 0.2))
         ),
-        "fewer than the 20"
+        list(R = m$LD),
+        NULL,
+        NULL,
+        diag(c(2, 3, 4))
     )
-    expect_equal(few$V, diag(3))
+    expect_true(scaled$originalScale)
+    expect_equal(scaled$V, c(1, 3, 3.2))
 })
 
 test_that("the mash prior's residual correlation reaches mr.mash.rss", {
-    skip_if_not_installed("mr.mashr")
+    .skipIfMrmashCannotFitStudies()
     m <- .rrwMulti(n = 60, p = 6, K = 3)
     R <- 0.3 + diag(0.7, 3)
     w <- mrmashRssWeights(
@@ -2986,11 +3084,8 @@ test_that(".rssSampleGroups splits a reference's conditions by sample group", {
     expect_equal(.rssSampleGroups(c(1, 2, 1), c("s1", "s1", "s1")), c(1, 2, 1))
 })
 
-test_that(".rssH2Scaled scales variances by 1 - h2, keeping correlations", {
-    C <- matrix(c(1, 0.4, 0.4, 1), 2)
-    V <- .rssH2Scaled(C, c(0.2, NA))
-    expect_equal(diag(V), c(0.8, 1))
-    expect_equal(cov2cor(V), C)
-    expect_identical(.rssH2Scaled(C, NULL), C)
-    expect_null(.rssH2Scaled(NULL, c(0.1, 0.1)))
+test_that(".rssResidualVariances gives 1 - h2 of each condition's variance", {
+    expect_equal(.rssResidualVariances(c(0.2, NA)), c(0.8, 1))
+    expect_equal(.rssResidualVariances(c(0.2, 0.5), c(2, 4)), c(1.6, 2))
+    expect_null(.rssResidualVariances(NULL))
 })

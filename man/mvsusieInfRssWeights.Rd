@@ -59,7 +59,11 @@ stat <- list(
   z = vapply(ss, function(s) s[1] / s[2], numeric(1)),
   n = rep(nrow(X), ncol(X)))
 LD <- cor(X)
-fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
-  prior_variance = 1, methodArgs = MvsusieInfRssOptions())
-mvsusieInfRssWeights(stat, mvsusieInfRssFit = fit)
+# With an mvsusieR that fits unmappable effects
+if (requireNamespace("mvsusieR", quietly = TRUE) &&
+  "unmappable_effects" \%in\% names(formals(mvsusieR::mvsusie_ss))) {
+  fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
+    prior_variance = 1, methodArgs = MvsusieInfRssOptions())
+  mvsusieInfRssWeights(stat, mvsusieInfRssFit = fit)
+}
 }

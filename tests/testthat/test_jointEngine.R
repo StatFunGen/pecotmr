@@ -537,7 +537,7 @@ test_that(".runJointCell: cross-context FM sumstats -> per-context rows", {
         .package = "mvsusieR"
     )
     local_mocked_bindings(
-        fitMvsusieRss = function(Z, R, N, prior_variance, coverage, ...) {
+        .fitMvsusieRss = function(Z, R, N, prior_variance, coverage, ...) {
             captured <<- list(N = N)
             list()
         },
@@ -560,11 +560,15 @@ test_that(".runJointCell: cross-context FM sumstats -> per-context rows", {
     expect_equal(captured$N, 110)
 })
 
-# Two studies, each on its own LD reference; study B lacks the last variant.
-.je_xsSsGroup <- function() {
+# Two studies, each on its own LD reference (of `nSamples` samples, unknown
+# by default); study B lacks the last variant.
+.je_xsSsGroup <- function(nSamples = c(NA_integer_, NA_integer_)) {
     ids <- sprintf("chr1:%d:A:G", 100L * (1:3))
-    ldm <- function(rho) {
-        LdMatrix(`dimnames<-`(rho^abs(outer(1:3, 1:3, "-")), list(ids, ids)))
+    ldm <- function(rho, n) {
+        LdMatrix(
+            `dimnames<-`(rho^abs(outer(1:3, 1:3, "-")), list(ids, ids)),
+            nSamples = n
+        )
     }
     new(
         "SumStatsJointGroup",
@@ -580,7 +584,7 @@ test_that(".runJointCell: cross-context FM sumstats -> per-context rows", {
             2L,
             dimnames = list(ids, c("A", "B"))
         ),
-        ldReference = list(ldm(0.5), ldm(0.2)),
+        ldReference = list(ldm(0.5, nSamples[[1L]]), ldm(0.2, nSamples[[2L]])),
         N = c(100, 120)
     )
 }
@@ -602,7 +606,7 @@ test_that(".runJointCell: mvsusie across studies reads each study's own LD", {
         .package = "mvsusieR"
     )
     local_mocked_bindings(
-        fitMvsusieRss = function(Z, R, N, prior_variance, coverage, ...) {
+        .fitMvsusieRss = function(Z, R, N, prior_variance, coverage, ...) {
             captured <<- list(Z = Z, R = R, N = N)
             list()
         },
@@ -2365,27 +2369,229 @@ test_that("fitJointGroup(SumStats, Fm) passes a reweighted residual variance", {
         .buildMvsusieReweightedPrior = function(fitParts, conditions, ddCut) {
             list(priorVariance = "PV", residualVariance = diag(2))
         },
-        fitMvsusieRss = function(
+        # Not fitMvsusieRss() formals, so they reach it in its `methodArgs`
+        .fitMvsusieRss = function(
             Z,
             R,
             N,
             prior_variance,
             coverage,
-            residual_variance = NULL,
-            varY = NULL,
-            ...
+            ...,
+            methodArgs
         ) {
-            captured <<- list(residual = residual_variance, varY = varY)
+            user <- as.list(methodArgs)
+            captured <<- list(
+                residual = user$residual_variance,
+                varY = user$varY
+            )
             list()
         },
         .fmPostprocessOne = .je_mockPostprocess,
         .package = "pecotmr"
     )
     pecotmr:::fitJointGroup(grp, pipe, "mvsusie", list())
-    expect_equal(captured$residual, diag(2))
-    # The same matrix is Y's covariance, so mvsusie_rss does not estimate one
-    # of its own from the region's z-scores.
-    expect_identical(captured$varY, captured$residual)
+    # The mr.mash fit's residual covariance is Y's covariance, so mvsusie_rss
+    # does not estimate one of its own from the region's z-scores; without
+    # the run's h2, the residual variance is left to its default, varY.
+    expect_equal(captured$varY, diag(2))
+    expect_null(captured$residual)
+})
+
+test_that("fitJointGroup(SumStats, Fm) gives mvsusie_rss a missing z-score", {
+    local_mocked_bindings(
+        .ldFromRef = .je_mockSsLd,
+        .package = "pecotmr"
+    )
+    grp <- .je_mkSsGroup("G1")
+    grp@Z[2L, 2L] <- NA
+    pipe <- new("FmJointPipeline", config = list(coverage = 0.95))
+    captured <- NULL
+    local_mocked_bindings(
+        .buildMvsusieReweightedPrior = function(fitParts, conditions, ddCut) {
+            list(priorVariance = "PV", residualVariance = NULL)
+        },
+        .fitMvsusieRss = function(Z, R, N, prior_variance, coverage, ...) {
+            captured <<- Z
+            list()
+        },
+        .fmPostprocessOne = .je_mockPostprocess,
+        .package = "pecotmr"
+    )
+    pecotmr:::fitJointGroup(grp, pipe, "mvsusie", list())
+    # mvsusie_rss fits it as 0 but leaves it out of its estimate of the
+    # conditions' residual correlation, which a 0 would pull toward 0
+    expect_true(is.na(captured[2L, 2L]))
+    expect_equal(sum(is.na(captured)), 1L)
+})
+
+test_that("the joint RSS fit takes SusieRssParam's LD-reference settings", {
+    captured <- NULL
+    local_mocked_bindings(
+        create_mixture_prior = function(...) "PRIOR",
+        .package = "mvsusieR"
+    )
+    local_mocked_bindings(
+        .fitMvsusieRss = function(
+            Z,
+            R,
+            N,
+            prior_variance,
+            coverage,
+            ...,
+            rssArgs = list()
+        ) {
+            captured <<- rssArgs
+            list()
+        },
+        .fmPostprocessOne = .je_mockPostprocess,
+        .package = "pecotmr"
+    )
+    fit <- function(group, rssParam) {
+        pipe <- new(
+            "FmJointPipeline",
+            config = list(coverage = 0.95, susieRssParam = rssParam)
+        )
+        pecotmr:::fitJointGroup(group, pipe, "mvsusie", list())
+        captured
+    }
+    # Each study's reference size, for the correction rMismatch turns on
+    eb <- SusieRssParam(
+        rMismatch = "eb",
+        control = SusieRssControlOptions(r_tol = 1e-6)
+    )
+    sized <- fit(.je_xsSsGroup(nSamples = c(300L, 200L)), eb)
+    expect_equal(sized$R_finite, c(300, 200))
+    expect_identical(sized$R_mismatch, "eb")
+    expect_equal(sized$control, list(r_tol = 1e-6))
+    given <- SusieRssParam(rFinite = 500, rMismatch = "eb")
+    expect_equal(fit(.je_xsSsGroup(), given)$R_finite, c(500, 500))
+    expect_error(
+        fit(.je_xsSsGroup(), eb),
+        "needs the LD reference's size"
+    )
+    # By default, no correction, and none of the settings is given
+    plain <- fit(.je_xsSsGroup(), SusieRssParam())
+    expect_null(plain$R_finite)
+    expect_null(plain$R_mismatch)
+    expect_null(plain$control)
+})
+
+# Two studies on the two halves of the bundled GWAS example's panel as a
+# GenotypeMixture, each study's z-scores simulated on one half's LD: study A
+# on the first's, B on the second's.
+.je_mixtureSsGroup <- function(p = 60L) {
+    data(gwasSumStatsS4Example, envir = environment())
+    panel <- ldReference(gwasSumStatsS4Example)[[1L]]
+    halves <- list(a = panel[, 1:80], b = panel[, 81:165])
+    ids <- names(SummarizedExperiment::rowRanges(panel))[seq_len(p)]
+    lds <- map(halves, .ldFromRef, variantIds = ids, label = "t")
+    b <- replace(numeric(p), c(20L, 45L), c(0.25, -0.2))
+    set.seed(11)
+    Z <- `dimnames<-`(
+        exec(cbind, !!!map(lds, .je_simulateZ, n = 2000, b = b)),
+        list(ids, c("A", "B"))
+    )
+    list(
+        group = new(
+            "SumStatsJointGroup",
+            conditions = data.frame(
+                study = c("A", "B"),
+                context = "c1",
+                trait = "G",
+                stringsAsFactors = FALSE
+            ),
+            Z = Z,
+            ldReference = GenotypeMixture(halves, mixtureWeights = c(0.5, 0.5)),
+            N = c(2000, 2000)
+        ),
+        lds = lds
+    )
+}
+
+# z-scores of effects `b` (per SD) in `n` samples with LD `R`.
+.je_simulateZ <- function(R, n, b) {
+    noise <- t(chol(R + diag(1e-6, nrow(R)))) %*% rnorm(nrow(R))
+    drop(sqrt(n) * R %*% b + noise)
+}
+
+test_that("the joint RSS fit estimates each study's mixture weights", {
+    .skipIfMvsusieCannotFitStudies()
+    fx <- .je_mixtureSsGroup()
+    captured <- list(fit = NULL, dataX = list())
+    local_mocked_bindings(
+        .fmPostprocessOne = function(fit, method, dataX, ..., conditionIdx) {
+            captured$fit <<- fit
+            captured$dataX[[conditionIdx]] <<- dataX
+            .je_mockPostprocess(
+                fit,
+                method,
+                dataX,
+                ...,
+                conditionIdx = conditionIdx
+            )
+        },
+        .package = "pecotmr"
+    )
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 3L),
+            susieRssParam = SusieRssParam(estimateMixtureWeights = TRUE)
+        )
+    )
+    rows <- suppressWarnings(suppressMessages(
+        pecotmr:::fitJointGroup(fx$group, pipe, "mvsusie", list())
+    ))
+    expect_length(rows, 2L)
+    # One set of weights per study, each on the half its z-scores came from
+    omega <- captured$fit$omega_weights
+    expect_length(omega, 2L)
+    expect_gt(omega[[1L]][[1L]], 0.9)
+    expect_gt(omega[[2L]][[2L]], 0.9)
+    # Each study's credible sets read the halves mixed with its weights
+    for (r in 1:2) {
+        purity <- captured$dataX[[r]]
+        expect_equal(
+            unname(crossprod(purity) / (nrow(purity) - 1)),
+            unname(omega[[r]][[1L]] * fx$lds$a + omega[[r]][[2L]] * fx$lds$b),
+            tolerance = 1e-8
+        )
+    }
+})
+
+test_that("the joint RSS fit falls back to its single-effect fit", {
+    .skipIfMvsusieCannotFitStudies()
+    fx <- .je_mixtureSsGroup()
+    # A zero threshold on the credible sets' BF attenuation flags every fit
+    # with one, so the fallback is taken
+    rssParam <- SusieRssParam(
+        serFallback = TRUE,
+        keepFullFit = "all",
+        rMismatch = "eb",
+        control = SusieRssControlOptions(sensitivity_threshold = 0)
+    )
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 3L),
+            fitRetention = "full",
+            susieRssParam = rssParam
+        )
+    )
+    rows <- suppressWarnings(suppressMessages(
+        pecotmr:::fitJointGroup(fx$group, pipe, "mvsusie", list())
+    ))
+    expect_length(rows, 2L)
+    for (row in rows) {
+        sf <- pecotmr:::.fmrPartsSusieFit(row)
+        expect_true(sf$R_reliability_flag)
+        expect_true(sf$serFallbackUsed)
+        # The reported fit is the one-effect model; the multi-effect fit it
+        # replaced is kept alongside
+        expect_equal(nrow(sf$alpha), 1L)
+        expect_gt(nrow(sf$multiEffectFit$alpha), 1L)
+        expect_s3_class(sf$multiEffectFit, "mvsusie")
+    }
 })
 
 test_that("fitJointGroup(twas): spike-and-slab pi feeds bayes_b pi", {

@@ -293,3 +293,23 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
         "mvsusieR predates unmappable effects by adaptive shrinkage"
     )
 }
+
+# Skip unless mvsusieR learns the size of the unmappable effects over the
+# conditions (unmappable_scale).
+.fm_skipIfNoUnmappableScale <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("unmappable_scale", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates pooled unmappable scales"
+    )
+}
+
+# Skip unless mvsusieR integrates the residual variances out of the single
+# effects (estimate_residual_method = "NIG").
+.fm_skipIfNoMvsusieNig <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("estimate_residual_method", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates the NIG prior"
+    )
+}

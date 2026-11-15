@@ -76,6 +76,20 @@ Options forwarded to one fine-mapping engine, checked
   class is not known at that point. A plain list works there too and
   stays checked against both; the exact engine is checked once the run's
   input class is known.
+
+  Two mvsusieR settings help joint fits of small studies, such as
+  ancestry groups of a few dozen samples. \code{unmappable_scale}
+  (\code{MvsusieInfOptions}, \code{MvsusieAshOptions} and their
+  summary-statistic siblings) learns the size of the unmappable effects
+  over all the conditions instead of from each condition's samples: one
+  scale with \code{"single"}, or each condition's shrunk toward it with
+  \code{"shrink"} (by \code{unmappable_shrinkage} samples), the shape
+  being the run's mash prior collapsed over its weights.
+  \code{estimate_residual_method = "NIG"} (\code{MvsusieOptions},
+  \code{MvsusieRssOptions}) integrates each condition's residual
+  variance out of the single effects, as susieR's NIG prior does for one
+  trait, which tempers the evidence of a small sample; it takes no
+  unmappable effects.
 }
 \examples{
 SusieOptions(max_iter = 200)

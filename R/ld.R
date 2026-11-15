@@ -1444,6 +1444,33 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     named
 }
 
+# The panels of a GenotypeMixture over `variantIds`, matched and
+# allele-aligned as .ldFromRef() and .ldFactorFromRef() align the mixture's
+# LD: each panel's LD matrix, or with `useFactor` its factor, unweighted and
+# in the caller's frame, for the fits that estimate the panels' weights
+# (SusieRssParam's estimateMixtureWeights). NULL when no variant matches.
+# @noRd
+.ldPanelsFromRef <- function(
+    ldReference,
+    variantIds,
+    label,
+    onMissing = c("error", "drop"),
+    useFactor = FALSE
+) {
+    onMissing <- arg_match(onMissing)
+    matched <- .ldFromRefMatch(ldReference, variantIds, label, onMissing)
+    if (is.null(matched)) {
+        return(NULL)
+    }
+    map(
+        seq_along(.gmComponents(ldReference)),
+        .gmPanelAt,
+        x = ldReference,
+        matched = matched,
+        useFactor = useFactor
+    )
+}
+
 # The LD among the reference's variants at `idx`, in the reference's own
 # allele coding: the sample correlation of a panel's dosages, or the
 # corresponding block of an LdMatrix.

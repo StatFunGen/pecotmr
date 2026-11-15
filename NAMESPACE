@@ -771,6 +771,7 @@ importFrom(dplyr,
 importFrom(glue,glue)
 importFrom(magrittr,is_in)
 importFrom(matrixStats,
+  colMedians,
   colSds,
   rowLogSumExps
 )
@@ -940,6 +941,7 @@ importFrom(tools,file_ext)
 importFrom(utils,
   combn,
   head,
+  packageVersion,
   removeSource
 )
 importFrom(vctrs,

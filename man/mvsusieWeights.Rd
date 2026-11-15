@@ -36,8 +36,6 @@ missing fit is an error rather than an invitation to refit.
 }
 \examples{
 \donttest{
-# Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
-library(susieR)
 data(multiTraitData)
 X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y

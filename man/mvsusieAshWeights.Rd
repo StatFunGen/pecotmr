@@ -44,16 +44,18 @@ Extracts coefficients from an existing mvSuSiE-ash fit
 
 \examples{
 \donttest{
-# Requires susieR attached (mvsusieR 0.3.0 packaging limitation).
-library(susieR)
 data(multiTraitData)
 # The unmappable effects take conditions observed on the same samples.
 observed <- stats::complete.cases(multiTraitData$Y)
 X <- multiTraitData$X[observed, 1:60]
 Y <- multiTraitData$Y[observed, ]
-fit <- fitMvsusie(X = X, Y = Y,
-  prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
-  methodArgs = MvsusieAshOptions(max_iter = 20))
-mvsusieAshWeights(mvsusieAshFit = fit)
+# With an mvsusieR that fits unmappable effects
+if (requireNamespace("mvsusieR", quietly = TRUE) &&
+  "unmappable_effects" \%in\% names(formals(mvsusieR::mvsusie))) {
+  fit <- fitMvsusie(X = X, Y = Y,
+    prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
+    methodArgs = MvsusieAshOptions(max_iter = 20))
+  mvsusieAshWeights(mvsusieAshFit = fit)
+}
 }
 }

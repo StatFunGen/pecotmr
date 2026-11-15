@@ -104,6 +104,51 @@ setClass("MethodOptions", contains = "SimpleList")
     )
 }
 
+# The argument names the installed engines `callee` ("pkg::fn", one or
+# several, such as mvsusie_rss and mvsusie_ss, which its `...` reaches) take
+# explicitly, read off their live formals; none when a package is absent.
+# What an engine can be asked, where its version decides (.engineRequire()).
+# @noRd
+.engineFormalNames <- function(callee) {
+    fns <- compact(map(callee, .engineCallee))
+    setdiff(unique(list_c(map(map(fns, formals), names))), "...")
+}
+
+# Whether the installed engines `callee` take each of the arguments `args`:
+# named among their formals, or any argument when the last of them takes
+# `...` (as a function standing in for an engine in a test may; mvsusie_rss
+# is named before mvsusie_ss, which its `...` reaches).
+# @noRd
+.engineTakes <- function(callee, args) {
+    last <- .engineCallee(callee[[length(callee)]])
+    if (!is.null(last) && is_in("...", names(formals(last)))) {
+        return(rep(TRUE, length(args)))
+    }
+    is_in(args, .engineFormalNames(callee))
+}
+
+# Stop unless the installed engines `callee` take every one of `args`: what
+# `what` asks of an engine is a feature of a newer version than the one
+# installed (or of one not installed at all), which the message names
+# instead of the engine failing on an unused argument.
+# @noRd
+#' @importFrom utils packageVersion
+.engineRequire <- function(callee, args, what) {
+    pkg <- str_extract(callee[[1L]], "^[^:]+")
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+        abort(glue("{what} needs {pkg}, which is not installed."))
+    }
+    lacking <- args[!.engineTakes(callee, args)]
+    if (length(lacking) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "{what} needs a newer {pkg}: the installed {pkg} ",
+        "{packageVersion(pkg)} does not take ",
+        "{str_flatten(sprintf('`%s`', lacking), ', ')}."
+    ))
+}
+
 # The names an engine will accept, or NULL when that cannot be determined --
 # either the package is absent or the engine takes `...`, in which case it
 # accepts anything and there is nothing to check against.

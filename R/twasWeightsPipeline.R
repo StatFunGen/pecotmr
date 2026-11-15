@@ -1641,7 +1641,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   start from one: the Bayesian alphabet (\code{bayesA} to \code{bayesR},
 #'   as their \code{h2}) and, on summary statistics, LDpred2
 #'   (\code{ldpred2Auto}'s \code{h2Init}, and the centre of
-#'   \code{ldpred2Grid}'s grid). \code{NULL} (the default) gives none, so
+#'   \code{ldpred2Grid}'s grid) and the joint mr.mash fits, whose residual
+#'   variances it sets to each condition's \eqn{1 - h^2}, as SuSiE-RSS's,
+#'   with the correlations of their residual covariance (see
+#'   \code{\link{mrmashRssWeights}}). \code{NULL} (the default) gives none, so
 #'   each keeps its own default. An estimator estimates each trait's first,
 #'   once, on the variants, samples and LD its methods fit: \code{"lava"},
 #'   \code{"hdlL"} or \code{"fastHer"}, or on individual-level data

@@ -910,6 +910,7 @@ test_that("fineMappingPipeline(QtlSumStats): trait joint refuses fsusie", {
 })
 
 test_that("fineMappingPipeline(QtlSumStats): study joint per context x trait", {
+    .skipIfMvsusieCannotFitStudies()
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = "c1",
@@ -938,6 +939,7 @@ test_that("fineMappingPipeline(QtlSumStats): study joint per context x trait", {
 })
 
 test_that("fineMappingPipeline(QtlSumStats): study+context joint fits", {
+    .skipIfMvsusieCannotFitStudies()
     ss <- .jd_makeQtlSumStats(
         studies = c("Q1", "Q2"),
         contexts = c("c1", "c2"),
@@ -2164,6 +2166,38 @@ test_that(".fmDispatchJointSpecsMultiStudy: study specs go to sumstats", {
     ))
     expect_s4_class(out, "QtlFineMappingResult")
     expect_equal(nrow(out), 2L) # indA row + ssC row
+})
+
+test_that(".fmDispatchJointSpecsMultiStudy: summary statistics take the h2", {
+    # The run's h2 is settled on the summary statistics their joint fits
+    # read, as a QtlSumStats run settles it on its own.
+    qd <- .js_makeQtlDataset(studyName = "indA", traits = "t1")
+    ss <- .js_makeQtlSumStats(
+        studies = "ssC",
+        contexts = c("c1", "c2"),
+        traits = "t1"
+    )
+    mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qd), sumStats = ss)
+    seen <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .fmDispatchJointSpecsQtlSumStats = function(parsed, tokens, args, cfg) {
+            seen$cfg <- cfg
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    run <- function(h2) {
+        pecotmr:::.fmDispatchJointSpecsMultiStudy(
+            list(list(axes = "context", scope = NULL)),
+            "mvsusie",
+            list(),
+            list(data = mt, verbose = 0, h2 = h2),
+            components = FALSE
+        )
+        seen$cfg
+    }
+    expect_identical(run("lava")$h2Spec, list(method = "lava"))
+    expect_null(run(NULL)$h2Spec)
 })
 
 test_that(".fmDispatchJointSpecsMultiStudy: a study spec joins the studies", {

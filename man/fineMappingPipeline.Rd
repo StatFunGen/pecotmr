@@ -360,24 +360,28 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 
 \item{susieRssParam}{Summary-statistics solver settings for
 \code{QtlSumStats} / \code{GwasSumStats} input, built with
-\code{\link{SusieRssParam}}: \itemize{
+\code{\link{SusieRssParam}}. The joint mvSuSiE fits
+(\code{mvsusieR::mvsusie_rss}) take them too, for each condition's LD
+reference: \itemize{
   \item \code{serFallback} (default \code{FALSE}) --- after each
-    multi-effect SuSiE-RSS fit, read susieR's finite-sample R
-    diagnostics and, when
+    multi-effect fit, read its finite-sample R diagnostics and, when
     \code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE},
     report the single-effect (\code{ser_model}) result for that region
-    instead.
+    instead. That is the fit the mismatch correction starts from, so
+    the fallback needs \code{rMismatch}.
   \item \code{keepFullFit} (default \code{"fallback"}) --- which
     pre-fallback multi-effect fits to retain: only the regions that fell
     back, \code{"all"}, or \code{"none"}. Meaningful only with
     \code{serFallback}. The retained fit and the decision are read via
     \code{susieFit(res)$multiEffectFit},
     \code{$R_reliability_flag} and \code{$serFallbackUsed}.
-  \item \code{rFinite} --- finite-sample size for susieR's
-    \code{R_finite} correction. \code{NULL} (default) uses susieR's
-    own, except when a finite/EB mode is active (\code{serFallback} or
-    \code{rMismatch != "none"}), where it falls back to the LD panel's
-    \code{nSamples(ldReference)}.
+  \item \code{rFinite} --- finite-sample size for the \code{R_finite}
+    correction. \code{NULL} (default) leaves the correction off,
+    except when a finite/EB mode is active (\code{serFallback} or
+    \code{rMismatch != "none"}), where it falls back to each LD
+    reference's \code{nSamples(ldReference)}: a
+    \code{GenotypeMixture}'s pooled over its weights, or with
+    \code{estimateMixtureWeights} each panel's.
   \item \code{rMismatch} (default \code{"none"}) --- LD-mismatch
     correction forwarded as \code{R_mismatch}: also \code{"eb"} or
     \code{"eb_mix"}.
@@ -386,6 +390,11 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
     \code{\link{SusieRssControlOptions}}. This was a bare named list,
     which meant a misspelled option was dropped silently; the
     constructor checks the names against that function's live formals.
+  \item \code{estimateMixtureWeights} (default \code{FALSE}) --- for a
+    \code{GenotypeMixture} LD reference, the fits estimate its panels'
+    weights instead of using its own (for each group of conditions
+    from the same samples, in the joint fits). The credible sets'
+    purity reads the reference with the estimated weights.
 }}
 
 \item{h2}{For \code{QtlSumStats} input (and a
@@ -402,10 +411,13 @@ share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
 its row's estimate, and must hold exactly one row for each. A value is
 used floored at 0.001 and capped at 0.99, and a trait with no estimate
 keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
-chained from \code{susieInf} or not; \code{susieInf} re-estimates its
-residual variance every sweep, and \code{ser} and \code{mvsusie} take
-none from it. A \code{residual_variance} set through \code{methods}
-wins.}
+chained from \code{susieInf} or not, and the joint mvSuSiE fits, whose
+residual variances it sets condition by condition, with the
+correlations of the residual covariance of the run's mr.mash fit, or
+without one those \code{mvsusie_rss} estimates from the z-scores.
+\code{susieInf} re-estimates its residual variance every sweep, as
+\code{mvsusieInf} does from that start; \code{ser} takes none from it.
+A \code{residual_variance} set through \code{methods} wins.}
 }
 \value{
 A \code{QtlFineMappingResult} keyed by \code{(study, context,

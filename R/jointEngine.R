@@ -683,7 +683,7 @@ setMethod(
                 args$methodArgs[[token]],
                 .residualSd(mvPrior$residualVariance, Ys)
             ),
-            unmappable_variance = .fmInfUnmappableVariance(
+            unmappable_variance = .fmUnmappableShape(
                 token,
                 mvPrior,
                 colnames(Ys),
@@ -828,19 +828,44 @@ setMethod(
             .jgLdRef(group),
             "jointEngine"
         )
-        fit <- .jointFitMvsusieRss(group, ld, cfg, args, token)
-        # One per-condition entry (RSS has no sample folds).
-        map(
+        fitted <- .jointFitMvsusieRss(group, ld, cfg, args, token)
+        # One per-condition entry (RSS has no sample folds), the credible
+        # sets' purity read on the references the fit weighed
+        entries <- map(
             seq_len(ncol(.jgZ(group))),
             .jointRssEntry,
-            fit = fit,
-            ld = ld,
+            fit = fitted$fit,
+            ld = .jointRssPurityLd(ld, fitted$fitLd, fitted$fit),
             cfg = cfg,
             token = token,
             region = args$region
         )
+        .jointRssRecordFallback(entries, fitted, .jointRssParam(cfg))
     }
 )
+
+# The run's SusieRssParam, which the joint summary-statistics fits read as
+# susie_rss's fits do; its defaults when the run gives none.
+# @noRd
+.jointRssParam <- function(cfg) {
+    cfg$susieRssParam %||% SusieRssParam()
+}
+
+# Each condition's entry with the SER-fallback decision recorded on it, as
+# .fmRssRecordFallback() records it for a susie_rss fit, when the run asks
+# for the fallback (SusieRssParam's serFallback).
+# @noRd
+.jointRssRecordFallback <- function(entries, fitted, rssParam) {
+    if (!isTRUE(rssParam$serFallback)) {
+        return(entries)
+    }
+    map(
+        entries,
+        .fmRssRecordFallback,
+        f = fitted,
+        keepFullFit = rssParam$keepFullFit
+    )
+}
 
 # A summary-statistics group's statistics, as the RSS fits read them.
 # @noRd
@@ -902,20 +927,86 @@ setMethod(
 }
 
 # mvSuSiE-RSS joint fit of the method `token` over summary statistics, with
-# the data-driven reweighted prior. Returns the class-tagged fit. `ld` is the
-# group's LD (.rssConditionLd()): one matrix or factor, or one per condition
-# when its studies are each on their own reference, fitted as different
-# samples with each condition's sample size. The mr.mash fit's residual
-# covariance is both the residual variance and the Y covariance (varY), zero
-# between references; without a fit, mvsusie_rss estimates both from the
-# near-null z-scores.
+# the data-driven reweighted prior (.jointMvsusieRssArgs()), conditioned on
+# its LD references as the run's SusieRssParam sets (.jointRssArgs()). `ld`
+# is the group's LD (.rssConditionLd()): one matrix or factor, or one per
+# condition when its studies are each on their own reference, fitted as
+# different samples with each condition's sample size; with estimated
+# mixture weights, the fit reads the mixtures' panels (.jointRssFitLd()).
+# Returns the class-tagged fit, or with serFallback the single-effect fit it
+# falls back to, as .fmRssSerFallback() gives them, and the LD the fit read
+# (`fitLd`).
 # @noRd
 .jointFitMvsusieRss <- function(group, ld, cfg, args, token) {
-    ddCut <- if (is.null(cfg$dataDrivenPriorWeightsCutoff)) {
-        1e-10
-    } else {
-        cfg$dataDrivenPriorWeightsCutoff
-    }
+    rssParam <- .jointRssParam(cfg)
+    fitLd <- .jointRssFitLd(group, ld, rssParam)
+    fitArgs <- .fmMergeUserArgs(
+        .jointMvsusieRssArgs(group, ld, fitLd, cfg, args, token),
+        args$methodArgs[[token]]
+    )
+    fit <- .rssQuietMissingZ(exec(
+        .fitMvsusieRss,
+        !!!.fmMvsusieSplitArgs(token, fitMvsusieRss, fitArgs, rss = TRUE),
+        rssArgs = .jointRssArgs(group, rssParam)
+    ))
+    fitClass <- str_c(token, "Rss")
+    fallback <- .fmRssSerFallback(
+        .setFinemappingFitClass(fit, fitClass),
+        rssParam,
+        fitClass = fitClass
+    )
+    c(fallback, list(fitLd = fitLd))
+}
+
+# The joint mvSuSiE-RSS fit's arguments before the run's own for the method:
+# the z-scores `ld` carries (.rssFitZ()), the LD the fit reads (`fitLd`),
+# and the data-driven reweighted prior (.jointMvsusieRssPrior()), whose
+# mr.mash fit's residual covariance is the Y covariance (varY), zero between
+# references, whose correlations mvsusie_rss reads; without a fit,
+# mvsusie_rss estimates them from the near-null z-scores. With the run's
+# `h2`, the residual variance is each condition's 1 - h2, as SuSiE-RSS's,
+# which mvsusie_rss gives those correlations; without it, varY's.
+# @noRd
+.jointMvsusieRssArgs <- function(group, ld, fitLd, cfg, args, token) {
+    mvPrior <- .jointMvsusieRssPrior(group, cfg, args)
+    residual <- .rssMaskBetweenRefs(mvPrior$residualVariance, ld$group)
+    residualVariance <- .rssResidualVariances(
+        .jointRssH2(group, ld, cfg$h2, "fitJointGroup(SumStatsJointGroup)")
+    )
+    stat <- .rssCarriedStat(.jointRssStat(group), ld)
+    list(
+        Z = .rssFitZ(.jointRssStat(group), ld),
+        N = ld$n %||% as.numeric(stats::median(.jgN(group))),
+        prior_variance = mvPrior$priorVariance,
+        coverage = cfg$credibleSetParam$coverage
+    ) |>
+        c(compact(list(
+            R = fitLd$R,
+            X = fitLd$X,
+            sample_groups = ld$group,
+            residual_variance = residualVariance,
+            varY = residual,
+            unmappable_prior = .fmAshThetaPrior(
+                token,
+                mvPrior,
+                colnames(.jgZ(group)),
+                .mrmashRssStats(stat),
+                args$methodArgs[[token]],
+                .residualSd(residualVariance)
+            ),
+            unmappable_variance = .fmUnmappableShape(
+                token,
+                mvPrior,
+                colnames(.jgZ(group)),
+                args$methodArgs[[token]]
+            )
+        )))
+}
+
+# The data-driven reweighted mvSuSiE prior of a summary-statistics group,
+# from the run's mr.mash fit of its conditions.
+# @noRd
+.jointMvsusieRssPrior <- function(group, cfg, args) {
     key <- .jointPriorKey(.jgConditions(group))
     mvFitParts <- .fmLookupMrmashFit(
         args$mrmashPrior,
@@ -924,54 +1015,125 @@ setMethod(
         context = key$context,
         conditionNames = colnames(.jgZ(group))
     )
-    mvPrior <- .buildMvsusieReweightedPrior(
+    .buildMvsusieReweightedPrior(
         mvFitParts,
         colnames(.jgZ(group)),
-        ddCut
+        cfg$dataDrivenPriorWeightsCutoff %||% 1e-10
     )
-    residual <- .rssMaskBetweenRefs(mvPrior$residualVariance, ld$group)
-    # V carries each condition's heritability, as SuSiE-RSS's 1 - h2;
-    # varY stays the correlation
-    residualVariance <- .rssH2Scaled(
-        residual,
-        .jointRssH2(group, ld, cfg$h2, "fitJointGroup(SumStatsJointGroup)")
+}
+
+# The LD-reference settings of the run's SusieRssParam that the joint RSS
+# fit takes and MvsusieRssOptions() refuses: mvsusie_rss's R_finite
+# (.jointRssRFinite()), R_mismatch and control, each only when it is set,
+# so a fit without them asks nothing of an mvsusie_rss that predates them.
+# @noRd
+.jointRssArgs <- function(group, rssParam) {
+    list(
+        R_finite = .jointRssRFinite(group, rssParam),
+        R_mismatch = if (!identical(rssParam$rMismatch, "none")) {
+            rssParam$rMismatch
+        },
+        control = .rssControlList(rssParam$control)
     )
-    mvBaseArgs <- list(
-        Z = .rssCarriedStat(.jointRssStat(group), ld)$z,
-        N = ld$n %||% as.numeric(stats::median(.jgN(group))),
-        prior_variance = mvPrior$priorVariance,
-        coverage = cfg$credibleSetParam$coverage
-    ) |>
-        c(compact(list(
-            R = ld$R,
-            X = ld$X,
-            sample_groups = ld$group,
-            residual_variance = residualVariance,
-            varY = residual,
-            unmappable_prior = .fmAshThetaPrior(
-                token,
-                mvPrior,
-                colnames(.jgZ(group)),
-                .mrmashRssStats(.rssCarriedStat(.jointRssStat(group), ld)),
-                args$methodArgs[[token]],
-                .residualSd(residualVariance)
-            ),
-            unmappable_variance = .fmInfUnmappableVariance(
-                token,
-                mvPrior,
-                colnames(.jgZ(group)),
-                args$methodArgs[[token]]
-            )
-        )))
-    fitArgs <- .fmMergeUserArgs(mvBaseArgs, args$methodArgs[[token]])
-    fitMvsusieRssArgs <- .fmMvsusieSplitArgs(
-        token,
-        fitMvsusieRss,
-        fitArgs,
-        rss = TRUE
+}
+
+# The reference sizes of the joint RSS fit's finite-reference correction
+# (mvsusie_rss's R_finite), each condition's reference's resolved as
+# .fmResolveRFinite() resolves susie_rss's: one per condition, or a list
+# with one element per condition when a mixture's panels each have their
+# own (estimated mixture weights). NULL when the correction is off.
+# @noRd
+.jointRssRFinite <- function(group, rssParam) {
+    sizes <- map(
+        .jointConditionRefs(group),
+        .fmResolveRFinite,
+        rFinite = rssParam$rFinite,
+        serFallback = rssParam$serFallback,
+        rMismatch = rssParam$rMismatch,
+        estimateMixtureWeights = rssParam$estimateMixtureWeights
     )
-    fit <- exec(fitMvsusieRss, !!!fitMvsusieRssArgs)
-    .setFinemappingFitClass(fit, str_c(token, "Rss"))
+    if (any(lengths(sizes) > 1L)) sizes else list_c(sizes)
+}
+
+# Each condition's LD reference (.jgLdRefAt()).
+# @noRd
+.jointConditionRefs <- function(group) {
+    map(seq_len(ncol(.jgZ(group))), .jgLdRefAt, g = group)
+}
+
+# The LD the joint RSS fit reads: `ld` (.rssConditionLd()), or, when the fit
+# estimates the weights of GenotypeMixture references (SusieRssParam's
+# estimateMixtureWeights), with each such condition's LD replaced by a list
+# of its reference's panels (.jointRssPanels()).
+# @noRd
+.jointRssFitLd <- function(group, ld, rssParam) {
+    refs <- .jointConditionRefs(group)
+    if (
+        !isTRUE(rssParam$estimateMixtureWeights) ||
+            !any(map_lgl(refs, .ldIsMixtureRef))
+    ) {
+        return(ld)
+    }
+    useFactor <- !is.null(ld$X)
+    replace(
+        ld,
+        if (useFactor) "X" else "R",
+        list(.jointRssPanels(group, ld, refs, useFactor))
+    )
+}
+
+# Each condition's LD for a fit that estimates mixture weights
+# (.jointRssFitLd()): its GenotypeMixture reference's panels -- each one's
+# matrix, or with `useFactor` its factor -- over the statistics' variants
+# for the group's one reference (as .rssOneLd() reads it), else laid on them
+# as .rssGroupLd() lays each reference's LD (.rssGroupPanels()); its LD in
+# `ld` for any other reference.
+# @noRd
+.jointRssPanels <- function(group, ld, refs, useFactor) {
+    ids <- .jgVariantIds(group)
+    if (is.null(ld$group)) {
+        panels <- .ldPanelsFromRef(
+            refs[[1L]],
+            ids,
+            "jointEngine",
+            useFactor = useFactor
+        )
+        return(rep(list(panels), length(refs)))
+    }
+    refGroups <- .rssRefGroups(refs)
+    panels <- map(
+        seq_len(max(refGroups)),
+        .rssGroupPanels,
+        groups = refGroups,
+        refs = refs,
+        Z = as.matrix(.jgZ(group)),
+        ids = ids,
+        label = "jointEngine",
+        useFactor = useFactor
+    )
+    map2(panels[refGroups], if (useFactor) ld$X else ld$R, `%||%`)
+}
+
+# The LD each condition's credible sets' purity reads (.jointRssEntry()):
+# `ld`, or, where the fit estimated mixture weights (`fit$omega_weights`,
+# one set for each group of conditions on the same samples), the panels it
+# read (`fitLd`, .jointRssFitLd()) mixed with the weights of the
+# condition's group (.rssMixedPanels()).
+# @noRd
+.jointRssPurityLd <- function(ld, fitLd, fit) {
+    if (is.null(fit$omega_weights)) {
+        return(ld)
+    }
+    useFactor <- !is.null(fitLd$X)
+    conditionLd <- if (useFactor) fitLd$X else fitLd$R
+    group <- ld$group %||% rep(1L, length(conditionLd))
+    mixed <- map2(
+        conditionLd[match(unique(group), group)],
+        fit$omega_weights,
+        .rssMixedPanels,
+        useFactor = useFactor
+    )
+    replace(ld, if (useFactor) "X" else "R", list(mixed[group]))
 }
 
 # One RSS per-condition FineMappingRow of the mvSuSiE method `token`, its

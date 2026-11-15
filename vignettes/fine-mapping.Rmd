@@ -255,6 +255,17 @@ single effects are active. Their prior is the run's mr.mash prior when the
 run has one. Its settings go through `MvsusieAshOptions()` and
 `MvsusieAshRssOptions()`.
 
+Small studies, such as ancestry groups of a few dozen samples, have two
+settings of their own. With `unmappable_scale = "single"` (or `"shrink"`)
+in `MvsusieInfOptions()` or `MvsusieAshOptions()`, the size of the
+unmappable effects is learned over all the conditions instead of from each
+condition's own samples (or each condition's is shrunk toward that), their
+shape being the run's mash prior collapsed over its weights. With
+`MvsusieOptions(estimate_residual_method = "NIG")`, each condition's
+residual variance is integrated out of the single effects, as susieR's NIG
+prior does for one trait, which tempers the evidence of a small sample; it
+takes no unmappable effects.
+
 ## Reading the result
 
 `QtlFineMappingResult` is a `GRangesList` subclass, one element per

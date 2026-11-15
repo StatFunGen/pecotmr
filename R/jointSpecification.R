@@ -1829,8 +1829,9 @@ parseTraitIds <- function(traitId, data) {
             fitRetention = cfg$fitRetention,
             seed = cfg$seed,
             # The settled `h2` the summary-statistics fits scale V by
-            # (.jointRssH2())
-            h2 = cfg$h2Spec
+            # (.jointRssH2()), and their LD-reference settings
+            h2 = cfg$h2Spec,
+            susieRssParam = cfg$susieRssParam
         )
     )
 }
@@ -2025,13 +2026,24 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(sumStats)) {
         return(out)
     }
+    ssData <- .msJointSumStats(sumStats, cfg, "fineMappingPipeline")
     ssRes <- .fmDispatchJointSpecsQtlSumStats(
         parsedJointSpec,
         tokens,
         methodArgs,
         list_assign(
             cfg,
-            data = .msJointSumStats(sumStats, cfg, "fineMappingPipeline")
+            data = ssData,
+            # The run's `h2`, settled on the summary statistics the joint
+            # fits scale V by (.jointRssH2())
+            h2Spec = .fmQssH2Spec(
+                cfg$h2,
+                list(
+                    data = ssData,
+                    contexts = cfg$contexts,
+                    traitId = cfg$traitId
+                )
+            )
         )
     )
     if (is.null(ssRes)) {

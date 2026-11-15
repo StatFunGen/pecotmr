@@ -2694,9 +2694,24 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
     # Supplied by pecotmr, so the options bag refuses it, as MvsusieOptions
     # does.
     expect_error(MvsusieRssOptions(L = 3), "maxNumSingleEffects")
+    # So are the LD-reference settings, which SusieRssParam carries, and
+    # which reach mvsusie_rss as `rssArgs`
+    expect_error(MvsusieRssOptions(R_finite = 100), "rFinite")
+    expect_error(MvsusieRssOptions(R_mismatch = "eb"), "rMismatch")
+    expect_error(MvsusieRssOptions(control = list()), "control")
+    .skipIfMvsusieCannotFitStudies()
+    r <- pecotmr:::.fitMvsusieRss(
+        matrix(0, 2, 1),
+        diag(2),
+        N = 100,
+        prior_variance = 1,
+        rssArgs = list(R_finite = 500, R_mismatch = "eb", control = NULL)
+    )
+    expect_equal(r$dots, list(L = 10L, R_finite = 500, R_mismatch = "eb"))
 })
 
 test_that("fitMvsusieRss takes one LD matrix and sample size per condition", {
+    .skipIfMvsusieCannotFitStudies()
     skip_if_not_installed("mvsusieR")
     local_mocked_bindings(
         mvsusie_rss = function(Z, R, N, prior_variance, coverage, ...) {
@@ -2717,6 +2732,16 @@ test_that("fitMvsusieRss takes one LD matrix and sample size per condition", {
     # Its posterior mean there is 0; the rest is as mvsusieR gave it.
     expect_equal(fit$mu[, 3L, 2L], c(0, 0))
     expect_equal(sum(fit$mu == 0), 2L)
+    # So it is for a condition given a mixture's panels, which all hold the
+    # same variants
+    panels <- pecotmr:::.fitMvsusieRss(
+        matrix(0, 3L, 2L),
+        list(list(diag(3), diag(3)), list(lacking, lacking)),
+        N = c(100, 80),
+        prior_variance = diag(2)
+    )
+    expect_equal(panels$mu[, 3L, 2L], c(0, 0))
+    expect_equal(sum(panels$mu == 0), 2L)
     expect_error(
         fitMvsusieRss(
             matrix(0, 3L, 2L),
@@ -2934,6 +2959,7 @@ test_that("susieInfRssWeights adds the fit's infinitesimal theta", {
 
 test_that("susieAshRssWeights adds the fit's ash theta", {
     skip_if_not_installed("susieR")
+    .skipIfSusieRPredates("compute_theta_fitted", "the ash theta's scale fix")
     f <- .rrwStatLd()
     # The fit fineMappingPipeline() makes for susieAsh: it carries theta, the
     # ash-shrunk unmappable effects. A plain susie_rss() fit has no theta,
@@ -3189,6 +3215,16 @@ test_that("unmappable effects belong to the mvsusieInf method", {
         MvsusieInfOptions(unmappable_effects = "none"),
         "unmappable_effects"
     )
+    # Its own value again sets nothing, as a record read back from YAML
+    # gives it
+    expect_identical(
+        MvsusieInfOptions(unmappable_effects = "inf", max_iter = 5L),
+        MvsusieInfOptions(max_iter = 5L)
+    )
+    expect_identical(
+        MvsusieInfRssOptions(unmappable_effects = "inf"),
+        MvsusieInfRssOptions()
+    )
     .fm_skipIfNoMvsusieInf()
     expect_identical(as.list(MvsusieInfOptions())$unmappable_effects, "inf")
     rssArgs <- as.list(MvsusieInfRssOptions(max_iter = 5L))
@@ -3239,6 +3275,14 @@ test_that("unmappable effects by adaptive shrinkage belong to mvsusieAsh", {
     expect_error(
         MvsusieAshOptions(unmappable_effects = "none"),
         "unmappable_effects"
+    )
+    expect_error(
+        MvsusieAshOptions(unmappable_effects = "inf"),
+        "unmappable_effects"
+    )
+    expect_identical(
+        MvsusieAshRssOptions(unmappable_effects = "ash"),
+        MvsusieAshRssOptions()
     )
     .fm_skipIfNoMvsusieAsh()
     expect_identical(as.list(MvsusieAshOptions())$unmappable_effects, "ash")
@@ -3317,6 +3361,14 @@ test_that("mvsusieAsh's unmappable effects take the run's mr.mash prior", {
         conditions,
         stop("unused"),
         MvsusieAshOptions(unmappable_prior = S0)
+    ))
+    # With a single scale, mvsusieR builds the prior from the shape
+    expect_null(pecotmr:::.fmAshThetaPrior(
+        "mvsusieAsh",
+        mvPrior,
+        conditions,
+        stop("unused"),
+        list(unmappable_scale = "single")
     ))
 })
 
@@ -6230,7 +6282,7 @@ test_that("computeCsCorrelation refuses an LD-free summary-statistics source", {
     )
 })
 
-test_that(".fmInfUnmappableVariance collapses the mash prior by its weights", {
+test_that(".fmUnmappableShape collapses the mash prior by its weights", {
     U <- list(
         a = matrix(c(1, 0.5, 0.5, 1), 2, dimnames = rep(list(c("x", "y")), 2)),
         b = matrix(c(2, 0, 0, 1), 2, dimnames = rep(list(c("x", "y")), 2))
@@ -6238,25 +6290,40 @@ test_that(".fmInfUnmappableVariance collapses the mash prior by its weights", {
     mvPrior <- list(
         dataDrivenPriorMatrices = list(U = U, w = c(a = 0.75, b = 0.25))
     )
-    U0 <- .fmInfUnmappableVariance("mvsusieInf", mvPrior, c("x", "y"), list())
+    U0 <- .fmUnmappableShape("mvsusieInf", mvPrior, c("x", "y"), list())
     expect_equal(U0, 0.75 * U$a + 0.25 * U$b)
-    # Without weights, equal ones; only for mvsusieInf; a given one wins
+    # Without weights, equal ones; a given one wins
     noW <- list(dataDrivenPriorMatrices = list(U = U))
     expect_equal(
-        .fmInfUnmappableVariance("mvsusieInf", noW, c("x", "y"), list()),
+        .fmUnmappableShape("mvsusieInf", noW, c("x", "y"), list()),
         0.5 * U$a + 0.5 * U$b
     )
-    expect_null(.fmInfUnmappableVariance(
-        "mvsusieAsh",
-        mvPrior,
-        c("x", "y"),
-        list()
-    ))
-    expect_null(.fmInfUnmappableVariance(
+    expect_null(.fmUnmappableShape(
         "mvsusieInf",
         mvPrior,
         c("x", "y"),
         list(unmappable_variance = diag(2))
+    ))
+    # mvsusieAsh takes it as the shape whose scale is pooled
+    # (unmappable_scale "single" or "shrink"), not otherwise; nor does
+    # plain mvsusie
+    expect_null(.fmUnmappableShape("mvsusieAsh", mvPrior, c("x", "y"), list()))
+    for (scale in c("single", "shrink")) {
+        expect_equal(
+            .fmUnmappableShape(
+                "mvsusieAsh",
+                mvPrior,
+                c("x", "y"),
+                list(unmappable_scale = scale)
+            ),
+            U0
+        )
+    }
+    expect_null(.fmUnmappableShape(
+        "mvsusie",
+        mvPrior,
+        c("x", "y"),
+        list(unmappable_scale = "single")
     ))
     # Matrices without a weight (canonical ones added after the fit) get 0
     expect_equal(.mashCollapseWeights(list(U = U, w = c(a = 1))), c(1, 0))
