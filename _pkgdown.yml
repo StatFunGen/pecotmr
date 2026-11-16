@@ -315,6 +315,7 @@ reference:
       - fsusieTraitEffects
       - credibleSetSummary
       - credibleSets
+      - sharingPatterns
       - lbf
       - ldReference
       - marginalEffects

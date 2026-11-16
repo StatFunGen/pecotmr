@@ -31,3 +31,12 @@
         str_c("susieR predates ", what)
     )
 }
+
+# Skip unless susieR gives the SuSiEx marginals without enumerating the
+# patterns, and enumerates them past 20 conditions (.susiexTakes()).
+.skipIfSusiexPredates <- function() {
+    skip_if_not(
+        .susiexTakes("config_probability"),
+        "susieR predates SuSiEx marginals without enumeration"
+    )
+}

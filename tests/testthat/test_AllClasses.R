@@ -1728,6 +1728,158 @@ test_that("credibleSetSummary aggregates a collection with entry identity", {
     expect_setequal(unique(s$context), c("brain", "blood"))
 })
 
+test_that("credibleSetSummary gives each row of a joint fit its condition", {
+    skip_if_not_installed("mvsusieR")
+    fx <- .spJointFixture
+    slim <- susieFit(fx$entry)
+    s <- credibleSetSummary(fx$coll)
+    expect_equal(nrow(s), 6L) # two sets in each of three conditions
+    effRow <- match(as.integer(sub("^L", "", s$effect_id)), slim$effect_index)
+    condition <- match(s$context, c("c1", "c2", "c3"))
+    expect_equal(s$cs_lfsr, slim$single_effect_lfsr[cbind(effRow, condition)])
+    expect_equal(
+        s$cs_log_bf_outcome,
+        slim$lbf_outcome[cbind(effRow, condition)]
+    )
+    # A result made before rows recorded their position reads it off the
+    # joint fit's rows.
+    unrecorded <- fx$coll
+    unrecorded$jointIndex <- NULL
+    expect_equal(
+        credibleSetSummary(unrecorded)$cs_log_bf_outcome,
+        s$cs_log_bf_outcome
+    )
+})
+
+test_that("credibleSetSummary's activation is sharingPatterns' marginal", {
+    skip_if_not_installed("mvsusieR")
+    .skipIfSusiexPredates()
+    fx <- .spJointFixture
+    s <- credibleSetSummary(fx$coll)
+    sp <- sharingPatterns(fx$coll, patternCoverage = 1)
+    patterns <- as.list(sp$active_conditions)
+    marginal <- map2_dbl(
+        s$cs,
+        s$context,
+        function(cs, condition) {
+            active <- map_lgl(patterns, function(a) condition %in% a)
+            sum(sp$probability[sp$cs == cs & active])
+        }
+    )
+    expect_equal(s$cs_activation_prob, marginal, tolerance = 1e-10)
+    # Effect 1 is c1's and c2's; effect 2 is c3's alone.
+    shared <- s$cs_activation_prob[s$cs == "mvsusie_1"]
+    expect_true(all(shared[1:2] > 0.99))
+    expect_lt(shared[[3L]], 0.5)
+})
+
+test_that("sharingPatterns reads a joint fit once and ranks its patterns", {
+    skip_if_not_installed("mvsusieR")
+    sp <- sharingPatterns(.spJointFixture$coll)
+    expect_s4_class(sp, "DataFrame")
+    expect_s4_class(sp$active_conditions, "CharacterList")
+    # One fit, not one per condition: the condition columns differ, so NA.
+    expect_true(all(is.na(sp$context)))
+    expect_equal(unique(sp$study), "s")
+    expect_equal(unique(sp$jointContexts), "c1;c2;c3")
+    expect_setequal(unique(sp$cs), c("mvsusie_1", "mvsusie_2"))
+    for (cs in unique(sp$cs)) {
+        set <- sp[sp$cs == cs, ]
+        expect_equal(set$pattern_rank, seq_len(nrow(set)))
+        expect_true(all(diff(set$probability) <= 0))
+        # Cut at the first pattern reaching 0.95.
+        expect_gte(max(set$cumulative_probability), 0.95)
+        expect_equal(sum(set$cumulative_probability < 0.95), nrow(set) - 1L)
+        expect_equal(set$n_active, lengths(set$active_conditions))
+    }
+    top <- sp[sp$pattern_rank == 1L, ]
+    expect_setequal(
+        map_chr(as.list(top$active_conditions), str_flatten, collapse = ","),
+        c("c1,c2", "c3")
+    )
+})
+
+test_that("sharingPatterns with patternCoverage = 1 gives all 2^R patterns", {
+    skip_if_not_installed("mvsusieR")
+    sp <- sharingPatterns(.spJointFixture$coll, patternCoverage = 1)
+    expect_equal(as.integer(table(sp$cs)), c(8L, 8L))
+    expect_equal(
+        as.numeric(tapply(sp$probability, sp$cs, sum)),
+        c(1, 1),
+        tolerance = 1e-12
+    )
+})
+
+test_that("sharingPatterns skips joint fits of more than maxConditions", {
+    skip_if_not_installed("mvsusieR")
+    expect_warning(
+        sp <- sharingPatterns(.spJointFixture$coll, maxConditions = 2),
+        "skipped 1 joint fit"
+    )
+    expect_equal(nrow(sp), 0L)
+})
+
+test_that("sharingPatterns warns of fits without per-condition Bayes factors", {
+    skip_if_not_installed("mvsusieR")
+    trimmed <- trimFineMappingResult(.spJointFixture$coll, "annotation")
+    expect_warning(
+        sp <- sharingPatterns(trimmed),
+        "without their per-condition Bayes factors"
+    )
+    expect_equal(nrow(sp), 0L)
+})
+
+test_that("sharingPatterns gives no rows, silently, for one-condition fits", {
+    data(qtlFineMappingExample, envir = environment())
+    expect_no_warning(sp <- sharingPatterns(qtlFineMappingExample))
+    expect_equal(nrow(sp), 0L)
+    expect_true(all(
+        c("cs", "active_conditions", "probability") %in% colnames(sp)
+    ))
+})
+
+test_that("sharingPatterns checks its arguments", {
+    data(qtlFineMappingExample, envir = environment())
+    expect_error(
+        sharingPatterns(qtlFineMappingExample, patternCoverage = 1.5),
+        "patternCoverage"
+    )
+    expect_error(
+        sharingPatterns(qtlFineMappingExample, coverage = 2),
+        "coverage"
+    )
+    expect_error(
+        sharingPatterns(qtlFineMappingExample, maxConditions = 2.5),
+        "maxConditions"
+    )
+    expect_error(
+        sharingPatterns(qtlFineMappingExample, maxConditions = 0),
+        "maxConditions"
+    )
+})
+
+test_that("sharingPatterns above 20 conditions needs susieR's max_traits", {
+    skip_if(
+        pecotmr:::.susiexTakes("max_traits"),
+        "susieR takes max_traits"
+    )
+    data(qtlFineMappingExample, envir = environment())
+    expect_error(
+        sharingPatterns(qtlFineMappingExample, maxConditions = 21),
+        "maxConditions above 20 needs a newer susieR"
+    )
+})
+
+test_that("sharingPatterns passes maxConditions to a susieR that takes it", {
+    skip_if_not_installed("mvsusieR")
+    .skipIfSusiexPredates()
+    coll <- .spJointFixture$coll
+    expect_equal(
+        sharingPatterns(coll, maxConditions = 25),
+        sharingPatterns(coll)
+    )
+})
+
 test_that("fsusieCredibleBand on a result with no fSuSiE fit is empty ranges", {
     data(qtlFineMappingExample, envir = environment())
     cb <- fsusieCredibleBand(qtlFineMappingExample)

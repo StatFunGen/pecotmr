@@ -2451,15 +2451,67 @@ setGeneric("lbf", function(x, ...) standardGeneric("lbf"))
 #'   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
 #'   \code{cs_pip} (summed member PIP = inclusion mass captured),
 #'   \code{cs_mean_effect} (mean posterior conditional effect),
-#'   \code{lead_variant, lead_pip} (the collection method also carries the entry
-#'   identity columns).
-#' @seealso \code{\link{credibleSets}}, \code{\link{topLoci}}
+#'   \code{lead_variant, lead_pip}, and for a row of a joint multi-condition
+#'   fit (mvSuSiE), the effect in the row's condition: \code{cs_lfsr}
+#'   (mvSuSiE's per-effect local false sign rate, 1 where the condition's own
+#'   log Bayes factor is below its cutoff, \code{NA} where the condition has
+#'   no data on a member of the set), \code{cs_log_bf_outcome} (that
+#'   per-condition log Bayes factor) and \code{cs_activation_prob} (the
+#'   probability that the condition shares the effect, SuSiEx's marginal;
+#'   see \code{\link{sharingPatterns}}). The three are \code{NA} for other
+#'   fits and for fits stored without them; \code{cs_activation_prob} also
+#'   needs a susieR whose \code{susie_post_outcome_configuration()} takes
+#'   \code{config_probability}. The collection method also carries the entry
+#'   identity columns.
+#' @seealso \code{\link{credibleSets}}, \code{\link{topLoci}},
+#'   \code{\link{sharingPatterns}}
 #' @examples
 #' data(qtlFineMappingExample)
 #' credibleSetSummary(qtlFineMappingExample)
 #' @export
 setGeneric("credibleSetSummary", function(x, ...) {
     standardGeneric("credibleSetSummary")
+})
+
+#' Sharing patterns of a joint fit's credible sets
+#'
+#' For each credible set of a joint multi-condition fit (mvSuSiE), the
+#' posterior probabilities of the patterns of conditions that share its
+#' effect, from SuSiEx's post-hoc activation model
+#' (\code{susieR::susie_post_outcome_configuration()}). A pattern is the set
+#' of conditions active for the effect; a credible set's \eqn{2^R} patterns,
+#' for \eqn{R} conditions, sum to 1. The prior is uniform over patterns, so
+#' a condition with no information either way has an activation probability
+#' of 0.5, which \code{cs_activation_prob} in
+#' \code{\link{credibleSetSummary}} reports per condition.
+#'
+#' @param x A \code{QtlFineMappingResult} or \code{GwasFineMappingResult}.
+#' @param coverage Credible-set coverage whose sets to report. Default 0.95.
+#' @param patternCoverage Each set's most probable patterns are kept until
+#'   their probabilities sum to at least this. Default 0.95; 1 keeps all
+#'   \eqn{2^R}.
+#' @param maxConditions Joint fits of more conditions are skipped with a
+#'   warning. The patterns are enumerated, so the time and memory double with
+#'   each condition: for 2,000 variants, seconds per set at 12 conditions and
+#'   about 20 minutes at 20. Default 20; above 20 needs a susieR whose
+#'   \code{susie_post_outcome_configuration()} takes \code{max_traits}.
+#' @param ... Ignored.
+#' @return A \code{DataFrame} with one row per pattern of each credible set
+#'   of each joint fit, read once per fit rather than per condition: the
+#'   fit's identity columns (\code{NA} in a column on which its conditions
+#'   differ; its joint key columns name them), \code{cs}, \code{effect_id},
+#'   \code{pattern_rank} (1 the most probable), \code{active_conditions} (a
+#'   \code{CharacterList} of the pattern's active conditions, named as the
+#'   fit names them), \code{n_active}, \code{probability} and
+#'   \code{cumulative_probability}. Fits of one condition, and fits stored
+#'   without per-condition Bayes factors, give no rows.
+#' @seealso \code{\link{credibleSetSummary}}
+#' @examples
+#' data(mvsusieFineMappingExample)
+#' sharingPatterns(mvsusieFineMappingExample)
+#' @export
+setGeneric("sharingPatterns", function(x, ...) {
+    standardGeneric("sharingPatterns")
 })
 
 #' fSuSiE credible band (fitted effect + uncertainty band)

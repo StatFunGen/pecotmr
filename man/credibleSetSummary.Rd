@@ -22,8 +22,18 @@ A \code{DataFrame}: \code{cs, effect_id, coverage, n_variants,
   \code{cs_log_bf} (true per-effect single-effect log Bayes factor),
   \code{cs_pip} (summed member PIP = inclusion mass captured),
   \code{cs_mean_effect} (mean posterior conditional effect),
-  \code{lead_variant, lead_pip} (the collection method also carries the entry
-  identity columns).
+  \code{lead_variant, lead_pip}, and for a row of a joint multi-condition
+  fit (mvSuSiE), the effect in the row's condition: \code{cs_lfsr}
+  (mvSuSiE's per-effect local false sign rate, 1 where the condition's own
+  log Bayes factor is below its cutoff, \code{NA} where the condition has
+  no data on a member of the set), \code{cs_log_bf_outcome} (that
+  per-condition log Bayes factor) and \code{cs_activation_prob} (the
+  probability that the condition shares the effect, SuSiEx's marginal;
+  see \code{\link{sharingPatterns}}). The three are \code{NA} for other
+  fits and for fits stored without them; \code{cs_activation_prob} also
+  needs a susieR whose \code{susie_post_outcome_configuration()} takes
+  \code{config_probability}. The collection method also carries the entry
+  identity columns.
 }
 \description{
 One row per credible set (at a given coverage) with its size, purity, prior
@@ -36,5 +46,6 @@ data(qtlFineMappingExample)
 credibleSetSummary(qtlFineMappingExample)
 }
 \seealso{
-\code{\link{credibleSets}}, \code{\link{topLoci}}
+\code{\link{credibleSets}}, \code{\link{topLoci}},
+  \code{\link{sharingPatterns}}
 }

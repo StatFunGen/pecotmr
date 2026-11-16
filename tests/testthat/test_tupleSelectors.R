@@ -1929,6 +1929,36 @@ test_that("a joint row's position is recorded, or read off its fit's rows", {
     expect_true(is.na(pecotmr:::.fmrJointIndexAt(fm, 3L)))
 })
 
+test_that("an aggregate view hands each row its own arguments", {
+    fm <- .ts_jointFmr()
+    rowView <- function(parts, jointIndex) tibble(jointIndex = jointIndex)
+    out <- pecotmr:::.fmrAggregateView(
+        fm,
+        perEntry = rowView,
+        rowArgs = map(seq_len(nrow(fm)), pecotmr:::.fmrJointIndexArgs, x = fm)
+    )
+    expect_equal(out$jointIndex, c(NA, 1L, 2L))
+    expect_equal(out$context, c("brain", "brain", "liver"))
+})
+
+test_that("a row's identity for sharingPatterns carries the joint keys", {
+    fm <- .ts_jointFmr()
+    identity <- pecotmr:::.spIdentityColumns(fm)
+    expect_equal(nrow(identity), 3L)
+    expect_equal(identity$jointContexts, c(NA, "brain;liver", "brain;liver"))
+    expect_true(all(c("study", "context", "method") %in% names(identity)))
+    plain <- QtlFineMappingResult(
+        studyName = "s1",
+        context = "brain",
+        trait = "g",
+        method = "susie",
+        entry = list(pecotmr:::.fmrRowParts(fm, 1L))
+    )
+    expect_false(
+        "jointContexts" %in% names(pecotmr:::.spIdentityColumns(plain))
+    )
+})
+
 test_that("a fit's kind of joint fit names the axes it joined", {
     joint <- list(
         jointStudies = c(NA, "a;b", NA, "a;b"),

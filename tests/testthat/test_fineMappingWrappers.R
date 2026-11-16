@@ -2346,6 +2346,8 @@ test_that("trimFinemappingFit keeps an mvsusie fit with only null effects", {
         mu2_diag = array(0, dim = c(L, p, R)),
         V = c(0, 0),
         conditional_lfsr = NA_real_,
+        single_effect_lfsr = NA_real_,
+        lbf_outcome = NA_real_,
         niter = 3
     )
     eff <- pecotmr:::selectEffects(fit)
@@ -2361,8 +2363,152 @@ test_that("trimFinemappingFit keeps an mvsusie fit with only null effects", {
     )
     tr <- pecotmr:::trimFinemappingFit(fit, eff, "mvsusie", csTables)
     expect_null(tr$clfsr)
+    expect_null(tr$single_effect_lfsr)
+    expect_null(tr$lbf_outcome)
     expect_equal(nrow(tr$alpha), 0L)
     expect_equal(tr$coef, matrix(0, p, R))
+})
+
+test_that("trimFinemappingFit keeps the kept effects' per-condition evidence", {
+    skip_if_not_installed("mvsusieR")
+    L <- 3L
+    p <- 4L
+    R <- 2L
+    fit <- list(
+        pip = setNames(rep(0.2, p), paste0("chr1:", seq_len(p), ":A:G")),
+        alpha = matrix(1 / p, L, p),
+        mu = array(0, dim = c(L, p, R)),
+        V = c(1, 0, 1),
+        conditional_lfsr = array(0.5, dim = c(L, p, R)),
+        single_effect_lfsr = matrix(seq_len(L * R) / 10, L, R),
+        lbf_outcome = matrix(seq_len(L * R), L, R),
+        lbf_variable_outcome = array(seq_len(L * p * R), dim = c(L, p, R)),
+        niter = 3
+    )
+    eff <- pecotmr:::selectEffects(fit)
+    expect_equal(eff, c(1L, 3L))
+    csTables <- list(list(
+        sets = list(cs = list()),
+        cs_corr = NULL,
+        pip = fit$pip
+    ))
+    local_mocked_bindings(
+        coef.mvsusie = function(...) matrix(0, p + 1L, R),
+        .package = "mvsusieR"
+    )
+    tr <- pecotmr:::trimFinemappingFit(fit, eff, "mvsusie", csTables)
+    expect_equal(
+        tr$single_effect_lfsr,
+        fit$single_effect_lfsr[eff, , drop = FALSE]
+    )
+    expect_equal(tr$lbf_outcome, fit$lbf_outcome[eff, , drop = FALSE])
+    expect_equal(
+        tr$lbf_variable_outcome,
+        fit$lbf_variable_outcome[eff, , , drop = FALSE]
+    )
+
+    # mvsusieR fills the per-condition log Bayes factors with 0 when it keeps
+    # no per-(variant, condition) ones to weight, so none are stored then.
+    bare <- fit[setdiff(names(fit), "lbf_variable_outcome")]
+    trBare <- pecotmr:::trimFinemappingFit(bare, eff, "mvsusie", csTables)
+    expect_null(trBare$lbf_outcome)
+    expect_null(trBare$lbf_variable_outcome)
+    expect_equal(trBare$single_effect_lfsr, tr$single_effect_lfsr)
+})
+
+# ---- SuSiEx sharing patterns of a joint fit ----
+
+test_that(".susiexTakes reads susieR's explicit formals, not its dots", {
+    takes <- pecotmr:::.susiexTakes(
+        c("config_probability", "max_traits", "not_an_argument")
+    )
+    expect_false(takes[[3L]])
+    # The two came together.
+    expect_identical(takes[[1L]], takes[[2L]])
+})
+
+test_that(".fitConditionNames reads the names a joint fit records", {
+    named <- list(
+        single_effect_lfsr = matrix(0, 1, 2, dimnames = list(NULL, c("a", "b")))
+    )
+    expect_equal(pecotmr:::.fitConditionNames(named, 2L), c("a", "b"))
+    # Names that cannot tell the conditions apart are passed over.
+    duplicated <- list(
+        coef = matrix(0, 3, 2, dimnames = list(NULL, c("a", "a"))),
+        outcome_names = c("x", "y")
+    )
+    expect_equal(pecotmr:::.fitConditionNames(duplicated, 2L), c("x", "y"))
+    expect_equal(
+        pecotmr:::.fitConditionNames(list(), 3L),
+        paste0("condition_", 1:3)
+    )
+})
+
+test_that(".susiexFitView points the sets at a trimmed fit's rows", {
+    J <- 4L
+    R <- 2L
+    vars <- paste0("v", seq_len(J))
+    fit <- list(
+        alpha = matrix(0.25, 2, J, dimnames = list(NULL, vars)),
+        effect_index = c(2L, 4L),
+        lbf_variable_outcome = array(
+            0,
+            c(2, J, R),
+            dimnames = list(NULL, vars, c("a", "b"))
+        )
+    )
+    sets <- list(cs = list(L4 = 1:2, L3 = 3L))
+    view <- pecotmr:::.susiexFitView(fit, sets)
+    expect_s3_class(view, "mvsusie")
+    # Effect 3 is not among those the trimmed fit kept.
+    expect_equal(names(view$sets$cs), "L4")
+    expect_equal(attr(view$sets$cs, "cs_idx"), 2L)
+    expect_null(colnames(view$alpha))
+    expect_equal(dimnames(view$lbf_variable_outcome)[[3L]], c("a", "b"))
+
+    expect_null(pecotmr:::.susiexFitView(fit, list(cs = list(L3 = 3L))))
+    expect_null(pecotmr:::.susiexFitView(fit, list(cs = list())))
+    expect_null(pecotmr:::.susiexFitView(fit, NULL))
+    noLbf <- fit[c("alpha", "effect_index")]
+    expect_null(pecotmr:::.susiexFitView(noLbf, sets))
+    oneCondition <- fit
+    oneCondition$lbf_variable_outcome <- array(0, c(2, J, 1))
+    expect_null(pecotmr:::.susiexFitView(oneCondition, sets))
+})
+
+test_that(".susiexActivation is each set's marginal of its pattern table", {
+    skip_if_not_installed("mvsusieR")
+    .skipIfSusiexPredates()
+    slim <- susieFit(.spJointFixture$entry)
+    view <- pecotmr:::.susiexFitView(slim, slim$sets)
+    tables <- pecotmr:::.susiexPatternTables(view, 20L)
+    for (r in 1:3) {
+        activation <- pecotmr:::.susiexActivation(slim, slim$sets, r)
+        expect_named(activation, names(tables))
+        marginal <- vapply(
+            tables,
+            function(cp) sum(cp$config_prob[cp[[r]] == 1L]),
+            numeric(1)
+        )
+        expect_equal(activation, marginal, tolerance = 1e-10)
+    }
+    expect_null(pecotmr:::.susiexActivation(slim, slim$sets, NA_integer_))
+    expect_null(pecotmr:::.susiexActivation(slim, slim$sets, 4L))
+})
+
+test_that("cs_activation_prob is NA, saying why, where susieR enumerates", {
+    skip_if_not_installed("mvsusieR")
+    skip_if(
+        pecotmr:::.susiexTakes("config_probability"),
+        "susieR computes the marginals directly"
+    )
+    withr::local_options(rlib_message_verbosity = "verbose")
+    slim <- susieFit(.spJointFixture$entry)
+    expect_message(
+        activation <- pecotmr:::.susiexActivation(slim, slim$sets, 1L),
+        "cs_activation_prob is NA"
+    )
+    expect_null(activation)
 })
 
 # ---- postprocessFinemappingFit S3 methods ----

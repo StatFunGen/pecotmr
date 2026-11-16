@@ -868,7 +868,10 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         cs_pip = numeric(),
         cs_mean_effect = numeric(),
         lead_variant = character(),
-        lead_pip = numeric()
+        lead_pip = numeric(),
+        cs_lfsr = numeric(),
+        cs_log_bf_outcome = numeric(),
+        cs_activation_prob = numeric()
     )
 }
 
@@ -901,8 +904,16 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # from the
 # stored fit. The credible-set index in the `cs` label doubles as the effect (L)
 # index for susie-family fits (unfiltered CS are ordered by effect).
+# `condition`, the row's position in its joint fit's condition axis, picks
+# the per-condition columns, NA for a row from no joint fit.
 # @noRd
-.csSummaryFit <- function(tl, fit, coverage, fitIds = colnames(fit$alpha)) {
+.csSummaryFit <- function(
+    tl,
+    fit,
+    coverage,
+    fitIds = colnames(fit$alpha),
+    condition = NA_integer_
+) {
     csCol <- str_c("cs_", coverage * 100)
     purCol <- str_c(csCol, "_purity")
     if (is.null(tl) || nrow(tl) == 0L) {
@@ -912,7 +923,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (length(specs) == 0L) {
         return(.emptyCsSummary())
     }
-    ctx <- .csSummaryContext(tl, fit, coverage, csCol, purCol)
+    ctx <- .csSummaryContext(tl, fit, coverage, csCol, purCol, condition)
     map(specs, .csSummaryRow, ctx = ctx) |>
         compact() |>
         bind_rows() |>
@@ -969,6 +980,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     members <- as.integer(setsObj$cs[[k]])
     list(
         ids = if (is.null(vn)) NA_character_ else vn[members],
+        members = members,
         eff = eff[k],
         lab = str_c(tag, "_", eff[k])
     )
@@ -1040,10 +1052,11 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     .camelToSnakeMethod(class(fit)[1L])
 }
 
-# Per-fit context for the CS summary rows: prior variances (V) and per-effect
-# mean-purity, plus the resolved column names.
+# Per-fit context for the CS summary rows: prior variances (V), per-effect
+# mean-purity and, for a row of a joint fit, the effects' activation
+# probabilities in its condition, plus the resolved column names.
 # @noRd
-.csSummaryContext <- function(tl, fit, coverage, csCol, purCol) {
+.csSummaryContext <- function(tl, fit, coverage, csCol, purCol, condition) {
     # Names kept: a trimmed fit's V is named by effect id (.csEffectV()).
     Vvec <- if (!is.null(fit$V)) set_names(as.numeric(fit$V), names(fit$V))
     sp <- fit$sets$purity
@@ -1064,7 +1077,13 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         csCol = csCol,
         purCol = purCol,
         Vvec = Vvec,
-        meanPur = meanPur
+        meanPur = meanPur,
+        condition = condition,
+        activation = .susiexActivation(
+            fit,
+            .csSetsForCoverage(fit, coverage),
+            condition
+        )
     )
 }
 
@@ -1093,7 +1112,7 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         # entry's topLoci when the fit is the source.
         n_variants = length(spec$ids),
         purity_min = .csPurityMin(m, ctx$purCol),
-        purity_mean = .csPurityMean(ctx$meanPur, Lname),
+        purity_mean = .csByEffectId(ctx$meanPur, Lname),
         V = .csEffectV(ctx$Vvec, effRow),
         # cs_log10bf: the strongest MEMBER variant's logBF (max over the CS).
         cs_log10bf = .csLog10Bf(m),
@@ -1105,8 +1124,63 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         # variant being causal, i.e. the posterior mean over the PIP.
         cs_mean_effect = .csMeanEffect(m),
         lead_variant = as.character(m$variant_id[lead]),
-        lead_pip = as.numeric(m$pip[lead])
+        lead_pip = as.numeric(m$pip[lead]),
+        !!!.csConditionColumns(ctx, spec, effRow, Lname)
     )
+}
+
+# The effect in the row's condition of a joint fit (`ctx$condition`):
+# mvsusieR's per-effect lfsr (.csConditionLfsr()), the condition's log Bayes
+# factor, and SuSiEx's probability that the condition shares the effect. NA
+# for a row from no joint fit.
+# @noRd
+.csConditionColumns <- function(ctx, spec, effRow, Lname) {
+    list(
+        cs_lfsr = .csConditionLfsr(ctx, spec, effRow),
+        cs_log_bf_outcome = .csEffectCondition(
+            .fitOutcomeLbf(ctx$fit),
+            effRow,
+            ctx$condition
+        ),
+        cs_activation_prob = .csByEffectId(ctx$activation, Lname)
+    )
+}
+
+# mvsusieR's per-effect lfsr in the row's condition (1 where the condition's
+# log Bayes factor is below its cutoff), NA where the condition has no data
+# on a member of the set: mvsusieR computes it before pecotmr leaves such
+# (variant, condition) pairs without an lfsr (.mvsusieZeroLackedFit()), so it
+# would average in the prior's prediction from the other conditions there.
+# @noRd
+.csConditionLfsr <- function(ctx, spec, effRow) {
+    lfsr <- .csEffectCondition(
+        ctx$fit[["single_effect_lfsr"]],
+        effRow,
+        ctx$condition
+    )
+    lacks <- !is.na(lfsr) &&
+        .csConditionLacksMember(ctx$fit, spec$members, effRow, ctx$condition)
+    if (lacks) NA_real_ else lfsr
+}
+
+# Whether condition `condition` has no data on one of the set's `members`
+# (positions among the fit's variables): the fit's conditional lfsr, NA at
+# each (variant, condition) pair without data, is missing at one of them.
+# FALSE when the fit holds no such array or the set's members are unknown.
+# @noRd
+.csConditionLacksMember <- function(fit, members, effRow, condition) {
+    clfsr <- fit[["clfsr"]] %||% fit[["conditional_lfsr"]]
+    d <- dim(clfsr)
+    if (
+        length(d) != 3L ||
+            length(members) == 0L ||
+            effRow > d[[1L]] ||
+            condition > d[[3L]] ||
+            any(members > d[[2L]])
+    ) {
+        return(FALSE)
+    }
+    anyNA(clfsr[effRow, members, condition])
 }
 
 # purity_min: first per-CS purity value (NA when the column is absent).
@@ -1115,14 +1189,31 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
     if (is_in(purCol, names(m))) as.numeric(m[[purCol]][1]) else NA_real_
 }
 
-# purity_mean: per-effect mean absolute correlation (NA when unavailable).
+# The value of `values`, named by effect id, for effect `Lname`, such as its
+# mean purity (purity_mean) or activation probability; NA when unavailable.
 # @noRd
-.csPurityMean <- function(meanPur, Lname) {
-    if (!is.null(meanPur) && !is.na(Lname) && is_in(Lname, names(meanPur))) {
-        as.numeric(meanPur[[Lname]])
+.csByEffectId <- function(values, Lname) {
+    if (!is.null(values) && !is.na(Lname) && is_in(Lname, names(values))) {
+        as.numeric(values[[Lname]])
     } else {
         NA_real_
     }
+}
+
+# Entry [effRow, condition] of a joint fit's per-effect, per-condition
+# matrix `m`; NA when the fit holds none, or the row is from no joint fit.
+# @noRd
+.csEffectCondition <- function(m, effRow, condition) {
+    if (
+        !is.matrix(m) ||
+            is.na(effRow) ||
+            is.na(condition) ||
+            effRow > nrow(m) ||
+            condition > ncol(m)
+    ) {
+        return(NA_real_)
+    }
+    as.numeric(m[effRow, condition])
 }
 
 # V: the prior variance at the effect's row `effRow` (NA when out of range /
@@ -1189,6 +1280,204 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
 # @noRd
 .csColumn <- function(m, nm) {
     if (is_in(nm, names(m))) m[[nm]] else numeric(0)
+}
+
+# ---- sharingPatterns helpers ------------------------------------------------
+
+# The columns giving each pattern's size and probability, which follow its
+# active conditions.
+# @noRd
+.SP_PATTERN_STATS <- c("n_active", "probability", "cumulative_probability")
+
+# The sharing patterns of the joint fit that rows `rows` of `x` hold (one key
+# into its fits dictionary), each identity column as .spFitIdentity() gives
+# it: list(table, conditions, skipped) -- the pattern rows, their active
+# conditions, and why a fit with credible sets gave none (.spSkipReason()).
+# @noRd
+.spFitPatterns <- function(rows, x, identity, args) {
+    parts <- .fmrRowParts(x, rows[[1L]])
+    fit <- susieFit(parts)
+    setsObj <- .csSetsForCoverage(fit, args$coverage)
+    view <- .susiexFitView(fit, setsObj)
+    skipped <- .spSkipReason(fit, setsObj, view, args$maxConditions)
+    if (is.null(view) || !is.na(skipped)) {
+        return(list(skipped = skipped))
+    }
+    sets <- compact(imap(
+        .susiexPatternTables(view, args$maxConditions),
+        .spSetPatterns,
+        conditions = dimnames(view$lbf_variable_outcome)[[3L]],
+        patternCoverage = args$patternCoverage
+    ))
+    if (length(sets) == 0L) {
+        return(list(skipped = NA_character_))
+    }
+    tag <- .csMethodTag(
+        .fmrPartsTopLoci(parts),
+        fit,
+        str_c("cs_", args$coverage * 100)
+    )
+    setTables <- bind_rows(map(sets, "table"))
+    labelled <- mutate(
+        setTables,
+        cs = str_c(tag, "_", str_remove(.data$effect_id, "^L")),
+        .before = 1L
+    )
+    list(
+        table = bind_cols(
+            slice(.spFitIdentity(identity, rows), rep(1L, nrow(labelled))),
+            labelled
+        ),
+        conditions = exec(c, !!!unname(map(sets, "conditions"))),
+        skipped = NA_character_
+    )
+}
+
+# Why a joint fit with credible sets at the coverage gives no patterns:
+# "conditions", more than `maxConditions`; "bayesFactors", an mvSuSiE fit
+# stored without its per-condition Bayes factors (saved before they were
+# kept, or trimmed by trimFineMappingResult()). NA when it gives them, or
+# has no sets, or not several conditions, to give them for.
+# @noRd
+.spSkipReason <- function(fit, setsObj, view, maxConditions) {
+    if (length(setsObj$cs) == 0L) {
+        return(NA_character_)
+    }
+    if (!is.null(view)) {
+        nCond <- dim(view$lbf_variable_outcome)[[3L]]
+        return(if (nCond > maxConditions) "conditions" else NA_character_)
+    }
+    mvsusie <- is.list(fit) &&
+        any(is_in(class(fit), c(.fmMvsusieTokens(), "mvsusie")))
+    if (mvsusie && is.null(fit[["lbf_variable_outcome"]])) {
+        "bayesFactors"
+    } else {
+        NA_character_
+    }
+}
+
+# The patterns of one credible set from its table `cp` (a 0/1 column per
+# condition and config_prob): by decreasing probability, up to the first
+# whose cumulative probability reaches `patternCoverage`, or all of them at
+# 1. list(table, conditions), or NULL when its probabilities are not finite.
+# @noRd
+.spSetPatterns <- function(cp, effectId, conditions, patternCoverage) {
+    prob <- as.numeric(cp$config_prob)
+    if (!all(is.finite(prob))) {
+        return(NULL)
+    }
+    ord <- order(prob, decreasing = TRUE)
+    cum <- cumsum(prob[ord])
+    nKeep <- if (patternCoverage >= 1) {
+        length(ord)
+    } else {
+        min(length(ord), sum(cum < patternCoverage) + 1L)
+    }
+    kept <- ord[seq_len(nKeep)]
+    patterns <- as.matrix(select(cp, all_of(conditions)))
+    active <- patterns[kept, , drop = FALSE] == 1L
+    list(
+        table = tibble(
+            effect_id = effectId,
+            pattern_rank = seq_len(nKeep),
+            n_active = as.integer(rowSums(active)),
+            probability = prob[kept],
+            cumulative_probability = cum[seq_len(nKeep)]
+        ),
+        conditions = .spActiveConditions(active, conditions)
+    )
+}
+
+# The conditions active in each pattern (a row of the logical matrix
+# `active`), in condition order, as a CharacterList.
+# @noRd
+.spActiveConditions <- function(active, conditions) {
+    at <- which(active, arr.ind = TRUE)
+    unname(S4Vectors::splitAsList(
+        conditions[at[, "col"]],
+        factor(at[, "row"], levels = seq_len(nrow(active)))
+    ))
+}
+
+# The identity of the joint fit rows `rows` hold: each identity column's
+# value where its rows agree, NA where they differ -- on the axes the fit
+# joins, which its joint key columns name.
+# @noRd
+.spFitIdentity <- function(identity, rows) {
+    summarise(slice(identity, rows), across(everything(), .spConstantOrNa))
+}
+
+# @noRd
+.spConstantOrNa <- function(v) {
+    if (n_distinct(v) == 1L) v[[1L]] else v[NA_integer_]
+}
+
+# Warn once per call about the joint fits that gave no patterns, by reason
+# (.spSkipReason()).
+# @noRd
+.spWarnSkipped <- function(skipped, maxConditions) {
+    nCond <- sum(skipped == "conditions", na.rm = TRUE)
+    nLbf <- sum(skipped == "bayesFactors", na.rm = TRUE)
+    if (nCond > 0L) {
+        warn(glue(
+            "sharingPatterns(): skipped {nCond} joint fit(s) of more than ",
+            "maxConditions = {maxConditions} conditions. The time and memory ",
+            "of their 2^R patterns double with each condition; raise ",
+            "maxConditions to enumerate them."
+        ))
+    }
+    if (nLbf > 0L) {
+        warn(glue(
+            "sharingPatterns(): skipped {nLbf} mvSuSiE fit(s) stored ",
+            "without their per-condition Bayes factors (saved before they ",
+            "were kept, or trimmed by trimFineMappingResult())."
+        ))
+    }
+    invisible(NULL)
+}
+
+# The pattern rows of the joint fits `fits` (.spFitPatterns()) as one
+# DataFrame, `active_conditions` a CharacterList so a pattern of any size
+# lives in one row; the columns alone when no fit gave any.
+# @noRd
+.spAssemble <- function(fits, identity) {
+    withRows <- keep(fits, .spHasRows)
+    table <- if (length(withRows) == 0L) {
+        .spEmptyTable(identity)
+    } else {
+        bind_rows(map(withRows, "table"))
+    }
+    conditions <- if (length(withRows) == 0L) {
+        IRanges::CharacterList()
+    } else {
+        exec(c, !!!unname(map(withRows, "conditions")))
+    }
+    lead <- setdiff(names(table), .SP_PATTERN_STATS)
+    cbind(
+        S4Vectors::DataFrame(select(table, all_of(lead)), check.names = FALSE),
+        S4Vectors::DataFrame(active_conditions = conditions),
+        S4Vectors::DataFrame(select(table, all_of(.SP_PATTERN_STATS)))
+    )
+}
+
+# @noRd
+.spHasRows <- function(fit) {
+    !is.null(fit$table)
+}
+
+# @noRd
+.spEmptyTable <- function(identity) {
+    bind_cols(
+        slice(identity, integer(0)),
+        tibble(
+            cs = character(),
+            effect_id = character(),
+            pattern_rank = integer(),
+            n_active = integer(),
+            probability = numeric(),
+            cumulative_probability = numeric()
+        )
+    )
 }
 
 
@@ -1489,6 +1778,11 @@ FineMappingRow <- function(variantIds, susieFit, topLoci, cvResult = NULL) {
         mu2 = .adjustPipsCols(fit[["mu2"]], p, "mu2"),
         mu2_diag = .adjustPipsCols(fit[["mu2_diag"]], p, "mu2_diag"),
         clfsr = .adjustPipsCols(fit[["clfsr"]], p, "clfsr"),
+        lbf_variable_outcome = .adjustPipsCols(
+            fit[["lbf_variable_outcome"]],
+            p,
+            "lbf_variable_outcome"
+        ),
         coef = .adjustPipsRows(fit[["coef"]], p, "coef"),
         X_column_scale_factors = .adjustPipsVec(
             fit[["X_column_scale_factors"]],

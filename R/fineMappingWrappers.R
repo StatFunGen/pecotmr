@@ -2687,8 +2687,11 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 }
 
 # mvsusie-specific slots: the coefficient matrix and the conditional lfsr
-# array (re-summarizing the stored fit reads it per condition), and for
-# mvsusieInf the unmappable effects' covariance (tau2); their posterior mean
+# array (re-summarizing the stored fit reads it per condition); the kept
+# effects' evidence per condition, which credibleSetSummary() and
+# sharingPatterns() read -- the per-effect lfsr, the per-condition log Bayes
+# factors and the per-(variant, condition) ones they weight; and for
+# mvsusieInf the unmappable effects' covariance (tau2). Their posterior mean
 # (theta), which the coefficients include, is a common slot. mu2_diag has no
 # reader once topLoci is built, so it is not stored.
 # @noRd
@@ -2698,20 +2701,194 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
             mvsusieR::coef.mvsusie(fit)[-1, , drop = FALSE]
         },
         clfsr = .trimEffectArray(fit$conditional_lfsr, effectIdx),
+        single_effect_lfsr = .trimEffectArray(
+            fit[["single_effect_lfsr"]],
+            effectIdx
+        ),
+        lbf_outcome = .trimEffectArray(.fitOutcomeLbf(fit), effectIdx),
+        lbf_variable_outcome = .trimEffectArray(
+            fit[["lbf_variable_outcome"]],
+            effectIdx
+        ),
         tau2 = fit$tau2
     ))
     list_assign(trimmed, !!!mvFields)
 }
 
-# The selected effects of an L x p x R array, or NULL when the fit holds none:
-# a fit whose every effect is null carries NA where mvsusieR would put the
-# lfsr arrays, having no effect to report them for.
+# The selected effects of an effect-indexed array -- L x R, or L x p x R --
+# or NULL when the fit holds none: a fit whose every effect is null carries
+# NA where mvsusieR would put its per-effect arrays, having no effect to
+# report them for.
 # @noRd
 .trimEffectArray <- function(x, effectIdx) {
-    if (length(dim(x)) != 3L) {
+    nDim <- length(dim(x))
+    if (nDim == 2L) {
+        return(x[effectIdx, , drop = FALSE])
+    }
+    if (nDim != 3L) {
         return(NULL)
     }
     x[effectIdx, , , drop = FALSE]
+}
+
+# A joint fit's per-effect, per-condition log Bayes factors; NULL for a fit
+# without the per-(variant, condition) ones they weight, where mvsusieR
+# fills them with 0.
+# @noRd
+.fitOutcomeLbf <- function(fit) {
+    if (length(dim(fit[["lbf_variable_outcome"]])) != 3L) {
+        return(NULL)
+    }
+    fit[["lbf_outcome"]]
+}
+
+# ---- SuSiEx sharing patterns of a joint fit -------------------------------
+# susieR's post-hoc SuSiEx model (susie_post_outcome_configuration()) asks,
+# for each credible set of a joint fit, which of its conditions share the
+# effect: a posterior over the 2^R patterns of active conditions, under a
+# prior uniform over them. credibleSetSummary() reports each condition's
+# marginal, sharingPatterns() the patterns.
+
+# Whether the installed susieR's susie_post_outcome_configuration() takes
+# `arg`. config_probability (the marginals without enumerating the patterns)
+# and max_traits (enumerating them for more than 20 conditions) came
+# together. The function ignores its `...`, so its explicit formals are
+# read; .engineTakes() would take the `...` to accept anything.
+# @noRd
+.susiexTakes <- function(arg) {
+    is_in(arg, .engineFormalNames("susieR::susie_post_outcome_configuration"))
+}
+
+# The joint fit `fit` as susie_post_outcome_configuration() reads it, for
+# its credible sets `setsObj`. A trimmed fit's arrays hold only the effects
+# it kept, so the sets point at their rows by the `cs_idx` attribute, their
+# L<k> names numbering the effects before trimming. Variable names are
+# dropped: every condition has the fit's variables, and alpha's names and
+# the Bayes factors' may differ in form. `lbf` is given, empty, so that an
+# older susieR's `fit$lbf` does not prefix-match the Bayes factors. NULL for
+# a fit without them, of one condition, or holding none of the sets'
+# effects.
+# @noRd
+.susiexFitView <- function(fit, setsObj) {
+    lbf <- fit[["lbf_variable_outcome"]]
+    alpha <- fit[["alpha"]]
+    if (
+        length(dim(lbf)) != 3L ||
+            dim(lbf)[[3L]] < 2L ||
+            !is.matrix(alpha) ||
+            !identical(dim(lbf)[1:2], dim(alpha)) ||
+            length(setsObj$cs) == 0L
+    ) {
+        return(NULL)
+    }
+    rows <- .fitEffectRows(fit, .fmEffectIndices(setsObj$cs))
+    held <- !is.na(rows)
+    if (!any(held)) {
+        return(NULL)
+    }
+    structure(
+        list(
+            alpha = unname(alpha),
+            lbf = rep(NA_real_, nrow(alpha)),
+            lbf_variable_outcome = `dimnames<-`(
+                lbf,
+                list(NULL, NULL, .fitConditionNames(fit, dim(lbf)[[3L]]))
+            ),
+            sets = list(cs = structure(setsObj$cs[held], cs_idx = rows[held]))
+        ),
+        class = "mvsusie"
+    )
+}
+
+# The names of a joint fit's `nCond` conditions as it was given them, or
+# condition_1, condition_2, ... when it records none it can be told apart
+# by.
+# @noRd
+.fitConditionNames <- function(fit, nCond) {
+    recorded <- list(
+        colnames(fit[["single_effect_lfsr"]]),
+        colnames(fit[["coef"]]),
+        dimnames(fit[["lbf_variable_outcome"]])[[3L]],
+        fit[["outcome_names"]]
+    )
+    detect(recorded, .namesConditions, nCond = nCond) %||%
+        str_c("condition_", seq_len(nCond))
+}
+
+# @noRd
+.namesConditions <- function(nm, nCond) {
+    length(nm) == nCond &&
+        !anyNA(nm) &&
+        all(nzchar(nm)) &&
+        !anyDuplicated(nm)
+}
+
+# Each credible set's probability that condition `condition` of a joint fit
+# shares its effect (SuSiEx's marginal), named by effect id: computed
+# without enumerating the patterns, by a susieR whose
+# susie_post_outcome_configuration() takes config_probability. NULL for a
+# row from no joint fit, or a fit that cannot give it.
+# @noRd
+.susiexActivation <- function(fit, setsObj, condition) {
+    view <- if (!is.na(condition)) .susiexFitView(fit, setsObj)
+    if (is.null(view) || condition > dim(view$lbf_variable_outcome)[[3L]]) {
+        return(NULL)
+    }
+    if (!.susiexTakes("config_probability")) {
+        .informNoSusiexMarginals()
+        return(NULL)
+    }
+    res <- susieR::susie_post_outcome_configuration(
+        view,
+        by = "outcome",
+        config_probability = FALSE
+    )
+    map_dbl(res$susiex, .susiexMarginalAt, condition = condition)
+}
+
+# @noRd
+.susiexMarginalAt <- function(cs, condition) {
+    as.numeric(cs$config_summary$posthoc_prob[[condition]])
+}
+
+# Said once a session: the installed susieR gives a condition's activation
+# probability only by enumerating every pattern, which credibleSetSummary()
+# does not do.
+# @noRd
+.informNoSusiexMarginals <- function() {
+    inform(
+        str_c(
+            "credibleSetSummary(): cs_activation_prob is NA, as the ",
+            "installed susieR ",
+            as.character(packageVersion("susieR")),
+            " computes it only by enumerating every sharing pattern. A ",
+            "susieR whose susie_post_outcome_configuration() takes ",
+            "`config_probability` computes it directly."
+        ),
+        .frequency = "once",
+        .frequency_id = "pecotmrSusiexMarginals"
+    )
+}
+
+# Each credible set's pattern table for a joint fit `view`
+# (.susiexFitView()), named by effect id: a 0/1 column per condition and
+# the pattern's probability (config_prob), over all 2^R patterns.
+# `maxConditions` reaches susieR as its enumeration ceiling where it takes
+# one (.susiexTakes()).
+# @noRd
+.susiexPatternTables <- function(view, maxConditions) {
+    ceilingArg <- if (.susiexTakes("max_traits")) {
+        list(max_traits = maxConditions)
+    } else {
+        list()
+    }
+    res <- exec(
+        susieR::susie_post_outcome_configuration,
+        view,
+        by = "outcome",
+        !!!ceilingArg
+    )
+    map(res$susiex, "config_probability")
 }
 
 #' Format Fine-mapping Post-processing for Protocol Output

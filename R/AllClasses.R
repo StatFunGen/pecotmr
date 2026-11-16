@@ -1777,14 +1777,48 @@ setMethod(
     }
 )
 
-# credibleSetSummary() as a tibble.
+# credibleSetSummary() as a tibble, each row's per-condition columns read at
+# its position in its joint fit.
 # @noRd
 .fmrCredibleSetSummaryTable <- function(x, coverage = 0.95) {
     .fmrAggregateView(
         x,
         perEntry = .fmrRowCredibleSetSummary,
-        viewArgs = list(coverage = coverage)
+        viewArgs = list(coverage = coverage),
+        rowArgs = map(seq_len(nrow(x)), .fmrJointIndexArgs, x = x)
     )
+}
+
+#' @rdname sharingPatterns
+#' @importFrom checkmate assertCount assertNumber
+#' @export
+setMethod(
+    "sharingPatterns",
+    "FineMappingResultBase",
+    function(x, coverage = 0.95, patternCoverage = 0.95, maxConditions = 20) {
+        assertNumber(coverage, lower = 0, upper = 1)
+        assertNumber(patternCoverage, lower = 0, upper = 1)
+        assertCount(maxConditions, positive = TRUE)
+        .fitCoverageCheckedRows(x, "sharingPatterns()")
+        .spRequireCeiling(maxConditions)
+        .fmrSharingPatternsTable(x, coverage, patternCoverage, maxConditions)
+    }
+)
+
+# Stop unless the installed susieR enumerates the patterns of
+# `maxConditions` conditions: past its fixed ceiling of 20 it has to take
+# max_traits (.susiexTakes()).
+# @noRd
+.spRequireCeiling <- function(maxConditions) {
+    if (maxConditions <= 20 || .susiexTakes("max_traits")) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "sharingPatterns(): maxConditions above 20 needs a newer susieR: ",
+        "the installed susieR {packageVersion('susieR')} enumerates the ",
+        "patterns of at most 20 conditions, as its ",
+        "susie_post_outcome_configuration() takes no `max_traits`."
+    ))
 }
 
 #' @rdname fsusieCredibleBand
