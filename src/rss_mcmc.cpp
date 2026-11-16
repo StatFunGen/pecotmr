@@ -331,14 +331,15 @@ SdprChain<LdBlock>::SdprChain(
 }
 
 // Each union variant's studies and its place in each, and each block's union
-// variants in order; a variant lies in the same block in every study
-// carrying it.
+// variants in order. A variant lies in the same block in every study
+// carrying it: SDPR's one study has its own blocks, and SDPRX gives each of
+// its studies one block.
 template <class LdBlock>
 void SdprChain<LdBlock>::place_variants() {
     present_.assign(n_union_, 0);
     local_.zeros(n_union_, K_);
     block_union_.assign(n_blocks_, std::vector<arma::uword>());
-    std::vector<size_t> block_of(n_union_, n_blocks_);
+    std::vector<unsigned char> placed(n_union_, 0);
     for (size_t k = 0; k < K_; k++) {
         for (size_t j = 0; j < n_blocks_; j++) {
             arma::uword start = layouts_[k].start(j);
@@ -346,12 +347,9 @@ void SdprChain<LdBlock>::place_variants() {
                 arma::uword u = union_idx_[k](i);
                 present_[u] |= StudySet(1) << k;
                 local_(u, k) = i;
-                if (block_of[u] == n_blocks_) {
-                    block_of[u] = j;
+                if (!placed[u]) {
+                    placed[u] = 1;
                     block_union_[j].push_back(u);
-                } else if (block_of[u] != j) {
-                    cpp11::stop("Union variant %d lies in different LD blocks "
-                                "across the studies.", (int)u + 1);
                 }
             }
         }
@@ -1175,47 +1173,19 @@ SdprBlock<FactorLdBlock> sdpr_factor_block(const SdprData &dat, const arma::mat 
 
 namespace {
 
-// The inputs sdpr_mcmc() reads, checked before the chain is built.
-template <class LdBlock>
-void check_sdpr_inputs(const std::vector<std::vector<SdprBlock<LdBlock>>> &blocks,
-                       const std::vector<arma::uvec> &union_idx,
-                       const SdprSharing &sharing, size_t M,
-                       const std::vector<double> &gap0) {
-    size_t K = blocks.size();
+// The inputs sdpr_mcmc() reads that no entry point checks first: the number
+// of studies K, M and the kinds there are. The entry points build each
+// study's places in the union, LD blocks and bound of divergence to match
+// its effects, and check the kinds' studies and rho against K.
+void check_sdpr_inputs(size_t K, const SdprSharing &sharing, size_t M) {
     if (K == 0 || K > 64) {
         cpp11::stop("SDPR runs on 1 to 64 studies, not %d.", (int)K);
-    }
-    if (union_idx.size() != K || gap0.size() != K) {
-        cpp11::stop("Each study needs its places in the union and its bound "
-                    "of divergence.");
     }
     if (M < 4) {
         cpp11::stop("'M' must be at least 4.");
     }
-    for (size_t k = 0; k < K; k++) {
-        if (blocks[k].size() != blocks[0].size()) {
-            cpp11::stop("Every study needs the same number of LD blocks.");
-        }
-        arma::uword p = 0;
-        for (const SdprBlock<LdBlock> &blk : blocks[k]) {
-            p += blk.size();
-        }
-        if (p != union_idx[k].n_elem) {
-            cpp11::stop("Study %d has %d variants in its LD blocks but %d "
-                        "places in the union.", (int)k + 1, (int)p,
-                        (int)union_idx[k].n_elem);
-        }
-    }
     if (sharing.kinds.empty()) {
         cpp11::stop("SDPR needs at least one kind of component.");
-    }
-    for (const arma::uvec &kind : sharing.kinds) {
-        if (kind.is_empty() || kind.max() >= K) {
-            cpp11::stop("Each kind must hold some of the %d studies.", (int)K);
-        }
-    }
-    if (sharing.rho.n_rows != K || sharing.rho.n_cols != K) {
-        cpp11::stop("rho must be %d x %d.", (int)K, (int)K);
     }
 }
 
@@ -1227,7 +1197,7 @@ SdprEstimates sdpr_mcmc(const std::vector<std::vector<SdprBlock<LdBlock>>> &bloc
                         const SdprSharing &sharing, size_t M, double a0k, double b0k,
                         const ChainSchedule &schedule, bool verbose, unsigned int seed,
                         const ChainOptions &opts, const std::vector<double> &gap0) {
-    check_sdpr_inputs(blocks, union_idx, sharing, M, gap0);
+    check_sdpr_inputs(blocks.size(), sharing, M);
     SdprChain<LdBlock> chain(blocks, union_idx, n_union, sharing, M, a0k, b0k, seed,
                              opts, gap0);
     run_chain(chain, schedule, verbose);
@@ -1286,6 +1256,22 @@ mat checked_factor(const doubles_matrix<>& factorR, R_xlen_t n_effects) {
 		            (int)F.n_cols, (int)n_effects);
 	}
 	return F;
+}
+
+// The LD blocks as R passes them, refused unless they hold a variant per
+// effect between them: each block reads the effects at its own places.
+std::vector<mat> checked_blocks(const list& LD, R_xlen_t n_effects) {
+	std::vector<mat> blocks;
+	uword held = 0;
+	for (R_xlen_t i = 0; i < LD.size(); i++) {
+		blocks.push_back(as_Mat(doubles_matrix<>(LD[i])));
+		held += blocks.back().n_rows;
+	}
+	if (held != static_cast<uword>(n_effects)) {
+		cpp11::stop("The LD blocks hold %d variants but there are %d effects.",
+		            (int)held, (int)n_effects);
+	}
+	return blocks;
 }
 
 // What a chain reports to R: its effects, the sampler's own estimates
@@ -1555,6 +1541,21 @@ cpp11::writable::list jointPrsFactorCpp(double a, double b, sexp phi,
 
 namespace {
 
+// A per-variant setting `what` as R passes it, NULL standing for `fill` at
+// every variant, refused unless it holds a value per effect.
+template <class T>
+std::vector<T> per_variant(sexp x, size_t n_effects, T fill, const char* what) {
+	if (x == R_NilValue) {
+		return std::vector<T>(n_effects, fill);
+	}
+	std::vector<T> out = cpp11::as_cpp<std::vector<T>>(x);
+	if (out.size() != n_effects) {
+		cpp11::stop("'%s' holds %d values but there are %d effects.", what,
+		            (int)out.size(), (int)n_effects);
+	}
+	return out;
+}
+
 // The per-variant data as R passes it: the marginal betas deflated by `c`, a
 // NULL perVariantSampleSize is n for every variant, and a NULL array is
 // array 1 for every variant.
@@ -1566,16 +1567,9 @@ SdprData sdpr_data(const doubles& bhatR, int n, sexp perVariantSampleSize, sexp 
 	for (size_t i = 0; i < dat.beta_mrg.size(); i++) {
 		dat.beta_mrg[i] /= c;
 	}
-	if (perVariantSampleSize != R_NilValue) {
-		dat.sz = cpp11::as_cpp<std::vector<double>>(perVariantSampleSize);
-	} else {
-		dat.sz = std::vector<double>(dat.beta_mrg.size(), n);
-	}
-	if (array != R_NilValue) {
-		dat.array = cpp11::as_cpp<std::vector<int>>(array);
-	} else {
-		dat.array = std::vector<int>(dat.beta_mrg.size(), 1);
-	}
+	dat.sz = per_variant<double>(perVariantSampleSize, dat.beta_mrg.size(), n,
+	                             "perVariantSampleSize");
+	dat.array = per_variant<int>(array, dat.beta_mrg.size(), 1, "array");
 	return dat;
 }
 
@@ -1720,10 +1714,7 @@ cpp11::writable::list sdprCpp(
 	bool track = false
 	) {
 	ChainSchedule schedule(iter, burn, thin);
-	std::vector<mat> ref_ld_mat;
-	for (int i = 0; i < LD.size(); i++) {
-		ref_ld_mat.push_back(as_Mat(doubles_matrix<>(LD[i])));
-	}
+	std::vector<mat> ref_ld_mat = checked_blocks(LD, bhatR.size());
 
 	SdprData data = sdpr_data(bhatR, n, perVariantSampleSize, array, c);
 	std::vector<std::vector<SdprBlock<DenseLdBlock>>> blocks = {

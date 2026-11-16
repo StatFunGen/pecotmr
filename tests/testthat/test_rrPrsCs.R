@@ -539,6 +539,43 @@ test_that("PRS-CS across one study is PRS-CS, draw for draw", {
     expect_identical(as.numeric(jointF$betaEst), aloneF$betaEst)
 })
 
+test_that("JointPRS's entry points refuse LD that does not fit the studies", {
+    studies <- .rrwTwoStudies()
+    run <- function(entry, ld) {
+        entry(
+            1,
+            0.5,
+            NULL,
+            1,
+            map(studies, "z"),
+            c(250, 165),
+            ld,
+            list(1:30, 1:30),
+            30L,
+            20L,
+            5L,
+            5L,
+            FALSE,
+            11L,
+            1,
+            FALSE,
+            FALSE
+        )
+    }
+    expect_error(
+        run(jointPrsCpp, list(studies[[1L]]$R)),
+        "There are 1 LD matrices for 2 studies"
+    )
+    expect_error(
+        run(jointPrsCpp, list(studies[[1L]]$R, studies[[2L]]$R[1:29, 1:29])),
+        "Study 2's LD is 29 x 29 but it has 30 effects"
+    )
+    expect_error(
+        run(jointPrsFactorCpp, list(studies[[1L]]$X)),
+        "There are 1 LD factors for 2 studies"
+    )
+})
+
 test_that("a constraint of 0 holds the studies' correlation at 0 (PRS-CSx)", {
     studies <- .rrwTwoStudies()
     # The second study lacks the last variant.

@@ -171,9 +171,9 @@ static inline double apply_threshold(Penalty pen, double t, double v,
     case PEN_LASSO: return lasso_thresh(t, pp.l1, pp.l2, v);
     case PEN_MCP:   return mcp_thresh(t, pp.l1, pp.l2, gamma, v);
     case PEN_SCAD:  return scad_thresh(t, pp.l1, pp.l2, gamma, v);
-    case PEN_L0:    return l0_thresh(t, pp.lambda0, pp.l1, pp.l2, v);
+    case PEN_L0:    break;
   }
-  return 0.0; // unreachable
+  return l0_thresh(t, pp.lambda0, pp.l1, pp.l2, v);
 }
 
 // ---- Full penalty value (for fbeta computation) --------------------------

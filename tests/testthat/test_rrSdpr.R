@@ -614,6 +614,134 @@ test_that("SDPR skips an LD block holding no variant", {
     expect_identical(withEmpty$betaEst, run(list(one$R))$betaEst)
 })
 
+test_that("SDPR's entry points refuse inputs that do not fit together", {
+    studies <- .rrwTwoStudies()
+    one <- studies[[1L]]
+    single <- function(LD = list(one$R), M = 20L, sizes = NULL, array = NULL) {
+        sdprCpp(
+            one$z,
+            LD,
+            250L,
+            sizes,
+            array,
+            0.1,
+            1,
+            M,
+            0.5,
+            0.5,
+            20L,
+            5L,
+            5L,
+            1L,
+            FALSE,
+            6L,
+            FALSE,
+            FALSE
+        )
+    }
+    expect_error(single(M = 3L), "'M' must be at least 4")
+    # Each input read per variant holds a value per effect, checked before
+    # any is read: LD blocks over fewer or more variants than there are
+    # effects, and sample sizes or arrays for some, are refused.
+    expect_error(
+        single(LD = list(one$R[1:20, 1:20])),
+        "The LD blocks hold 20 variants but there are 30 effects"
+    )
+    expect_error(
+        single(LD = list(one$R, one$R[1:10, 1:10])),
+        "The LD blocks hold 40 variants but there are 30 effects"
+    )
+    expect_error(
+        single(sizes = rep(250, 29L)),
+        "'perVariantSampleSize' holds 29 values but there are 30 effects"
+    )
+    expect_error(
+        single(array = rep(1L, 29L)),
+        "'array' holds 29 values but there are 30 effects"
+    )
+    across <- function(
+        bhat = map(studies, "z"),
+        ld = map(studies, "R"),
+        n = c(250L, 165L),
+        nUnion = 30L,
+        kinds = list(1L, 2L, 1:2)
+    ) {
+        sdprxCpp(
+            bhat,
+            ld,
+            n,
+            rep(list(1:30), length(bhat)),
+            nUnion,
+            kinds,
+            NULL,
+            0.1,
+            1,
+            20L,
+            0.5,
+            0.5,
+            20L,
+            5L,
+            5L,
+            FALSE,
+            7L,
+            FALSE,
+            FALSE
+        )
+    }
+    expect_error(
+        across(bhat = list(), ld = list(), n = integer(0), kinds = list()),
+        "SDPR runs on 1 to 64 studies, not 0"
+    )
+    # A union place no study fills
+    expect_error(across(nUnion = 31L), "Union variant 31 is in no study")
+    expect_error(across(kinds = list()), "at least one kind of component")
+    expect_error(across(kinds = list(3L)), "Kind 1's studies must lie in 1..2")
+    expect_error(
+        across(ld = list(one$R)),
+        "Each of the 2 studies needs one LD and one sample size"
+    )
+    expect_error(across(n = c(250L, 0L)), "sample size must be positive")
+    expect_error(
+        across(ld = list(one$R, studies[[2L]]$R[1:29, 1:29])),
+        "Study 2's LD is 29 x 29 but it has 30 effects"
+    )
+})
+
+test_that("SDPR clamps a component variance drawn infinite or zero", {
+    one <- .rrwTwoStudies()[[1L]]
+    run <- function(a0k, b0k) {
+        sdprCpp(
+            one$z,
+            list(one$R),
+            250L,
+            NULL,
+            NULL,
+            0.1,
+            1,
+            20L,
+            a0k,
+            b0k,
+            20L,
+            5L,
+            5L,
+            1L,
+            FALSE,
+            6L,
+            FALSE,
+            FALSE
+        )
+    }
+    # An empty component's variance is 1 over a gamma draw: a prior shape
+    # near 0 draws that as 0, and a prior rate near 0 overflows its scale.
+    # Each is held at a bound, said on the console, and the chain goes on.
+    infinite <- capture.output(fitInf <- run(1e-300, 0.5), type = "message")
+    expect_true(is_in("Cluster variance is infinite.", infinite))
+    expect_true(all(is.finite(fitInf$betaEst)))
+    zero <- capture.output(fitZero <- run(0.5, 5e-324), type = "message")
+    expect_true(is_in("Cluster variance is zero.", zero))
+    expect_true(all(is.finite(fitZero$betaEst)))
+})
+
 test_that("SDPR across three studies learns each pair a kind spans", {
     # Three copies of one study: their effects agree, so the learned
     # correlations run high and some grid values leave rho indefinite.

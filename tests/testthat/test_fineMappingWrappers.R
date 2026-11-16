@@ -2978,6 +2978,18 @@ test_that("a credible set's purity is read over the members with data", {
         pecotmr:::.csTableSusie(fit, full, 0.95, "X", 0.5, NULL)$sets,
         susieR::susie_get_cs(fit, X = full, coverage = 0.95, min_abs_corr = 0.5)
     )
+    # Only a base matrix is read for variants without data: a sparse design,
+    # which susieR fits as well, gives susie_get_cs()'s own sets directly.
+    sparse <- Matrix::Matrix(full, sparse = TRUE)
+    expect_identical(
+        pecotmr:::.csTableSusie(fit, sparse, 0.95, "X", 0.5, NULL)$sets,
+        susieR::susie_get_cs(
+            fit,
+            X = sparse,
+            coverage = 0.95,
+            min_abs_corr = 0.5
+        )
+    )
 })
 
 test_that("an unmappable-effects fit refuses missing phenotypes in a study", {
@@ -3306,10 +3318,38 @@ test_that("fitMvsusieRss fits unmappable effects on an LD factor", {
     expect_equal(viaFactor$theta, viaMatrix$theta, tolerance = 1e-6)
     expect_equal(viaFactor$tau2, viaMatrix$tau2, tolerance = 1e-6)
     expect_equal(dim(viaFactor$tau2), c(2L, 2L))
-    # One LD form only.
+})
+
+test_that("fitMvsusieRss reads exactly one LD form", {
+    skip_if_not_installed("mvsusieR")
+    Z <- cbind(a = c(1, -2, 0.5), b = c(0.3, 1, -1))
+    oneForm <- "give exactly one of `R` \\(the LD matrix\\) and `X`"
+    # Both the matrix and a factor of it, or neither
     expect_error(
-        fitMvsusieRss(Z, R = diag(40), N = 500, prior_variance = 1, X = Z),
-        "give exactly one of `R` \\(the LD matrix\\) and `X`"
+        fitMvsusieRss(Z, R = diag(3), N = 500, prior_variance = 1, X = diag(3)),
+        oneForm
+    )
+    expect_error(fitMvsusieRss(Z, N = 500, prior_variance = 1), oneForm)
+})
+
+test_that("an mvsusieR that predates fits across studies refuses them", {
+    skip_if_not_installed("mvsusieR")
+    skip_if(pecotmr:::.mvsusieFitsStudies(), "mvsusieR fits across studies")
+    Z <- cbind(a = c(1, -2, 0.5), b = c(0.3, 1, -1))
+    newer <- "needs a newer mvsusieR than the installed mvsusieR"
+    # An LD matrix per study, or a sample size per outcome
+    expect_error(
+        fitMvsusieRss(
+            Z,
+            R = list(diag(3), diag(3)),
+            N = 500,
+            prior_variance = 1
+        ),
+        newer
+    )
+    expect_error(
+        fitMvsusieRss(Z, R = diag(3), N = c(500, 800), prior_variance = 1),
+        newer
     )
 })
 
@@ -5348,6 +5388,21 @@ test_that(".fsusieScaleCols reads the wavelet columns off a flat prior", {
     expect_equal(dim(W), c(ncol(obj$X), ncol(obj$Y)))
 })
 
+test_that("the fSuSiE credible band stops where fsusieR lacks its method", {
+    skip_if_not_installed("fsusieR")
+    # The band is fsusieR's unexported update_cal_credible_band.susiF(): an
+    # fsusieR without it (renamed upstream) is an error naming it, not a fit
+    # without a band. The fit here has no band yet.
+    local_mocked_bindings(
+        update_cal_credible_band.susiF = NULL,
+        .package = "fsusieR"
+    )
+    expect_error(
+        pecotmr:::.fsusiePopulateCredibleBand(list()),
+        "update_cal_credible_band.susiF not found"
+    )
+})
+
 test_that("fsusieWeights attaches the fit only when asked", {
     skip_if_not_installed("fsusieR")
     skip_if_not_installed("wavethresh")
@@ -6396,6 +6451,22 @@ test_that("a screen whose marginal z cannot be computed falls back", {
     scr <- list(metric = "absZ", cutoff = 2)
     expect_true(.fmSerScreen(X, y, scr, fallback = TRUE))
     # colocboost passes FALSE: it drops an outcome it cannot screen.
+    expect_false(.fmSerScreen(X, y, scr, fallback = FALSE))
+})
+
+test_that("a screen whose fit has no finite log Bayes factor falls back", {
+    # A stand-in fit: susieR stops on the inputs that might give one (a
+    # constant y, a non-finite X), and a fit that stops falls back too.
+    local_mocked_bindings(
+        susie = function(...) {
+            list(pip = rep(0.2, 5L), lbf_variable = matrix(NA_real_, 1L, 5L))
+        },
+        .package = "susieR"
+    )
+    X <- matrix(as.double(1:50), nrow = 10L, ncol = 5L)
+    y <- as.double(1:10)
+    scr <- list(metric = "logBf", cutoff = 2)
+    expect_true(.fmSerScreen(X, y, scr, fallback = TRUE))
     expect_false(.fmSerScreen(X, y, scr, fallback = FALSE))
 })
 

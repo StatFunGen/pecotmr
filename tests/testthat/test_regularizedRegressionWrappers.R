@@ -2882,6 +2882,61 @@ test_that("the coupled L0 path swaps as each study's own does at c = 0", {
             info = k
         )
     }
+    # No swap qualifies on that data. On real LD one study swaps along the
+    # first points of its own path, and each round re-solves every study as
+    # its own swaps would. (Below lambda ~1e-4 a swap can rest on a near-tie
+    # that the joint solve's schedule breaks the other way.)
+    studies <- .rrwTwoStudies()
+    ownFit <- function(k, lambda, maxSwaps) {
+        penalizedRssCpp(
+            studies[[k]]$z,
+            studies[[k]]$R,
+            0,
+            lambda,
+            "L0",
+            "gradientRanked",
+            0,
+            1,
+            0,
+            0,
+            1e-10,
+            100000L,
+            maxSwaps,
+            pecotmr:::.rssPathControl()
+        )
+    }
+    sharedPath <- ownFit(2L, numeric(0), 0L)$lambda[1:6]
+    coupledFit <- function(maxSwaps) {
+        penalizedRssCoupledCpp(
+            map(studies, "z"),
+            map(studies, "R"),
+            list(1:30, 1:30),
+            30L,
+            0,
+            0,
+            sharedPath,
+            "L0",
+            "gradientRanked",
+            0,
+            1,
+            0,
+            0,
+            1e-10,
+            100000L,
+            maxSwaps,
+            pecotmr:::.rssPathControl()
+        )
+    }
+    swapped <- coupledFit(3L)
+    expect_false(identical(swapped, coupledFit(0L)))
+    for (k in 1:2) {
+        expect_equal(
+            swapped$studies[[k]]$beta,
+            ownFit(k, sharedPath, 3L)$beta,
+            tolerance = 1e-8,
+            info = k
+        )
+    }
 })
 
 test_that("the coupled path flags a point it ran out of passes on", {
@@ -2909,6 +2964,48 @@ test_that("the coupled path flags a point it ran out of passes on", {
         )
         expect_true(any(joint$studies[[1L]]$conv == 0L), info = strategy)
     }
+})
+
+test_that("the coupled path refuses LD that does not fit the studies", {
+    studies <- .rrwTwoStudies()
+    rest <- list(
+        zList = map(studies, "z"),
+        unionIdxList = list(1:30, 1:30),
+        nUnion = 30L,
+        strength = 1,
+        shrink = 0,
+        pathR = c(0.05, 0.01),
+        penaltyStr = "lasso",
+        strategyStr = "strongRule",
+        gamma = 3,
+        alpha = 1,
+        lambda1 = 0,
+        lambda2 = 0,
+        thr = 1e-10,
+        maxiter = 1000L,
+        maxSwaps = 0L,
+        control = pecotmr:::.rssPathControl()
+    )
+    expect_error(
+        exec(penalizedRssCoupledCpp, ldList = list(studies[[1L]]$R), !!!rest),
+        "There are 1 LD sources for 2 studies"
+    )
+    expect_error(
+        exec(
+            penalizedRssCoupledCpp,
+            ldList = list(studies[[1L]]$R, studies[[2L]]$R[1:29, 1:29]),
+            !!!rest
+        ),
+        "Study 2's LD is 29 x 29 but it has 30 z-scores"
+    )
+    expect_error(
+        exec(
+            penalizedRssCoupledFactorCpp,
+            factorList = list(studies[[1L]]$X, studies[[2L]]$X[, 1:29]),
+            !!!rest
+        ),
+        "Study 2's LD is 165 x 29 but it has 30 z-scores"
+    )
 })
 
 test_that("the coupled path's helpers pad, skip and pair as asked", {

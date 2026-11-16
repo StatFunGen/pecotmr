@@ -116,16 +116,14 @@ inline double gigrnd(double p, double a, double b, std::mt19937& rng) {
 
 	double alpha = std::sqrt(std::pow(omega, 2) + std::pow(lambda, 2)) - lambda;
 
+	// PRS-CS's gigrnd() also tests alpha == lambda == 0 where x > 2, but psi
+	// is 0 there, so x is 0 and only the x < 1/2 branches keep the test.
 	double x = -psi(1.0, alpha, lambda);
 	double t;
 	if (x >= 0.5 && x <= 2.0) {
 		t = 1.0;
 	} else if (x > 2.0) {
-		if (alpha == 0 && lambda == 0) {
-			t = 1.0;
-		} else {
-			t = std::sqrt(2.0 / (alpha + lambda));
-		}
+		t = std::sqrt(2.0 / (alpha + lambda));
 	} else {
 		if (alpha == 0 && lambda == 0) {
 			t = 1.0;
@@ -139,11 +137,7 @@ inline double gigrnd(double p, double a, double b, std::mt19937& rng) {
 	if (x >= 0.5 && x <= 2.0) {
 		s = 1.0;
 	} else if (x > 2.0) {
-		if (alpha == 0 && lambda == 0) {
-			s = 1.0;
-		} else {
-			s = std::sqrt(4.0 / (alpha * std::cosh(1.0) + lambda));
-		}
+		s = std::sqrt(4.0 / (alpha * std::cosh(1.0) + lambda));
 	} else {
 		if (alpha == 0 && lambda == 0) {
 			s = 1.0;
@@ -458,9 +452,7 @@ public:
 	arma::mat sub(const arma::uvec& idx) const {
 		arma::mat W_idx = W_.cols(idx);
 		arma::mat S = W_idx.t() * W_idx;
-		if (extra_ != 0.0) {
-			S.diag() += extra_;
-		}
+		S.diag() += extra_;
 		return S;
 	}
 

@@ -2838,17 +2838,25 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
         .informNoSusiexMarginals()
         return(NULL)
     }
+    # nocov start: needs a susieR whose susie_post_outcome_configuration()
+    # takes config_probability, which no release has yet. Remove the marks
+    # once one does.
     res <- susieR::susie_post_outcome_configuration(
         view,
         by = "outcome",
         config_probability = FALSE
     )
     map_dbl(res$susiex, .susiexMarginalAt, condition = condition)
+    # nocov end
 }
 
 # @noRd
 .susiexMarginalAt <- function(cs, condition) {
+    # nocov start: reached only from .susiexActivation()'s
+    # config_probability call, which no released susieR has yet. Remove the
+    # marks once one does.
     as.numeric(cs$config_summary$posthoc_prob[[condition]])
+    # nocov end
 }
 
 # Said once a session: the installed susieR gives a condition's activation
@@ -2878,7 +2886,11 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
 # @noRd
 .susiexPatternTables <- function(view, maxConditions) {
     ceilingArg <- if (.susiexTakes("max_traits")) {
+        # nocov start: needs a susieR whose
+        # susie_post_outcome_configuration() takes max_traits, which no
+        # release has yet. Remove the marks once one does.
         list(max_traits = maxConditions)
+        # nocov end
     } else {
         list()
     }
@@ -3376,7 +3388,10 @@ fitMvsusieRss <- function(
 # @noRd
 .mvsusieRssRequire <- function(callArgs, R, X, N) {
     if (.mvsusieFitsStudies()) {
+        # nocov start: needs an mvsusieR that fits across studies, which no
+        # release does yet. Remove the marks once one does.
         return(invisible(NULL))
+        # nocov end
     }
     if (is.list(R) || is.list(X) || length(unique(N)) > 1L) {
         abort(glue(
@@ -3402,6 +3417,9 @@ fitMvsusieRss <- function(
     if (!is.list(R) && !is.list(X)) {
         return(fit)
     }
+    # nocov start: one LD per condition needs an mvsusieR that fits across
+    # studies (.mvsusieRssRequire()), which no release does yet. Remove the
+    # marks once one does.
     .mvsusieZeroLackedFit(
         fit,
         .rssLackedVariants(list(
@@ -3409,12 +3427,17 @@ fitMvsusieRss <- function(
             X = if (is.list(X)) map(X, .rssFirstPanel)
         ))
     )
+    # nocov end
 }
 
 # A condition's LD, or the first of its list of panels.
 # @noRd
 .rssFirstPanel <- function(ld) {
+    # nocov start: reached only from .mvsusieRssZeroLacked(), with an
+    # mvsusieR that fits across studies, which no release does yet. Remove
+    # the marks once one does.
     if (.rssIsPanels(ld)) ld[[1L]] else ld
+    # nocov end
 }
 
 # fitMvsusieRss() reads the LD as its matrix `R` or its factor `X`, exactly
@@ -5911,7 +5934,16 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # fits estimate their weights (.fmRssLd()'s `panels`).
 # @noRd
 .fmRssFitLd <- function(ld) {
-    if (is.null(ld$panels)) ld else ld$panels
+    if (is.null(ld$panels)) {
+        ld
+    } else {
+        # nocov start: a fit that estimates a mixture's weights keeps its
+        # variant names only with a susieR that has two-stage panel fits
+        # (fit_multi_panel_two_stage()), which no release has yet. Remove
+        # the marks once one does.
+        ld$panels
+        # nocov end
+    }
 }
 
 # An unreliable LD matrix makes the multi-effect fit untrustworthy, so with
@@ -6415,7 +6447,11 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         return(NULL)
     }
     conditionU <- if (is.null(colnames(U[[1L]]))) {
+        # nocov start: only mvsusieAsh fits reach this, and they need an
+        # mvsusieR that takes unmappable_prior, which no release does yet.
+        # Remove the marks once one does.
         U
+        # nocov end
     } else {
         map(U, .mashSubsetMatrix, conditionsToKeep = conditionNames)
     }
@@ -6436,6 +6472,10 @@ extractTopPipInfo <- function(fmRow, sumstats) {
 # has neither.
 # @noRd
 .residualSd <- function(residualVariance, Y = NULL) {
+    # nocov start: only mvsusieAsh fits and mr.mash's relative prior
+    # (.mrmashGridSd()) reach this, and they need an mvsusieR that takes
+    # unmappable_prior or an mr.mashr that takes relative_S0, which no
+    # release does yet. Remove the marks once one does.
     if (is.null(dim(residualVariance)) && !is.null(residualVariance)) {
         return(sqrt(residualVariance))
     }
@@ -6446,6 +6486,7 @@ extractTopPipInfo <- function(fmRow, sumstats) {
         return(1)
     }
     apply(Y, 2L, stats::sd, na.rm = TRUE)
+    # nocov end
 }
 
 # The covariance of the unmappable effects of `token`'s fit, or its shape
@@ -6473,7 +6514,11 @@ extractTopPipInfo <- function(fmRow, sumstats) {
     }
     collapsed <- reduce(map2(ddpm$U, .mashCollapseWeights(ddpm), `*`), `+`)
     if (is.null(colnames(collapsed))) {
+        # nocov start: only mvsusieInf and mvsusieAsh fits reach this, and
+        # they need an mvsusieR that takes unmappable_effects, which no
+        # release does yet. Remove the marks once one does.
         return(collapsed)
+        # nocov end
     }
     .mashSubsetMatrix(collapsed, conditionsToKeep = conditionNames)
 }
