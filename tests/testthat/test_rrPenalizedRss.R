@@ -645,7 +645,7 @@ test_that("gradientRanked follows L0Learn's lambda0 path for L0", {
         expect_identical(
             which(ours$beta[, i] != 0),
             which(theirs[, i] != 0),
-            info = i
+            info = paste("point", i)
         )
     }
 })

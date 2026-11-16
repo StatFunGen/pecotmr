@@ -305,7 +305,7 @@ test_that("prsCs runs with the local shape a below and at 0.5", {
             thin = 5,
             seed = 1L
         )
-        expect_true(all(is.finite(fit$betaEst)), info = a)
+        expect_true(all(is.finite(fit$betaEst)), info = paste("a =", a))
     }
 })
 

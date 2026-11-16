@@ -2832,7 +2832,7 @@ test_that("the coupled RSS path reads a factor of each study's LD as it", {
             viaFactor$studies[[k]]$beta,
             dense$studies[[k]]$beta,
             tolerance = 1e-8,
-            info = k
+            info = paste("study", k)
         )
     }
 })
@@ -2881,14 +2881,17 @@ test_that("the coupled L0 path swaps as each study's own does at c = 0", {
             joint$studies[[k]]$beta,
             alone$beta,
             tolerance = 1e-8,
-            info = k
+            info = paste("study", k)
         )
     }
-    # No swap qualifies on that data. On real LD one study swaps along the
-    # first points of its own path, and each round re-solves every study as
-    # its own swaps would. (Below lambda ~1e-4 a swap can rest on a near-tie
-    # that the joint solve's schedule breaks the other way.)
-    studies <- .rrwTwoStudies()
+    # No swap qualifies on that data. On real LD both studies swap along
+    # study 1's path, each lowering its objective, and each round re-solves
+    # every study as its own swaps would. Nothing may rest on a tie, which
+    # rounding or the joint solve's extra sweeps can break either way: the
+    # variants keep |r| < 0.98 (a swap test between duplicates compares equal
+    # numbers), and the path skips study 1's entry value, which its own fit
+    # records as zero but the joint fit, at study 2's larger pathMax, solves.
+    studies <- .rrwTwoStudies(401L, maxR = 0.98)
     ownFit <- function(k, lambda, maxSwaps) {
         penalizedRssCpp(
             studies[[k]]$z,
@@ -2907,7 +2910,7 @@ test_that("the coupled L0 path swaps as each study's own does at c = 0", {
             pecotmr:::.rssPathControl()
         )
     }
-    sharedPath <- ownFit(2L, numeric(0), 0L)$lambda[1:6]
+    sharedPath <- ownFit(1L, numeric(0), 0L)$lambda[2:7]
     coupledFit <- function(maxSwaps) {
         penalizedRssCoupledCpp(
             map(studies, "z"),
@@ -2930,13 +2933,15 @@ test_that("the coupled L0 path swaps as each study's own does at c = 0", {
         )
     }
     swapped <- coupledFit(3L)
-    expect_false(identical(swapped, coupledFit(0L)))
+    unswapped <- coupledFit(0L)
     for (k in 1:2) {
+        gain <- unswapped$studies[[k]]$fbeta - swapped$studies[[k]]$fbeta
+        expect_gt(max(gain), 0.01, label = paste("study", k, "swap gain"))
         expect_equal(
             swapped$studies[[k]]$beta,
             ownFit(k, sharedPath, 3L)$beta,
             tolerance = 1e-8,
-            info = k
+            info = paste("study", k)
         )
     }
 })

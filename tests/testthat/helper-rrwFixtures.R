@@ -131,15 +131,19 @@
 
 # Two studies on disjoint halves of eqtlRegionExample's people: each one's
 # marginal correlations and in-sample LD over 30 common variants, scaled to
-# population SD, with an effect on four of them.
-.rrwTwoStudies <- function() {
+# population SD, with an effect on four of them. The variants are the 30
+# common ones from the `from`-th on, several in perfect LD, or with `maxR`
+# the first 30 there no two of which pass |r| = maxR in either study.
+.rrwTwoStudies <- function(from = 301L, maxR = NULL) {
     data(eqtlRegionExample, envir = environment())
     X0 <- eqtlRegionExample$X
     p <- colMeans(X0) / 2
-    cols <- which(pmin(p, 1 - p) >= 0.05)[301:330]
+    pool <- which(pmin(p, 1 - p) >= 0.05)[from + 0:199]
+    halves <- list(1:250, 251:415)
+    cols <- pool[.rrwApart(X0, pool, halves, maxR)]
     withr::local_seed(5L)
     effects <- stats::rnorm(4L)
-    map(list(1:250, 251:415), function(rows) {
+    map(halves, function(rows) {
         X <- scale(X0[rows, cols]) * sqrt(length(rows) / (length(rows) - 1))
         g <- drop(X[, c(3, 10, 17, 25)] %*% effects)
         y <- scale(g + stats::rnorm(length(rows)))[, 1L]
@@ -150,6 +154,25 @@
             n = length(rows)
         )
     })
+}
+
+# The positions in `pool` of its first 30 variants no two of which pass
+# |r| = maxR in any of `halves`; with no `maxR`, its first 30.
+.rrwApart <- function(X0, pool, halves, maxR) {
+    if (is.null(maxR)) {
+        return(1:30)
+    }
+    ld <- map(halves, function(rows) abs(stats::cor(X0[rows, pool])))
+    kept <- reduce(
+        seq_along(pool),
+        function(kept, j) {
+            apart <- every(ld, function(r) all(r[j, kept] < maxR))
+            if (length(kept) < 30L && apart) c(kept, j) else kept
+        },
+        .init = integer()
+    )
+    stopifnot(length(kept) == 30L)
+    kept
 }
 
 # .rrwTwoStudies()'s studies as the samplers across studies take them: each
