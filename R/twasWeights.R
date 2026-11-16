@@ -3446,6 +3446,16 @@ twasWeightsCv <- function(
 # Multivariate fit: one call producing the full variants x features matrix.
 # @noRd
 .twasFitMultivariate <- function(fnName, args, ctx) {
+    # A joint fit uses only samples observed in every context. With few such
+    # samples (and per-context covariates regressed out) no column of X may vary,
+    # and the multivariate methods then fail deep inside with an index error.
+    if (ncol(ctx$Xfiltered) == 0L) {
+        abort(glue(
+            "{fnName}: no variant varies across the {nrow(ctx$X)} sample(s) ",
+            "shared by all {ncol(ctx$Y)} context(s), so a joint fit cannot be ",
+            "run. Use fewer contexts or contexts with more overlapping samples."
+        ))
+    }
     call <- .twasWeightCallArgs(
         fnName,
         list(X = ctx$Xfiltered, Y = ctx$Y),
@@ -3461,10 +3471,13 @@ twasWeightsCv <- function(
     } else {
         NULL
     }
-    weightsMatrix <- if (nrow(fitted) == length(ctx$validColumns)) {
+    # validColumns is a logical flag over every column of X; the fit was made on
+    # Xfiltered, i.e. only the TRUE columns, so compare against that count and
+    # select by the retained column names when a method reports more rows.
+    weightsMatrix <- if (nrow(fitted) == ncol(ctx$Xfiltered)) {
         fitted
     } else {
-        fitted[names(ctx$validColumns), , drop = FALSE]
+        fitted[colnames(ctx$Xfiltered), , drop = FALSE]
     }
     list(weights = weightsMatrix, methodFit = methodFit)
 }

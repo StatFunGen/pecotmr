@@ -3193,3 +3193,49 @@ test_that(".rssResidualVariances gives 1 - h2 of each condition's variance", {
     expect_equal(.rssResidualVariances(c(0.2, 0.5), c(2, 4)), c(1.6, 2))
     expect_null(.rssResidualVariances(NULL))
 })
+
+# ---- data-driven mr.mash prior aligned to the contexts present in the data ----
+
+.alignTestPrior <- function() {
+    ctx <- c("c1", "c2", "c3", "c4")
+    m1 <- matrix(1:16, 4, 4, dimnames = list(ctx, ctx))
+    m2 <- diag(4) * 2
+    dimnames(m2) <- list(ctx, ctx)
+    list(U = list(a = m1, b = m2), w = c(0.5, 0.5))
+}
+
+test_that(".mrmashAlignPriorToContexts subsets and reorders named prior matrices", {
+    prior <- .alignTestPrior()
+    out <- pecotmr:::.mrmashAlignPriorToContexts(prior, c("c3", "c1"), 2)
+    expect_equal(dim(out$U$a), c(2L, 2L))
+    expect_equal(rownames(out$U$a), c("c3", "c1"))
+    expect_equal(out$U$a, prior$U$a[c("c3", "c1"), c("c3", "c1")])
+    expect_equal(out$w, prior$w)
+})
+
+test_that(".mrmashAlignPriorToContexts errors on contexts missing from the prior", {
+    expect_error(
+        pecotmr:::.mrmashAlignPriorToContexts(.alignTestPrior(), c("c1", "zz"), 2),
+        "lack context"
+    )
+})
+
+test_that(".mrmashAlignPriorToContexts requires unnamed matrices to be K x K", {
+    prior <- list(U = list(diag(3)))
+    expect_equal(pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 3)$U[[1]], diag(3))
+    expect_error(pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 2), "3 x 3")
+})
+
+test_that("buildMrmashPriorMatrices accepts a prior learned on more contexts", {
+    skip_if_not_installed("mr.mashr")
+    set.seed(1)
+    ctx <- c("c2", "c4")
+    Bhat <- matrix(rnorm(20), 10, 2, dimnames = list(NULL, ctx))
+    Shat <- matrix(1, 10, 2, dimnames = list(NULL, ctx))
+    res <- buildMrmashPriorMatrices(
+        Bhat, Shat,
+        dataDrivenPriorMatrices = .alignTestPrior(),
+        canonicalPriorMatrices = FALSE
+    )
+    expect_true(all(vapply(res$S0, function(m) identical(dim(m), c(2L, 2L)), logical(1))))
+})

@@ -10221,6 +10221,13 @@ buildMrmashPriorMatrices <- function(
     if (is.null(priorGrid)) {
         priorGrid <- computeGrid(bhat = Bhat, sbhat = Shat)
     }
+    if (!is.null(dataDrivenPriorMatrices)) {
+        dataDrivenPriorMatrices <- .mrmashAlignPriorToContexts(
+            dataDrivenPriorMatrices,
+            colnames(Bhat),
+            K
+        )
+    }
     S0_raw <- .mrmashRawPriorCovs(
         K,
         dataDrivenPriorMatrices,
@@ -10240,6 +10247,40 @@ buildMrmashPriorMatrices <- function(
 # The unexpanded prior covariances: the canonical set (when requested) plus
 # any data-driven matrices, or the data-driven matrices alone.
 # @noRd
+# Align user-supplied data-driven prior matrices to the contexts present in
+# the data (columns of Bhat): subset and reorder by name, so a prior learned on
+# more contexts (e.g. a multi-cohort mash fit) can be applied to a trait observed
+# in only some of them. Unnamed matrices must already be K x K.
+# @noRd
+.mrmashAlignPriorToContexts <- function(prior, contexts, K) {
+    U <- prior$U
+    if (is.null(U)) {
+        return(prior)
+    }
+    prior$U <- lapply(U, function(m) {
+        m <- as.matrix(m)
+        if (!is.null(contexts) && !is.null(rownames(m)) && !is.null(colnames(m))) {
+            missing <- setdiff(contexts, rownames(m))
+            if (length(missing) > 0) {
+                abort(glue(
+                    "Data-driven prior matrices lack context(s): ",
+                    "{paste(missing, collapse = ', ')}."
+                ))
+            }
+            return(m[contexts, contexts, drop = FALSE])
+        }
+        if (nrow(m) != K || ncol(m) != K) {
+            abort(glue(
+                "Data-driven prior matrices are {nrow(m)} x {ncol(m)} but the data ",
+                "has {K} context(s); name their rows/columns by context so they ",
+                "can be aligned."
+            ))
+        }
+        m
+    })
+    prior
+}
+
 .mrmashRawPriorCovs <- function(
     K,
     dataDrivenPriorMatrices,
