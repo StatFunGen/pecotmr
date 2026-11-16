@@ -820,6 +820,7 @@ test_that(".ctwasLdPanelKey: errors when no candidate file exists", {
 })
 
 test_that(".ctwasLdPanelKey: a mixture checks each panel; memory needs none", {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     mix <- GenotypeMixture(
         list(a = panel[, 1:40], b = panel[, 41:100]),
@@ -3330,6 +3331,7 @@ test_that("the three ctwas stages can each be called on their own", {
 }
 
 test_that("ctwasPipeline fits contexts that hold different genes", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "liver", "liver"),
@@ -3359,6 +3361,7 @@ test_that("ctwasPipeline fits contexts that hold different genes", {
 })
 
 test_that("gene contexts share a prior variance unless asked otherwise", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "liver", "liver"),
@@ -3388,6 +3391,7 @@ test_that("gene contexts share a prior variance unless asked otherwise", {
 })
 
 test_that("shared_type pools the groups of a type, on a run's real labels", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "liver", "liver", "lung"),
@@ -3411,6 +3415,7 @@ test_that("shared_type pools the groups of a type, on a run's real labels", {
 })
 
 test_that("two studies with one context name stay apart, end to end", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "brain", "brain"),
@@ -3476,6 +3481,7 @@ test_that("a block with no gene weights feeds the priors only if asked", {
 })
 
 test_that("a context too small for cTWAS is named when it is left out", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "liver"),
@@ -3495,6 +3501,7 @@ test_that("a context too small for cTWAS is named when it is left out", {
 })
 
 test_that("keeping a small context takes both of cTWAS's size limits", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     spec <- data.frame(
         context = c("brain", "brain", "brain", "liver"),
@@ -3587,6 +3594,7 @@ test_that("merging re-fine-maps a boundary gene over both blocks, for real", {
 })
 
 test_that("ctwasPipeline merges by default, and can be told not to", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     expect_true(BoundaryMergeParam()$enabled)
     spec <- data.frame(
@@ -3608,6 +3616,7 @@ test_that("ctwasPipeline merges by default, and can be told not to", {
 })
 
 test_that("ctwasPipeline end to end on the real engine and bundled panel", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("ctwas")
     data(gwasSumStatsS4Example)
     data(qtlDatasetExample)
@@ -3806,6 +3815,7 @@ test_that(".ctwasFilterVariants: returns NULL when no variants survive", {
 })
 
 test_that(".ctwasBuildWeights: the variant cap and weight cutoff apply", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     gh <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     vids <- .ctp_panelSnpInfo(gh)$SNP[1:5]
@@ -5696,6 +5706,7 @@ test_that(".ctwasRegionGwasLd refuses a region whose rows use two references", {
 }
 
 test_that("a fine-mapping method's weights are capped by their own fit", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     gh <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     vids <- .ctp_panelSnpInfo(gh)$SNP[1:5]
