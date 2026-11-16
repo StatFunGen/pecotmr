@@ -705,9 +705,9 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
 
 .jd_mockMvsusieRss <- function() {
     # The real mvsusie_rss passes its `...` on to mvsusie, which is how L and
-    # L_greedy (the pipeline's CredibleSetParam) arrive; recorded for tests,
-    # as is the form the LD came in: the matrix R, or a genotype reference's
-    # factor X.
+    # L_greedy (the pipeline's CredibleSetParam) arrive, and `verbose`; the
+    # first two are recorded for tests, as is the form the LD came in: the
+    # matrix R, or a genotype reference's factor X.
     function(
         Z,
         R = NULL,
@@ -717,7 +717,8 @@ context("joint dispatchers (fineMappingPipeline / twasWeightsPipeline)")
         L = NULL,
         L_greedy = NULL,
         X = NULL,
-        sample_groups = NULL
+        sample_groups = NULL,
+        verbose = TRUE
     ) {
         list(
             token = "mvsusieRss",

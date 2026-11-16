@@ -259,11 +259,13 @@ test_that("twasWeightsPipeline reads a window once across its paths", {
 test_that("a multi-study TWAS run reads a window once per component", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
+    # One trait's fits read the window as all three would.
     run <- .countBlocks(suppressWarnings(twasWeightsPipeline(
         .fitSamplesTwoStudies(),
         methods = c("lasso", "mrmash"),
         jointSpecification = "context",
         region = .fitSamplesWindow(),
+        traitId = "g1",
         seed = 1L
     )))
     expect_equal(run$reads, 2L)
@@ -2379,10 +2381,13 @@ test_that("a preset fits every method it names", {
     skip_if_not_installed("L0Learn")
     data <- .fitSamplesDataset()
     window <- .fitSamplesWindow()
+    # One context's trait shows the methods; each fits it on its own.
     fineMapped <- suppressWarnings(suppressMessages(fineMappingPipeline(
         data,
         methods = c("susie", "susieInf"),
         region = window,
+        contexts = "brain",
+        traitId = "g1",
         seed = 1L
     )))
     res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
@@ -2390,6 +2395,8 @@ test_that("a preset fits every method it names", {
         methods = "fastDefault",
         fineMappingResult = fineMapped,
         region = window,
+        contexts = "brain",
+        traitId = "g1",
         seed = 1L
     )))
     expect_setequal(
@@ -2411,6 +2418,8 @@ test_that("a preset fits every method it names", {
         studies,
         methods = c("susie", "susieInf"),
         region = window,
+        contexts = "brain",
+        traitId = "g1",
         seed = 1L
     )))
     across <- suppressWarnings(suppressMessages(twasWeightsPipeline(
@@ -2418,6 +2427,8 @@ test_that("a preset fits every method it names", {
         methods = "fastDefault",
         fineMappingResult = fineMappedBoth,
         region = window,
+        contexts = "brain",
+        traitId = "g1",
         seed = 1L
     )))
     expect_setequal(methodNames(across), methodNames(res))
@@ -2431,11 +2442,14 @@ test_that("a preset runs without the fine-mapping methods it cannot read", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("L0Learn")
     window <- .fitSamplesWindow()
+    # One context's trait shows the methods; each fits it on its own.
     res <- expect_warning(
         suppressMessages(twasWeightsPipeline(
             .fitSamplesDataset(),
             methods = "fastDefault",
             region = window,
+            contexts = "brain",
+            traitId = "g1",
             seed = 1L
         )),
         "preset is skipping susie, susieInf"
@@ -2451,6 +2465,8 @@ test_that("a preset runs without the fine-mapping methods it cannot read", {
             .fitSamplesTwoStudies(),
             methods = "fastDefault",
             region = window,
+            contexts = "brain",
+            traitId = "g1",
             seed = 1L
         )),
         warning = function(cnd) {
@@ -4763,14 +4779,15 @@ test_that("bayesC on BGLR also fits each context group jointly", {
             "bayesC",
             jointSpecification,
             region = .fitSamplesWindow(),
+            traitId = "g1",
             crossValidationParam = CrossValidationParam(folds = 2)
         )
     }
     tw <- run(.fitSamplesDataset(), "context")
     joint <- !is.na(tw$jointContexts)
-    # Each trait: its two contexts one at a time, and the two together.
-    expect_equal(sum(joint), 6L)
-    expect_equal(sum(!joint), 6L)
+    # The trait's two contexts one at a time, and the two together.
+    expect_equal(sum(joint), 2L)
+    expect_equal(sum(!joint), 2L)
     expect_equal(unique(as.character(tw$jointContexts[joint])), "brain;liver")
     for (r in which(joint)) {
         cell <- pecotmr:::.twrCellParts(tw, r, "bayesC")
@@ -4779,7 +4796,7 @@ test_that("bayesC on BGLR also fits each context group jointly", {
     }
     # Without a specification it runs one tuple at a time only.
     alone <- run(.fitSamplesDataset(), NULL)
-    expect_equal(nrow(alone), 6L)
+    expect_equal(nrow(alone), 2L)
     expect_false("jointContexts" %in% pecotmr:::.tupleColumnNames(alone))
     # Each study of a collection fits its own context groups.
     both <- run(.fitSamplesTwoStudies(), "context")
@@ -5811,11 +5828,14 @@ test_that("both kinds of method run together with no joint spec", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     window <- .fitSamplesWindow()
+    # g1 and g2, which observe different samples; g3 observes g1's.
+    traits <- c("g1", "g2")
     alone <- function(method) {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
             .fitSamplesDataset(),
             methods = method,
             region = window,
+            traitId = traits,
             seed = 1L
         )))
     }
@@ -5825,6 +5845,7 @@ test_that("both kinds of method run together with no joint spec", {
         .fitSamplesDataset(),
         methods = c("lasso", "mrmash"),
         region = window,
+        traitId = traits,
         seed = 1L
     )))
     # One read of the window serves both kinds of fit.
@@ -5842,7 +5863,7 @@ test_that("both kinds of method run together with no joint spec", {
         )
     }
     for (context in c("brain", "liver")) {
-        for (trait in c("g1", "g2", "g3")) {
+        for (trait in traits) {
             expect_equal(
                 weightsAt(run$result, "lasso", context, trait),
                 weightsAt(lasso, "lasso", context, trait)
@@ -5862,11 +5883,13 @@ test_that("a multi-study run takes both kinds of method with no joint spec", {
         .fitSamplesTwoStudies(),
         methods = c("lasso", "mrmash"),
         region = .fitSamplesWindow(),
+        traitId = "g1",
         seed = 1L
     )))
     expect_setequal(methodNames(res), c("lasso", "mrmash"))
     expect_setequal(as.character(S4Vectors::mcols(res)$study), c("s", "s2"))
-    expect_equal(nrow(res), 24L)
+    # Each study's two contexts of g1, by each method.
+    expect_equal(nrow(res), 8L)
 })
 
 test_that(".twasQdsGridResult takes a path that fitted nothing", {
@@ -6109,6 +6132,7 @@ test_that("a multi-study run keeps X in its individual-level fits if asked", {
         methods = c("lasso", "mrmash"),
         jointSpecification = "context",
         region = .fitSamplesWindow(),
+        traitId = "g1",
         fitRetention = "full",
         retainX = TRUE,
         seed = 1L

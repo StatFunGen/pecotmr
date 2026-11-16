@@ -1310,8 +1310,10 @@ test_that("mrmashRssWeights reads a genotype panel's LD as a factor", {
         d$stat,
         z = cbind(a = d$stat$z, b = d$stat$z + stats::rnorm(40L))
     )
-    # The panel's genotypes as the factor fit as the matrix they give.
-    opts <- MrmashRssOptions(verbose = FALSE)
+    # The panel's genotypes as the factor fit as the matrix they give. These
+    # statistics take mr.mash.rss past its 5000 iterations; the two forms of
+    # the LD agree at every iteration, so a few dozen check it.
+    opts <- MrmashRssOptions(verbose = FALSE, max_iter = 50L)
     expect_equal(
         mrmashRssWeights(
             stat,

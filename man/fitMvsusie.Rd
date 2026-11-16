@@ -39,7 +39,7 @@ at once. \code{fineMappingPipeline()} sets it from
 \item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie}, built
 with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be silently
-ignored.}
+ignored. The fit runs with \code{verbose = FALSE} unless they set it.}
 }
 \value{
 The fit object returned by \code{mvsusieR::mvsusie}. A variant

@@ -1847,8 +1847,8 @@ test_that("fineMappingPipeline refuses fsusie on a single trait", {
 # shape so the test can assert it was constructed as expected.
 .fmp_mockMvsusie <- function() {
     # L / L_greedy are refused by MvsusieOptions as pipeline-owned, so record
-    # what arrives for a test to assert. `standardize` is the pipeline's
-    # default the user may override, recorded likewise.
+    # what arrives for a test to assert. `standardize` and `verbose` are the
+    # pipeline's defaults the user may override, recorded likewise.
     function(
         X,
         Y,
@@ -1856,7 +1856,8 @@ test_that("fineMappingPipeline refuses fsusie on a single trait", {
         coverage,
         L = NULL,
         L_greedy = NULL,
-        standardize = TRUE
+        standardize = TRUE,
+        verbose = TRUE
     ) {
         list(
             token = "mvsusie",
@@ -1865,7 +1866,8 @@ test_that("fineMappingPipeline refuses fsusie on a single trait", {
             coverage = coverage,
             L = L,
             L_greedy = L_greedy,
-            standardize = standardize
+            standardize = standardize,
+            verbose = verbose
         )
     }
 }
@@ -2516,6 +2518,8 @@ test_that("fineMappingPipeline passes mvsusie the CredibleSetParam settings", {
     expect_equal(recorded$L, 3L)
     expect_equal(recorded$L_greedy, 2L)
     expect_equal(recorded$coverage, 0.9)
+    # Quiet, the options not asking otherwise.
+    expect_false(recorded$verbose)
 })
 
 test_that("fineMappingPipeline dispatches fsusie on traits per context", {

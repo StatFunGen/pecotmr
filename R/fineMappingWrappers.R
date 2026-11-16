@@ -3129,7 +3129,7 @@ fsusieGetCs <- function(fsusieObj, X, requestedCoverage = 0.95) {
 #' @param methodArgs Options forwarded to \code{mvsusieR::mvsusie}, built
 #'   with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 #'   checked against the engine, so a misspelled option would be silently
-#'   ignored.
+#'   ignored. The fit runs with \code{verbose = FALSE} unless they set it.
 #' @return The fit object returned by \code{mvsusieR::mvsusie}. A variant
 #'   with no data for a condition --- constant in the samples observing it,
 #'   as a variant a study lacks is in a design stacked across studies --- has
@@ -3161,6 +3161,8 @@ fitMvsusie <- function(
     assertCount(L, positive = TRUE)
     assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
     user <- as.list(methodArgs)
+    # Quiet unless `methodArgs` asks: mvsusieR prints a line every iteration,
+    # and each reads the memory in use through a full garbage collection.
     callArgs <- list_modify(
         c(
             list(
@@ -3168,7 +3170,8 @@ fitMvsusie <- function(
                 Y = Y,
                 prior_variance = prior_variance,
                 coverage = coverage,
-                L = L
+                L = L,
+                verbose = FALSE
             ),
             compact(list(L_greedy = L_greedy))
         ),
@@ -3269,7 +3272,9 @@ fitMvsusie <- function(
 #'   built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 #'   its own constructor, since it is a different function from
 #'   \code{mvsusie} with different arguments --- or, for the unmappable
-#'   effects model, \code{\link{MvsusieInfRssOptions}}.
+#'   effects model, \code{\link{MvsusieInfRssOptions}}. As in
+#'   \code{\link{fitMvsusie}}, the fit runs with \code{verbose = FALSE}
+#'   unless they set it.
 #' @param X Instead of \code{R}, a factor of the LD matrix: a samples x
 #'   variants matrix, such as a reference panel's genotypes, whose columns
 #'   \code{mvsusieR::mvsusie_rss} centres (when they are not already) and
@@ -3351,6 +3356,7 @@ fitMvsusieRss <- function(
     assertCount(L_greedy, positive = TRUE, null.ok = TRUE)
     .mvsusieRssAssertOneLd(R, X)
     user <- as.list(methodArgs)
+    # Quiet unless `methodArgs` asks, as in fitMvsusie().
     callArgs <- list_modify(
         c(
             list(
@@ -3358,7 +3364,8 @@ fitMvsusieRss <- function(
                 N = N,
                 prior_variance = prior_variance,
                 coverage = coverage,
-                L = L
+                L = L,
+                verbose = FALSE
             ),
             compact(list(R = R, X = X, L_greedy = L_greedy)),
             compact(rssArgs)
@@ -3621,6 +3628,7 @@ buildMvsusieMixturePrior <- function(
 #' @param methodArgs Options forwarded to \code{fsusieR::susiF}, built with
 #'   \code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
 #'   against the engine, so a misspelled option would be silently ignored.
+#'   The fit runs with \code{verbose = FALSE} unless they set it.
 #' @return The fit object returned by \code{fsusieR::susiF}.
 #' @examples
 #' data(eqtlRegionExample)
@@ -3654,8 +3662,9 @@ fitFsusie <- function(
         min_purity = minPurity
     ))
     user <- as.list(methodArgs)
+    # Quiet unless `methodArgs` asks, as fitMvsusie() is.
     callArgs <- list_modify(
-        c(list(X = X, Y = Y, pos = pos), owned),
+        c(list(X = X, Y = Y, pos = pos, verbose = FALSE), owned),
         !!!user
     )
     exec(fsusieR::susiF, !!!callArgs)

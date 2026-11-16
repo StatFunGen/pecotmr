@@ -45,7 +45,9 @@ at once. \code{fineMappingPipeline()} sets it from
 built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 its own constructor, since it is a different function from
 \code{mvsusie} with different arguments --- or, for the unmappable
-effects model, \code{\link{MvsusieInfRssOptions}}.}
+effects model, \code{\link{MvsusieInfRssOptions}}. As in
+\code{\link{fitMvsusie}}, the fit runs with \code{verbose = FALSE}
+unless they set it.}
 
 \item{X}{Instead of \code{R}, a factor of the LD matrix: a samples x
 variants matrix, such as a reference panel's genotypes, whose columns

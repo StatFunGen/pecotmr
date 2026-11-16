@@ -4443,6 +4443,10 @@ FineMappingMethodsParam <- function(
 #'   variance out of the single effects, as susieR's NIG prior does for one
 #'   trait, which tempers the evidence of a small sample; it takes no
 #'   unmappable effects.
+#'
+#'   mvSuSiE and fSuSiE run with \code{verbose = FALSE} unless their options
+#'   set it: mvsusieR prints a line every iteration, and each reads the
+#'   memory in use through a full garbage collection.
 #' @param ... Arguments for the engine, under its own names (\code{L},
 #'   \code{coverage}, \code{max_iter}, ...).
 #' @return A \code{\link{MethodOptions}} object.

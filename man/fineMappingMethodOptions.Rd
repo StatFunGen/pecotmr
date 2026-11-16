@@ -90,6 +90,10 @@ Options forwarded to one fine-mapping engine, checked
   variance out of the single effects, as susieR's NIG prior does for one
   trait, which tempers the evidence of a small sample; it takes no
   unmappable effects.
+
+  mvSuSiE and fSuSiE run with \code{verbose = FALSE} unless their options
+  set it: mvsusieR prints a line every iteration, and each reads the
+  memory in use through a full garbage collection.
 }
 \examples{
 SusieOptions(max_iter = 200)

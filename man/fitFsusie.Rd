@@ -38,7 +38,8 @@ supplies \code{minAbsCorr()} on \code{\link{CredibleSetParam}}.}
 
 \item{methodArgs}{Options forwarded to \code{fsusieR::susiF}, built with
 \code{\link{FsusieOptions}}. A bare list is refused: it cannot be checked
-against the engine, so a misspelled option would be silently ignored.}
+against the engine, so a misspelled option would be silently ignored.
+The fit runs with \code{verbose = FALSE} unless they set it.}
 }
 \value{
 The fit object returned by \code{fsusieR::susiF}.

@@ -2703,8 +2703,9 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
     expect_equal(r$tag, "mv")
     expect_equal(r$coverage, 0.9)
     # L is pecotmr's to set (MvsusieOptions refuses it), so it always
-    # reaches the engine; L_greedy only when one is given.
-    expect_equal(r$dots, list(L = 10L))
+    # reaches the engine; L_greedy only when one is given. The fit is quiet
+    # unless the options ask.
+    expect_equal(r$dots, list(L = 10L, verbose = FALSE))
     r <- fitMvsusie(
         matrix(0, 4, 2),
         matrix(0, 4, 2),
@@ -2712,7 +2713,7 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
         L = 3L,
         L_greedy = 2L
     )
-    expect_equal(r$dots, list(L = 3L, L_greedy = 2L))
+    expect_equal(r$dots, list(L = 3L, verbose = FALSE, L_greedy = 2L))
     # A record whose last setting is NULL reaches the engine whole: rlang's
     # splice of the record itself would drop that NULL.
     r <- fitMvsusie(
@@ -2723,8 +2724,15 @@ test_that("fitMvsusie forwards arguments to mvsusieR::mvsusie", {
     )
     expect_equal(
         r$dots,
-        list(L = 10L, max_iter = 50, residual_variance = NULL)
+        list(L = 10L, verbose = FALSE, max_iter = 50, residual_variance = NULL)
     )
+    r <- fitMvsusie(
+        matrix(0, 4, 2),
+        matrix(0, 4, 2),
+        prior_variance = 1,
+        methodArgs = MvsusieOptions(verbose = TRUE)
+    )
+    expect_equal(r$dots, list(L = 10L, verbose = TRUE))
 })
 
 test_that("fitMvsusie fits missing Y with susieR left unattached", {
@@ -2827,7 +2835,7 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
     r <- fitMvsusieRss(matrix(0, 2, 1), diag(2), N = 100, prior_variance = 1)
     expect_equal(r$tag, "rss")
     expect_equal(r$N, 100)
-    expect_equal(r$dots, list(L = 10L))
+    expect_equal(r$dots, list(L = 10L, verbose = FALSE))
     r <- fitMvsusieRss(
         matrix(0, 2, 1),
         diag(2),
@@ -2836,7 +2844,15 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
         L = 3L,
         L_greedy = 2L
     )
-    expect_equal(r$dots, list(L = 3L, L_greedy = 2L))
+    expect_equal(r$dots, list(L = 3L, verbose = FALSE, L_greedy = 2L))
+    r <- fitMvsusieRss(
+        matrix(0, 2, 1),
+        diag(2),
+        N = 100,
+        prior_variance = 1,
+        methodArgs = MvsusieRssOptions(verbose = TRUE)
+    )
+    expect_equal(r$dots, list(L = 10L, verbose = TRUE))
     # Supplied by pecotmr, so the options bag refuses it, as MvsusieOptions
     # does.
     expect_error(MvsusieRssOptions(L = 3), "maxNumSingleEffects")
@@ -2853,7 +2869,10 @@ test_that("fitMvsusieRss forwards arguments to mvsusieR::mvsusie_rss", {
         prior_variance = 1,
         rssArgs = list(R_finite = 500, R_mismatch = "eb", control = NULL)
     )
-    expect_equal(r$dots, list(L = 10L, R_finite = 500, R_mismatch = "eb"))
+    expect_equal(
+        r$dots,
+        list(L = 10L, verbose = FALSE, R_finite = 500, R_mismatch = "eb")
+    )
 })
 
 test_that("fitMvsusieRss takes one LD matrix and sample size per condition", {
@@ -3012,12 +3031,23 @@ test_that("an unmappable-effects fit refuses missing phenotypes in a study", {
 test_that("fitFsusie forwards arguments to fsusieR::susiF", {
     skip_if_not_installed("fsusieR")
     local_mocked_bindings(
-        susiF = function(X, Y, pos, ...) list(tag = "fs", npos = length(pos)),
+        susiF = function(X, Y, pos, verbose = TRUE, ...) {
+            list(tag = "fs", npos = length(pos), verbose = verbose)
+        },
         .package = "fsusieR"
     )
     r <- fitFsusie(matrix(0, 4, 3), matrix(0, 4, 2), pos = 1:2)
     expect_equal(r$tag, "fs")
     expect_equal(r$npos, 2)
+    # Quiet unless the options ask.
+    expect_false(r$verbose)
+    r <- fitFsusie(
+        matrix(0, 4, 3),
+        matrix(0, 4, 2),
+        pos = 1:2,
+        methodArgs = FsusieOptions(verbose = TRUE)
+    )
+    expect_true(r$verbose)
 })
 
 # ===========================================================================
