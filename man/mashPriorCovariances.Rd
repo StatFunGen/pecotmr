@@ -13,7 +13,8 @@ mashPriorCovariances(
   nPcs = NULL,
   priorCovariances = NULL,
   priorComponents = NULL,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   mashArgs = MashOptions(),
   setSeed = 999
@@ -28,10 +29,13 @@ least \code{"strong"} (the discovery set the covariances are learned on).}
 \item{vhat}{Residual correlation matrix (\code{V}); typically from
 \code{\link{mashResidualCorrelation}}. \code{NULL} -> identity.}
 
-\item{components}{Data-driven covariance components, any of
-\code{"canonical"}, \code{"pca"}, \code{"flash"} (default
-\code{cov_flash}), \code{"flashNonneg"} (\code{cov_flash(factors =
-"nonneg")}). Built in that fixed order. May instead be a
+\item{components}{Covariance components, any of \code{"canonical"},
+\code{"subsets"} (\code{\link{CovSubsetsOptions}}: effects shared by
+some conditions but not all, needing three or more), \code{"pca"},
+\code{"flash"} (default \code{cov_flash}), \code{"flashNonneg"}
+(\code{cov_flash(factors = "nonneg")}). Built in that fixed order; the
+canonical and subset-shared ones are fixed hypotheses, which the engine
+does not refine. May instead be a
 \code{\link{MashComponentParam}} record, which names the components and
 carries each one's options.}
 
@@ -63,7 +67,12 @@ mixture-prior pipeline where separate steps built the components.
 \code{components} / \code{nPcs} are then ignored. Distinct from
 \code{priorCovariances}, which bypasses the engine entirely.}
 
-\item{inputScale}{SumStats -> matrix conversion scale.}
+\item{inputScale}{SumStats -> matrix conversion scale (see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts).}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

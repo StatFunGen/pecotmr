@@ -22,7 +22,14 @@ Accessor for the \code{cvFits} slot (per-fold priors +
   \code{samplePartition}).
 }
 \examples{
-U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
-mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
+conditions <- data.frame(
+  study = NA, context = c("brain", "liver"), trait = NA, n = 100
+)
+prior <- list(
+  U = list(shared = matrix(1, 2, 2)), w = 1, alpha = 0,
+  inputScale = "standardized", axes = "context", scope = NULL,
+  conditions = conditions
+)
+mp <- MashPrior(fullFit = list(context = prior))
 cvFits(mp)
 }

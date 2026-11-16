@@ -10,7 +10,9 @@ EnsembleParam(
   enabled = FALSE,
   r2Threshold = 0.01,
   solver = c("quadprog", "glmnet"),
-  alpha = 1
+  alpha = 1,
+  acrossStudies = FALSE,
+  transferScale = c("perSd", "perAllele")
 )
 }
 \arguments{
@@ -18,14 +20,32 @@ EnsembleParam(
 \code{FALSE}.}
 
 \item{r2Threshold}{Minimum cross-validated \eqn{R^2} for a method to enter
-the stack. Default \code{0.01}. Stacking needs at least two methods to
-clear it.}
+the stack, the held-out \eqn{R^2} on summary statistics. Default
+\code{0.01}. Stacking needs at least two methods to clear it.}
 
 \item{solver}{Stacking solver, \code{"quadprog"} (default) or
-\code{"glmnet"}.}
+\code{"glmnet"}, which needs individual-level data.}
 
 \item{alpha}{Elastic-net mixing parameter, used only when
 \code{solver = "glmnet"}. Default \code{1}.}
+
+\item{acrossStudies}{Logical. On several studies joined by a
+\code{"study"} \code{jointSpecification}, also stack the other
+studies' fits into each study's ensemble, as MAGEPRO (individual-level
+data) and LEOPARD (summary statistics) combine ancestries. Each study's
+stack then holds its own methods' out-of-fold predictions (the fits
+across studies under \code{studyCoupling} among them) and, as fixed
+predictors, every other study's own fit of each method, applied to its
+samples or statistics. Another study's fit across studies saw this
+study's data, so it is left out. The rows carry \code{jointStudies}.
+Default \code{FALSE}.}
+
+\item{transferScale}{The scale another study's weights are carried to a
+study on, with \code{acrossStudies}: \code{"perSd"} (the default), as
+fitted, per standard deviation of each study's genotypes;
+\code{"perAllele"}, per allele, each weight rescaled by the ratio of the
+two studies' genotype standard deviations, which needs every study's
+allele frequencies.}
 }
 \value{
 A \code{EnsembleParam} object, a \code{\link{MethodParam}}.
@@ -34,21 +54,30 @@ A \code{EnsembleParam} object, a \code{\link{MethodParam}}.
 Whether and how \code{\link{twasWeightsPipeline}} stacks its
   per-method weights into an SR-TWAS ensemble.
 }
-\section{Requires cross-validation}{
+\section{Out-of-fold predictions}{
 
-  Stacking combines each method's \strong{out-of-fold} predictions, so it
-  cannot run without cross-validation. \code{enabled = TRUE} together with
-  \code{CrossValidationParam(folds < 2)} is an error. It used to be
-  neither: the ensemble row was simply absent from the result, with
-  \code{ensemble = TRUE} still reading as on.
+  Stacking combines each method's \strong{out-of-fold} predictions. On
+  individual-level data they come from cross-validation, so
+  \code{enabled = TRUE} together with \code{CrossValidationParam(folds <
+  2)} is an error. It used to be neither: the ensemble row was simply
+  absent from the result, with \code{ensemble = TRUE} still reading as on.
 
   \code{enabled} defaults to \code{FALSE} because
   \code{\link{CrossValidationParam}} defaults to no folds. To get an
-  ensemble, ask for both.
+  ensemble on individual-level data, ask for both.
+
+  Summary statistics have no samples to hold out, so there each method is
+  refit on training parts of the statistics drawn from the LD, and scored
+  on the held-out remainder, as PUMAS (Zhao et al. 2021) splits them: four
+  splits, each keeping three quarters of the samples. The stack is fit to
+  the held-out parts, and its coefficients combine the methods' full-data
+  weights. Methods whose weights come from a fine-mapping fit cannot be
+  refit, so they stay out of it. The stack is solved by quadprog there.
 }
 
 \examples{
 EnsembleParam(enabled = TRUE, r2Threshold = 0.05)
+EnsembleParam(enabled = TRUE, acrossStudies = TRUE)
 }
 \seealso{
 \code{\link{CrossValidationParam}}

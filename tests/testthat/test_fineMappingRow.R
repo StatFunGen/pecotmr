@@ -60,6 +60,34 @@ test_that("adjustPips renormalizes PIPs on a kept FineMappingRow subset", {
     expect_false(identical(unname(origPips[keep]), susieFit(adj)$pip))
 })
 
+test_that("adjustPips weights each effect by its slot weight", {
+    vids <- paste0("chr1:", 1:6, ":A:G")
+    entry <- .makeAdjustEntry(vids)
+    slotWeights <- c(1, 0.3)
+    mu <- matrix(seq_len(12L) / 10, 2L)
+    weighted <- FineMappingRow(
+        variantIds = vids,
+        susieFit = utils::modifyList(
+            susieFit(entry),
+            list(slot_weights = slotWeights, mu = mu, mu2 = mu^2 + 0.01)
+        ),
+        topLoci = .fmrPartsTopLoci(entry)
+    )
+    keep <- vids[2:5]
+    adj <- adjustPips(weighted, keep)
+    fit <- susieFit(adj)
+    # Each effect counts with the probability that it is active, as susieR
+    expect_equal(
+        unname(fit$pip),
+        unname(1 - apply(1 - slotWeights * fit$alpha, 2L, prod))
+    )
+    expect_equal(.fmrPartsTopLoci(adj)$pip, fit$pip)
+    expect_equal(
+        unname(.fmrPartsTopLoci(adj)$posterior_mean),
+        unname(colSums(slotWeights * fit$alpha * fit$mu))
+    )
+})
+
 test_that("adjustPips errors when the intersection is empty", {
     vids <- paste0("chr1:", 1:4, ":A:G")
     entry <- .makeAdjustEntry(vids)
@@ -681,6 +709,7 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
     fit <- .fmrPartsSusieFit(entry)
     fit$coef <- matrix(seq_len(p * R), nrow = p, ncol = R)
     fit$clfsr <- array(seq_len(L * p * R), dim = c(L, p, R))
+    fit$lbf_variable_outcome <- array(-seq_len(L * p * R), dim = c(L, p, R))
     mv <- FineMappingRow(
         variantIds = vids,
         susieFit = fit,
@@ -694,6 +723,10 @@ test_that("adjustPips subsets mvsusie-shaped coef rows and 3-D clfsr", {
     expect_equal(
         susieFit(adj)$clfsr,
         fit$clfsr[, keepIdx, , drop = FALSE]
+    )
+    expect_equal(
+        susieFit(adj)$lbf_variable_outcome,
+        fit$lbf_variable_outcome[, keepIdx, , drop = FALSE]
     )
 })
 
@@ -814,6 +847,200 @@ test_that("credibleSetSummary gives each CS's size, purity, V, logBF, lead", {
     expect_true(all(is.finite(s$cs_mean_effect)))
     # lead = highest-PIP member
     expect_equal(s$lead_variant, c("chr1:100:A:G", "chr1:300:A:G"))
+    # A univariate fit has no conditions to report the effect in.
+    expect_true(all(is.na(s$cs_lfsr)))
+    expect_true(all(is.na(s$cs_log_bf_outcome)))
+    expect_true(all(is.na(s$cs_activation_prob)))
+})
+
+test_that("credibleSetSummary gives a joint row its condition's columns", {
+    skip_if_not_installed("mvsusieR")
+    entry <- .spJointFixture$entry
+    slim <- susieFit(entry)
+    s <- .fmrRowCredibleSetSummary(entry, jointIndex = 3L)
+    expect_equal(nrow(s), 2L)
+    effRow <- match(as.integer(sub("^L", "", s$effect_id)), slim$effect_index)
+    expect_equal(s$cs_lfsr, slim$single_effect_lfsr[cbind(effRow, 3L)])
+    expect_equal(s$cs_log_bf_outcome, slim$lbf_outcome[cbind(effRow, 3L)])
+    expect_true(all(is.na(s$cs_activation_prob) | s$cs_activation_prob <= 1))
+
+    noJoint <- .fmrRowCredibleSetSummary(entry)
+    expect_true(all(is.na(noJoint$cs_lfsr)))
+    expect_true(all(is.na(noJoint$cs_log_bf_outcome)))
+    expect_true(all(is.na(noJoint$cs_activation_prob)))
+})
+
+test_that("cs_lfsr is NA where the condition has no data on a set member", {
+    skip_if_not_installed("mvsusieR")
+    entry <- .spJointFixture$entry
+    fit <- susieFit(entry)
+    sets <- fit$sets$cs
+    member <- sets[[1L]][[1L]]
+    # As .mvsusieZeroLackedFit() leaves a (variant, condition) pair without
+    # data: condition 1 has none on the first set's first member.
+    fit$clfsr[, member, 1L] <- NA
+    row <- FineMappingRow(
+        variantIds = variantIds(entry),
+        susieFit = fit,
+        topLoci = .fmrRowTopLoci(entry, raw = TRUE)
+    )
+    labels <- str_c("mvsusie_", .fmEffectIndices(sets))
+    holds <- labels[map_lgl(sets, is_in, x = member)]
+    lacking <- .fmrRowCredibleSetSummary(row, jointIndex = 1L)
+    full <- .fmrRowCredibleSetSummary(entry, jointIndex = 1L)
+    expect_false(anyNA(full$cs_lfsr))
+    expect_equal(is.na(lacking$cs_lfsr), lacking$cs %in% holds)
+    expect_equal(
+        lacking$cs_lfsr[!lacking$cs %in% holds],
+        full$cs_lfsr[!full$cs %in% holds]
+    )
+    expect_equal(lacking$cs_log_bf_outcome, full$cs_log_bf_outcome)
+    # The other conditions have their data on it.
+    expect_equal(
+        .fmrRowCredibleSetSummary(row, jointIndex = 2L)$cs_lfsr,
+        .fmrRowCredibleSetSummary(entry, jointIndex = 2L)$cs_lfsr
+    )
+})
+
+test_that(".csConditionLacksMember reads the gaps of the conditional lfsr", {
+    clfsr <- array(0.5, c(2, 3, 2))
+    clfsr[1, 2, 2] <- NA
+    fit <- list(clfsr = clfsr)
+    expect_true(.csConditionLacksMember(fit, c(1L, 2L), 1L, 2L))
+    expect_false(.csConditionLacksMember(fit, c(1L, 2L), 1L, 1L))
+    expect_false(.csConditionLacksMember(fit, 3L, 1L, 2L))
+    expect_false(.csConditionLacksMember(fit, NULL, 1L, 2L))
+    expect_false(.csConditionLacksMember(fit, 4L, 1L, 2L))
+    expect_false(.csConditionLacksMember(fit, 2L, 3L, 2L))
+    expect_false(.csConditionLacksMember(fit, 2L, 1L, 3L))
+    # An untrimmed fit names the array conditional_lfsr.
+    untrimmed <- list(conditional_lfsr = clfsr)
+    expect_true(.csConditionLacksMember(untrimmed, 2L, 1L, 2L))
+    noEffects <- list(conditional_lfsr = NA_real_)
+    expect_false(.csConditionLacksMember(noEffects, 2L, 1L, 2L))
+})
+
+test_that(".csEffectCondition is NA outside a joint fit's matrix", {
+    m <- matrix(1:6, 2, 3)
+    expect_equal(.csEffectCondition(m, 2L, 3L), 6)
+    expect_true(is.na(.csEffectCondition(m, NA_integer_, 1L)))
+    expect_true(is.na(.csEffectCondition(m, 1L, NA_integer_)))
+    expect_true(is.na(.csEffectCondition(m, 3L, 1L)))
+    expect_true(is.na(.csEffectCondition(m, 1L, 4L)))
+    expect_true(is.na(.csEffectCondition(NA_real_, 1L, 1L)))
+})
+
+# ===========================================================================
+# sharingPatterns helpers
+# ===========================================================================
+
+test_that(".spSetPatterns keeps patterns until the cut is reached", {
+    cp <- data.frame(
+        a = c(1L, 0L, 1L, 0L),
+        b = c(1L, 1L, 0L, 0L),
+        config_prob = c(0.6, 0.07, 0.3, 0.03)
+    )
+    at95 <- .spSetPatterns(cp, "L2", c("a", "b"), 0.95)
+    expect_equal(at95$table$effect_id, rep("L2", 3L))
+    expect_equal(at95$table$pattern_rank, 1:3)
+    expect_equal(at95$table$probability, c(0.6, 0.3, 0.07))
+    expect_equal(at95$table$cumulative_probability, c(0.6, 0.9, 0.97))
+    expect_equal(at95$table$n_active, c(2L, 1L, 1L))
+    expect_equal(as.list(at95$conditions), list(c("a", "b"), "a", "b"))
+    expect_equal(nrow(.spSetPatterns(cp, "L2", c("a", "b"), 0.85)$table), 2L)
+
+    everything <- .spSetPatterns(cp, "L2", c("a", "b"), 1)
+    expect_equal(nrow(everything$table), 4L)
+    # The pattern with no condition active.
+    expect_equal(as.list(everything$conditions)[[4L]], character(0))
+    expect_equal(everything$table$n_active[[4L]], 0L)
+
+    unscored <- transform(cp, config_prob = NA_real_)
+    expect_null(.spSetPatterns(unscored, "L2", c("a", "b"), 0.95))
+})
+
+test_that(".spSkipReason says why a joint fit with sets gives no patterns", {
+    sets <- list(cs = list(L1 = 1L))
+    view <- list(lbf_variable_outcome = array(0, c(1, 2, 3)))
+    expect_true(is.na(.spSkipReason(list(), list(cs = list()), NULL, 20)))
+    expect_equal(.spSkipReason(list(), sets, view, 2), "conditions")
+    expect_true(is.na(.spSkipReason(list(), sets, view, 3)))
+    mv <- structure(
+        list(alpha = matrix(1, 1, 2)),
+        class = c("mvsusie", "susie")
+    )
+    expect_equal(.spSkipReason(mv, sets, NULL, 20), "bayesFactors")
+    univariate <- structure(list(alpha = matrix(1, 1, 2)), class = "susie")
+    expect_true(is.na(.spSkipReason(univariate, sets, NULL, 20)))
+})
+
+test_that(".spFitIdentity keeps what a joint fit's rows agree on", {
+    identity <- tibble(
+        study = c("s", "s", "t"),
+        context = c("a", "b", "c"),
+        jointContexts = c("a;b", "a;b", NA)
+    )
+    fitIdentity <- .spFitIdentity(identity, 1:2)
+    expect_equal(fitIdentity$study, "s")
+    expect_true(is.na(fitIdentity$context))
+    expect_type(fitIdentity$context, "character")
+    expect_equal(fitIdentity$jointContexts, "a;b")
+})
+
+test_that(".spWarnSkipped warns once for each reason", {
+    expect_warning(
+        .spWarnSkipped(c(NA, "conditions", "conditions"), 20),
+        "skipped 2 joint fit\\(s\\) of more than maxConditions = 20"
+    )
+    expect_warning(
+        .spWarnSkipped("bayesFactors", 20),
+        "without their per-condition Bayes factors"
+    )
+    expect_silent(.spWarnSkipped(c(NA_character_, NA_character_), 20))
+})
+
+test_that(".spAssemble gives the columns alone when no fit gave patterns", {
+    identity <- tibble(study = "s", method = "susie")
+    out <- .spAssemble(list(list(skipped = NA_character_)), identity)
+    expect_s4_class(out, "DataFrame")
+    expect_equal(nrow(out), 0L)
+    expect_equal(
+        colnames(out),
+        c(
+            "study",
+            "method",
+            "cs",
+            "effect_id",
+            "pattern_rank",
+            "active_conditions",
+            "n_active",
+            "probability",
+            "cumulative_probability"
+        )
+    )
+    expect_s4_class(out$active_conditions, "CharacterList")
+})
+
+test_that("a joint fit whose Bayes factors are not finite gives no patterns", {
+    skip_if_not_installed("mvsusieR")
+    entry <- .spJointFixture$entry
+    fit <- susieFit(entry)
+    fit$lbf_variable_outcome[] <- NaN
+    row <- FineMappingRow(
+        variantIds = variantIds(entry),
+        susieFit = fit,
+        topLoci = .fmrRowTopLoci(entry, raw = TRUE)
+    )
+    coll <- QtlFineMappingResult(
+        studyName = rep("s", 3),
+        context = c("c1", "c2", "c3"),
+        trait = rep("g", 3),
+        method = rep("mvsusie", 3),
+        entry = list(row, row, row),
+        jointContexts = rep("c1;c2;c3", 3)
+    )
+    expect_no_warning(sp <- sharingPatterns(coll))
+    expect_equal(nrow(sp), 0L)
 })
 
 test_that("credibleSetSummary is empty when there are no credible sets", {

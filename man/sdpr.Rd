@@ -23,7 +23,9 @@ sdpr(
   verbose = TRUE,
   seed = NULL,
   raoBlackwell = FALSE,
-  nChains = 1
+  nChains = 1,
+  sharing = c("eachOrAll", "everySubset", "all"),
+  rho = NULL
 )
 }
 \arguments{
@@ -74,6 +76,22 @@ draws' average. Default \code{FALSE}.}
 \item{nChains}{The number of chains, from seeds \code{seed},
 \code{seed + 1}, ...; they are tested for divergence and, with more
 than one, combined as \code{\link{prsCs}}'s are. Default 1.}
+
+\item{sharing}{Across studies only: the \code{dprGibbs} method fitted
+across the studies a \code{"study"} \code{jointSpecification} joins
+(\code{studyCoupling} set in \code{\link{twasWeightsPipeline}}), as
+SDPRX fits ancestries. Which sets of the studies a non-null
+component's effects lie in: \code{"eachOrAll"} (the default), each
+study alone or all of them together; \code{"everySubset"}, every
+nonempty set, \eqn{2^K - 1} of them for \eqn{K} studies; \code{"all"},
+all of them together only, SDPRX's \code{force_shared}. The first two
+agree for two studies. A single study ignores it.}
+
+\item{rho}{Across studies only: the correlation between a variant's
+effects in the studies a component spans. \code{NULL} (the default)
+learns each pair's on \eqn{[0, 0.99]}; a number in \eqn{[0, 1)} fixes
+every pair's, and a \eqn{K \times K} positive-definite correlation
+matrix each pair's. A single study ignores it.}
 }
 \value{
 A list with \code{betaEst} (the estimated effect sizes) and
@@ -103,5 +121,18 @@ This function wraps a rewritten and adapted version of the SDPR C++
   closed-form draw let the global scale of the effects run away. That
   scale has an N(1, 1) prior where the original's is flat, under which a
   window that drew no causal variant tended to stay null.
+
+  Across studies the same chain is SDPRX's, described in Zhou G, Chen T,
+  Zhao H (2023), "SDPRX: A statistical method for cross-population
+  prediction of complex traits", American Journal of Human Genetics
+  110(1): 13-22. \doi{10.1016/j.ajhg.2022.11.007}. Each non-null
+  component draws a variant's effects in the studies of its kind from
+  \eqn{N(0, \sigma^2 \Sigma)}, \eqn{\Sigma} holding \code{rho}, for any
+  number of studies. So that one study is SDPR draw for draw, the null
+  stays the first stick of the process, the other kinds splitting the
+  rest by a Dirichlet, and one concentration serves every kind; SDPRX
+  puts the null among its kinds and gives each kind its own. A variant a
+  study lacks can take any kind, its effect there integrated out, where
+  SDPRX allows it only the kinds of the studies carrying it.
 }
 \keyword{internal}

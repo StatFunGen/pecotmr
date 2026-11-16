@@ -22,7 +22,7 @@ jobs:
         include:
           - { name: Run unit tests, task: devtools_test, platform: linux-aarch64, runner: ubuntu-24.04-arm, environment: r45 }
           - { name: Run unit tests, task: devtools_test, platform: osx-arm64, runner: macos-latest, environment: r45 }
-          - { name: Run unit tests, task: devtools_test, platform: linux-64, -aarch64, runner: ubuntu-24.04-arm, environment: r45 }
+          - { name: Run unit tests, task: devtools_test, platform: linux-64, runner: ubuntu-latest, environment: r45 }
           - { name: Check code coverage with covr, task: codecov, platform: linux-64, runner: ubuntu-latest, environment: r45 }
           - { name: Run R CMD check, task: rcmdcheck, platform: linux-64, runner: ubuntu-latest, environment: r45 }
           - { name: Run BiocCheckGitClone, task: bioccheck_git_clone, platform: linux-64, runner: ubuntu-latest, environment: r45 }

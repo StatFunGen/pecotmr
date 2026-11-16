@@ -197,6 +197,7 @@ reference:
       - CovFlashOptions
       - CovMcdOptions
       - CovPcaOptions
+      - CovSubsetsOptions
       - CovUdrOptions
       - CtwasOptions
       - CtwasBoundaryGenesOptions
@@ -314,6 +315,7 @@ reference:
       - fsusieTraitEffects
       - credibleSetSummary
       - credibleSets
+      - sharingPatterns
       - lbf
       - ldReference
       - marginalEffects
@@ -340,6 +342,7 @@ reference:
       - cvResult
       - fineMappingResult
       - pip
+      - selectWeights
       - traitNames
 
   - subtitle: "GwasFineMappingResult"
@@ -420,6 +423,7 @@ reference:
       - variantIds
       - weights-methods
       - resolveWeights
+      - selectWeights
       - writeGwasVcf
       - writeBed
       - readTwasWeights
@@ -619,6 +623,10 @@ reference:
       - susieAshRssWeights
       - mvsusieWeights
       - mvsusieRssWeights
+      - mvsusieInfWeights
+      - mvsusieInfRssWeights
+      - mvsusieAshWeights
+      - mvsusieAshRssWeights
       - fsusieWeights
       - fitMvsusie
       - fitMvsusieRss

@@ -17,7 +17,6 @@ export("maf<-")
 export("sampleSize<-")
 export(AnnotationMatrix)
 export(AspuOptions)
-export(BayesAlphabetRssOptions)
 export(BglrOptions)
 export(BigsnprOptions)
 export(BoundaryMergeParam)
@@ -33,6 +32,7 @@ export(CovEdOptions)
 export(CovFlashOptions)
 export(CovMcdOptions)
 export(CovPcaOptions)
+export(CovSubsetsOptions)
 export(CovUdrOptions)
 export(CredibleSetParam)
 export(CrossValidationParam)
@@ -88,6 +88,10 @@ export(MrmashOptions)
 export(MrmashPriorParam)
 export(MrmashRssOptions)
 export(MultiStudyQtlDataset)
+export(MvsusieAshOptions)
+export(MvsusieAshRssOptions)
+export(MvsusieInfOptions)
+export(MvsusieInfRssOptions)
 export(MvsusieMixturePriorOptions)
 export(MvsusieOptions)
 export(MvsusieRssOptions)
@@ -315,6 +319,10 @@ export(mrashWeights)
 export(mrmashRssWeights)
 export(mrmashWeights)
 export(mrmashWrapper)
+export(mvsusieAshRssWeights)
+export(mvsusieAshWeights)
+export(mvsusieInfRssWeights)
+export(mvsusieInfWeights)
 export(mvsusieRssWeights)
 export(mvsusieWeights)
 export(nSamples)
@@ -366,7 +374,9 @@ export(screenCtwasRegions)
 export(sdprWeights)
 export(se)
 export(secondaryCoverage)
+export(selectWeights)
 export(serWeights)
+export(sharingPatterns)
 export(signalCutoff)
 export(significantQtls)
 export(slalom)
@@ -566,6 +576,7 @@ exportMethods(retainedMass)
 exportMethods(sampleSize)
 exportMethods(scoreStats)
 exportMethods(se)
+exportMethods(sharingPatterns)
 exportMethods(show)
 exportMethods(significantQtls)
 exportMethods(sldscResults)
@@ -642,8 +653,11 @@ importFrom(IRanges,
 )
 importFrom(MASS,ginv)
 importFrom(Matrix,
+  Matrix,
+  bdiag,
   colSums,
-  rowSums
+  rowSums,
+  sparseMatrix
 )
 importFrom(MultiAssayExperiment,
   ExperimentList,
@@ -760,6 +774,7 @@ importFrom(dplyr,
 importFrom(glue,glue)
 importFrom(magrittr,is_in)
 importFrom(matrixStats,
+  colMedians,
   colSds,
   rowLogSumExps
 )
@@ -809,6 +824,7 @@ importFrom(purrr,
   partial,
   pluck,
   pmap,
+  pmap_chr,
   possibly,
   pwalk,
   reduce,
@@ -842,6 +858,7 @@ importFrom(rlang,
   eval_bare,
   fn_env,
   fn_fmls,
+  fn_fmls_names,
   has_name,
   hash,
   inform,
@@ -854,9 +871,11 @@ importFrom(rlang,
   warn
 )
 importFrom(stats,
+  ave,
   coef,
   complete.cases,
   cor,
+  cov,
   lm,
   lm.fit,
   median,
@@ -925,8 +944,8 @@ importFrom(tools,file_ext)
 importFrom(utils,
   combn,
   head,
-  removeSource,
-  tail
+  packageVersion,
+  removeSource
 )
 importFrom(vctrs,
   vec_chop,

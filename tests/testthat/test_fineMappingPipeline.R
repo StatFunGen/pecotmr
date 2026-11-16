@@ -1410,6 +1410,46 @@ test_that(".fmLookupMrmashFit: finds the mr.mash fit by (study, trait)", {
     expect_null(lk(NULL, "S", "G")) # no TwasWeights supplied
 })
 
+test_that(".fmLookupMrmashFit: a cross-study group takes its studies' fit", {
+    mkEntry <- function(fits) {
+        TwasWeightsRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
+            weights = c(0.1, 0.2),
+            methodFits = fits
+        )
+    }
+    payloadOver <- function(conditions) {
+        U <- diag(2)
+        dimnames(U) <- list(conditions, conditions)
+        list(dataDrivenPriorMatrices = list(U = list(a = U)), w0 = c(a = 1))
+    }
+    # Study A's own fit over its contexts, and a fit over the studies A and B
+    # in context c1: both have a row keyed (c1, G).
+    withinA <- payloadOver(c("c1", "c2"))
+    acrossStudies <- payloadOver(c("A", "B"))
+    tw <- TwasWeights(
+        studyName = c("A", "A", "B"),
+        context = c("c1", "c2", "c1"),
+        trait = c("G", "G", "G"),
+        method = c("mrmash", "mrmash", "mrmash"),
+        entry = list(mkEntry(withinA), mkEntry(NULL), mkEntry(acrossStudies))
+    )
+    lk <- function(...) pecotmr:::.fmLookupMrmashFit(...)
+    # The group across studies keys on (context, trait), as .jointPriorKey()
+    # gives it, and takes only the fit over its studies.
+    key <- pecotmr:::.jointPriorKey(
+        tibble(study = c("A", "B"), context = "c1", trait = "G")
+    )
+    expect_null(key$study)
+    expect_identical(
+        lk(tw, key$study, key$trait, key$context, c("A", "B")),
+        acrossStudies
+    )
+    # Study A's group across its contexts takes its own.
+    expect_identical(lk(tw, "A", "G", NULL, c("c1", "c2")), withinA)
+    expect_null(lk(tw, NULL, "G", "c1", c("A", "C")))
+})
+
 test_that(".fmLookupMrmashCv finds the per-fold CV payload by study, trait", {
     mkEntry <- function(cv) {
         TwasWeightsRow(
@@ -1807,15 +1847,27 @@ test_that("fineMappingPipeline refuses fsusie on a single trait", {
 # shape so the test can assert it was constructed as expected.
 .fmp_mockMvsusie <- function() {
     # L / L_greedy are refused by MvsusieOptions as pipeline-owned, so record
-    # what arrives for a test to assert.
-    function(X, Y, prior_variance, coverage, L = NULL, L_greedy = NULL) {
+    # what arrives for a test to assert. `standardize` and `verbose` are the
+    # pipeline's defaults the user may override, recorded likewise.
+    function(
+        X,
+        Y,
+        prior_variance,
+        coverage,
+        L = NULL,
+        L_greedy = NULL,
+        standardize = TRUE,
+        verbose = TRUE
+    ) {
         list(
             token = "mvsusie",
             n_X_cols = ncol(X),
             n_Y_cols = ncol(Y),
             coverage = coverage,
             L = L,
-            L_greedy = L_greedy
+            L_greedy = L_greedy,
+            standardize = standardize,
+            verbose = verbose
         )
     }
 }
@@ -2051,6 +2103,71 @@ test_that("multi-trait auto-detection uses the data-driven mr.mash prior", {
     expect_true(sawMixturePrior) # data-driven prior built, not canonical
 })
 
+test_that("pooled unmappable scales take the mash prior's shape", {
+    # With unmappable_scale "single" or "shrink", the run's mash prior
+    # collapsed over its weights is the shape whose scale the fit learns
+    # over the conditions, for mvsusieInf and mvsusieAsh; under "single",
+    # mvsusieR builds ash's prior from it
+    .fm_skipIfNoUnmappableScale()
+    qd <- .fmp_qdAB
+    fitParts <- list(
+        dataDrivenPriorMatrices = list(U = list(K = diag(2)), w = c(K = 1)),
+        w0 = c(K_grid1 = 1),
+        V = diag(2)
+    )
+    mkE <- function() {
+        TwasWeightsRow(
+            variantIds = c("chr1:100:A:G", "chr1:200:A:G"),
+            weights = c(0.1, 0.2),
+            methodFits = fitParts
+        )
+    }
+    tw <- TwasWeights(
+        studyName = c("study1", "study1"),
+        context = c("brain", "brain"),
+        trait = c("ENSG_A", "ENSG_B"),
+        method = c("mrmash", "mrmash"),
+        entry = list(mkE(), mkE())
+    )
+    seen <- NULL
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        rescaleCovW0 = function(w0) c(K = 1),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        mvsusie = function(X, Y, prior_variance, coverage, ...) {
+            seen <<- list(...)
+            list(token = "mvsusie")
+        },
+        create_mixture_prior = function(...) "PRIOR",
+        .package = "mvsusieR"
+    )
+    run <- function(token, options) {
+        seen <<- NULL
+        suppressMessages(fineMappingPipeline(
+            qd,
+            methods = FineMappingMethodsParam(
+                qtlDatasetMethods = setNames(list(options), token)
+            ),
+            cisWindow = 1000L,
+            mrmashPrior = tw
+        ))
+        seen
+    }
+    single <- run("mvsusieAsh", list(unmappable_scale = "single"))
+    expect_equal(single$unmappable_variance, diag(2))
+    expect_null(single$unmappable_prior)
+    shrink <- run("mvsusieAsh", list(unmappable_scale = "shrink"))
+    expect_equal(shrink$unmappable_variance, diag(2))
+    expect_false(is.null(shrink$unmappable_prior))
+    expect_null(run("mvsusieAsh", list())$unmappable_variance)
+    inf <- run("mvsusieInf", list(unmappable_scale = "single"))
+    expect_equal(inf$unmappable_variance, diag(2))
+    expect_identical(inf$unmappable_scale, "single")
+})
+
 test_that("multi-trait without mrmashPrior keeps the canonical prior", {
     qd <- .fmp_qdAB
     sawMixturePrior <- FALSE
@@ -2096,12 +2213,14 @@ test_that("the mvsusie resume cache short-circuits the joint fitter", {
             )
         )
     }
+    # A cached row of the group's fit records the traits it joined.
     cache <- QtlFineMappingResult(
         studyName = c("study1", "study1"),
         context = c("brain", "brain"),
         trait = c("ENSG_A", "ENSG_B"),
         method = c("mvsusie", "mvsusie"),
-        entry = list(cachedEntry(), cachedEntry())
+        entry = list(cachedEntry(), cachedEntry()),
+        jointTraits = rep("ENSG_A;ENSG_B", 2L)
     )
     mv_calls <- 0
     local_mocked_bindings(
@@ -2127,6 +2246,56 @@ test_that("the mvsusie resume cache short-circuits the joint fitter", {
     )
     expect_equal(mv_calls, 0L) # cache hit -> fitter never called
     expect_equal(nrow(res), 2L)
+})
+
+test_that("the mvsusie resume cache does not borrow another fit's rows", {
+    # Rows of the tuples fitted alone, or of a fit over other traits, are
+    # other fits: the group is fitted afresh.
+    qd <- .fmp_qdAB
+    cachedEntry <- function() {
+        FineMappingRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
+            susieFit = list(token = "mvsusie_cached"),
+            topLoci = data.frame(
+                variant_id = sprintf("chr1:%d:A:G", 100L * (1:3)),
+                pip = c(0.9, 0.5, 0.1),
+                stringsAsFactors = FALSE
+            )
+        )
+    }
+    cacheOf <- function(jointTraits) {
+        QtlFineMappingResult(
+            studyName = c("study1", "study1"),
+            context = c("brain", "brain"),
+            trait = c("ENSG_A", "ENSG_B"),
+            method = c("mvsusie", "mvsusie"),
+            entry = list(cachedEntry(), cachedEntry()),
+            jointTraits = jointTraits
+        )
+    }
+    mv_calls <- 0
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    local_mocked_bindings(
+        mvsusie = function(...) {
+            mv_calls <<- mv_calls + 1L
+            list()
+        },
+        create_mixture_prior = .fmp_mockMixturePrior(),
+        .package = "mvsusieR"
+    )
+    for (joint in list(NULL, rep("ENSG_A;ENSG_B;ENSG_C", 2L))) {
+        suppressMessages(fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            cisWindow = 1000L,
+            fineMappingResult = cacheOf(joint)
+        ))
+    }
+    expect_equal(mv_calls, 2L)
 })
 
 test_that("jointSpec = 'context' gives one joint row per trait", {
@@ -2349,6 +2518,8 @@ test_that("fineMappingPipeline passes mvsusie the CredibleSetParam settings", {
     expect_equal(recorded$L, 3L)
     expect_equal(recorded$L_greedy, 2L)
     expect_equal(recorded$coverage, 0.9)
+    # Quiet, the options not asking otherwise.
+    expect_false(recorded$verbose)
 })
 
 test_that("fineMappingPipeline dispatches fsusie on traits per context", {
@@ -2421,6 +2592,117 @@ test_that("multi-study fine-mapping aggregates its QtlDatasets' results", {
     expect_setequal(studyName(res), c("s1", "s2"))
     # Pure individual-level -> ldReference should be NULL.
     expect_identical(ldReference(res), list())
+})
+
+test_that("a study-axis spec fits the individual-level studies jointly", {
+    msd <- .fm_disjointStudies()
+    run <- function(data, methods, jointSpecification = NULL) {
+        suppressMessages(fineMappingPipeline(
+            data,
+            methods = methods,
+            jointSpecification = jointSpecification,
+            cisWindow = 50000L,
+            initializeWithSusieInf = FALSE,
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+            verbose = 0
+        ))
+    }
+    quiet <- FineMappingMethodsParam(
+        qtlDatasetMethods = list(mvsusie = list(verbose = FALSE))
+    )
+    res <- run(msd, quiet, "study")
+    expect_s4_class(res, "QtlFineMappingResult")
+    expect_equal(as.character(res$study), c("study1", "study2"))
+    expect_equal(as.character(res$jointStudies), rep("study1;study2", 2L))
+    expect_setequal(methodNames(res), "mvsusie")
+    expect_false("package:susieR" %in% search())
+    # Each study's row reports its own samples' allele frequencies, as that
+    # study's own fit reports them.
+    for (i in 1:2) {
+        joint <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        own <- run(msd[[i]], "susie")
+        alone <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(own, 1L))
+        shared <- intersect(joint$variant_id, alone$variant_id)
+        expect_gt(length(shared), 10L)
+        expect_equal(
+            joint$af[match(shared, joint$variant_id)],
+            alone$af[match(shared, alone$variant_id)]
+        )
+    }
+})
+
+test_that("NIG reaches the joint fit of small studies", {
+    # Two studies of about 80 samples: mvsusieR integrates each condition's
+    # residual variance out of the single effects, and reports their
+    # posterior means
+    .fm_skipIfNoMvsusieNig()
+    msd <- .fm_disjointStudies()
+    run <- function(options) {
+        suppressMessages(fineMappingPipeline(
+            msd,
+            methods = FineMappingMethodsParam(
+                qtlDatasetMethods = list(mvsusie = options)
+            ),
+            jointSpecification = "study",
+            cisWindow = 50000L,
+            initializeWithSusieInf = FALSE,
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+            verbose = 0
+        ))
+    }
+    nig <- run(MvsusieOptions(
+        estimate_residual_method = "NIG",
+        verbose = FALSE
+    ))
+    plain <- run(MvsusieOptions(verbose = FALSE))
+    expect_equal(as.character(nig$study), c("study1", "study2"))
+    fitNig <- susieFit(nig[1, ])
+    fitPlain <- susieFit(plain[1, ])
+    expect_equal(unname(fitNig$sigma2[1, 2]), 0)
+    expect_false(isTRUE(all.equal(fitNig$pip, fitPlain$pip)))
+    expect_gt(fitNig$sigma2[1, 1], fitPlain$sigma2[1, 1])
+})
+
+test_that("a study-axis spec refuses studies sharing samples", {
+    data(multiStudyQtlDatasetExample, envir = environment())
+    expect_error(
+        suppressMessages(fineMappingPipeline(
+            multiStudyQtlDatasetExample,
+            methods = "mvsusie",
+            jointSpecification = "study",
+            cisWindow = 50000L,
+            verbose = 0
+        )),
+        "share 165 sample"
+    )
+})
+
+test_that("a composed spec with the study stacks the studies' contexts", {
+    # One mvsusie fit over each study's brain and liver, the studies stacked
+    # with each one's conditions on its own samples.
+    res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        .fm_disjointTwoContextStudies(),
+        methods = FineMappingMethodsParam(
+            qtlDatasetMethods = list(mvsusie = list(verbose = FALSE))
+        ),
+        jointSpecification = list(c("study", "context")),
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+        verbose = 0
+    )))
+    md <- S4Vectors::mcols(res, use.names = FALSE)
+    expect_equal(
+        as.character(md$study),
+        c("study1", "study1", "study2", "study2")
+    )
+    expect_equal(
+        as.character(md$context),
+        c("brain", "liver", "brain", "liver")
+    )
+    expect_true(all(md$jointStudies == "study1;study2"))
+    expect_true(all(md$jointContexts == "brain;liver"))
+    expect_equal(as.integer(md$jointIndex), 1:4)
 })
 
 # A study measured in brain and liver, on the synthetic genotypes.
@@ -3250,6 +3532,7 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie needs two contexts", {
 })
 
 test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
+    .skipIfMvsusieCannotFitStudies()
     # Multi-context (c1, c2) single-trait collection: mvsusie without an
     # explicit jointSpecification routes through the joint engine -> per-context
     # rows that share the cross-context RSS fit, each tagged with the co-fit
@@ -3273,6 +3556,61 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
     expect_setequal(as.character(res$context), c("c1", "c2"))
     expect_true("jointContexts" %in% pecotmr:::.tupleColumnNames(res))
     expect_true(all(grepl("c1;c2|c2;c1", as.character(res$jointContexts))))
+})
+
+test_that("QtlSumStats joint fits take h2 and the RSS settings", {
+    .skipIfMvsusieCannotFitStudies()
+    # The run's h2 sets each condition's residual variance, which mvsusie_rss
+    # gives the correlations of the mr.mash fit's residual covariance (varY),
+    # and SusieRssParam reaches mvsusie_rss as it reaches susie_rss.
+    ss <- .fmp_makeMultiCtxQtlSumStats()
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    est <- suppressWarnings(estimateH2(ss))
+    S4Vectors::mcols(est)$h2 <- 0.3
+    # mvsusie_rss's arguments with the mr.mash fit's residual covariance V
+    capture <- function(V) {
+        captured <- NULL
+        local_mocked_bindings(
+            .buildMvsusieReweightedPrior = function(fitParts, conditions, cut) {
+                list(priorVariance = "PV", residualVariance = V)
+            },
+            .package = "pecotmr"
+        )
+        local_mocked_bindings(
+            mvsusie_rss = function(Z, R, N, prior_variance, coverage, ...) {
+                captured <<- list(...)
+                list(token = "mvsusie_rss")
+            },
+            .package = "mvsusieR"
+        )
+        suppressMessages(fineMappingPipeline(
+            ss,
+            methods = "mvsusie",
+            h2 = est,
+            susieRssParam = SusieRssParam(rMismatch = "eb")
+        ))
+        captured
+    }
+    plain <- capture(diag(2))
+    expect_equal(plain$residual_variance, c(0.7, 0.7))
+    expect_equal(plain$varY, diag(2))
+    # The reference's size, for each condition
+    expect_equal(plain$R_finite, c(40, 40))
+    expect_identical(plain$R_mismatch, "eb")
+    # An mr.mash fit whose residual covariance already carries h2 (a TWAS
+    # fit given it) gives only its correlations: h2 applies once.
+    carried <- capture(0.2 + diag(0.5, 2))
+    expect_equal(carried$residual_variance, c(0.7, 0.7))
+    expect_equal(carried$varY, 0.2 + diag(0.5, 2))
+    # Without an mr.mash fit, mvsusie_rss estimates the correlations from
+    # the z-scores, and h2 still sets the residual variances.
+    none <- capture(NULL)
+    expect_equal(none$residual_variance, c(0.7, 0.7))
+    expect_null(none$varY)
 })
 
 test_that("QTL sumstat fine-mapping: a cache hit skips the RSS fitter", {
@@ -5153,11 +5491,27 @@ test_that(".fmRssArgsResolved fills rFinite without leaving the class", {
 test_that("each input path offers only the methods it implements", {
     expect_setequal(
         pecotmr:::.fmMethodsFor("QtlDataset"),
-        c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")
+        c(
+            "susie",
+            "susieInf",
+            "susieAsh",
+            "mvsusie",
+            "mvsusieInf",
+            "mvsusieAsh",
+            "fsusie"
+        )
     )
     expect_setequal(
         pecotmr:::.fmMethodsFor("QtlSumStats"),
-        c("susie", "susieInf", "susieAsh", "ser", "mvsusie")
+        c(
+            "susie",
+            "susieInf",
+            "susieAsh",
+            "ser",
+            "mvsusie",
+            "mvsusieInf",
+            "mvsusieAsh"
+        )
     )
     # fsusie has no summary-statistics implementation; ser no individual one.
     expect_null(pecotmr:::.fmMethodCalleeFor("fsusie", "QtlSumStats"))
@@ -6102,6 +6456,126 @@ test_that("the rFinite default needs the reference's size", {
     expect_null(.fmResolveRFinite(NULL, FALSE, "none", unknown))
 })
 
+# The bundled GWAS example's panel split into two halves of its samples, as
+# a GenotypeMixture with equal weights.
+.fmp_halvesMixture <- function() {
+    data(gwasSumStatsS4Example, envir = environment())
+    panel <- ldReference(gwasSumStatsS4Example)[[1L]]
+    halves <- list(a = panel[, 1:80], b = panel[, 81:165])
+    list(
+        mix = GenotypeMixture(halves, mixtureWeights = c(0.5, 0.5)),
+        halves = halves,
+        ids = names(SummarizedExperiment::rowRanges(panel))
+    )
+}
+
+test_that("SusieRssParam takes estimateMixtureWeights, a flag", {
+    expect_false(SusieRssParam()$estimateMixtureWeights)
+    expect_true(
+        SusieRssParam(estimateMixtureWeights = TRUE)$estimateMixtureWeights
+    )
+    expect_error(
+        SusieRssParam(estimateMixtureWeights = NA),
+        "estimateMixtureWeights"
+    )
+})
+
+test_that("a mixture's rFinite is pooled, or per panel when estimated", {
+    fx <- .fmp_halvesMixture()
+    # The size its weights pool its panels to, in whole samples
+    expect_identical(
+        .fmResolveRFinite(NULL, TRUE, "none", fx$mix),
+        as.integer(round(1 / (0.25 / 80 + 0.25 / 85)))
+    )
+    # Each panel's, when the fits estimate the weights
+    expect_equal(
+        .fmResolveRFinite(
+            NULL,
+            FALSE,
+            "eb",
+            fx$mix,
+            estimateMixtureWeights = TRUE
+        ),
+        c(a = 80, b = 85)
+    )
+    resolved <- .fmRssArgsResolved(
+        SusieRssParam(rMismatch = "eb", estimateMixtureWeights = TRUE),
+        fx$mix
+    )
+    expect_equal(resolved$rFinite, c(a = 80, b = 85))
+    # One panel has one size either way
+    expect_equal(
+        .fmResolveRFinite(NULL, TRUE, "none", fx$halves$a, TRUE),
+        80
+    )
+})
+
+test_that("an RSS block that estimates mixture weights reads the panels", {
+    fx <- .fmp_halvesMixture()
+    ids <- fx$ids[1:25]
+    given <- .fmRssLd(fx$mix, ids, "susie", FALSE)
+    expect_null(given$panels)
+    ld <- .fmRssLd(fx$mix, ids, "susie", FALSE, estimateMixtureWeights = TRUE)
+    expect_identical(ld$X, given$X)
+    expect_null(ld$panels$R)
+    # Each panel's factor gives its LD over the block, in the block's frame
+    panelLd <- map(fx$halves, .ldFromRef, variantIds = ids, label = "t")
+    expect_equal(map(ld$panels$X, .ldFactorCrossprod), unname(panelLd))
+    # susieAsh reads the matrices
+    withR <- .fmRssLd(fx$mix, ids, "susieAsh", FALSE, TRUE)
+    expect_equal(withR$panels$R, unname(panelLd))
+    # The credible sets' purity reads the panels mixed with the fit's
+    # weights, or the block's own LD without them
+    purity <- .rssPurityLd(ld, c(0.2, 0.8))
+    expect_equal(
+        .ldFactorCrossprod(purity$X),
+        0.2 * panelLd$a + 0.8 * panelLd$b
+    )
+    expect_identical(.rssPurityLd(ld, NULL), list(R = NULL, X = ld$X))
+    expect_identical(.rssPurityLd(given, c(0.2, 0.8)), list(R = NULL, X = ld$X))
+})
+
+test_that("SuSiE-RSS estimates a GenotypeMixture's weights", {
+    .skipIfSusieRPredates(
+        "fit_multi_panel_two_stage",
+        "two-stage panel mixtures"
+    )
+    fx <- .fmp_halvesMixture()
+    ids <- fx$ids[1:60]
+    ld <- .fmRssLd(fx$mix, ids, "susie", FALSE, estimateMixtureWeights = TRUE)
+    # z-scores on the first half's LD
+    Ra <- .ldFromRef(fx$halves$a, ids, label = "t")
+    set.seed(5)
+    b <- replace(numeric(60L), c(20L, 45L), c(0.25, -0.2))
+    noise <- t(chol(Ra + diag(1e-6, 60L))) %*% rnorm(60L)
+    z <- set_names(drop(sqrt(2000) * Ra %*% b + noise), ids)
+    std <- suppressWarnings(suppressMessages(.fmRssFitStd(
+        "susie",
+        list(chainSusie = FALSE, chainAsh = FALSE),
+        NULL,
+        z = z,
+        ld = ld,
+        n = 2000,
+        coverage = 0.95,
+        methodArgs = list(susie = list(L = 3L)),
+        susieRssParam = SusieRssParam(estimateMixtureWeights = TRUE),
+        verbose = 0,
+        label = "t"
+    )))
+    expect_gt(std$fit$omega_weights[[1L]], 0.9)
+    row <- .fmRssPostprocess(
+        std$fit,
+        ld = ld,
+        z = z,
+        credibleSetParam = CredibleSetParam(),
+        af = NULL,
+        nVar = NULL,
+        fitRetention = "slim"
+    )
+    expect_s4_class(row, "FineMappingRow")
+    expect_identical(variantIds(row), ids)
+})
+
 # ===========================================================================
 # Per-row LD references
 # ===========================================================================
@@ -6168,6 +6642,232 @@ test_that("mvsusie on QtlSumStats refuses contexts on two LD references", {
         suppressMessages(fineMappingPipeline(ss, methods = "mvsusie")),
         "a joint fit uses one LD matrix"
     )
+})
+
+# Two studies of one trait in one context on their own LD references: S2
+# lacks the last of the five variants, and its LD decays faster.
+.fmp_twoStudyLdSs <- function() {
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    entry <- function(z, keep, n) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100L * keep, width = 1L)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = ids[keep],
+            A1 = "A",
+            A2 = "G",
+            Z = z,
+            N = n
+        )
+        gr
+    }
+    ldm <- function(rho, keep) {
+        LdMatrix(
+            `dimnames<-`(
+                rho^abs(outer(keep, keep, "-")),
+                list(ids[keep], ids[keep])
+            ),
+            nSamples = 1000L
+        )
+    }
+    QtlSumStats(
+        studyName = c("S1", "S2"),
+        context = c("c1", "c1"),
+        trait = c("t1", "t1"),
+        entry = list(
+            entry(c(6, 5.5, 1, 0.5, 0.2), 1:5, 1000L),
+            entry(c(5, 2, 0.4, 0.3), 1:4, 800L)
+        ),
+        genome = "hg19",
+        ldReference = list(ldm(0.6, 1:5), ldm(0.2, 1:4)),
+        qcOptions = list(step1 = "ok")
+    )
+}
+
+test_that("mvsusie across studies fits each on its own LD reference", {
+    skip_if_not_installed("mvsusieR")
+    # mvsusie_rss() takes one LD matrix per outcome from the version with
+    # per-outcome sufficient statistics on.
+    skip_if_not(
+        exists("compute_outcome_groups", asNamespace("mvsusieR")),
+        "mvsusieR predates one LD matrix per outcome"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusie",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(nrow(res), 2L)
+    expect_setequal(as.character(res$study), c("S1", "S2"))
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    # The variant S2 lacks has effect 0 there.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_false(fit$coef[ids[5L], "S1"] == 0)
+})
+
+test_that("a credible set's member a study lacks leaves its purity there", {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        exists("compute_outcome_groups", asNamespace("mvsusieR")),
+        "mvsusieR predates one LD matrix per outcome"
+    )
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    entry <- function(z, keep, n) {
+        gr <- GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(100L * keep, width = 1L)
+        )
+        S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+            SNP = ids[keep],
+            A1 = "A",
+            A2 = "G",
+            Z = z,
+            N = n
+        )
+        gr
+    }
+    ldm <- function(R, keep) {
+        LdMatrix(`dimnames<-`(R, list(ids[keep], ids[keep])), nSamples = 1000L)
+    }
+    # One effect at variants 4 and 5 (r = 0.95 in S1); S2 lacks variant 5.
+    R1 <- 0.2^abs(outer(1:5, 1:5, "-"))
+    R1[4L, 5L] <- R1[5L, 4L] <- 0.95
+    fit <- function(z1, z2) {
+        ss <- QtlSumStats(
+            studyName = c("S1", "S2"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t1"),
+            entry = list(
+                entry(z1, 1:5, 1000L),
+                entry(c(0.2, 0.4, 0.3, z2), 1:4, 800L)
+            ),
+            genome = "hg19",
+            ldReference = list(
+                ldm(R1, 1:5),
+                ldm(0.2^abs(outer(1:4, 1:4, "-")), 1:4)
+            ),
+            qcOptions = list(step1 = "ok")
+        )
+        res <- suppressMessages(
+            fineMappingPipeline(
+                ss,
+                methods = "mvsusie",
+                jointSpecification = "study"
+            )
+        )
+        map(1:2, function(i) {
+            pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        })
+    }
+    tl <- fit(c(0.3, 0.1, 1, 7.2, 7.6), 3)
+    # The set {4, 5} stands in both rows: S2's purity is read over variant
+    # 4 alone, where the lacked variant 5 used to make it 0 and drop it.
+    expect_equal(tl[[1L]]$cs_95_purity[4:5], c(0.95, 0.95))
+    expect_equal(tl[[2L]]$cs_95[4:5], tl[[1L]]$cs_95[4:5])
+    expect_equal(tl[[2L]]$cs_95_purity[4:5], c(1, 1))
+    expect_gt(tl[[2L]]$posterior_mean[4L], 0)
+    # The variant S2 lacks has an effect of 0 there: no SD and no lfsr.
+    expect_equal(tl[[2L]]$posterior_mean[5L], 0)
+    expect_equal(tl[[2L]]$posterior_sd[5L], 0)
+    expect_true(is.na(tl[[2L]]$lfsr[5L]))
+    expect_false(is.na(tl[[1L]]$lfsr[5L]))
+    # A set of variant 5 alone holds nothing of S2's, so S2's row drops it.
+    alone <- fit(c(0.3, 0.1, 1, 7.2, 8), 1.5)
+    expect_true(any(alone[[1L]]$cs_95_purity > 0))
+    expect_true(all(alone[[2L]]$cs_95_purity == 0))
+})
+
+test_that("mvsusieInf across studies keeps their unmappable effects apart", {
+    .fm_skipIfNoMvsusieInf()
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusieInf",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(as.character(res$study), c("S1", "S2"))
+    expect_setequal(methodNames(res), "mvsusieInf")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    # The studies' unmappable effects are uncorrelated, the default.
+    expect_equal(dim(fit$tau2), c(2L, 2L))
+    expect_equal(fit$tau2[1L, 2L], 0)
+    expect_equal(dim(fit$theta), c(5L, 2L))
+    # The variant S2 lacks has effect 0 there, its unmappable part too.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_equal(fit$theta[5L, 2L], 0)
+})
+
+test_that("mvsusieAsh across studies keeps their unmappable effects apart", {
+    .fm_skipIfNoMvsusieAsh()
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:5))
+    res <- suppressMessages(
+        fineMappingPipeline(
+            .fmp_twoStudyLdSs(),
+            methods = "mvsusieAsh",
+            jointSpecification = "study"
+        )
+    )
+    expect_equal(as.character(res$study), c("S1", "S2"))
+    expect_setequal(methodNames(res), "mvsusieAsh")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    expect_gt(fit$pip[[1L]], 0.9)
+    expect_equal(dim(fit$theta), c(5L, 2L))
+    expect_equal(dim(fit$tau2), c(2L, 2L))
+    # The studies' residuals are on different samples
+    expect_equal(fit$sigma2[1L, 2L], 0)
+    # The variant S2 lacks has effect 0 there, its unmappable part too.
+    expect_equal(unname(fit$coef[ids[5L], "S2"]), 0)
+    expect_equal(fit$theta[5L, 2L], 0)
+})
+
+test_that("mvsusieInf fits the studies' contexts across individuals", {
+    .fm_skipIfNoMvsusieInf()
+    res <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        .fm_disjointTwoContextStudies(),
+        methods = FineMappingMethodsParam(
+            qtlDatasetMethods = list(
+                mvsusieInf = MvsusieInfOptions(
+                    verbose = FALSE,
+                    estimate_unmappable_correlation = TRUE
+                )
+            )
+        ),
+        jointSpecification = list(c("study", "context")),
+        cisWindow = 50000L,
+        initializeWithSusieInf = FALSE,
+        credibleSetParam = CredibleSetParam(maxNumSingleEffects = 2L),
+        verbose = 0
+    )))
+    md <- S4Vectors::mcols(res, use.names = FALSE)
+    expect_equal(as.character(md$study), rep(c("study1", "study2"), each = 2L))
+    expect_setequal(methodNames(res), "mvsusieInf")
+    fit <- pecotmr:::.fmrPartsSusieFit(pecotmr:::.fmrRowParts(res, 1L))
+    # Each study's contexts share samples, so the covariance of their
+    # unmappable effects is estimated; between the studies it is zero.
+    expect_equal(dim(fit$tau2), c(4L, 4L))
+    expect_equal(fit$tau2[1:2, 3:4], matrix(0, 2L, 2L))
+    expect_gt(fit$tau2[1L, 2L], 0)
+    expect_gte(min(eigen(fit$tau2, only.values = TRUE)$values), -1e-12)
+    # Each row's posterior effects include its condition's unmappable part.
+    scale <- pecotmr:::.fitScaleFactors(fit, nrow(fit$theta))
+    for (i in seq_len(nrow(res))) {
+        tl <- pecotmr:::.fmrPartsTopLoci(pecotmr:::.collectionEntry(res, i))
+        at <- match(tl$variant_id, rownames(fit$coef))
+        expect_equal(
+            tl$posterior_theta,
+            unname(fit$theta[at, md$jointIndex[[i]]] / scale[at]),
+            tolerance = 1e-12
+        )
+    }
+    expect_true(any(fit$theta != 0))
 })
 
 # ===========================================================================

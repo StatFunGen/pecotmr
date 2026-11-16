@@ -16,7 +16,7 @@
     if (is(data, "QtlDataset")) {
         return(studyName(data))
     }
-    if (is(data, "QtlSumStats")) {
+    if (is(data, "QtlSumStats") || is(data, "GwasSumStats")) {
         return(unique(as.character(data$study)))
     }
     if (is(data, "MultiStudyQtlDataset")) {
@@ -129,6 +129,10 @@
         }
         return(character(0))
     }
+    # A GWAS is one phenotype per study: it has no contexts.
+    if (is(data, "GwasSumStats")) {
+        return(character(0))
+    }
     cls <- class(data)[[1L]]
     msg <- glue(".spListContexts: unsupported class: {cls}")
     abort(msg)
@@ -213,6 +217,10 @@
     }
     if (is(data, "MultiStudyQtlDataset")) {
         return(.spListTraitsMultiStudy(data, studyName, context))
+    }
+    # A GWAS's trait is its study: it has no trait axis of its own.
+    if (is(data, "GwasSumStats")) {
+        return(character(0))
     }
     cls <- class(data)[[1L]]
     msg <- glue(".spListTraits: unsupported class: {cls}")
@@ -916,6 +924,63 @@ parseTraitIds <- function(traitId, data) {
     list(Z = filled$Z, nVec = filled$nVec, variantIds = variantIds)
 }
 
+# The z-scores of studies each on their own LD reference
+# (.enumCrossStudyGroup(), .enumComposedStudyGroup()), over the union of their
+# variants: each row's variants kept by its own reference's panel filters,
+# the union matched by allele (.xsVariantUnion()), and each row's z signed
+# into the union's allele frame, NA at a variant it lacks; its column
+# labelled `labels` (its study's name by default). `read` holds the data, the
+# panel cutoffs and the label for messages.
+# @noRd
+.buildJointSumstatZUnion <- function(
+    tupleRows,
+    cols,
+    refs,
+    read,
+    labels = cols$study[tupleRows]
+) {
+    entries <- map2(tupleRows, refs, .jointUnionEntry, cols = cols, read = read)
+    ids <- .xsVariantUnion(map(entries, "variantId"))
+    Z <- exec(cbind, !!!map(entries, .jointUnionColumn, ids = ids))
+    list(
+        Z = `dimnames<-`(Z, list(ids, labels)),
+        nVec = map_dbl(entries, "n"),
+        variantIds = ids
+    )
+}
+
+# One study's variants, z-scores and median N, its variants kept by its own
+# reference's panel filters.
+# @noRd
+.jointUnionEntry <- function(row, ref, cols, read) {
+    d <- .sumStatsDf(
+        read$data,
+        studyName = cols$study[[row]],
+        context = cols$context[[row]],
+        trait = cols$trait[[row]],
+        require = c("SNP", "Z", "N")
+    )
+    kept <- d[
+        .panelKeepMask(d$variant_id, ref, read$cutoffs, read$label),
+        ,
+        drop = FALSE
+    ]
+    list(
+        variantId = kept$variant_id,
+        z = kept$z,
+        n = stats::median(kept$N, na.rm = TRUE)
+    )
+}
+
+# A study's z-scores over the union `ids`, signed into its allele frame and
+# NA at a variant the study lacks.
+# @noRd
+.jointUnionColumn <- function(entry, ids) {
+    m <- matchVariants(entry$variantId, ids, removeStrandAmbiguous = FALSE)
+    at <- match(seq_along(ids), m$idxB)
+    entry$z[m$idxA[at]] * m$sign[at]
+}
+
 # One tuple's z column and median N, checked against the shared SNP order.
 # @noRd
 .jointSumstatEntryAt <- function(
@@ -1426,15 +1491,19 @@ parseTraitIds <- function(traitId, data) {
 # Fine-mapping dispatchers
 # =============================================================================
 
-# Identity-tuple key (study/context/trait/method joined by "\r"), used to align
-# per-region result entries when merging. Shared by the fm/twas mergers.
+# Identity key (study/context/trait/method and the joint key, joined by "\r"),
+# used to align per-region result entries when merging: two joint groups
+# sharing a tuple stay apart. Shared by the fm/twas mergers.
 # @noRd
 .mergeResultKeyOf <- function(r) {
-    str_c(
+    joint <- map(.JOINT_COLUMNS, .fmrIdentityColumn, x = r)
+    exec(
+        str_c,
         as.character(r$study),
         as.character(r$context),
         as.character(r$trait),
         as.character(r$method),
+        !!!map(joint, coalesce, ""),
         sep = "\r"
     )
 }
@@ -1469,7 +1538,52 @@ parseTraitIds <- function(traitId, data) {
         # all.
         list(ldReference = .rowLdRefs(base))
     )
-    exec(QtlFineMappingResult, !!!qfmrArgs)
+    .fmWithMergedJointIndex(
+        exec(QtlFineMappingResult, !!!qfmrArgs),
+        results,
+        baseKeys
+    )
+}
+
+# `merged` with each row's position in its joint fit's condition axis: the
+# one its regions agree on, else NA (a region's screen can drop different
+# conditions), as .twasMergedJointIndex() keeps it. No column when no region
+# records one.
+# @noRd
+.fmWithMergedJointIndex <- function(merged, results, baseKeys) {
+    if (!any(map_lgl(results, .fmrHasJointIndex))) {
+        return(merged)
+    }
+    `$<-`(
+        merged,
+        "jointIndex",
+        map_int(baseKeys, .fmMergedJointIndexFor, results = results)
+    )
+}
+
+# @noRd
+.fmrHasJointIndex <- function(r) {
+    is_in("jointIndex", colnames(mcols(r)))
+}
+
+# @noRd
+.fmMergedJointIndexFor <- function(key, results) {
+    v <- unique(discard(
+        map_int(results, .fmJointIndexForKey, key = key),
+        is.na
+    ))
+    if (length(v) == 1L) v else NA_integer_
+}
+
+# The position recorded by the row of result `r` matching merge key `key`; NA
+# when it has none.
+# @noRd
+.fmJointIndexForKey <- function(r, key) {
+    hit <- which(.mergeResultKeyOf(r) == key)
+    if (length(hit) == 0L) {
+        return(NA_integer_)
+    }
+    as.integer(.fmrJointIndexAt(r, hit[[1L]]))
 }
 
 # One passthrough column of a joint result row as a character vector (the joint-
@@ -1592,17 +1706,17 @@ parseTraitIds <- function(traitId, data) {
     rbindFn(perTupleResult, jointResult)
 }
 
-# Synthesize a jointSpecification for the AUTO-DETECTION path (no explicit
-# jointSpecification supplied): route mvsusie / fsusie over the data's natural
-# multi-axis shape through the SAME engine as an explicit jointSpecification,
-# matching the historical mvJobs / runMultivariate detection. >= 2 traits ->
-# cross-trait (covers multi-trait single-context AND both-multi, since the
-# cross-trait enumerator iterates contexts -> per-context multi-trait fits);
-# else >= 2 contexts (single trait) -> cross-context. Single context & single
-# trait -> no joint (the caller's multivariate guard already rejects mvsusie /
-# fsusie there). Returns a list of parsed specs (full scope) or list().
+# The jointSpecification of a run on individual-level data that names none:
+# both pipelines group every joint method (mvsusie, fsusie, mr.mash) by it,
+# so a TWAS run reads the very fits a fine-mapping run made, through the SAME
+# engine as an explicit jointSpecification. >= 2 traits -> cross-trait (covers
+# multi-trait single-context AND both-multi, since the cross-trait enumerator
+# iterates contexts -> per-context multi-trait fits); else >= 2 contexts
+# (single trait) -> cross-context. Single context & single trait -> no joint
+# (the callers' multivariate guards already reject the joint methods there).
+# Returns a list of parsed specs (full scope) or list().
 # @noRd
-.fmSynthesizeJointSpec <- function(nCtx, nTraits) {
+.defaultJointSpec <- function(nCtx, nTraits) {
     if (nTraits >= 2L) {
         list(list(axes = "trait", scope = NULL))
     } else if (nCtx >= 2L) {
@@ -1610,6 +1724,12 @@ parseTraitIds <- function(traitId, data) {
     } else {
         list()
     }
+}
+
+# The same for summary statistics: across contexts.
+# @noRd
+.defaultSumStatsJointSpec <- function() {
+    list(list(axes = "context", scope = NULL))
 }
 # ---- fine-mapping joint dispatch --------------------------------------------
 #
@@ -1647,6 +1767,12 @@ parseTraitIds <- function(traitId, data) {
 # @noRd
 .fmJointSpecsWork <- function(parsedJointSpec, tokens, methodArgs, cfg) {
     .jointRejectStudyOnIndividual(parsedJointSpec)
+    .fmJointRegionsWork(parsedJointSpec, tokens, methodArgs, cfg)
+}
+
+# Individual-level joint specs' fits, planned, one region block at a time.
+# @noRd
+.fmJointRegionsWork <- function(parsedJointSpec, tokens, methodArgs, cfg) {
     .qtlWorkOf(
         map(
             cfg$xRegions,
@@ -1679,7 +1805,7 @@ parseTraitIds <- function(traitId, data) {
         cfg$data,
         dataForm = "individual",
         pipeline = .fmJointPipeline(cfg, cfg$crossValidationParam),
-        jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
+        jointMethods = intersect(tokens, .fmMultivariateTokens()),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
         args = .fmJointIndividualArgs(cfg, methodArgs, region)
@@ -1701,7 +1827,11 @@ parseTraitIds <- function(traitId, data) {
             crossValidationParam = crossValidationParam,
             verbose = cfg$verbose,
             fitRetention = cfg$fitRetention,
-            seed = cfg$seed
+            seed = cfg$seed,
+            # The settled `h2` the summary-statistics fits scale V by
+            # (.jointRssH2()), and their LD-reference settings
+            h2 = cfg$h2Spec,
+            susieRssParam = cfg$susieRssParam
         )
     )
 }
@@ -1741,7 +1871,7 @@ parseTraitIds <- function(traitId, data) {
         cfg$data,
         dataForm = "sumstats",
         pipeline = .fmJointPipeline(cfg, .cvResolve(CrossValidationParam())),
-        jointMethods = intersect(tokens, c("mvsusie", "fsusie")),
+        jointMethods = intersect(tokens, .fmMultivariateTokens()),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
         args = list(
@@ -1758,14 +1888,17 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # Joint dispatch for a MultiStudyQtlDataset. Per component AND per axis: a
-# spec with a `study` axis only touches the summary statistics, while the
-# other specs run on every individual-level component -- each under the same
-# settings, with the component's own data (its genotype-filter overrides
-# applied, as the per-study recursion applies them) -- and on the summary
-# statistics too. `cfg` is the individual-level joint record plus
+# spec with a `study` axis, alone or composed with others, joins the
+# individual-level studies with one another
+# (.fmDispatchStudySpecsIndividual()), while the other specs run on every
+# individual-level component -- each under the same settings, with the
+# component's own data (its genotype-filter overrides applied, as the
+# per-study recursion applies them). Every spec also runs on the summary
+# statistics. `cfg` is the individual-level joint record plus
 # `genotypeFilterParam` and `panelFilterParam`, with the collection as data.
-# `components = FALSE` leaves the components' fits to their own runs
-# (.fmPerStudy()), which have other fits to share their reads with.
+# `components = FALSE` leaves the components' own fits to their own runs
+# (.fmPerStudy()), which have other fits to share their reads with; a
+# cross-study fit belongs to no one run.
 # @noRd
 .fmDispatchJointSpecsMultiStudy <- function(
     parsedJointSpec,
@@ -1776,29 +1909,85 @@ parseTraitIds <- function(traitId, data) {
 ) {
     qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
-    .fmMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
-    out <- if (length(specs$nonStudy) == 0L || !components) {
+    perStudy <- if (length(specs$nonStudy) == 0L || !components) {
         NULL
     } else {
-        .msFoldStudyResults(
-            map(
-                qtlDatasets,
-                .fmStudyJointResult,
-                specs = specs$nonStudy,
-                tokens = tokens,
-                methodArgs = methodArgs,
-                cfg = cfg
-            ),
-            .rbindFineMappingResult
+        map(
+            qtlDatasets,
+            .fmStudyJointResult,
+            specs = specs$nonStudy,
+            tokens = tokens,
+            methodArgs = methodArgs,
+            cfg = cfg
         )
     }
-    .fmMultiStudySumStats(
-        parsedJointSpec,
+    acrossStudies <- .fmDispatchStudySpecsIndividual(
         specs$study,
-        out,
         tokens,
         methodArgs,
         cfg
+    )
+    .fmMultiStudySumStats(
+        parsedJointSpec,
+        .msFoldStudyResults(
+            c(perStudy, list(acrossStudies)),
+            .rbindFineMappingResult
+        ),
+        tokens,
+        methodArgs,
+        cfg
+    )
+}
+
+# The study-axis specs on a MultiStudyQtlDataset's individual-level studies:
+# one mvsusie fit per group a spec makes of them -- per (context, trait) two or
+# more of them carry on the study axis alone (.enumCrossStudyIndividual()),
+# per value of the axes a composed spec does not join on otherwise
+# (.enumComposedCrossStudyIndividual()) -- their samples stacked with each
+# study's phenotypes missing outside its own rows, once per region block. Each
+# study is read with its genotype-filter overrides applied, as its own fits
+# read it. NULL when no spec applies or fewer than two individual-level studies
+# are present. fsusie has no cross-study fit: its functional domain is a
+# study's traits.
+# @noRd
+.fmDispatchStudySpecsIndividual <- function(
+    studySpecs,
+    tokens,
+    methodArgs,
+    cfg
+) {
+    jointTokens <- intersect(tokens, .fmMvsusieTokens())
+    if (length(studySpecs) == 0L || length(cfg$data) < 2L) {
+        return(NULL)
+    }
+    if (is_in("fsusie", tokens) && (cfg$verbose %||% 1) >= 1) {
+        inform(str_c(
+            "jointCrossStudy: fsusie has no cross-study fit, so the ",
+            "individual-level studies are fitted across studies by the ",
+            "mvSuSiE methods alone."
+        ))
+    }
+    if (length(jointTokens) == 0L) {
+        return(NULL)
+    }
+    studies <- MultiStudyQtlDataset(
+        qtlDatasets = map(
+            as.list(cfg$data),
+            .qtlRestrictSamples,
+            keepSamples = cfg$genotypeFilter$keepSamples
+        )
+    )
+    .qtlRunWork(
+        .fmJointRegionsWork(
+            studySpecs,
+            jointTokens,
+            methodArgs,
+            list_assign(cfg, data = studies)
+        ),
+        studies,
+        cfg$genotypeFilter,
+        cfg$residualizationParam,
+        withAf = TRUE
     )
 }
 
@@ -1823,12 +2012,11 @@ parseTraitIds <- function(traitId, data) {
     .qssApplyCisWindow(ss, cfg$cisWindow, caller, rows)
 }
 
-# Fine-map every spec on the summary-statistics component and rbind onto the
-# individual-level results `out`.
+# Fine-map every spec on the summary-statistics component, when there is one,
+# and rbind onto the individual-level results `out`.
 # @noRd
 .fmMultiStudySumStats <- function(
     parsedJointSpec,
-    studyAxisSpecs,
     out,
     tokens,
     methodArgs,
@@ -1836,22 +2024,26 @@ parseTraitIds <- function(traitId, data) {
 ) {
     sumStats <- sumStats(cfg$data)
     if (is.null(sumStats)) {
-        if (length(studyAxisSpecs) > 0L && cfg$verbose >= 1) {
-            msg <- glue(
-                "jointCrossStudy: no sumStats slot present on this ",
-                "MultiStudyQtlDataset; cross-study specs produce no result."
-            )
-            inform(msg)
-        }
         return(out)
     }
+    ssData <- .msJointSumStats(sumStats, cfg, "fineMappingPipeline")
     ssRes <- .fmDispatchJointSpecsQtlSumStats(
         parsedJointSpec,
         tokens,
         methodArgs,
         list_assign(
             cfg,
-            data = .msJointSumStats(sumStats, cfg, "fineMappingPipeline")
+            data = ssData,
+            # The run's `h2`, settled on the summary statistics the joint
+            # fits scale V by (.jointRssH2())
+            h2Spec = .fmQssH2Spec(
+                cfg$h2,
+                list(
+                    data = ssData,
+                    contexts = cfg$contexts,
+                    traitId = cfg$traitId
+                )
+            )
         )
     )
     if (is.null(ssRes)) {
@@ -1864,9 +2056,9 @@ parseTraitIds <- function(traitId, data) {
 }
 
 
-# Merge the per-region joint results by (study, context, trait, method). A
-# single block -- cis, or jointRegions = TRUE concatenated -- is returned
-# directly rather than merged with itself.
+# Merge the per-region joint results by (study, context, trait, method) and
+# joint key. A single block -- cis, or jointRegions = TRUE concatenated -- is
+# returned directly rather than merged with itself.
 # @noRd
 .fmCombineRegionResults <- function(perRegion) {
     if (length(perRegion) == 0L) {
@@ -1921,21 +2113,6 @@ parseTraitIds <- function(traitId, data) {
         study = parsedJointSpec[hasStudy],
         nonStudy = parsedJointSpec[!hasStudy]
     )
-}
-
-# Note that individual-level studies are excluded from cross-study fits.
-.fmMultiStudyWarnExcluded <- function(studyAxisSpecs, qtlDatasets, verbose) {
-    if (
-        length(studyAxisSpecs) > 0L && length(qtlDatasets) > 0L && verbose >= 1
-    ) {
-        qdNames <- str_flatten(names(qtlDatasets), ", ")
-        msg <- glue(
-            "jointCrossStudy: excluding individual-level studies ",
-            "({qdNames}) from cross-study fits (no LD reference available); ",
-            "sumstats studies participate."
-        )
-        inform(msg)
-    }
 }
 
 
@@ -2075,7 +2252,9 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # .twasDispatchJointSpecsQtlDataset()'s fits, planned, for a run with others to
-# fit alongside.
+# fit alongside: the joint methods' (.twasJointTokens()), and those of the
+# methods also fitted jointly on a group of two or more conditions
+# (`multitraitTokens`, .twasMultitraitTokens()).
 # @noRd
 .twasJointSpecsWork <- function(
     parsedJointSpec,
@@ -2088,7 +2267,7 @@ parseTraitIds <- function(traitId, data) {
     .jointRejectStudyOnIndividual(parsedJointSpec)
     .twasJointSpecGridWork(
         parsedJointSpec,
-        intersect(tokens, "mrmash"),
+        union(.twasJointTokens(tokens), .jpConfig(marker)$multitraitTokens),
         contexts,
         traitIds,
         marker,
@@ -2096,10 +2275,11 @@ parseTraitIds <- function(traitId, data) {
     )
 }
 
-# Explicit joint specs (mr.mash RSS) on a QtlSumStats collection. `cfg` is
-# the summary-statistics joint record, or a MultiStudy record with the
-# collection as its data; `methodArgs` are the summary-statistics path's
-# per-method options.
+# Joint specs on a QtlSumStats collection: mr.mash RSS fitted on each group,
+# mvsusie read off its fine-mapping fit of the group. `cfg` is the
+# summary-statistics joint record, or a MultiStudy record with the collection
+# as its data; `methodArgs` are the summary-statistics path's per-method
+# options.
 # @noRd
 .twasDispatchJointSpecsQtlSumStats <- function(
     parsedJointSpec,
@@ -2114,33 +2294,107 @@ parseTraitIds <- function(traitId, data) {
             fitRetention = cfg$fitRetention,
             standardized = TRUE,
             verbose = cfg$verbose,
-            seed = cfg$seed
+            seed = cfg$seed,
+            studyCoupling = cfg$studyCoupling
         )
     )
-    .runJointSpecs(
+    args <- list(
+        methodArgs = methodArgs,
+        mashPriors = cfg$mashPriors,
+        verbose = cfg$verbose,
+        fineMappingResult = cfg$fineMappingResult,
+        cache = cfg$twasWeights,
+        cutoffs = .panelCutoffs(cfg$panelFilterParam %||% PanelFilterParam())
+    )
+    joint <- .runJointSpecs(
         parsedJointSpec,
         cfg$data,
         dataForm = "sumstats",
         pipeline = pipeline,
-        jointMethods = intersect(tokens, "mrmash"),
+        jointMethods = .twasJointTokens(tokens),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
-        args = list(
-            methodArgs = methodArgs,
-            verbose = cfg$verbose,
-            cutoffs = .panelCutoffs(
-                cfg$panelFilterParam %||% PanelFilterParam()
-            )
-        )
+        args = args
+    )
+    .msFoldStudyResults(
+        list(joint, .twasCoupledSumStats(parsedJointSpec, tokens, cfg, args)),
+        .rbindTwasWeights
     )
 }
 
-# Joint dispatch for a MultiStudyQtlDataset. Non-study specs run on every
+# The methods fitted across the summary-statistics studies
+# (.jointTwasCoupledRss()) -- the penalized ones under the penalty on the
+# difference between their effects, PRS-CS as JointPRS and SDPR as SDPRX fit
+# ancestries -- and the ensemble stacking the studies' own fits
+# (EnsembleParam(acrossStudies = TRUE), .twasSumstatEnsembleLayer()), on the
+# specs with the study axis alone; their per-study fits run with the
+# per-tuple ones. NULL when none applies.
+# @noRd
+.twasCoupledSumStats <- function(parsedJointSpec, tokens, cfg, args) {
+    studySpecs <- .twasCoupledSpecs(parsedJointSpec, tokens, cfg)
+    if (length(studySpecs) == 0L) {
+        return(NULL)
+    }
+    pipeline <- new(
+        "TwasJointPipeline",
+        config = list(
+            crossValidationParam = .cvResolve(CrossValidationParam()),
+            fitRetention = cfg$fitRetention,
+            standardized = TRUE,
+            verbose = cfg$verbose,
+            seed = cfg$seed,
+            studyCoupling = cfg$studyCoupling,
+            ensembleParam = list_assign(
+                .ensembleResolve(cfg$ensemble),
+                stackTokens = .twasStackTokens(tokens, cfg$ensemble, "sumstat")
+            ),
+            h2 = cfg$h2Spec
+        )
+    )
+    .runJointSpecs(
+        studySpecs,
+        cfg$data,
+        dataForm = "sumstats",
+        pipeline = pipeline,
+        jointMethods = .twasAcrossStudyTokens(tokens, cfg),
+        contexts = cfg$contexts,
+        traitIds = cfg$traitId,
+        args = args
+    )
+}
+
+# The specs a run fits methods across studies on: those with the study axis
+# alone, when it couples a method across studies or stacks the studies' own
+# fits.
+# @noRd
+.twasCoupledSpecs <- function(parsedJointSpec, tokens, cfg) {
+    if (length(.twasAcrossStudyTokens(tokens, cfg)) == 0L) {
+        return(list())
+    }
+    keep(.fmSplitStudyAxisSpecs(parsedJointSpec)$study, .jsIsStudyAxisOnly)
+}
+
+# The summary-statistics methods a run fits across studies: those it couples
+# (`studyCoupling` given) and those its ensemble stacks across them.
+# @noRd
+.twasAcrossStudyTokens <- function(tokens, cfg) {
+    coupled <- if (!is.null(cfg$studyCoupling)) {
+        intersect(tokens, .TWAS_COUPLED_SUMSTATS)
+    }
+    union(coupled, .twasStackTokens(tokens, cfg$ensemble, "sumstat"))
+}
+
+# Joint dispatch for a MultiStudyQtlDataset, mirroring
+# .fmDispatchJointSpecsMultiStudy(). Non-study specs run on every
 # individual-level component, each fitting under the setup its own QtlDataset
 # run would use (.twasJointSetup() on the component, its genotype-filter
-# overrides applied); every spec runs on the summary-statistics component.
-# `cfg` is .twasJointCfg()'s record plus the collection, `genotypeFilterParam`
-# and `panelFilterParam`; `methods` is the translated methods record.
+# overrides applied); a spec with a `study` axis, alone or composed with
+# others, reads mvsusie off the fits across the individual-level studies
+# (.twasDispatchStudySpecsIndividual()) and fits the methods fitted across
+# them (.twasDispatchStudySpecsCoupled()); every spec runs on the
+# summary-statistics component. `cfg` is .twasJointCfg()'s record plus the
+# collection, `genotypeFilterParam` and `panelFilterParam`; `methods` is the
+# translated methods record.
 # @noRd
 .twasDispatchJointSpecsMultiStudy <- function(
     parsedJointSpec,
@@ -2151,30 +2405,218 @@ parseTraitIds <- function(traitId, data) {
 ) {
     qtlDatasets <- as.list(cfg$data)
     specs <- .fmSplitStudyAxisSpecs(parsedJointSpec)
-    .twasMultiStudyWarnExcluded(specs$study, qtlDatasets, cfg$verbose)
-    out <- if (length(specs$nonStudy) == 0L || !components) {
+    perStudy <- if (length(specs$nonStudy) == 0L || !components) {
         NULL
     } else {
-        .msFoldStudyResults(
-            map(
-                qtlDatasets,
-                .twasStudyJointResult,
-                specs = specs$nonStudy,
-                tokens = tokens,
-                methods = methods,
-                cfg = cfg
-            ),
-            .rbindTwasWeights
+        map(
+            qtlDatasets,
+            .twasStudyJointResult,
+            specs = specs$nonStudy,
+            tokens = tokens,
+            methods = methods,
+            cfg = cfg
         )
     }
+    acrossStudies <- .msFoldStudyResults(
+        list(
+            .twasDispatchStudySpecsIndividual(specs$study, tokens, cfg),
+            .twasDispatchStudySpecsCoupled(specs$study, tokens, methods, cfg)
+        ),
+        .rbindTwasWeights
+    )
     .twasMultiStudySumStats(
         parsedJointSpec,
-        specs$study,
-        out,
+        .msFoldStudyResults(
+            c(perStudy, list(acrossStudies)),
+            .rbindTwasWeights
+        ),
         tokens,
         methods,
         cfg
     )
+}
+
+# The study-axis specs on a MultiStudyQtlDataset's individual-level studies:
+# the mvSuSiE methods' weights over each group fineMappingPipeline() fits
+# across them, read off those fits (.twasAcrossStudyWeights()), each study
+# taken with its genotype-filter overrides applied, as fine-mapping took it.
+# NULL when no spec applies, fewer than two individual-level studies are
+# present, or no mvSuSiE method is asked for: fsusie has no fit across
+# studies, and mr.mash is fitted on the groups here
+# (.twasDispatchStudySpecsCoupled()).
+# @noRd
+.twasDispatchStudySpecsIndividual <- function(studySpecs, tokens, cfg) {
+    mvTokens <- intersect(tokens, .fmMvsusieTokens())
+    if (
+        length(studySpecs) == 0L ||
+            length(cfg$data) < 2L ||
+            length(mvTokens) == 0L
+    ) {
+        return(NULL)
+    }
+    studies <- MultiStudyQtlDataset(
+        qtlDatasets = map(
+            as.list(cfg$data),
+            .qtlRestrictSamples,
+            keepSamples = cfg$genotypeFilter$keepSamples
+        )
+    )
+    .twasAcrossStudyWeights(
+        .twasStudyAxisGroups(studySpecs, studies, cfg),
+        cfg,
+        mvTokens
+    )
+}
+
+# The study-axis specs on a MultiStudyQtlDataset's individual-level studies,
+# for the methods fitted on their groups across studies: their samples stacked
+# as fineMappingPipeline() stacks them, per region block, each study read with
+# its genotype-filter overrides applied. A spec with the study axis alone
+# (one group per (context, trait) two or more studies carry;
+# .enumCrossStudyIndividual()) fits the univariate methods under the penalty
+# on the difference between the studies' effects (lasso, enet, ridge,
+# l0learn; .lassoCoupledWeights()), the ensemble across studies
+# (EnsembleParam(acrossStudies = TRUE)), which stacks each study's own fits of
+# the methods it names (.twasStackTokens()), and the methods fitted across
+# the studies jointly: mr.mash, and bayesC and bayesN on BGLR
+# (.twasAcrossStudyJointTokens()). A composed spec including the study
+# (.enumComposedCrossStudyIndividual()) fits mr.mash alone: its groups hold
+# several conditions per study, sharing that study's samples, which the
+# coupling and the ensemble across studies would take as studies of their
+# own, and whose residual correlation BGLR's diagonal residual covariance
+# across studies (.bglrStudyResiduals()) would drop; mr.mash estimates it
+# within each study. The methods' per-study fits run as well, in the
+# per-component recursion. NULL when no spec applies, fewer than two studies
+# are present, or none of these methods is asked for.
+# @noRd
+.twasDispatchStudySpecsCoupled <- function(studySpecs, tokens, methods, cfg) {
+    if (length(studySpecs) == 0L || length(cfg$data) < 2L) {
+        return(NULL)
+    }
+    studies <- MultiStudyQtlDataset(
+        qtlDatasets = map(
+            as.list(cfg$data),
+            .qtlRestrictSamples,
+            keepSamples = cfg$genotypeFilter$keepSamples
+        )
+    )
+    .msFoldStudyResults(
+        list(
+            .twasStudyAxisFits(
+                keep(studySpecs, .jsIsStudyAxisOnly),
+                .twasStudyOnlyTokens(tokens, cfg),
+                methods,
+                cfg,
+                studies
+            ),
+            .twasStudyAxisFits(
+                discard(studySpecs, .jsIsStudyAxisOnly),
+                intersect(tokens, "mrmash"),
+                methods,
+                .twasComposedStudyCfg(cfg),
+                studies
+            )
+        ),
+        .rbindTwasWeights
+    )
+}
+
+# The methods fitted on the groups the study axis alone makes across studies:
+# the coupled ones (under `studyCoupling`), those the ensemble stacks across
+# studies, and the joint ones.
+# @noRd
+.twasStudyOnlyTokens <- function(tokens, cfg) {
+    coupled <- if (!is.null(cfg$studyCoupling)) {
+        intersect(tokens, names(.TWAS_COUPLED_IMPL))
+    }
+    union(
+        union(
+            coupled,
+            .twasStackTokens(tokens, cfg$ensembleParam, "individual")
+        ),
+        .twasAcrossStudyJointTokens(tokens, cfg$backend)
+    )
+}
+
+# The methods fitted jointly on a group across studies: mr.mash, whose
+# missing-value fit takes each study's conditions on its own rows, and bayesC
+# and bayesN on BGLR (.twasMultitraitTokens()).
+# @noRd
+.twasAcrossStudyJointTokens <- function(tokens, backend) {
+    union(intersect(tokens, "mrmash"), .twasMultitraitTokens(tokens, backend))
+}
+
+# The run's settings for a composed spec including the study: neither coupled
+# nor stacked across studies.
+# @noRd
+.twasComposedStudyCfg <- function(cfg) {
+    list_assign(
+        cfg,
+        studyCoupling = zap(),
+        ensembleParam = list_assign(
+            .ensembleResolve(cfg$ensembleParam),
+            acrossStudies = FALSE
+        )
+    )
+}
+
+# The fits of `fitted` on the groups `specs` make across `studies`; NULL when
+# no spec or method applies.
+# @noRd
+.twasStudyAxisFits <- function(specs, fitted, methods, cfg, studies) {
+    if (length(specs) == 0L || length(fitted) == 0L) {
+        return(NULL)
+    }
+    setup <- .twasJointSetup(
+        studies,
+        .twasNormWithBackends(methods, cfg$backend),
+        list_assign(
+            cfg,
+            stackTokens = .twasStackTokens(
+                fitted,
+                cfg$ensembleParam,
+                "individual"
+            )
+        )
+    )
+    .qtlRunWork(
+        .twasJointSpecGridWork(
+            specs,
+            fitted,
+            cfg$contexts,
+            cfg$traitId,
+            setup$marker,
+            setup$ctx
+        ),
+        studies,
+        cfg$genotypeFilter,
+        cfg$residualizationParam,
+        withAf = TRUE
+    )
+}
+
+# The methods a run stacks across studies (EnsembleParam(acrossStudies =
+# TRUE)): its univariate ones fitted from their own data on `path`
+# ("individual" or "sumstat"), every fine-mapping method excepted, whose
+# weights come from fits a group across studies does not hold. None unless
+# the ensemble is on and across studies.
+# @noRd
+.twasStackTokens <- function(tokens, ensembleParam, path) {
+    if (
+        !isTRUE(ensembleParam$enabled) ||
+            !isTRUE(ensembleParam$acrossStudies)
+    ) {
+        return(character(0))
+    }
+    keep(tokens, .twasStacksAcross, path = path)
+}
+
+# @noRd
+.twasStacksAcross <- function(tk, path) {
+    impl <- .twasMethodCapabilities[[tk]][[str_c(path, "Impl")]]
+    !is.null(impl) &&
+        is.null(.twasFineMappingMethodAdapters[[tk]]) &&
+        !.twasIsMultivariateToken(tk)
 }
 
 # One individual-level component's joint fits.
@@ -2182,7 +2624,7 @@ parseTraitIds <- function(traitId, data) {
 .twasStudyJointResult <- function(qd, specs, tokens, methods, cfg) {
     setup <- .twasJointSetup(
         .qtlRestrictSamples(qd, cfg$genotypeFilter$keepSamples),
-        .twasNormalizeMethods(methods),
+        .twasNormWithBackends(methods, cfg$backend),
         cfg
     )
     .twasDispatchJointSpecsQtlDataset(
@@ -2195,12 +2637,11 @@ parseTraitIds <- function(traitId, data) {
     )
 }
 
-# Fit every spec on the summary-statistics component and rbind onto the
-# individual-level results `out`.
+# Fit every spec on the summary-statistics component, when there is one, and
+# rbind onto the individual-level results `out`.
 # @noRd
 .twasMultiStudySumStats <- function(
     parsedJointSpec,
-    studyAxisSpecs,
     out,
     tokens,
     methods,
@@ -2208,22 +2649,26 @@ parseTraitIds <- function(traitId, data) {
 ) {
     sumStats <- sumStats(cfg$data)
     if (is.null(sumStats)) {
-        if (length(studyAxisSpecs) > 0L && cfg$verbose >= 1) {
-            msg <- glue(
-                "jointCrossStudy (twas): no sumStats slot present on this ",
-                "MultiStudyQtlDataset; cross-study specs produce no result."
-            )
-            inform(msg)
-        }
         return(out)
     }
+    ssData <- .msJointSumStats(sumStats, cfg, "twasWeightsPipeline")
     ssRes <- .twasDispatchJointSpecsQtlSumStats(
         parsedJointSpec,
         tokens,
         .twasSumStatsMethodTokens(methods)$methodArgs,
         list_assign(
             cfg,
-            data = .msJointSumStats(sumStats, cfg, "twasWeightsPipeline")
+            data = ssData,
+            mashPriors = .twasQssMashPriors(cfg$mashPrior, tokens),
+            ensemble = .ensembleResolve(cfg$ensembleParam),
+            h2Spec = .twasQssH2Spec(
+                cfg$h2,
+                list(
+                    data = ssData,
+                    contexts = cfg$contexts,
+                    traitId = cfg$traitId
+                )
+            )
         )
     )
     if (is.null(ssRes)) {
@@ -2233,24 +2678,6 @@ parseTraitIds <- function(traitId, data) {
         return(ssRes)
     }
     .rbindTwasWeights(out, ssRes)
-}
-
-
-# --- .twasDispatchJointSpecsMultiStudy helpers ------------------------------
-
-# Note that individual-level studies are excluded from cross-study TWAS fits.
-.twasMultiStudyWarnExcluded <- function(studyAxisSpecs, qtlDatasets, verbose) {
-    if (
-        length(studyAxisSpecs) > 0L && length(qtlDatasets) > 0L && verbose >= 1
-    ) {
-        qdNames <- str_flatten(names(qtlDatasets), ", ")
-        msg <- glue(
-            "jointCrossStudy (twas): excluding individual-level ",
-            "studies ({qdNames}) from cross-study fits; sumstats studies ",
-            "participate."
-        )
-        inform(msg)
-    }
 }
 
 
@@ -2315,4 +2742,10 @@ parseTraitIds <- function(traitId, data) {
 # @noRd
 .jsHasStudyAxis <- function(s) {
     is_in("study", s$axes)
+}
+
+# TRUE when a parsed joint spec's one axis is the study.
+# @noRd
+.jsIsStudyAxisOnly <- function(s) {
+    identical(s$axes, "study")
 }

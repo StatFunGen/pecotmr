@@ -129,6 +129,67 @@ delayedAssign(
 # it. susieR is an Import, so the build needs no skip.
 delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
 
+# A joint mvSuSiE fit of three conditions, c1-c3: effect 1 shared by c1 and
+# c2, effect 2 c3's alone. The raw fit, its row as the pipeline stores it,
+# and a collection of the fit's three conditions, each row at its own
+# position on the condition axis.
+.sp_makeJointFixture <- function() {
+    set.seed(3)
+    n <- 500L
+    J <- 40L
+    R <- 3L
+    X <- matrix(
+        rnorm(n * J),
+        n,
+        J,
+        dimnames = list(NULL, paste0("chr1:", 100 * seq_len(J), ":A:G"))
+    )
+    B <- matrix(0, J, R)
+    B[5, ] <- c(1, 0.8, 0)
+    B[20, ] <- c(0, 0, 0.9)
+    Y <- X %*% B + matrix(rnorm(n * R), n, R)
+    colnames(Y) <- c("c1", "c2", "c3")
+    fit <- mvsusieR::mvsusie(
+        X,
+        Y,
+        L = 5,
+        prior_variance = mvsusieR::create_mixture_prior(R = R),
+        verbose = FALSE
+    )
+    post <- postprocessFinemappingFits(
+        fits = list(
+            mvsusie = pecotmr:::.setFinemappingFitClass(fit, "mvsusie")
+        ),
+        dataX = X,
+        dataY = NULL,
+        xScalar = 1,
+        yScalar = 1,
+        credibleSetParam = CredibleSetParam(coverage = 0.95)
+    )
+    entry <- formatFinemappingOutput(
+        post,
+        primaryMethod = "mvsusie"
+    )$finemappingEntry
+    coll <- QtlFineMappingResult(
+        studyName = rep("s", 3),
+        context = c("c1", "c2", "c3"),
+        trait = rep("g", 3),
+        method = rep("mvsusie", 3),
+        entry = list(entry, entry, entry),
+        jointContexts = rep("c1;c2;c3", 3)
+    )
+    coll$jointIndex <- 1:3
+    list(fit = fit, entry = entry, coll = coll)
+}
+
+# Built once: the tests only read it. NULL without mvsusieR.
+delayedAssign(
+    ".spJointFixture",
+    if (requireNamespace("mvsusieR", quietly = TRUE)) {
+        .sp_makeJointFixture()
+    }
+)
+
 .thetaFit <- function(nV = 12, theta = NULL) {
     set.seed(1)
     alpha <- matrix(runif(2 * nV), nrow = 2)
@@ -227,4 +288,89 @@ delayedAssign(".twcvFixture", suppressMessages(.twcv_foldFits()))
 # The per-variant columns collection `x` stores.
 .fmStoredColumns <- function(x) {
     colnames(S4Vectors::mcols(unlist(x, use.names = FALSE)))
+}
+
+# The bundled two-study collection, its studies cut to disjoint halves of the
+# samples they share: two studies of one trait on real genotypes, as a fit
+# across studies expects them. `transform` is applied to each whole study
+# before it is cut.
+.fm_disjointStudies <- function(transform = identity) {
+    data(
+        "multiStudyQtlDatasetExample",
+        package = "pecotmr",
+        envir = environment()
+    )
+    studies <- map(as.list(multiStudyQtlDatasetExample), transform)
+    ids <- colnames(pecotmr:::.qtlContextSe(studies[[1L]], "brain"))
+    half <- seq_len(length(ids) %/% 2L)
+    MultiStudyQtlDataset(
+        qtlDatasets = list(
+            study1 = pecotmr:::.qtlRestrictSamples(studies[[1L]], ids[half]),
+            study2 = pecotmr:::.qtlRestrictSamples(studies[[2L]], ids[-half])
+        )
+    )
+}
+
+# .fm_disjointStudies() with a second context in each study, liver, whose
+# expression is brain's plus noise: two studies of one trait in two contexts
+# that share their effects, for the study axis composed with the context.
+.fm_disjointTwoContextStudies <- function() {
+    .fm_disjointStudies(.fm_withLiver)
+}
+
+.fm_withLiver <- function(qd) {
+    brain <- pecotmr:::.qtlContextSe(qd, "brain")
+    expr <- SummarizedExperiment::assay(brain)
+    noise <- withr::with_seed(
+        5L,
+        matrix(rnorm(length(expr), sd = stats::sd(expr) / 2), nrow(expr))
+    )
+    liver <- brain
+    SummarizedExperiment::assay(liver) <- expr + noise
+    QtlDataset(
+        studyName = studyName(qd),
+        genotypes = pecotmr:::.qtlGenotypeSe(qd),
+        phenotypes = list(brain = brain, liver = liver)
+    )
+}
+
+# Skip unless mvsusieR fits unmappable effects, which the mvsusieInf method
+# runs.
+.fm_skipIfNoMvsusieInf <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("unmappable_effects", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates unmappable effects"
+    )
+}
+
+# Skip unless mvsusieR fits unmappable effects by adaptive shrinkage, with
+# mr.mashr, which the mvsusieAsh method runs.
+.fm_skipIfNoMvsusieAsh <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not_installed("mr.mashr")
+    skip_if_not(
+        is_in("unmappable_prior", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates unmappable effects by adaptive shrinkage"
+    )
+}
+
+# Skip unless mvsusieR learns the size of the unmappable effects over the
+# conditions (unmappable_scale).
+.fm_skipIfNoUnmappableScale <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("unmappable_scale", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates pooled unmappable scales"
+    )
+}
+
+# Skip unless mvsusieR integrates the residual variances out of the single
+# effects (estimate_residual_method = "NIG").
+.fm_skipIfNoMvsusieNig <- function() {
+    skip_if_not_installed("mvsusieR")
+    skip_if_not(
+        is_in("estimate_residual_method", names(formals(mvsusieR::mvsusie))),
+        "mvsusieR predates the NIG prior"
+    )
 }

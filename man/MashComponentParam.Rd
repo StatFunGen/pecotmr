@@ -8,6 +8,7 @@
 \usage{
 MashComponentParam(
   canonical = NULL,
+  subsets = NULL,
   pca = NULL,
   flash = NULL,
   flashNonneg = NULL
@@ -15,6 +16,10 @@ MashComponentParam(
 }
 \arguments{
 \item{canonical}{Options for \code{\link{CovCanonicalOptions}}.}
+
+\item{subsets}{Options for \code{\link{CovSubsetsOptions}}: the
+subset-shared matrices, for effects shared by some conditions but not
+all.}
 
 \item{pca}{Options for \code{\link{CovPcaOptions}}.}
 

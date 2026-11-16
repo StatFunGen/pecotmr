@@ -43,6 +43,24 @@
 #'           \code{mvsusieR::mvsusie_rss} on sumstat input (requires
 #'           multi-context within a single (study, trait) group).
 #'           Errors on \code{GwasSumStats} input.}
+#'     \item{\code{mvsusieInf}}{\code{unmappable_effects = "inf"} variant
+#'           of \code{mvsusie}, set by \code{\link{MvsusieInfOptions}}:
+#'           the polygenic effects are integrated out, with a covariance
+#'           across conditions that is estimated, zero between studies by
+#'           default. A study's conditions must be observed on the same
+#'           samples, as the pipeline fits them; \code{\link{fitMvsusie}}
+#'           refuses missing phenotypes within a study.}
+#'     \item{\code{mvsusieAsh}}{\code{unmappable_effects = "ash"} variant
+#'           of \code{mvsusie}, set by \code{\link{MvsusieAshOptions}}: as
+#'           susieAsh, the unmappable effects are fitted by mr.mash to the
+#'           residuals of the confident sparse effects, outside the LD
+#'           neighborhoods of the signals still being resolved, with a
+#'           Beta-Binomial slot prior on the single effects. Their prior
+#'           is the one \code{MvsusieAshOptions(unmappable_prior = )}
+#'           gives, else the run's mr.mash prior (the data-driven
+#'           matrices of its mr.mash fit and the canonical ones, over its
+#'           grid) when the run has one, else mvsusieR's. The same
+#'           observation rule as \code{mvsusieInf} applies.}
 #'     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
 #'           per context. Individual-level only; errors on any
 #'           SumStats input.}
@@ -73,6 +91,11 @@
 #'   existing fine-mapping result skips re-fitting any \code{(study,
 #'   context, trait, method)} tuple that already has a matching row; cached
 #'   entries are merged with the newly-fit entries in the returned collection.
+#'   A row matches only when it comes from a fit like the one to be made: a
+#'   tuple fitted alone by a row of no joint group, a joint group's
+#'   conditions only all together and by rows of that same group (their
+#'   \code{jointStudies} / \code{jointContexts} / \code{jointTraits}), so a
+#'   fit of the tuple in another group is refit rather than borrowed.
 #'
 #' @section Intentional behaviours dropped from the pre-stub pipelines:
 #' The four pre-stub pipelines (\code{univariateAnalysisPipeline} /
@@ -122,8 +145,9 @@
 #'   \itemize{
 #'     \item A character vector of method tokens, e.g.
 #'           \code{c("susie", "susieInf", "mvsusie")} (any subset of
-#'           \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
-#'           subject to per-class compatibility).
+#'           \code{c("susie", "susieInf", "susieAsh", "mvsusie",
+#'           "mvsusieInf", "mvsusieAsh", "fsusie")}, subject to
+#'           per-class compatibility).
 #'     \item A \code{\link{FineMappingMethodsParam}} record keyed by method
 #'           token, where each value is a list of per-method kwargs to
 #'           splice into the underlying fitter, e.g.
@@ -252,7 +276,8 @@
 #'   \code{usePCA = TRUE} (default \code{10}). The effective count is
 #'   \code{min(nPCs, usable traits)}.
 #' @param jointSpecification Optional joint-fit specification saying which
-#'   axes \code{mvsusie} / \code{fsusie} fit across. When NULL (the default)
+#'   axes the joint methods (\code{mvsusie}, \code{mvsusieInf},
+#'   \code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the default)
 #'   they fit across traits if the input has two or more, else across
 #'   contexts. Otherwise give a character vector of axes (one spec) or a list
 #'   of specs. A spec is a character vector drawn from \code{"study"},
@@ -262,9 +287,30 @@
 #'   listed values, each of which must exist in \code{data}. A list-form
 #'   spec always goes inside the outer list, even on its own. Other methods
 #'   run per (study, context, trait) as usual. The \code{"study"} axis needs
-#'   summary statistics: it is rejected on a \code{QtlDataset}, and on a
-#'   \code{MultiStudyQtlDataset} only the summary-statistics studies take
-#'   part.
+#'   more than one study, so it is rejected on a \code{QtlDataset}. On a
+#'   \code{MultiStudyQtlDataset}, the summary-statistics studies are fitted
+#'   with one another, and so are the individual-level ones: on the study
+#'   axis alone, one \code{mvsusie} fit per (context, trait) that two or more
+#'   of them carry, for instance the same gene measured in several
+#'   ancestries; with a composed spec including \code{"study"}, one fit per
+#'   value of the axes it leaves out (each trait for \code{c("study",
+#'   "context")}), over every (study, context, trait) the studies carry.
+#'   Their samples must be disjoint. The fit stacks them, each study's
+#'   conditions observed on its own samples only (a study's conditions on the
+#'   samples it observes for all of them), over the union of the studies'
+#'   variants, which are matched by allele; a variant a study lacks carries no
+#'   evidence for it, and has effect 0 there. Each study keeps its own
+#'   residualization, genotype filters and scaling, and its rows report its
+#'   own samples' allele frequencies and credible-set purity.
+#'   Summary-statistics studies are fitted alike, each on its own LD
+#'   reference and sample size, its rows' credible-set purity read on its own
+#'   LD. While the residualizer scales X and
+#'   Y (\code{ResidualizationParam(scaleResiduals = TRUE)}, the default),
+#'   every joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so
+#'   its prior describes per-SD effects and a component shared across studies
+#'   means effects equal per SD whatever the studies' sizes;
+#'   \code{MvsusieOptions(standardize = TRUE)} restores mvsusieR's own
+#'   scaling. \code{fsusie} has no cross-study fit.
 #' @section Panel filters on the RSS path: On \code{QtlSumStats} /
 #'   \code{GwasSumStats} input there is no genotype matrix to filter, so
 #'   \code{panelFilterParam}'s \code{mafCutoff} / \code{macCutoff} /
@@ -295,8 +341,11 @@
 #' @param mrmashPrior Optional \code{\link{TwasWeights}} from a previous
 #'   mr.mash \code{\link{twasWeightsPipeline}} run, mined for the mvSuSiE
 #'   data-driven prior: the retained \code{mrmash} fits supply the prior
-#'   mixture, and their cross-validation payload supplies honest per-fold
-#'   priors. \code{NULL} uses the canonical prior instead.
+#'   mixture and the residual covariance mvSuSiE starts from (on summary
+#'   statistics, where it is held fixed, also Y's covariance,
+#'   \code{varY}), and their cross-validation payload supplies honest
+#'   per-fold priors. \code{NULL} uses the canonical prior instead, and
+#'   mvSuSiE's own residual covariance.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below
 #'   which data-driven prior weights are zeroed; \code{NULL} disables the
 #'   cutoff.
@@ -348,30 +397,37 @@
 #'   its row's estimate, and must hold exactly one row for each. A value is
 #'   used floored at 0.001 and capped at 0.99, and a trait with no estimate
 #'   keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
-#'   chained from \code{susieInf} or not; \code{susieInf} re-estimates its
-#'   residual variance every sweep, and \code{ser} and \code{mvsusie} take
-#'   none from it. A \code{residual_variance} set through \code{methods}
-#'   wins.
+#'   chained from \code{susieInf} or not, and the joint mvSuSiE fits, whose
+#'   residual variances it sets condition by condition, with the
+#'   correlations of the residual covariance of the run's mr.mash fit, or
+#'   without one those \code{mvsusie_rss} estimates from the z-scores.
+#'   \code{susieInf} re-estimates its residual variance every sweep, as
+#'   \code{mvsusieInf} does from that start; \code{ser} takes none from it.
+#'   A \code{residual_variance} set through \code{methods} wins.
 #' @param susieRssParam Summary-statistics solver settings for
 #'   \code{QtlSumStats} / \code{GwasSumStats} input, built with
-#'   \code{\link{SusieRssParam}}: \itemize{
+#'   \code{\link{SusieRssParam}}. The joint mvSuSiE fits
+#'   (\code{mvsusieR::mvsusie_rss}) take them too, for each condition's LD
+#'   reference: \itemize{
 #'     \item \code{serFallback} (default \code{FALSE}) --- after each
-#'       multi-effect SuSiE-RSS fit, read susieR's finite-sample R
-#'       diagnostics and, when
+#'       multi-effect fit, read its finite-sample R diagnostics and, when
 #'       \code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE},
 #'       report the single-effect (\code{ser_model}) result for that region
-#'       instead.
+#'       instead. That is the fit the mismatch correction starts from, so
+#'       the fallback needs \code{rMismatch}.
 #'     \item \code{keepFullFit} (default \code{"fallback"}) --- which
 #'       pre-fallback multi-effect fits to retain: only the regions that fell
 #'       back, \code{"all"}, or \code{"none"}. Meaningful only with
 #'       \code{serFallback}. The retained fit and the decision are read via
 #'       \code{susieFit(res)$multiEffectFit},
 #'       \code{$R_reliability_flag} and \code{$serFallbackUsed}.
-#'     \item \code{rFinite} --- finite-sample size for susieR's
-#'       \code{R_finite} correction. \code{NULL} (default) uses susieR's
-#'       own, except when a finite/EB mode is active (\code{serFallback} or
-#'       \code{rMismatch != "none"}), where it falls back to the LD panel's
-#'       \code{nSamples(ldReference)}.
+#'     \item \code{rFinite} --- finite-sample size for the \code{R_finite}
+#'       correction. \code{NULL} (default) leaves the correction off,
+#'       except when a finite/EB mode is active (\code{serFallback} or
+#'       \code{rMismatch != "none"}), where it falls back to each LD
+#'       reference's \code{nSamples(ldReference)}: a
+#'       \code{GenotypeMixture}'s pooled over its weights, or with
+#'       \code{estimateMixtureWeights} each panel's.
 #'     \item \code{rMismatch} (default \code{"none"}) --- LD-mismatch
 #'       correction forwarded as \code{R_mismatch}: also \code{"eb"} or
 #'       \code{"eb_mix"}.
@@ -380,6 +436,11 @@
 #'       \code{\link{SusieRssControlOptions}}. This was a bare named list,
 #'       which meant a misspelled option was dropped silently; the
 #'       constructor checks the names against that function's live formals.
+#'     \item \code{estimateMixtureWeights} (default \code{FALSE}) --- for a
+#'       \code{GenotypeMixture} LD reference, the fits estimate its panels'
+#'       weights instead of using its own (for each group of conditions
+#'       from the same samples, in the joint fits). The credible sets'
+#'       purity reads the reference with the estimated weights.
 #'   }
 #' @param ... Reserved for future per-method arguments.
 #'
@@ -452,7 +513,10 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 #                     GWAS fine-mapping.
 # `unmappableEffects`: the value passed to susieR::susie /
 #                     susieR::susie_rss to switch between susie / susieInf /
-#                     susieAsh variants. NA for non-SuSiE-family methods.
+#                     susieAsh variants. For mvsusieInf and mvsusieAsh, the
+#                     value their options constructors (MvsusieInfOptions,
+#                     MvsusieAshOptions) set for mvsusieR. NA for the other
+#                     methods.
 #
 # This table lists ONLY fine-mapping methods. TWAS-weight-oriented tokens (e.g.
 # mr.mash) are not here -- they live in .fmTwasOnlyTokens and are rejected with
@@ -500,6 +564,24 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         multivariate = TRUE,
         gwasAllowed = FALSE,
         unmappableEffects = NA_character_
+    ),
+    # mvsusie with polygenic (unmappable) effects integrated out, the
+    # multivariate SuSiE-inf: mvsusieR's unmappable_effects = "inf".
+    mvsusieInf = list(
+        individualImpl = "mvsusieR::mvsusie",
+        sumstatImpl = "mvsusieR::mvsusie_rss",
+        multivariate = TRUE,
+        gwasAllowed = FALSE,
+        unmappableEffects = "inf"
+    ),
+    # mvsusie with unmappable effects by adaptive shrinkage, the
+    # multivariate SuSiE-ash: mvsusieR's unmappable_effects = "ash".
+    mvsusieAsh = list(
+        individualImpl = "mvsusieR::mvsusie",
+        sumstatImpl = "mvsusieR::mvsusie_rss",
+        multivariate = TRUE,
+        gwasAllowed = FALSE,
+        unmappableEffects = "ash"
     ),
     fsusie = list(
         individualImpl = "fsusieR::susiF",
@@ -598,7 +680,10 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     maxNumSingleEffects,
     maxNumSingleEffectsGreedy
 ) {
-    seeded <- intersect(tokens, c("susie", "susieInf", "susieAsh", "mvsusie"))
+    seeded <- intersect(
+        tokens,
+        c("susie", "susieInf", "susieAsh", .fmMvsusieTokens())
+    )
     if (length(seeded) == 0L) {
         return(methodArgs)
     }
@@ -821,16 +906,18 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 }
 
 # Optional resume-cache lookup. Returns the matching FineMappingRow from
-# `fineMappingResult` for the tuple (study, context, trait, method), or
-# NULL when there is no hit. Returns NULL silently when fineMappingResult
-# is NULL or not a QtlFineMappingResult.
+# `fineMappingResult` for the tuple (study, context, trait, method) fitted in
+# joint group `joint` (.noJointKey() for a fit of the tuple alone), or NULL
+# when there is no hit: a row of another group's fit is another fit. Returns
+# NULL silently when fineMappingResult is NULL or not a QtlFineMappingResult.
 # @noRd
 .fmCacheLookup <- function(
     fineMappingResult,
     studyName,
     context,
     trait,
-    method
+    method,
+    joint = .noJointKey()
 ) {
     if (is.null(fineMappingResult)) {
         return(NULL)
@@ -840,11 +927,14 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     }
     idx <- .matchTupleRows(
         fineMappingResult,
-        list(
-            study = studyName,
-            context = context,
-            trait = trait,
-            method = method
+        c(
+            list(
+                study = studyName,
+                context = context,
+                trait = trait,
+                method = method
+            ),
+            joint
         )
     )
     if (length(idx) == 0L) {
@@ -1336,7 +1426,8 @@ setGeneric("fineMappingPipeline", function(data, ...) {
         cfg$ldReference,
         zn$variantIds,
         toRun,
-        cfg$initializeWithSusieInf
+        cfg$initializeWithSusieInf,
+        cfg$susieRssParam$estimateMixtureWeights
     )
     .fmFitRssBlock(
         z,
@@ -1365,9 +1456,18 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # the plain susie model and every credible set's purity read it directly,
 # never forming the p x p matrix. The matrix R is formed only when a fit has
 # no factor route -- susieInf, and susieAsh, whose susie_rss low-rank paths
-# fail (dev/ld-factor-audit.md) -- and is all an LdMatrix has.
+# fail (dev/ld-factor-audit.md) -- and is all an LdMatrix has. When the fits
+# estimate a GenotypeMixture's weights (`estimateMixtureWeights`), its
+# panels too (`panels`, list(R, X) of one per panel), which the fits read in
+# place of R and X.
 # @noRd
-.fmRssLd <- function(ldReference, variantIds, toRun, initializeWithSusieInf) {
+.fmRssLd <- function(
+    ldReference,
+    variantIds,
+    toRun,
+    initializeWithSusieInf,
+    estimateMixtureWeights = FALSE
+) {
     label <- "fineMappingPipeline"
     if (!.ldIsGenotypeRef(ldReference)) {
         return(list(R = .ldFromRef(ldReference, variantIds, label = label)))
@@ -1375,7 +1475,24 @@ setGeneric("fineMappingPipeline", function(data, ...) {
     X <- .ldFactorFromRef(ldReference, variantIds, label = label)
     chain <- .fmResolveSusieChain(toRun, initializeWithSusieInf)
     needsR <- chain$runInf || is_in("susieAsh", toRun)
-    list(R = if (needsR) crossprod(X) / (nrow(X) - 1), X = X)
+    ld <- list(R = if (needsR) crossprod(X) / (nrow(X) - 1), X = X)
+    if (!isTRUE(estimateMixtureWeights) || !.ldIsMixtureRef(ldReference)) {
+        return(ld)
+    }
+    panelX <- .ldPanelsFromRef(ldReference, variantIds, label, useFactor = TRUE)
+    list_assign(
+        ld,
+        panels = list(
+            R = if (needsR) map(panelX, .ldFactorCrossprod),
+            X = panelX
+        )
+    )
+}
+
+# The LD a factor (.ldRefFactor()'s contract) is of.
+# @noRd
+.ldFactorCrossprod <- function(ldFactor) {
+    crossprod(ldFactor) / (nrow(ldFactor) - 1)
 }
 
 # The SuSiE-RSS fits whose residual variance susie_rss holds fixed on z
@@ -1384,6 +1501,56 @@ setGeneric("fineMappingPipeline", function(data, ...) {
 # @noRd
 .fmH2Tokens <- function() {
     c("susie", "susieAsh")
+}
+
+# The mvSuSiE methods: mvsusie, and mvsusieInf and mvsusieAsh with
+# unmappable effects.
+# @noRd
+.fmMvsusieTokens <- function() {
+    c("mvsusie", "mvsusieInf", "mvsusieAsh")
+}
+
+# The multivariate methods, fitted jointly across conditions: the mvSuSiE
+# methods and fsusie (`multivariate` in .fineMappingMethodCapabilities).
+# @noRd
+.fmMultivariateTokens <- function() {
+    caps <- .fineMappingMethodCapabilities
+    names(caps)[map_lgl(caps, "multivariate")]
+}
+
+# .splitMethodArgs() for an mvSuSiE method's fit (`fn`: fitMvsusie, or with
+# `rss` fitMvsusieRss), the remainder built with the method's own
+# constructor (.fmTokenCtorsByPath()), once the installed mvsusieR is known
+# to fit the method (.fmRequireMvsusieMethod()). MvsusieInfOptions() and
+# MvsusieAshOptions() set their method's unmappable effects themselves,
+# whether or not the run gave the method options, so the value one of
+# their records carries is not given a second time.
+# @noRd
+.fmMvsusieSplitArgs <- function(token, fn, args, rss = FALSE) {
+    .fmRequireMvsusieMethod(token, rss)
+    ctor <- .fmTokenCtorsByPath()[[token]][[if (rss) 2L else 1L]]
+    .splitMethodArgs(fn, args[names(args) != "unmappable_effects"], ctor)
+}
+
+# Stop unless the installed mvsusieR fits the mvSuSiE method `token`: the
+# unmappable effects of mvsusieInf and mvsusieAsh are mvsusie's
+# unmappable_effects (with, for adaptive shrinkage, its unmappable_prior),
+# which on summary statistics mvsusie_rss passes through its `...` to
+# mvsusie_ss.
+# @noRd
+.fmRequireMvsusieMethod <- function(token, rss = FALSE) {
+    needs <- switch(
+        token,
+        mvsusieInf = "unmappable_effects",
+        mvsusieAsh = c("unmappable_effects", "unmappable_prior"),
+        character(0)
+    )
+    callee <- if (rss) {
+        c("mvsusieR::mvsusie_rss", "mvsusieR::mvsusie_ss")
+    } else {
+        "mvsusieR::mvsusie"
+    }
+    .engineRequire(callee, needs, glue("The {token} method"))
 }
 
 # The heritability the run's `h2` gives one QtlSumStats row's trait (`h2Key`),
@@ -1846,12 +2013,18 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # context) with trait = NULL (see .jointPriorKey). Returns NULL when no
 # TwasWeights is supplied or it carries no matching mr.mash fit (caller falls
 # back to the canonical prior).
+#
+# The axes alone do not say what a fit is over: a cross-study group keys on
+# (context, trait), which one study's own fit across its contexts also
+# carries. So a fit is taken only when it covers `conditionNames`, the
+# conditions the group fits.
 # @noRd
 .fmLookupMrmashFit <- function(
     mrmashPrior,
     studyName = NULL,
     trait = NULL,
-    context = NULL
+    context = NULL,
+    conditionNames = NULL
 ) {
     if (is.null(mrmashPrior)) {
         return(NULL)
@@ -1862,9 +2035,23 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
     for (row in cells$row) {
         f <- methodFits(.twrCellParts(mrmashPrior, row, "mrmash"))
-        if (!is.null(f)) return(f)
+        if (!is.null(f) && .fmMrmashFitCovers(f, conditionNames)) return(f)
     }
     NULL
+}
+
+# Whether a stored mr.mash fit (or fold fit) is over every one of
+# `conditionNames`. Its covariances are indexed by condition, so a fit over
+# other conditions -- one study's contexts, for a group over studies --
+# describes none of the group's. A fit whose conditions are unnamed, or a
+# lookup naming none, is taken as it is.
+# @noRd
+.fmMrmashFitCovers <- function(fitParts, conditionNames) {
+    named <- rownames(fitParts$V) %||%
+        rownames(pluck(fitParts, "dataDrivenPriorMatrices", "U", 1L))
+    is.null(conditionNames) ||
+        is.null(named) ||
+        all(is_in(conditionNames, named))
 }
 
 # Locate the retained per-fold mr.mash CV payload for one (study, trait[,
@@ -1872,13 +2059,15 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # carrying `foldFits` (per-fold lean payloads) + `samplePartition` (the folds
 # the per-fold priors were computed on). These let the mvSuSiE CV use an honest
 # per-fold prior instead of reusing the full-data prior on every fold. Returns
-# NULL when no TwasWeights / no matching mr.mash CV result with fold fits.
+# NULL when no TwasWeights / no matching mr.mash CV result with fold fits, or
+# none whose fold fits cover `conditionNames` (.fmLookupMrmashFit()).
 # @noRd
 .fmLookupMrmashCv <- function(
     mrmashPrior,
     studyName = NULL,
     trait = NULL,
-    context = NULL
+    context = NULL,
+    conditionNames = NULL
 ) {
     if (is.null(mrmashPrior)) {
         return(NULL)
@@ -1886,9 +2075,20 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     cells <- .fmMrmashCells(mrmashPrior, studyName, trait, context)
     for (row in cells$row) {
         cv <- cvResult(.twrCellParts(mrmashPrior, row, "mrmash"))
-        if (!is.null(cv) && !is.null(cv$foldFits)) return(cv)
+        if (.fmMrmashCvCovers(cv, conditionNames)) return(cv)
     }
     NULL
+}
+
+# Whether a mr.mash CV payload carries fold fits, over `conditionNames` when
+# any of them holds a fit to read its conditions from.
+# @noRd
+.fmMrmashCvCovers <- function(cv, conditionNames) {
+    if (is.null(cv) || is.null(cv$foldFits)) {
+        return(FALSE)
+    }
+    folds <- compact(cv$foldFits)
+    length(folds) == 0L || .fmMrmashFitCovers(folds[[1L]], conditionNames)
 }
 
 # Build the per-fold mvSuSiE reweighted priors for cross-validation from a
@@ -2154,25 +2354,22 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # overrides); this routes each name to the right place, so a tool option
 # reaches the tool and an unknown name errors at the call instead of
 # vanishing. A target with no `methodArgs` formal gets the list unchanged.
+# `ctor`, when given, builds the remainder in place of the constructor the
+# target's own default names (.methodConfigLike()).
 # @noRd
-.splitMethodArgs <- function(fn, args) {
+.splitMethodArgs <- function(fn, args, ctor = NULL) {
     target <- match.fun(fn)
     fm <- names(formals(target))
     if (!is_in("methodArgs", fm)) {
         return(args)
     }
     isFormal <- is_in(names(args), setdiff(fm, "methodArgs"))
-    c(
-        args[isFormal],
-        list(
-            methodArgs = .methodConfigLike(
-                target,
-                args[!isFormal],
-                fn,
-                args$backend
-            )
-        )
-    )
+    methodArgs <- if (is.null(ctor)) {
+        .methodConfigLike(target, args[!isFormal], fn, args$backend)
+    } else {
+        exec(ctor, !!!args[!isFormal])
+    }
+    c(args[isFormal], list(methodArgs = methodArgs))
 }
 
 # Wrap the remainder in the record the target's `methodArgs` expects, so a
@@ -2309,8 +2506,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     if (is_in(token, c("susie", "susieInf", "susieAsh"))) {
         return(.fmFoldWeightsSusie(token, Xtr, Ytr, coverage, userArgs))
     }
-    if (token == "mvsusie") {
-        return(.fmFoldWeightsMv(Xtr, Ytr, coverage, userArgs, mvPrior))
+    if (is_in(token, .fmMvsusieTokens())) {
+        return(.fmFoldWeightsMv(token, Xtr, Ytr, coverage, userArgs, mvPrior))
     }
     if (token == "fsusie") {
         return(.fmFoldWeightsFsusie(Xtr, Ytr, pos, coverage, userArgs))
@@ -3068,7 +3265,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     }
     work <- .fmJointSpecsWork(
         parsedJointSpec,
-        intersect(norm$tokens, c("mvsusie", "fsusie")),
+        intersect(norm$tokens, .fmMultivariateTokens()),
         norm$methodArgs,
         cfg
     )
@@ -3128,7 +3325,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # dispatch ran: the joint fits consumed the multivariate ones.
 # @noRd
 .fmNarrowAfterJoint <- function(tokens, methodArgs) {
-    remaining <- setdiff(tokens, c("mvsusie", "fsusie"))
+    remaining <- setdiff(tokens, .fmMultivariateTokens())
     list(tokens = remaining, methodArgs = methodArgs[remaining])
 }
 
@@ -3162,19 +3359,20 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     )
 }
 
-# Partition tokens into univariate / mvsusie / fsusie sets and validate the
-# multivariate requirements (mvsusie needs multi-trait OR multi-context; fsusie
-# needs multi-trait per context). Returns `p` extended with the three sets.
+# Partition tokens into univariate / mvSuSiE / fsusie sets and validate the
+# multivariate requirements (the mvSuSiE methods need multi-trait OR
+# multi-context; fsusie needs multi-trait per context). Returns `p` extended
+# with the three sets.
 # @noRd
 .fmQdsSplitTokens <- function(tokens, nCtx, nTraits) {
-    univTokens <- tokens[!is_in(tokens, c("mvsusie", "fsusie"))]
-    mvTokens <- tokens[tokens == "mvsusie"]
+    univTokens <- tokens[!is_in(tokens, .fmMultivariateTokens())]
+    mvTokens <- tokens[is_in(tokens, .fmMvsusieTokens())]
     fsTokens <- tokens[tokens == "fsusie"]
     if (length(mvTokens) > 0L && nCtx < 2L && nTraits < 2L) {
         msg <- glue(
-            "fineMappingPipeline(QtlDataset): mvsusie requires multi-trait ",
-            "or multi-context input (got {nTraits} trait(s) x ",
-            "{nCtx} context(s))."
+            "fineMappingPipeline(QtlDataset): {str_flatten(mvTokens, ', ')} ",
+            "requires multi-trait or multi-context input (got {nTraits} ",
+            "trait(s) x {nCtx} context(s))."
         )
         abort(msg)
     }
@@ -3258,7 +3456,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         return(jointWork)
     }
     .fmJointSpecsWork(
-        .fmSynthesizeJointSpec(nCtx, nTraits),
+        .defaultJointSpec(nCtx, nTraits),
         c(mvTokens, fsTokens),
         methodArgs,
         cfg
@@ -3659,7 +3857,7 @@ setMethod(
     # phase runs on whatever is left. A component with univariate fits to come
     # fits its joint specs along with them, on one read of each window.
     narrowed <- .fmNarrowAfterJoint(norm$tokens, norm$methodArgs)
-    jointTokens <- intersect(norm$tokens, c("mvsusie", "fsusie"))
+    jointTokens <- intersect(norm$tokens, .fmMultivariateTokens())
     withComponents <- length(narrowed$tokens) > 0L && length(jointTokens) > 0L
     jointResult <- .fmDispatchJointSpecsMultiStudy(
         parsedJointSpec,
@@ -3893,7 +4091,11 @@ setMethod(
             dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
         ),
         genotypeFilterParam = cfg$genotypeFilterParam,
-        panelFilterParam = cfg$panelFilterParam
+        panelFilterParam = cfg$panelFilterParam,
+        # For the joint fits on the summary-statistics component
+        # (.fmMultiStudySumStats())
+        susieRssParam = cfg$susieRssParam,
+        h2 = cfg$h2
     )
 }
 
@@ -3950,7 +4152,7 @@ setMethod(
     }
     jointResult <- .fmDispatchJointSpecsQtlSumStats(
         parsedJointSpec,
-        intersect(norm$tokens, "mvsusie"),
+        intersect(norm$tokens, .fmMvsusieTokens()),
         norm$methodArgs,
         cfg
     )
@@ -4030,20 +4232,11 @@ setMethod(
             set_names(rep(fromData, 2L), c("z", "n")),
             csHome["coverage"]
         ),
-        "mvsusieR::mvsusie" = c(
-            set_names(
-                rep(fromData, 3L),
-                c("X", "Y", "prior_variance")
-            ),
+        "mvsusieR::mvsusie" = .fmMvsusieOwnedArgs(
+            set_names(rep(fromData, 3L), c("X", "Y", "prior_variance")),
             csHome
         ),
-        "mvsusieR::mvsusie_rss" = c(
-            set_names(
-                rep(fromData, 4L),
-                c("Z", "R", "N", "prior_variance")
-            ),
-            csHome
-        ),
+        "mvsusieR::mvsusie_rss" = .fmMvsusieRssOwnedArgs(fromData, csHome),
         "fsusieR::susiF" = c(
             set_names(rep(fromData, 3L), c("X", "Y", "pos")),
             c(
@@ -4056,6 +4249,39 @@ setMethod(
     )
 }
 
+# An mvSuSiE engine's owned arguments: its data, the credible-set bounds, and
+# the unmappable effects, which the method sets (mvsusieInf and mvsusieAsh
+# run them).
+# @noRd
+.fmMvsusieOwnedArgs <- function(fromData, csHome) {
+    c(
+        fromData,
+        csHome,
+        unmappable_effects = str_c(
+            "the method: `mvsusieInf` or `mvsusieAsh` for unmappable ",
+            "effects"
+        )
+    )
+}
+
+# mvsusie_rss's owned arguments: an mvSuSiE engine's (.fmMvsusieOwnedArgs()),
+# with its data, and the LD-reference settings SusieRssParam carries.
+# @noRd
+.fmMvsusieRssOwnedArgs <- function(fromData, csHome) {
+    c(
+        .fmMvsusieOwnedArgs(
+            set_names(
+                rep(fromData, 5L),
+                c("Z", "R", "X", "N", "prior_variance")
+            ),
+            csHome
+        ),
+        R_finite = "`rFinite` on SusieRssParam",
+        R_mismatch = "`rMismatch` on SusieRssParam",
+        control = "`control` on SusieRssParam"
+    )
+}
+
 # Shared body for the per-engine constructors: pecotmr keeps no defaults of
 # its own here (they are seeded per run from `L` / `Lgreedy`), so everything
 # the caller gives is checked against that ONE engine and carried through.
@@ -4065,16 +4291,36 @@ setMethod(
 # accept a susie_rss-only name on an individual-level run and then drop it,
 # and mvsusie could not be checked at all, since mvsusie_rss takes `...` and
 # a union containing it accepts anything.
+#
+# A value repeating one the constructor sets itself (`defaults`: mvsusieInf's
+# unmappable_effects, which pecotmr owns) sets nothing, and is dropped before
+# the checks: a record writeConfigToYaml() wrote gives it back. A changed
+# value is refused as owned.
 # @noRd
-.fmMethodOptions <- function(callee, label, engine, extra) {
-    .configRefuseOwned(extra, .fmOwnedEngineArgs(callee), label)
+.fmMethodOptions <- function(callee, label, engine, extra, defaults = list()) {
+    given <- .fmChangedArgs(extra, defaults)
+    .configRefuseOwned(given, .fmOwnedEngineArgs(callee), label)
     .newMethodOptions(
         callee,
-        defaults = list(),
-        extra = extra,
+        defaults = defaults,
+        extra = given,
         label = label,
         engine = engine
     )
+}
+
+# The entries of `extra` other than those repeating the value `defaults`
+# gives the same name. An unnamed entry is kept, for the constructor to
+# refuse.
+# @noRd
+.fmChangedArgs <- function(extra, defaults) {
+    keys <- names(extra) %||% rep("", length(extra))
+    extra[!map2_lgl(keys, extra, .fmRepeatsDefault, defaults = defaults)]
+}
+
+# @noRd
+.fmRepeatsDefault <- function(name, value, defaults) {
+    has_name(defaults, name) && identical(value, defaults[[name]])
 }
 
 #' @rdname FineMappingMethodsParam
@@ -4183,6 +4429,24 @@ FineMappingMethodsParam <- function(
 #'   class is not known at that point. A plain list works there too and
 #'   stays checked against both; the exact engine is checked once the run's
 #'   input class is known.
+#'
+#'   Two mvsusieR settings help joint fits of small studies, such as
+#'   ancestry groups of a few dozen samples. \code{unmappable_scale}
+#'   (\code{MvsusieInfOptions}, \code{MvsusieAshOptions} and their
+#'   summary-statistic siblings) learns the size of the unmappable effects
+#'   over all the conditions instead of from each condition's samples: one
+#'   scale with \code{"single"}, or each condition's shrunk toward it with
+#'   \code{"shrink"} (by \code{unmappable_shrinkage} samples), the shape
+#'   being the run's mash prior collapsed over its weights.
+#'   \code{estimate_residual_method = "NIG"} (\code{MvsusieOptions},
+#'   \code{MvsusieRssOptions}) integrates each condition's residual
+#'   variance out of the single effects, as susieR's NIG prior does for one
+#'   trait, which tempers the evidence of a small sample; it takes no
+#'   unmappable effects.
+#'
+#'   mvSuSiE and fSuSiE run with \code{verbose = FALSE} unless their options
+#'   set it: mvsusieR prints a line every iteration, and each reads the
+#'   memory in use through a full garbage collection.
 #' @param ... Arguments for the engine, under its own names (\code{L},
 #'   \code{coverage}, \code{max_iter}, ...).
 #' @return A \code{\link{MethodOptions}} object.
@@ -4204,6 +4468,8 @@ NULL
         susieAsh = list(SusieAshOptions, SusieAshRssOptions),
         ser = list(SerOptions),
         mvsusie = list(MvsusieOptions, MvsusieRssOptions),
+        mvsusieInf = list(MvsusieInfOptions, MvsusieInfRssOptions),
+        mvsusieAsh = list(MvsusieAshOptions, MvsusieAshRssOptions),
         fsusie = list(FsusieOptions)
     )
 }
@@ -4261,12 +4527,12 @@ NULL
 }
 
 # Partition tokens into the univariate RSS family (everything that isn't
-# multivariate) and mvsusie, validating that mvsusie has >= 2 contexts for at
-# least one (study, trait) group.
+# multivariate) and the mvSuSiE methods, validating that they have >= 2
+# contexts for at least one (study, trait) group.
 # @noRd
 .fmQssSplitTokens <- function(tokens, sel) {
-    univTokens <- tokens[!is_in(tokens, c("mvsusie", "fsusie"))]
-    mvTokens <- tokens[tokens == "mvsusie"]
+    univTokens <- tokens[!is_in(tokens, .fmMultivariateTokens())]
+    mvTokens <- tokens[is_in(tokens, .fmMvsusieTokens())]
     if (length(mvTokens) > 0L) {
         groupKey <- str_c(
             sel$studyCol[sel$selRows],
@@ -4279,9 +4545,10 @@ NULL
         )
         if (all(perGroupNCtx < 2L)) {
             msg <- glue(
-                "fineMappingPipeline(QtlSumStats): mvsusie requires at ",
-                "least two contexts per (study, trait); the supplied ",
-                "collection has only one context per trait."
+                "fineMappingPipeline(QtlSumStats): ",
+                "{str_flatten(mvTokens, ', ')} requires at least two ",
+                "contexts per (study, trait); the supplied collection has ",
+                "only one context per trait."
             )
             abort(msg)
         }
@@ -4300,7 +4567,7 @@ NULL
         return(jointResult)
     }
     .fmDispatchJointSpecsQtlSumStats(
-        list(list(axes = "context", scope = NULL)),
+        .defaultSumStatsJointSpec(),
         mvTokens,
         methodArgs,
         cfg
@@ -4379,8 +4646,8 @@ NULL
 }
 
 # The settings the joint phase and the RSS row builders share, named once
-# so the two records built from them cannot disagree, and the run's `h2`,
-# settled here, at entry (.fmQssH2Spec()).
+# so the two records built from them cannot disagree: the run's `h2`,
+# settled here, at entry (.fmQssH2Spec()), and its SusieRssParam.
 # @noRd
 .fmQssConfigs <- function(
     data,
@@ -4393,7 +4660,8 @@ NULL
     traitId,
     mrmashPrior,
     dataDrivenPriorWeightsCutoff,
-    h2 = NULL
+    h2 = NULL,
+    susieRssParam = SusieRssParam()
 ) {
     common <- .fmSsCommonCfg(
         data = data,
@@ -4403,19 +4671,25 @@ NULL
         verbose = verbose,
         panelFilterParam = panelFilterParam
     )
+    h2Spec <- .fmQssH2Spec(
+        h2,
+        list(data = data, contexts = contexts, traitId = traitId)
+    )
     list(
         common = common,
-        joint = .fmQssJointCfg(
-            common,
-            contexts = contexts,
-            traitId = traitId,
-            mrmashPrior = mrmashPrior,
-            dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        # The joint fits read the settled `h2` and the RSS settings too
+        joint = c(
+            .fmQssJointCfg(
+                common,
+                contexts = contexts,
+                traitId = traitId,
+                mrmashPrior = mrmashPrior,
+                dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+            ),
+            list(h2Spec = h2Spec, susieRssParam = susieRssParam)
         ),
-        h2Spec = .fmQssH2Spec(
-            h2,
-            list(data = data, contexts = contexts, traitId = traitId)
-        )
+        h2Spec = h2Spec,
+        susieRssParam = susieRssParam
     )
 }
 
@@ -4474,7 +4748,8 @@ NULL
         traitId = inputs$traitId,
         mrmashPrior = mrmashPrior,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        h2 = h2
+        h2 = h2,
+        susieRssParam = susieRssParam
     )
     rt <- .fmQssResolveTokens(
         jointSpecification,
@@ -4489,8 +4764,7 @@ NULL
         cfgs = cfgs,
         contexts = inputs$contexts,
         traitId = inputs$traitId,
-        initializeWithSusieInf = initializeWithSusieInf,
-        susieRssParam = susieRssParam
+        initializeWithSusieInf = initializeWithSusieInf
     )
     .fmRecordProvenance(out, data, "sumstat", TRUE)
 }
@@ -4527,8 +4801,8 @@ NULL
 # sketch, and fit. `rt` is .fmQssResolveTokens()'s record -- it carries the
 # remaining tokens, their options, and whatever the joint phase produced; when
 # the joint phase consumed every method (`rt$done`) its result is returned
-# as is. `cfgs` is .fmQssConfigs()'s record: (common, joint) and the run's
-# settled `h2`.
+# as is. `cfgs` is .fmQssConfigs()'s record: (common, joint), the run's
+# settled `h2` and its SusieRssParam.
 # @noRd
 .fmQssAfterJoint <- function(
     data,
@@ -4536,8 +4810,7 @@ NULL
     cfgs,
     contexts,
     traitId,
-    initializeWithSusieInf,
-    susieRssParam
+    initializeWithSusieInf
 ) {
     if (rt$done) {
         return(rt$result)
@@ -4547,7 +4820,7 @@ NULL
         cfgs$common,
         initializeWithSusieInf = initializeWithSusieInf,
         methodArgs = rt$methodArgs,
-        susieRssParam = susieRssParam,
+        susieRssParam = cfgs$susieRssParam,
         h2Spec = cfgs$h2Spec
     )
     .fmQssRunRows(
@@ -4664,7 +4937,8 @@ setMethod(
         susieRssParam$rFinite,
         susieRssParam$serFallback,
         susieRssParam$rMismatch,
-        ldReference
+        ldReference,
+        estimateMixtureWeights = susieRssParam$estimateMixtureWeights
     )
     if (identical(resolved, susieRssParam$rFinite)) {
         return(susieRssParam)
@@ -4675,17 +4949,25 @@ setMethod(
 # Default the finite-sample LD reference size when an EB / SER-fallback LD-
 # mismatch mode is active (serFallback on, or rMismatch other than "none") and
 # rFinite is unset: use the LD-panel sample size (the notebook's `B`), or the
-# size an LdMatrix records. Shared by the QtlSumStats and GwasSumStats workers.
+# size an LdMatrix records (.rssReferenceSizes()); with estimated mixture
+# weights, each of a mixture's panels'. Shared by the QtlSumStats and
+# GwasSumStats workers.
 # @noRd
-.fmResolveRFinite <- function(rFinite, serFallback, rMismatch, ldReference) {
+.fmResolveRFinite <- function(
+    rFinite,
+    serFallback,
+    rMismatch,
+    ldReference,
+    estimateMixtureWeights = FALSE
+) {
     if (
         !is.null(rFinite) ||
             (!isTRUE(serFallback) && identical(rMismatch, "none"))
     ) {
         return(rFinite)
     }
-    n <- .ldRefNSamples(ldReference)
-    if (is.na(n)) {
+    n <- .rssReferenceSizes(ldReference, estimateMixtureWeights)
+    if (anyNA(n)) {
         abort(c(
             str_c(
                 "The finite-reference LD mismatch model needs the LD ",
@@ -4695,6 +4977,17 @@ setMethod(
         ))
     }
     n
+}
+
+# The finite-reference size of an LD reference (.ldRefNSamples(), a
+# mixture's pooled over its weights), or, when the fits estimate a
+# GenotypeMixture's weights, of each of its panels.
+# @noRd
+.rssReferenceSizes <- function(ldReference, estimateMixtureWeights = FALSE) {
+    if (isTRUE(estimateMixtureWeights) && .ldIsMixtureRef(ldReference)) {
+        return(map_dbl(.gmComponents(ldReference), .ldRefNSamples))
+    }
+    .ldRefNSamples(ldReference)
 }
 
 # GwasSumStats fine-mapping worker. The resolved tokens, LD sketch and
@@ -5363,57 +5656,80 @@ setClass(
         keepFullFit = "character",
         rFinite = "numeric_OR_NULL",
         rMismatch = "character_OR_NULL",
-        control = "MethodOptions_OR_NULL"
+        control = "MethodOptions_OR_NULL",
+        estimateMixtureWeights = "logical"
     )
 )
 
 #' @title SuSiE-RSS Solver Settings
-#' @description How the SuSiE-RSS fit is conditioned and what it falls back
-#'   to, on \code{QtlSumStats} / \code{GwasSumStats} input.
+#' @description How the summary-statistics fits are conditioned on their LD
+#'   references and what they fall back to, on \code{QtlSumStats} /
+#'   \code{GwasSumStats} input: the \code{susieR::susie_rss} fits, and the
+#'   joint \code{mvsusieR::mvsusie_rss} fits, which take the same settings
+#'   with one LD reference per condition.
 #'
-#'   SuSiE-family only, which is what the name says: every field is a
-#'   \code{susieR} concept --- \code{serFallback} drops to
-#'   \code{susie_ser}, \code{rFinite} / \code{rMismatch} are
-#'   \code{susie_rss}'s \code{R_finite} / \code{R_mismatch}, and
-#'   \code{control} is \code{susie_rss_control}. The other
-#'   summary-statistics engine, \code{mvsusieR::mvsusie_rss}, has none of
-#'   these formals and is not configured by this.
-#' @param serFallback Logical. Fall back to a single-effect fit when the
-#'   multi-effect fit is judged unreliable. Default \code{FALSE}.
+#'   Every field is a \code{susieR} concept, as the name says ---
+#'   \code{serFallback} drops to the single-effect model, \code{rFinite} /
+#'   \code{rMismatch} are \code{R_finite} / \code{R_mismatch}, and
+#'   \code{control} is \code{susie_rss_control}. \code{mvsusie_rss} takes
+#'   them under the same names, with a reference size and a mismatch
+#'   variance for each LD reference.
+#' @param serFallback Logical. Fall back to the single-effect fit when the
+#'   multi-effect fit is judged unreliable. Default \code{FALSE}. That fit is
+#'   the one the mismatch correction starts from, so the fallback needs
+#'   \code{rMismatch}; the joint mvSuSiE fits fall back to theirs the same
+#'   way.
 #' @param keepFullFit Which pre-fallback multi-effect fits to retain:
 #'   \code{"fallback"} (default) keeps them only for regions that fell back,
 #'   \code{"all"} for every region, \code{"none"} for none. Only meaningful
 #'   when \code{serFallback} is \code{TRUE}.
-#' @param rFinite Sample size used for the LD matrix's finiteness check, or
-#'   \code{NULL} (default) to use the panel's own.
-#' @param rMismatch How to treat an LD / z-score mismatch. Default
-#'   \code{"none"}.
+#' @param rFinite The LD references' sample size for the finite-reference
+#'   correction, or \code{NULL} (default) for each reference's own, which
+#'   the correction uses when \code{serFallback} or \code{rMismatch} is on
+#'   (an \code{\link{LdMatrix}} must then record its size). A
+#'   \code{\link{GenotypeMixture}}'s own is the size its weights pool its
+#'   panels to, \eqn{1 / \sum_k w_k^2 / n_k}; with
+#'   \code{estimateMixtureWeights}, each panel's.
+#' @param rMismatch How to treat an LD / z-score mismatch:
+#'   \code{susie_rss}'s \code{R_mismatch}. Default \code{"none"}.
 #' @param control Options for \code{susieR::susie_rss_control()}, forwarded as
-#'   \code{susie_rss()}'s \code{control} argument. Built with
-#'   \code{\link{SusieRssControlOptions}}; \code{NULL} (default) leaves that
-#'   function's own defaults in place.
+#'   the \code{control} argument of \code{susie_rss()} and
+#'   \code{mvsusie_rss()}. Built with \code{\link{SusieRssControlOptions}};
+#'   \code{NULL} (default) leaves that function's own defaults in place.
+#' @param estimateMixtureWeights Logical. For an LD reference that is a
+#'   \code{\link{GenotypeMixture}}, the fits estimate the weights of its
+#'   panels instead of using its own (susieR's multi-panel
+#'   \code{susie_rss}; \code{mvsusie_rss} for each group of conditions from
+#'   the same samples). Default \code{FALSE}. The steps before the fits
+#'   (quality control, heritability, mr.mash priors) keep the mixture's own
+#'   weights; the credible sets' purity reads the reference with the
+#'   estimated ones.
 #' @return A \code{SusieRssParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' SusieRssParam(serFallback = TRUE, keepFullFit = "all")
+#' @importFrom checkmate assertFlag
 #' @export
 SusieRssParam <- function(
     serFallback = FALSE,
     keepFullFit = c("fallback", "all", "none"),
     rFinite = NULL,
     rMismatch = "none",
-    control = NULL
+    control = NULL,
+    estimateMixtureWeights = FALSE
 ) {
     keepFullFit <- arg_match(keepFullFit)
     if (!is.null(control)) {
         .assertMethodOptions(control, "SusieRssControlOptions", "control")
     }
+    assertFlag(estimateMixtureWeights)
     new(
         "SusieRssParam",
         serFallback = serFallback,
         keepFullFit = keepFullFit,
         rFinite = rFinite,
         rMismatch = rMismatch,
-        control = control
+        control = control,
+        estimateMixtureWeights = estimateMixtureWeights
     )
 }
 

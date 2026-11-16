@@ -67,7 +67,16 @@ test_that("mrashRssWeights forwards arguments to susieR::mr.ash.rss", {
     expect_equal(captured$s0, c(0, 0.1, 0.2))
     expect_equal(captured$w0, c(0.5, 0.3, 0.2))
     expect_equal(captured$dots$tol, 1e-6)
+    # The residual variance is held fixed unless the caller asks otherwise.
+    expect_false(captured$dots$update_sigma)
     expect_equal(result, seq_len(p) * 0.01)
+    mrashRssWeights(
+        stat = stat,
+        ldReference = .rrwLdMatrix(R),
+        updateOrder = "consecutive",
+        methodArgs = MrashRssOptions(update_sigma = TRUE)
+    )
+    expect_true(captured$dots$update_sigma)
 })
 
 test_that("mrashRssWeights returns a numeric vector of expected length", {
@@ -227,7 +236,8 @@ test_that("the order is mr.ash.rss itself run on the permuted variants", {
         var_y = 1.2,
         n = 400,
         s0 = s0,
-        w0 = rep(1 / 3, 3)
+        w0 = rep(1 / 3, 3),
+        update_sigma = FALSE
     )
     inverse <- order(perm)
     expect_equal(as.numeric(w), as.numeric(manual$mu1)[inverse])
@@ -250,7 +260,8 @@ test_that("the order is mr.ash.rss itself run on the permuted variants", {
         var_y = 1.2,
         n = 400,
         s0 = s0,
-        w0 = rep(1 / 3, 3)
+        w0 = rep(1 / 3, 3),
+        update_sigma = FALSE
     )
     expect_equal(as.numeric(plain), as.numeric(direct$mu1))
 })

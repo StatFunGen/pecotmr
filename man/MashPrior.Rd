@@ -7,22 +7,30 @@
 MashPrior(fullFit = NULL, cvFits = NULL)
 }
 \arguments{
-\item{fullFit}{Full-data data-driven prior payload (the \code{mashPipeline()}
-\code{list(U, w)} output), or \code{NULL} for a CV-only bundle.}
+\item{fullFit}{Full-data priors (the \code{\link{mashPipeline}} output: a
+named list with one prior per joint spec), or \code{NULL} for a CV-only
+bundle.}
 
 \item{cvFits}{\code{NULL}, or a list with \code{perFoldFits} (a non-empty
-list of per-fold prior payloads) and optionally \code{samplePartition}
-(\code{data.frame(Sample, Fold)}).}
+list of per-fold priors, each the shape of \code{fullFit}) and
+optionally \code{samplePartition} (\code{data.frame(Sample, Fold)}).}
 }
 \value{
 A \code{MashPrior} object.
 }
 \description{
-Construct a \code{\link{MashPrior}} bundling a full-data
-  data-driven prior with optional per-fold (cross-validated) priors.
+Construct a \code{\link{MashPrior}} bundling full-data
+  data-driven priors with optional per-fold (cross-validated) priors.
 }
 \examples{
-U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
-mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
+U <- list(shared = matrix(1, 2, 2), brain = diag(c(1, 0)))
+conditions <- data.frame(
+  study = NA, context = c("brain", "liver"), trait = NA, n = 100
+)
+prior <- list(
+  U = U, w = c(0.5, 0.5), alpha = 0, inputScale = "standardized",
+  axes = "context", scope = NULL, conditions = conditions
+)
+mp <- MashPrior(fullFit = list(context = prior))
 mp
 }

@@ -13,27 +13,10 @@
 # engine themselves.
 # =============================================================================
 
-# method 'simple': mashr's estimate_null_correlation_simple on the null set.
+# method 'simple': mashr's estimate_null_correlation_simple on the null set's
+# matrices.
 # @noRd
-.mashResidCorSimple <- function(
-    sumStatsList,
-    alpha,
-    inputScale,
-    mashDataArgs,
-    corArgs
-) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method 'simple' requires a 'null' entry ",
-            "in `sumStatsList`."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale
-    )
+.mashResidCorSimple <- function(nullMats, alpha, mashDataArgs, corArgs) {
     user <- as.list(corArgs)
     exec(
         mashr::estimate_null_correlation_simple,
@@ -54,25 +37,18 @@
     exec(mashr::mash_set_data, !!!args)
 }
 
-# method 'mle': EM refinement of V against the prior U over a random subset.
+# method 'mle': EM refinement of V against the prior U over a random subset of
+# the random set's matrices.
 # @noRd
 .mashResidCorMle <- function(
-    sumStatsList,
+    randomMats,
     alpha,
-    inputScale,
     priorCovariances,
     nSubset,
     maxIter,
     mashDataArgs,
     corArgs
 ) {
-    .mashCheckMleInputs(sumStatsList, priorCovariances)
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    randomMats <- .mashSumStatsToMatrices(
-        sumStatsList$random,
-        "random",
-        inputScale = inputScale
-    )
     n <- nrow(randomMats$b)
     idx <- sample(seq_len(n), min(nSubset, n))
     dsub <- .mashSetData(
@@ -120,24 +96,7 @@
 # `null` partition is already the null variants (max|z| < 2), so no
 # re-thresholding is needed.
 # @noRd
-.mashResidCorNullBased <- function(
-    sumStatsList,
-    inputScale,
-    method,
-    corArgs
-) {
-    if (is.null(sumStatsList$null)) {
-        msg <- glue(
-            "mashResidualCorrelation: method '{method}' requires a 'null' ",
-            "entry in `sumStatsList` (the null variants V is estimated on)."
-        )
-        abort(msg)
-    }
-    nullMats <- .mashSumStatsToMatrices(
-        sumStatsList$null,
-        "null",
-        inputScale = inputScale
-    )
+.mashResidCorNullBased <- function(nullMats, method, corArgs) {
     nullZ <- nullMats$b / nullMats$s
     if (method == "simpleSpecific") {
         return(as.matrix(
@@ -168,10 +127,11 @@
 # vignette draws exactly this line -- cov_ed sees only the data-driven set.
 #
 # The components are built off a prepared mashr data object in a fixed order
-# (canonical, pca, flash, flashNonneg), so a given `components` set
-# reproduces the same ordering everywhere. RNG is consumed only by cov_flash
-# / cov_flash(nonneg). Shared by mashPriorCovariances and the exported
-# mashCovarianceComponents.
+# (canonical, subsets, pca, flash, flashNonneg), so a given `components` set
+# reproduces the same ordering everywhere. The subset-shared matrices are
+# fixed hypotheses too, so they join the canonical set. RNG is consumed only
+# by cov_flash / cov_flash(nonneg). Shared by mashPriorCovariances and the
+# exported mashCovarianceComponents.
 # @noRd
 .mashBuildComponents <- function(
     mashData,
@@ -183,6 +143,10 @@
     canonical <- if (is_in("canonical", components)) {
         canonicalArgs <- compact(.mashComponentArgs("canonical", componentArgs))
         exec(mashr::cov_canonical, mashData, !!!canonicalArgs)
+    }
+    subsets <- if (is_in("subsets", components)) {
+        subsetArgs <- compact(.mashComponentArgs("subsets", componentArgs))
+        exec(.mashCovSubsets, mashData, !!!subsetArgs)
     }
     pca <- if (is_in("pca", components)) {
         pcaArgs <- compact(.mashComponentArgs("pca", componentArgs))
@@ -200,7 +164,7 @@
         exec(mashr::cov_flash, mashData, factors = "nonneg", !!!flashNonnegArgs)
     }
     list(
-        canonical = canonical,
+        canonical = c(canonical, subsets),
         dataDriven = c(pca, flash, flashNonneg)
     )
 }
@@ -209,6 +173,88 @@
 # @noRd
 .mashComponentArgs <- function(key, componentArgs) {
     as.list(componentArgs[[key]] %||% list())
+}
+
+# The subset-shared components (CovSubsetsOptions()): for every subset of two
+# or more conditions short of all of them, and every correlation in `corr`,
+# effects with that correlation within the subset and none outside it --
+# mashr's equal_effects (`corr` 1) and simple_het applied to each subset.
+# Each is named "subset_<members>_corr<value>". NULL, with a message, for
+# fewer than three conditions, which have no such subset; too many to fit is
+# refused.
+# @noRd
+.mashCovSubsets <- function(mashData, corr = c(1, 0.25, 0.5, 0.75)) {
+    k <- ncol(mashData$Bhat)
+    if (k < 3L) {
+        inform(glue(
+            "mashPriorCovariances: the \"subsets\" component needs three or ",
+            "more conditions (got {k}); it adds no matrix."
+        ))
+        return(NULL)
+    }
+    conditions <- colnames(mashData$Bhat) %||% as.character(seq_len(k))
+    subsets <- list_flatten(map(seq(2L, k - 1L), .mashSubsetsOfSize, k = k))
+    .mashRequireFewSubsets(length(subsets) * length(corr), k)
+    list_flatten(map(
+        subsets,
+        .mashSharedSubsetMatrices,
+        corr = corr,
+        conditions = conditions
+    ))
+}
+
+# Every subset of 1..k of `size` conditions, as index vectors.
+# @noRd
+#' @importFrom utils combn
+.mashSubsetsOfSize <- function(size, k) {
+    combn(k, size, simplify = FALSE)
+}
+
+# The most subset-shared matrices one prior takes: 2^k - k - 2 subsets of k
+# conditions, times the correlations, grows past what a mash fit can weigh.
+# @noRd
+.MASH_SUBSETS_MAX <- 1000L
+
+# @noRd
+.mashRequireFewSubsets <- function(n, k) {
+    if (n <= .MASH_SUBSETS_MAX) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "mashPriorCovariances: the \"subsets\" component would build {n} ",
+            "matrices for {k} conditions ({2^k - k - 2} subsets, one matrix ",
+            "per subset and correlation); more than {.MASH_SUBSETS_MAX} is ",
+            "refused."
+        ),
+        i = str_c(
+            "Fit fewer conditions together, or pass a shorter ",
+            "CovSubsetsOptions(corr = )."
+        )
+    ))
+}
+
+# One subset's matrices, one per correlation, named by its members.
+# @noRd
+.mashSharedSubsetMatrices <- function(members, corr, conditions) {
+    label <- str_c("subset_", str_flatten(conditions[members], "_"))
+    set_names(
+        map(
+            corr,
+            .mashSharedSubsetMatrix,
+            members = members,
+            k = length(conditions)
+        ),
+        str_c(label, "_corr", corr)
+    )
+}
+
+# Effects with correlation `rho` within conditions `members` of `k` (unit
+# variance) and none elsewhere.
+# @noRd
+.mashSharedSubsetMatrix <- function(rho, members, k) {
+    inSubset <- is_in(seq_len(k), members)
+    outer(inSubset, inSubset) * (matrix(rho, k, k) + diag(1 - rho, k))
 }
 
 # The covariance list and its mixture weights. A supplied `priorCovariances`
@@ -279,6 +325,43 @@ CovCanonicalOptions <- function(cov_methods = NULL, ...) {
         extra = list(...),
         label = "CovCanonicalOptions",
         engine = "canonical"
+    )
+}
+
+#' @title Arguments For The Subset-Shared Covariance Components
+#' @description Options for the \code{"subsets"} component of
+#'   \code{\link{mashPriorCovariances}}: for every subset of two or more
+#'   conditions short of all of them, effects shared within the subset and
+#'   absent outside it -- mashr's \code{equal_effects} and \code{simple_het}
+#'   applied to each subset. They let an effect be shared by some studies or
+#'   contexts but not all, which needs three or more; with fewer the
+#'   component adds nothing. \eqn{k} conditions have \eqn{2^k - k - 2} such
+#'   subsets, each taking one matrix per correlation, and more than 1000
+#'   matrices in all are refused. These are hypotheses about shape, so they
+#'   go to the mash fit unrefined, beside the canonical set.
+#' @param corr Numeric vector of distinct values in \code{[0, 1]}: the
+#'   correlations of the effects within a subset, one matrix per subset and
+#'   value. Default \code{c(1, 0.25, 0.5, 0.75)}: equal effects, then the
+#'   correlations of mashr's \code{simple_het}.
+#' @return A \code{\link{MethodOptions}} object.
+#' @examples
+#' CovSubsetsOptions(corr = 1)
+#' @export
+CovSubsetsOptions <- function(corr = c(1, 0.25, 0.5, 0.75)) {
+    assertNumeric(
+        corr,
+        lower = 0,
+        upper = 1,
+        any.missing = FALSE,
+        min.len = 1L,
+        unique = TRUE
+    )
+    .newMethodOptions(
+        NULL,
+        defaults = list(corr = corr),
+        extra = list(),
+        label = "CovSubsetsOptions",
+        engine = "subsets"
     )
 }
 
@@ -807,7 +890,11 @@ CorShrinkOptions <- function(...) {
 #'   (default, the standard unbiased choice) or \code{"strong"}.
 #' @param outputLevel \code{mashr::mash()} \code{outputlevel} (default 4 -- the
 #'   full model \code{\link{mashPosterior}} consumes).
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts). Match the prior's.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -847,7 +934,8 @@ mashModelFit <- function(
     vhat = NULL,
     fitOn = c("random", "strong"),
     outputLevel = 4L,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     mashArgs = MashOptions(),
     setSeed = 999
@@ -859,35 +947,56 @@ mashModelFit <- function(
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
     }
-    if (methods::is(sumStatsList, "SimpleList")) {
-        sumStatsList <- as.list(sumStatsList)
+    Ulist <- .mashAsUlist(priorCovariances)
+    .mashValidatePriorCovList(Ulist)
+    mashData <- .mashModelFitData(
+        .mashPartitions(sumStatsList)[[fitOn]],
+        fitOn,
+        vhat,
+        alpha,
+        inputScale,
+        jointSpecification,
+        mashDataArgs
+    )
+    if (!is.null(setSeed)) {
+        withr::local_seed(setSeed)
     }
-    priorCovariances <- .mashAsUlist(priorCovariances)
-    .mashValidatePriorCovList(priorCovariances)
-    if (is.null(sumStatsList[[fitOn]])) {
+    user <- as.list(mashArgs)
+    exec(
+        mashr::mash,
+        mashData,
+        Ulist = Ulist,
+        outputlevel = outputLevel,
+        !!!user
+    )
+}
+
+# The mash data mashModelFit() fits on: the `fitOn` partition, laid out by the
+# joint spec.
+# @noRd
+.mashModelFitData <- function(
+    partition,
+    fitOn,
+    vhat,
+    alpha,
+    inputScale,
+    jointSpecification,
+    mashDataArgs
+) {
+    if (is.null(partition)) {
         msg <- glue(
             "mashModelFit: `sumStatsList` has no '{fitOn}' entry to fit on."
         )
         abort(msg)
     }
-    if (!is.null(setSeed)) {
-        withr::local_seed(setSeed)
-    }
-    mashData <- .mashMakeMashData(
-        sumStatsList[[fitOn]],
+    .mashMakeMashData(
+        partition,
         fitOn,
         vhat,
         alpha,
         inputScale,
-        mashDataArgs
-    )
-    user <- as.list(mashArgs)
-    exec(
-        mashr::mash,
-        mashData,
-        Ulist = priorCovariances,
-        outputlevel = outputLevel,
-        !!!user
+        mashDataArgs,
+        .mashOneSpec(jointSpecification, partition, "mashModelFit")
     )
 }
 
@@ -910,7 +1019,11 @@ mashModelFit <- function(
 #'   none.
 #' @param outputPosteriorCov Return the full posterior covariance array (needed
 #'   by \code{\link{fitMashContrast}}). Default \code{TRUE}.
-#' @param inputScale SumStats -> matrix conversion scale.
+#' @param inputScale SumStats -> matrix conversion scale (see
+#'   \code{\link{mashPipeline}}).
+#' @param jointSpecification One joint spec, as in \code{\link{mashPipeline}}:
+#'   which axes make the conditions (\code{NULL}, the default, for a
+#'   \code{QtlSumStats}' contexts). Match the prior's.
 #' @param mashDataArgs Extra arguments for
 #'   \code{mashr::mash_set_data()}, built with
 #'   \code{\link{MashDataOptions}} -- for example
@@ -956,7 +1069,8 @@ mashPosterior <- function(
     vhat = NULL,
     excludeCondition = character(0),
     outputPosteriorCov = TRUE,
-    inputScale = c("auto", "beta", "z"),
+    inputScale = c("auto", "beta", "z", "standardized"),
+    jointSpecification = NULL,
     mashDataArgs = MashDataOptions(),
     posteriorArgs = MashPosteriorOptions()
 ) {
@@ -966,7 +1080,12 @@ mashPosterior <- function(
     if (!requireNamespace("mashr", quietly = TRUE)) {
         abort("Package 'mashr' is required for this function.")
     }
-    mats <- .mashSumStatsToMatrices(sumStats, "target", inputScale = inputScale)
+    mats <- .mashSumStatsToMatrices(
+        sumStats,
+        "target",
+        inputScale = inputScale,
+        spec = .mashOneSpec(jointSpecification, sumStats, "mashPosterior")
+    )
     ex <- .mashExcludeConditions(
         mats$b,
         mats$s,

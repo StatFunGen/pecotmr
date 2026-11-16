@@ -4,40 +4,96 @@
 # (mvSuSiE).
 
 test_that("MashPrior: construct + accessors (full + cv)", {
-    U <- list(U1 = diag(2))
+    priors <- list(context = mashPriorPayload())
     sp <- data.frame(
         Sample = paste0("s", 1:6),
         Fold = rep(1:3, each = 2),
         stringsAsFactors = FALSE
     )
-    perFold <- list(
-        list(U = U, w = c(0.5, 0.5)),
-        list(U = U, w = c(0.5, 0.5)),
-        list(U = U, w = c(0.5, 0.5))
-    )
+    perFold <- list(priors, priors, priors)
     mp <- MashPrior(
-        fullFit = list(U = U, w = c(0.5, 0.5)),
+        fullFit = priors,
         cvFits = list(samplePartition = sp, perFoldFits = perFold)
     )
     expect_s4_class(mp, "MashPrior")
-    expect_identical(fullFit(mp)$U, U)
+    expect_identical(fullFit(mp), priors)
     expect_length(cvFits(mp)$perFoldFits, 3L)
     expect_identical(cvFits(mp)$samplePartition, sp)
-    expect_output(show(mp), "MashPrior")
+    expect_output(show(mp), "fullFit: context")
 })
 
 test_that("MashPrior: full-only and cv-only bundles", {
-    U <- list(U1 = diag(2))
-    perFold <- list(list(U = U), list(U = U), list(U = U))
-    mpFull <- MashPrior(fullFit = list(U = U))
+    priors <- list(context = mashPriorPayload())
+    mpFull <- MashPrior(fullFit = priors)
     expect_null(cvFits(mpFull))
-    mpCv <- MashPrior(cvFits = list(perFoldFits = perFold))
+    mpCv <- MashPrior(cvFits = list(perFoldFits = list(priors, priors)))
     expect_null(fullFit(mpCv))
-    expect_length(cvFits(mpCv)$perFoldFits, 3L)
+    expect_length(cvFits(mpCv)$perFoldFits, 2L)
+})
+
+test_that("MashPrior: each prior must say what its rows are", {
+    prior <- mashPriorPayload()
+    # The bare list(U, w) of a single prior is not a set of named priors.
+    expect_error(
+        MashPrior(fullFit = list(prior)),
+        "named list with one prior per joint spec"
+    )
+    expect_error(
+        MashPrior(fullFit = list(context = prior[c("U", "w")])),
+        "must carry U, alpha, inputScale, axes, conditions"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(context = list_assign(prior, conditions = "x"))
+        ),
+        "columns study, context, trait, n"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(
+                context = list_assign(prior, U = list(a = diag(3)))
+            )
+        ),
+        "list of 2 x 2 matrices"
+    )
+    # A residual correlation is optional (earlier mashPipeline() output has
+    # none), but when present it is one row and column per condition.
+    expect_s4_class(
+        MashPrior(
+            fullFit = list(
+                context = list_assign(prior, residualCorrelation = diag(2))
+            )
+        ),
+        "MashPrior"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(
+                context = list_assign(prior, residualCorrelation = diag(3))
+            )
+        ),
+        "residualCorrelation must be a 2 x 2 matrix"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(context = list_assign(prior, axes = "tissue"))
+        ),
+        "axes must name study, context or trait"
+    )
+    expect_error(
+        MashPrior(
+            fullFit = list(context = list_assign(prior, inputScale = "auto"))
+        ),
+        "inputScale"
+    )
+    # The same rules hold for each fold's priors, which name the fold.
+    expect_error(
+        MashPrior(cvFits = list(perFoldFits = list(list(prior)))),
+        "perFoldFits\\[\\[1\\]\\]"
+    )
 })
 
 test_that("MashPrior: validity rejects malformed bundles", {
-    U <- list(U1 = diag(2))
     sp <- data.frame(
         Sample = paste0("s", 1:6),
         Fold = rep(1:3, each = 2),
@@ -46,9 +102,10 @@ test_that("MashPrior: validity rejects malformed bundles", {
     # Empty bundle.
     expect_error(MashPrior(), "at least one")
     # perFoldFits count must match the partition's fold count.
+    priors <- list(context = mashPriorPayload())
     expect_error(
         MashPrior(
-            cvFits = list(samplePartition = sp, perFoldFits = list(list(U = U)))
+            cvFits = list(samplePartition = sp, perFoldFits = list(priors))
         ),
         "fold"
     )
@@ -59,7 +116,7 @@ test_that("MashPrior: validity rejects malformed bundles", {
         MashPrior(
             cvFits = list(
                 samplePartition = data.frame(x = 1),
-                perFoldFits = list(list(U = U))
+                perFoldFits = list(priors)
             )
         ),
         "Sample"
@@ -67,11 +124,15 @@ test_that("MashPrior: validity rejects malformed bundles", {
 })
 
 test_that("MashPrior: show reports 'cvFits: none' for a full-only bundle", {
-    U <- list(U1 = diag(2))
-    mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5))) # cvFits NULL
+    mp <- MashPrior(
+        fullFit = list(
+            context = mashPriorPayload(),
+            trait = mashPriorPayload()
+        )
+    )
     out <- capture.output(show(mp))
     expect_true(any(grepl("cvFits: none", out)))
-    expect_true(any(grepl("fullFit: present", out)))
+    expect_true(any(grepl("fullFit: context, trait", out)))
 })
 
 
@@ -95,9 +156,10 @@ test_that("the partition check stops when perFoldFits is not a list", {
 })
 
 test_that("MashPrior: cvFits must be a list or NULL", {
+    priors <- list(context = mashPriorPayload())
     expect_error(
-        MashPrior(fullFit = list(U = list(U1 = diag(2))), cvFits = "nope"),
+        MashPrior(fullFit = priors, cvFits = "nope"),
         "cvFits.*Must be of type 'list'"
     )
-    expect_silent(MashPrior(fullFit = list(U = list(U1 = diag(2)))))
+    expect_silent(MashPrior(fullFit = priors))
 })

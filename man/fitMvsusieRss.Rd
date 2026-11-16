@@ -6,21 +6,27 @@
 \usage{
 fitMvsusieRss(
   Z,
-  R,
+  R = NULL,
   N,
   prior_variance,
   coverage = 0.95,
   L = 10L,
   L_greedy = NULL,
-  methodArgs = MvsusieRssOptions()
+  methodArgs = MvsusieRssOptions(),
+  X = NULL
 )
 }
 \arguments{
 \item{Z}{Numeric matrix of Z-scores (variants x conditions).}
 
-\item{R}{Variant-by-variant LD correlation matrix.}
+\item{R}{Variant-by-variant LD correlation matrix, or a list of one per
+condition when the conditions are measured on different samples (e.g.
+studies of different ancestries, each on its own LD reference); see
+\code{mvsusieR::mvsusie_rss}. Give either \code{R} or \code{X}.}
 
-\item{N}{Scalar sample size (median across conditions when N varies).}
+\item{N}{Sample size: a scalar (the median across conditions when N
+varies), or one per condition, the same for the conditions on one LD
+matrix.}
 
 \item{prior_variance}{Prior variance matrix.}
 
@@ -38,10 +44,23 @@ at once. \code{fineMappingPipeline()} sets it from
 \item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie_rss},
 built with \code{\link{MvsusieRssOptions}} --- the RSS entry point has
 its own constructor, since it is a different function from
-\code{mvsusie} with different arguments.}
+\code{mvsusie} with different arguments --- or, for the unmappable
+effects model, \code{\link{MvsusieInfRssOptions}}. As in
+\code{\link{fitMvsusie}}, the fit runs with \code{verbose = FALSE}
+unless they set it.}
+
+\item{X}{Instead of \code{R}, a factor of the LD matrix: a samples x
+variants matrix, such as a reference panel's genotypes, whose columns
+\code{mvsusieR::mvsusie_rss} centres (when they are not already) and
+scales so that its cross-product is \code{R}, or a list of one per
+condition, as for \code{R}. The variants x variants matrix is then
+never formed.}
 }
 \value{
-The fit object returned by \code{mvsusieR::mvsusie_rss}.
+The fit object returned by \code{mvsusieR::mvsusie_rss}. With
+  one LD per condition, a variant a condition's LD lacks (a zero row and
+  column of its matrix, or a zero column of its factor) has posterior
+  mean 0 there, as in \code{\link{fitMvsusie}}.
 }
 \description{
 Wrapper around \code{mvsusieR::mvsusie_rss}. The underlying function was

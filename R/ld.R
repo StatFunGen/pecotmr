@@ -1444,6 +1444,33 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     named
 }
 
+# The panels of a GenotypeMixture over `variantIds`, matched and
+# allele-aligned as .ldFromRef() and .ldFactorFromRef() align the mixture's
+# LD: each panel's LD matrix, or with `useFactor` its factor, unweighted and
+# in the caller's frame, for the fits that estimate the panels' weights
+# (SusieRssParam's estimateMixtureWeights). NULL when no variant matches.
+# @noRd
+.ldPanelsFromRef <- function(
+    ldReference,
+    variantIds,
+    label,
+    onMissing = c("error", "drop"),
+    useFactor = FALSE
+) {
+    onMissing <- arg_match(onMissing)
+    matched <- .ldFromRefMatch(ldReference, variantIds, label, onMissing)
+    if (is.null(matched)) {
+        return(NULL)
+    }
+    map(
+        seq_along(.gmComponents(ldReference)),
+        .gmPanelAt,
+        x = ldReference,
+        matched = matched,
+        useFactor = useFactor
+    )
+}
+
 # The LD among the reference's variants at `idx`, in the reference's own
 # allele coding: the sample correlation of a panel's dosages, or the
 # corresponding block of an LdMatrix.
@@ -1727,6 +1754,16 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
         return(colSums((ld$ldFactor %*% B)^2) / (nrow(ld$ldFactor) - 1))
     }
     colSums(B * .ldSourceTimes(ld, B))
+}
+
+# B' R B, every pair of B's columns, from an LD source: (F B)'(F B) / (m - 1)
+# for a factor, never forming R.
+# @noRd
+.ldCrossForms <- function(ld, B) {
+    if (!is.null(ld$ldFactor)) {
+        return(crossprod(ld$ldFactor %*% B) / (nrow(ld$ldFactor) - 1))
+    }
+    crossprod(B, .ldSourceTimes(ld, B))
 }
 
 # `nDraws` draws from N(0, R), as the columns of a p x nDraws matrix: F' e /
@@ -2096,13 +2133,14 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # yields two differently trimmed sketches. Downstream LD lookups are all
 # id-matched, so a partial overlap is reported (once per session) rather than
 # refused; no overlap at all is an error. Shared by causalInferencePipeline,
-# colocPipeline, qtlEnrichmentPipeline and ctwasPipeline, each over the rows
-# it combines (.requireMatchingRowLdRefs()).
+# colocPipeline and qtlEnrichmentPipeline, each over the rows it combines
+# (.requireMatchingRowLdRefs()). ctwasPipeline computes everything on the
+# GWAS LD, so it does not check its weights' references against it.
 #
 # NULL handling:
 #   nullPolicy = "qtl-required" (default): a NULL qtlLd skips the check; a
 #     non-NULL qtlLd with a NULL gwasLd is an error. Used by cip / coloc
-#     (enloc included) / ctwas.
+#     (enloc included).
 #   nullPolicy = "lenient": a NULL on either side skips the check. Used by
 #     qtlEnrichmentPipeline.
 #
@@ -2243,8 +2281,8 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 }
 
 # A partial overlap is the expected result of QC-ing the two sides separately,
-# so it is reported once per session rather than on every call: ctwasPipeline
-# and colocboostPipeline run this check once per region / per bundle.
+# so it is reported once per session rather than on every call: a pipeline
+# runs this check once per pair of rows it combines.
 # @noRd
 .ldRefReportOverlap <- function(nQ, nG, nShared, pipelineName, between) {
     if (nShared == nQ && nShared == nG) {

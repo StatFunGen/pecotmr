@@ -29,25 +29,7 @@ each under a license compatible with GPL-3.
      sampler code; gigrnd() is ported from PRS-CS's gigrnd.py, and
      DenseLdBlock::draw() follows PRS-CS's draw of a block's effects.
 
-4. qgg
-   https://github.com/psoerensen/qgg
-   Copyright (C) the qgg authors (Peter Soerensen, Palle Duun Rohde, Izel
-   Fourie Soerensen). License: GPL-3.
-   - src/rss_mcmc.h, src/rss_mcmc.cpp: in the Bayesian alphabet sections,
-     the priors and updates of bayesA, bayesC, bayesN and bayesR follow CRAN
-     qgg 1.1.6's summary-statistics sampler (sbayes()), and Legarra et al.'s
-     bayesL its individual-level one (bayes()); rinvgauss() follows its
-     inverse-Gaussian sampler.
-
-5. hibayes
-   https://github.com/YinLiLin/hibayes
-   Copyright (C) the hibayes authors (Lilin Yin, Haohao Zhang, Xiaolei Liu).
-   License: GPL-3.
-   - src/rss_mcmc.h, src/rss_mcmc.cpp: in the Bayesian alphabet sections,
-     the priors and updates of bayesB (BayesBpi) and Park and Casella's
-     bayesL follow hibayes' summary-statistics sampler (SBayesD()).
-
-6. L0Learn
+4. L0Learn
    https://github.com/hazimehh/L0Learn
    Copyright (c) 2021 Hussein Hazimeh. License: MIT (text below).
    - src/penalized_rss.cpp: the L0 thresholding (CDL0.h, CDL012.h); the
@@ -56,7 +38,7 @@ each under a license compatible with GPL-3.
      adaptive lambda0 path (Grid1D.cpp); and the L0 swap step, ported from
      CDL012Swaps.cpp.
 
-7. lassosum
+5. lassosum
    https://github.com/tshmak/lassosum
    Copyright (c) 2016 tshmak. License: MIT according to its LICENSE file
    (text below); its DESCRIPTION declares GPL-3.
@@ -68,18 +50,16 @@ each under a license compatible with GPL-3.
      and pseudovalidation.R) and the path's ordering and records (after
      lassosum.R).
 
-8. bigsnpr
+6. bigsnpr
    https://github.com/privefl/bigsnpr
    Copyright (c) Florian Prive. License: GPL-3.
-   - src/rss_mcmc.h, src/rss_mcmc.cpp: the LDpred2 sections, derived from
-     LDpred2's samplers (ldpred2.cpp, ldpred2-auto.cpp) and rebuilt on
-     pecotmr's shared sampler code, reading the LD as a factor.
+   - src/rss_mcmc.h: the samplers' test of divergence, after LDpred2's.
    - R/regularizedRegressionWrappers.R: LDpred2-auto's chain filter and
      LDpred2-grid's grid, after the LDpred2 vignette.
    - R/variantId.R: harmonizeAlleles()'s matched-proportion check and
      parameter descriptions, after snp_match().
 
-9. DENTIST
+7. DENTIST
    https://github.com/Yves-CHEN/DENTIST
    (C) 2018 Wenhan Chen, Zhihong Zhu and Jian Yang. License: GNU Lesser
    General Public License, version 3 (its LICENSE file; its README states
@@ -91,36 +71,36 @@ each under a license compatible with GPL-3.
      storage.cpp and invoker.h).
    - R/ld.R: the GCTA-style LD estimate (after bfileOperations.cpp).
 
-10. LD score regression (ldsc)
-    https://github.com/bulik/ldsc
-    Copyright (C) 2014-2015 Brendan Bulik-Sullivan and Hilary Finucane.
-    License: GPL-3.
-    - R/h2EstimationWrappers.R: stratified LD score regression, its weights
-      and iteratively reweighted least squares (after
-      ldscore/regressions.py and ldscore/irwls.py).
-    - R/LdScore.R: the unbiased r^2 (after ldscore/ldscore.py).
+8. LD score regression (ldsc)
+   https://github.com/bulik/ldsc
+   Copyright (C) 2014-2015 Brendan Bulik-Sullivan and Hilary Finucane.
+   License: GPL-3.
+   - R/h2EstimationWrappers.R: stratified LD score regression, its weights
+     and iteratively reweighted least squares (after
+     ldscore/regressions.py and ldscore/irwls.py).
+   - R/LdScore.R: the unbiased r^2 (after ldscore/ldscore.py).
 
-11. HDL and HDL-L
-    https://github.com/zhenin/HDL
-    Copyright (C) the HDL authors (Zheng Ning, Xia Shen; HDL-L: Yuying Li,
-    Xia Shen). License: GPL-3 or (at your option) any later version.
-    - R/h2EstimationWrappers.R: the HDL likelihood and fit (after llfun.R
-      and HDL.h2.R) and HDL-L's per-locus fit (after HDL.L.R).
+9. HDL and HDL-L
+   https://github.com/zhenin/HDL
+   Copyright (C) the HDL authors (Zheng Ning, Xia Shen; HDL-L: Yuying Li,
+   Xia Shen). License: GPL-3 or (at your option) any later version.
+   - R/h2EstimationWrappers.R: the HDL likelihood and fit (after llfun.R
+     and HDL.h2.R) and HDL-L's per-locus fit (after HDL.L.R).
 
-12. LDER
+10. LDER
     https://github.com/shuangsong0110/LDER
     Copyright (c) 2021 Shuang Song. License: MIT according to its LICENSE
     file (text below); its DESCRIPTION declares GPL-3.
     - R/h2EstimationWrappers.R: the LDER estimator (after get.res.R,
       ldscore.R and lder.R).
 
-13. gLDSC
+11. gLDSC
     https://github.com/xzw20046/gldsc
     Copyright (c) 2023 Zewei Xiong. License: MIT (text below).
     - R/h2EstimationWrappers.R: the generalized LD score regression
       estimator (after middle_fun.R and gldsc.R).
 
-14. FastHer
+12. FastHer
     https://github.com/gulsvi/FastHer
     Copyright (c) 2025 Gulnara R. Svishcheva. License: MIT (text below), as
     its DESCRIPTION declares; the repository has no license file or
@@ -128,20 +108,20 @@ each under a license compatible with GPL-3.
     - R/h2EstimationWrappers.R: the local heritability's inputs, eigen cut
       and standard error (after fasther.R).
 
-15. RAiSS
+13. RAiSS
     https://gitlab.pasteur.fr/statistical-genetics/raiss
     Copyright (c) 2019 Institut Pasteur. License: MIT (text below).
     - R/sumstatsQc.R: the summary-statistics imputation and its output
       filtering (after raiss/stat_models.py and
       raiss/filter_format_output.py).
 
-16. SLALOM
+14. SLALOM
     https://github.com/mkanai/slalom
     Copyright (c) 2022 Masahiro Kanai. License: MIT (text below).
     - R/sumstatsQc.R: slalom() and its approximate Bayes factors, credible
       set and DENTIST-S statistics (after slalom.py).
 
-17. FUSION
+15. FUSION
     https://github.com/gusevlab/fusion_twas
     Copyright (C) the FUSION authors (Alexander Gusev et al.). License:
     GPL-3.
@@ -150,14 +130,14 @@ each under a license compatible with GPL-3.
     - R/variantId.R: the strand and allele checks of harmonizeAlleles()
       (after FUSION.assoc_test.R's allele.qc()).
 
-18. ACAT and STAAR
+16. ACAT and STAAR
     https://github.com/yaowuliu/ACAT, https://github.com/xihaoli/STAAR
     Copyright (C) Yaowu Liu (ACAT); Xihao Li, Zilin Li, Wenbo Wang, Han
     Chen and Yuxin Yuan (STAAR). License: GPL-3.
     - R/pvalCombineWrappers.R: pvalAcat(), the Cauchy combination (after
       ACAT.R and STAAR's CCT.R).
 
-19. cTWAS
+17. cTWAS
     https://github.com/xinhe-lab/multigroup_ctwas
     Copyright (c) 2020 Siming Zhao, Wesley Crouse, Sheng Qian, Kaixuan Luo,
     Matthew Stephens and Xin He. License: MIT (text below).
@@ -165,7 +145,7 @@ each under a license compatible with GPL-3.
       region filtering and thinning of the parameter estimation (after
       est_param()).
 
-20. xqtl-protocol
+18. xqtl-protocol
     https://github.com/StatFunGen/xqtl-protocol
     Copyright (c) 2021 Gao Wang. License: MIT (text below).
     - R/relatednessQc.R: the relatedness filter (after GWAS_QC.R).
@@ -173,7 +153,7 @@ each under a license compatible with GPL-3.
       contrasts, posterior summaries and prior fitting (after the MASH
       notebooks).
 
-21. fsusieR
+19. fsusieR
     https://github.com/stephenslab/fsusieR
     Copyright (c) 2023-2025, William R.P. Denault, Peter Carbonetto, Gao
     Wang and Matthew Stephens. License: BSD 3-Clause (text below).
@@ -181,7 +161,7 @@ each under a license compatible with GPL-3.
       cal_purity()) and the wavelet back-transform of the weights (after
       operation_on_susiF_obj.R).
 
-22. mr.mashr
+20. mr.mashr
     https://github.com/stephenslab/mr.mashr
     Copyright (c) 2020-2025 Fabio Morgante, Jason Willwerscheid, Gao Wang,
     Deborah Kunkel, Peter Carbonetto and Matthew Stephens. License: MIT
@@ -189,7 +169,7 @@ each under a license compatible with GPL-3.
     - R/regularizedRegressionWrappers.R: the description of mr.mash's fit in
       mrmashWrapper()'s documentation (after mr_mash.R).
 
-23. ncvreg
+21. ncvreg
     https://github.com/pbreheny/ncvreg
     Copyright (C) Patrick Breheny, Ryan Miller and Logan Harris. License:
     GPL-3.
@@ -198,9 +178,32 @@ each under a license compatible with GPL-3.
       rule, ever-active set and violation scans (after cdfit_gaussian() in
       gaussian.c).
 
+22. PRS-CSx
+    https://github.com/getian107/PRScsx
+    Copyright (c) 2019 Tian Ge. License: MIT (text below).
+    - src/rss_mcmc.h: in PrsCsChain, the local and global scales shared
+      across studies and the update of each variant's local scale from every
+      study carrying it, after PRS-CSx's sampler (mcmc_gtb.py).
 
-MIT License (items 3, 6, 7, 12, 13, 14, 15, 16, 19, 20 and 22, with the
-copyright lines given above)
+23. JointPRS
+    https://github.com/LeqiXu/JointPRS
+    Copyright (c) 2024 Leqi Xu. License: MIT (text below).
+    - src/rss_mcmc.h: in PrsCsChain, the correlated prior on the studies'
+      effects, each study's draw given the others', its residual variance,
+      and the random-walk Metropolis step on the correlations, after
+      JointPRS's sampler (mcmc_gtb.py, psi_update.pyx).
+
+24. SDPRX
+    https://github.com/eldronzhou/SDPRX
+    Copyright (c) 2022 Geyu Zhou. License: MIT (text below).
+    - src/rss_mcmc.h, src/rss_mcmc.cpp: in the SDPR chain, the components
+      whose effects lie in a set of the studies, correlated across them, and
+      the Dirichlet weights over those sets, after SDPRX's sampler
+      (gibbs.py).
+
+
+MIT License (items 3, 6, 7, 12, 13, 14, 15, 16, 19, 20, 22, 24, 25 and 26,
+with the copyright lines given above)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

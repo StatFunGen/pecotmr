@@ -12,8 +12,12 @@ NULL
 #'   formed from the reference over these variants.
 #' @param varY Variance of the phenotype, or \code{NULL} (default) to fit on
 #'   the standardized scale. Used only with \code{b} and \code{seb}.
-#' @param sigma2E Initial residual variance, or \code{NULL} (default) for
-#'   \code{mr.ash.rss}'s own.
+#' @param sigma2E The residual variance, or \code{NULL} (default) for
+#'   \code{varY} when it is finite, else 1 (the standardized scale). It is
+#'   held fixed, as the other summary-statistics fits hold theirs: against a
+#'   reference LD, an estimate absorbs LD mismatch.
+#'   \code{MrashRssOptions(update_sigma = TRUE)} estimates it from this
+#'   start, as \code{mr.ash.rss} does by default.
 #' @param s0 Prior variances of the mixture components, relative to the
 #'   residual variance, or \code{NULL} (default) for the grid
 #'   \code{susieR::mr.ash} uses by default, built for these statistics.
@@ -162,6 +166,9 @@ mrashRssWeights <- function(
             var_y = inp$varY,
             n = inp$n,
             sigma2_e = inp$sigma2E,
+            # Held fixed, as the other RSS fits hold the residual variance:
+            # against a reference LD, an estimate absorbs LD mismatch.
+            update_sigma = FALSE,
             s0 = prior$s0,
             # A copy: mr.ash.rss() writes its fitted weights over the vector
             # it is given, which would otherwise be the caller's.
@@ -539,6 +546,20 @@ prsCsWeights <- function(
 #' @param nChains The number of chains, from seeds \code{seed},
 #'   \code{seed + 1}, ...; they are tested for divergence and, with more
 #'   than one, combined as \code{\link{prsCs}}'s are. Default 1.
+#' @param sharing Across studies only: the \code{dprGibbs} method fitted
+#'   across the studies a \code{"study"} \code{jointSpecification} joins
+#'   (\code{studyCoupling} set in \code{\link{twasWeightsPipeline}}), as
+#'   SDPRX fits ancestries. Which sets of the studies a non-null
+#'   component's effects lie in: \code{"eachOrAll"} (the default), each
+#'   study alone or all of them together; \code{"everySubset"}, every
+#'   nonempty set, \eqn{2^K - 1} of them for \eqn{K} studies; \code{"all"},
+#'   all of them together only, SDPRX's \code{force_shared}. The first two
+#'   agree for two studies. A single study ignores it.
+#' @param rho Across studies only: the correlation between a variant's
+#'   effects in the studies a component spans. \code{NULL} (the default)
+#'   learns each pair's on \eqn{[0, 0.99]}; a number in \eqn{[0, 1)} fixes
+#'   every pair's, and a \eqn{K \times K} positive-definite correlation
+#'   matrix each pair's. A single study ignores it.
 #' @return A list with \code{betaEst} (the estimated effect sizes) and
 #'   \code{h2} (the estimated heritability), and with several chains
 #'   \code{chains} as \code{\link{prsCs}} records it.
@@ -553,6 +574,19 @@ prsCsWeights <- function(
 #'   closed-form draw let the global scale of the effects run away. That
 #'   scale has an N(1, 1) prior where the original's is flat, under which a
 #'   window that drew no causal variant tended to stay null.
+#'
+#'   Across studies the same chain is SDPRX's, described in Zhou G, Chen T,
+#'   Zhao H (2023), "SDPRX: A statistical method for cross-population
+#'   prediction of complex traits", American Journal of Human Genetics
+#'   110(1): 13-22. \doi{10.1016/j.ajhg.2022.11.007}. Each non-null
+#'   component draws a variant's effects in the studies of its kind from
+#'   \eqn{N(0, \sigma^2 \Sigma)}, \eqn{\Sigma} holding \code{rho}, for any
+#'   number of studies. So that one study is SDPR draw for draw, the null
+#'   stays the first stick of the process, the other kinds splitting the
+#'   rest by a Dirichlet, and one concentration serves every kind; SDPRX
+#'   puts the null among its kinds and gives each kind its own. A variant a
+#'   study lacks can take any kind, its effect there integrated out, where
+#'   SDPRX allows it only the kinds of the studies carrying it.
 #'
 #' @keywords internal
 sdpr <- function(
@@ -573,7 +607,9 @@ sdpr <- function(
     verbose = TRUE,
     seed = NULL,
     raoBlackwell = FALSE,
-    nChains = 1
+    nChains = 1,
+    sharing = c("eachOrAll", "everySubset", "all"),
+    rho = NULL
 ) {
     .rssValidateInputs(bhat, R, n)
     .sdprRun(
@@ -748,7 +784,9 @@ sdprWeights <- function(
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
     .rssValidateSource(bhat, ld, n)
-    user <- as.list(methodArgs)
+    given <- as.list(methodArgs)
+    # `sharing` and `rho` act across studies only, so one study drops them.
+    user <- given[setdiff(names(given), .SDPR_ACROSS)]
     settings <- list_modify(
         .formalDefaults(
             sdpr,
@@ -815,8 +853,10 @@ sdprWeights <- function(
 #'   prior = MrmashPriorParam(canonicalPriorMatrices = TRUE))
 #' mrmashWeights(mrmashFit = fit, X = X, Y = Y)
 #' @param dataDrivenPriorMatrices Optional list of data-driven prior
-#'   covariance matrices; forwarded to \code{mrmashWrapper} when it has to fit,
-#'   and retained in the payload for mvSuSiE prior reconstruction.
+#'   covariance matrices (\code{U}), and of the mash prior's residual
+#'   correlation (\code{residualCorrelation}); forwarded to
+#'   \code{mrmashWrapper} when it has to fit, and retained in the payload for
+#'   mvSuSiE prior reconstruction.
 #' @export
 mrmashWeights <- function(
     mrmashFit = NULL,
@@ -961,18 +1001,45 @@ mrmashWeights <- function(
 #'
 #' @param stat A list with \code{z} (variants x conditions matrix),
 #'   \code{n} (per-context numeric vector or scalar) and \code{variantNames}.
-#'   May also include \code{Bhat}, \code{Shat} matrices.
+#'   May also include \code{Bhat}, \code{Shat} matrices, which with
+#'   \code{covY} put the fit on their scale (without \code{covY} it is on
+#'   the standardized scale of \code{z}: effects per standard deviation of
+#'   the variant and of the condition), and
+#'   \code{sampleGroups}, one label per column of \code{z} naming the
+#'   samples it is measured on (such as its study): conditions with
+#'   different labels are fitted as different samples even when they share
+#'   an LD reference; and \code{h2}, one heritability per column of
+#'   \code{z} (\code{NA} for none), which sets each condition's residual
+#'   variance to \eqn{1 - h^2} of its variance, as SuSiE-RSS's residual
+#'   variance, with the correlations of \code{covY} (a given \code{V}
+#'   wins).
 #' @param ldReference The LD reference the statistics' variants are matched
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
-#'   \code{\link{LdMatrix}}. \code{mr.mash.rss} takes an LD matrix, which is
-#'   formed from the reference over these variants; it is not read when
-#'   \code{mrmashRssFit} is supplied.
+#'   \code{\link{LdMatrix}}. \code{mr.mash.rss} is given the LD over these
+#'   variants: a factor of it for a genotype panel or a
+#'   \code{GenotypeMixture} (its \code{X}), so the variants x variants
+#'   matrix is never formed, and the matrix of an \code{LdMatrix} (its
+#'   \code{R}). It is not read when
+#'   \code{mrmashRssFit} is supplied. Conditions measured on different
+#'   samples, such as studies of different ancestries, take a list of one
+#'   reference per column of \code{stat$z}, the same reference for the
+#'   conditions of one study. Each reference's LD is then taken over the
+#'   variants its conditions carry (a non-missing z-score in any of them)
+#'   that it holds, a variant they lack carrying no information in them,
+#'   as factors when every reference has one and as matrices otherwise;
+#'   the conditions on different references, or with different
+#'   \code{stat$sampleGroups}, are fitted as different samples, with a
+#'   residual covariance \code{V} and \code{covY} of zero between them, and
+#'   the conditions of one sample share the median of their sample sizes.
 #' @param mrmashRssFit Optional pre-fitted \code{mr.mash.rss} object; skips
 #'   fitting when supplied.
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
 #'   raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
-#'   alongside the canonical mixture.
+#'   alongside the canonical mixture. It may also carry
+#'   \code{residualCorrelation}, the residual correlation of the mash prior
+#'   \code{U} comes from (conditions x conditions), the default \code{V} and
+#'   \code{covY}.
 #' @param canonicalPriorMatrices Logical. When TRUE (default), include the
 #'   standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
 #'   When FALSE, \code{dataDrivenPriorMatrices} must be supplied.
@@ -980,10 +1047,20 @@ mrmashWeights <- function(
 #'   canonical / data-driven construction.
 #' @param w0 Optional prior mixture weights; defaults to \code{computeW0(Bhat,
 #'   length(S0))}.
-#' @param V Optional residual covariance matrix (K x K). When NULL, defaults to
-#'   the identity matrix of size K.
-#' @param covY Optional response covariance matrix (K x K). When NULL, defaults
-#'   to the identity matrix of size K.
+#' @param V Optional residual covariance matrix (K x K). When NULL, the
+#'   residual variances \code{stat$h2} implies, or without it
+#'   \code{mr.mash.rss}'s default, \code{covY} (its correlations on the
+#'   standardized scale).
+#' @param covY Optional response covariance matrix (K x K). When NULL, the
+#'   residual correlation of the mash prior, \code{dataDrivenPriorMatrices$
+#'   residualCorrelation} (\code{\link{mashPipeline}}), zero between
+#'   conditions on different references, which are fitted as different
+#'   samples; without one, \code{mr.mash.rss} estimates it from the
+#'   z-scores of the variants near-null (\eqn{|z| < 2}) in every condition
+#'   on one reference, over the variants their reference holds, by mashr's
+#'   \code{estimate_null_correlation_simple()} (fewer than
+#'   \eqn{\max(2K_g, 20)} such variants, for the \eqn{K_g} conditions on a
+#'   reference, give the identity there, with a warning).
 #' @param fitRetention How much of the mr.mash fit is kept as the
 #'   \code{"fit"} attribute of the returned weights. \code{"none"} (default)
 #'   attaches nothing. \code{"slim"} keeps what \code{fineMappingPipeline}
@@ -1035,7 +1112,7 @@ mrmashRssWeights <- function(
     if (is.null(mrmashRssFit)) {
         mrmashRssFit <- .mrmashRssComputeFit(
             stat,
-            .rssLdMatrix(stat, ldReference, "mrmashRssWeights"),
+            .rssConditionLd(stat, ldReference, "mrmashRssWeights"),
             dataDrivenPriorMatrices,
             canonicalPriorMatrices,
             S0,
@@ -1064,8 +1141,12 @@ mrmashRssWeights <- function(
     }
 }
 
-# Derive the (Z, K, nVec, Bhat, Shat) inputs from a multi-context stat list.
+# Derive the (Z, K, nVec, Bhat, Shat) inputs from a multi-context stat list:
+# Bhat and Shat, unless the statistics carry them, from z and the sample
+# size of each variant in each condition (.mrmashRssSampleSizes()), and
+# nVec, each condition's median sample size.
 # @noRd
+#' @importFrom matrixStats colMedians
 .mrmashRssStats <- function(stat) {
     Z <- if (is.matrix(stat$z)) stat$z else as.matrix(stat$z)
     if (ncol(Z) < 2) {
@@ -1076,14 +1157,36 @@ mrmashRssWeights <- function(
         abort(msg)
     }
     K <- ncol(Z)
-    nVec <- if (length(stat$n) > 1) stat$n else rep(stat$n, K)
-    Bhat <- if (!is.null(stat$Bhat)) stat$Bhat else sweep(Z, 2, sqrt(nVec), "/")
-    Shat <- if (!is.null(stat$Shat)) {
-        stat$Shat
-    } else {
-        matrix(1 / sqrt(rep(nVec, each = nrow(Z))), nrow = nrow(Z), ncol = K)
+    nMat <- .mrmashRssSampleSizes(stat$n, nrow(Z), K)
+    list(
+        Z = Z,
+        K = K,
+        nVec = colMedians(nMat),
+        Bhat = stat$Bhat %||% (Z / sqrt(nMat)),
+        Shat = stat$Shat %||% (1 / sqrt(nMat))
+    )
+}
+
+# The statistics' sample sizes (`n`) as a variants x conditions matrix, from
+# one for all, one per condition, one per variant (the same in every
+# condition), or that matrix. A vector as long as both the conditions and
+# the variants is read as one per condition.
+# @noRd
+.mrmashRssSampleSizes <- function(n, p, K) {
+    if (is.matrix(n)) {
+        assertMatrix(n, nrows = p, ncols = K, .var.name = "stat$n")
+        return(n)
     }
-    list(Z = Z, K = K, nVec = nVec, Bhat = Bhat, Shat = Shat)
+    if (length(n) %in% c(1L, K)) {
+        return(matrix(n, p, K, byrow = TRUE))
+    }
+    if (length(n) == p) {
+        return(matrix(n, p, K))
+    }
+    abort(glue(
+        "mrmashRssWeights: stat$n must be one sample size, one per ",
+        "condition ({K}), one per variant ({p}), or a {p} x {K} matrix."
+    ))
 }
 
 # Fit mr.mash.rss, defaulting the prior / w0 / V / covY when not supplied.
@@ -1099,41 +1202,79 @@ mrmashRssWeights <- function(
     covY,
     dots
 ) {
-    ss <- .mrmashRssStats(stat)
+    ss <- .mrmashRssStats(.rssCarriedStat(stat, LD))
+    residual <- .mrmashRssResidual(stat, LD, dataDrivenPriorMatrices, V, covY)
+    # The grid is in units of the residual standard deviations V starts from:
+    # covY's on the original scale when V is not given, else 1 (a correlation)
     prior <- .mrmashRssDefaults(
         ss,
         dataDrivenPriorMatrices,
         canonicalPriorMatrices,
         S0,
         w0,
-        V,
-        covY
+        gridSd = .mrmashGridSd(
+            dots,
+            residual$V %||% if (residual$originalScale) residual$covY
+        )
     )
-    # mr.mash.rss expects either Z or (Bhat, Shat) but not both; prefer
-    # Bhat/Shat. n must be a scalar (mr.mash.rss contract); use the median.
-    callArgs <- c(
+    callArgs <- .mrmashRssCallArgs(
+        ss,
+        .rssFitZ(stat, LD),
+        LD,
+        residual,
+        prior,
+        dots
+    )
+    .engineRequire(
+        "mr.mashr::mr.mash.rss",
+        names(callArgs),
+        "mrmashRssWeights()"
+    )
+    .rssQuietMissingZ(exec(mr.mashr::mr.mash.rss, !!!callArgs))
+}
+
+# mr.mash.rss's arguments: the statistics (`ss`, .mrmashRssStats(), or the
+# z-scores `z` the fit reads, .rssFitZ()) on the fit's scale, the
+# covariances (`residual`, .mrmashRssResidual()), the prior (`prior`,
+# .mrmashRssDefaults()) and the LD (`LD`), then the caller's options
+# (`dots`).
+# @noRd
+.mrmashRssCallArgs <- function(ss, z, LD, residual, prior, dots) {
+    # On one reference, n is one sample's: the median of the conditions'.
+    # The LD is its matrix (R) or, unformed, its factor (X).
+    c(
+        .mrmashRssEffects(ss, z, residual$originalScale),
         list(
-            Bhat = ss$Bhat,
-            Shat = ss$Shat,
-            R = LD,
-            n = as.numeric(stats::median(ss$nVec)),
-            covY = prior$covY,
-            V = prior$V,
+            n = LD$n %||% as.numeric(stats::median(ss$nVec)),
             S0 = prior$S0,
             w0 = prior$w0,
             # One thread: see .mrmashUnavailable().
             nthreads = 1L
         ),
+        # The conditions' sample groups: mr.mash.rss would otherwise take
+        # those on one reference with one n as one sample. The prior is
+        # relative to the residual standard deviations unless `dots` says,
+        # where mr.mashr can (.mrmashRelativeS0()).
+        compact(list(
+            covY = residual$covY,
+            V = residual$V,
+            R = LD$R,
+            X = LD$X,
+            sample_groups = LD$group,
+            relative_S0 = if (
+                is.null(as.list(dots)$relative_S0) && .mrmashRelativeS0()
+            ) {
+                TRUE
+            }
+        )),
         # `dots` is the caller's MrmashOptions() record; c() would append it as
         # one opaque element instead of splicing its entries.
         as.list(dots)
     )
-    exec(mr.mashr::mr.mash.rss, !!!callArgs)
 }
 
-# The prior (S0, w0) and the residual and Y covariances (V, covY) mr.mash.rss
-# is given: each as supplied, else its default for the statistics `ss`
-# (.mrmashRssStats()).
+# The prior (S0, w0) mr.mash.rss is given: each as supplied, else its default
+# for the statistics `ss` (.mrmashRssStats()).
 # @noRd
 .mrmashRssDefaults <- function(
     ss,
@@ -1141,28 +1282,77 @@ mrmashRssWeights <- function(
     canonicalPriorMatrices,
     S0,
     w0,
-    V,
-    covY
+    gridSd = 1
 ) {
-    if (is.null(S0)) {
-        S0 <- buildMrmashPriorMatrices(
-            Bhat = ss$Bhat,
-            Shat = ss$Shat,
+    priorS0 <- S0 %||%
+        buildMrmashPriorMatrices(
+            Bhat = t(t(ss$Bhat) / gridSd),
+            Shat = t(t(ss$Shat) / gridSd),
             K = ss$K,
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             canonicalPriorMatrices = canonicalPriorMatrices
         )$S0
+    list(S0 = priorS0, w0 = w0 %||% computeW0(ss$Bhat, length(priorS0)))
+}
+
+# The residual and Y covariances mr.mash.rss is given, and the scale of its
+# fit: the original scale of the statistics' Bhat and Shat when covY is
+# given, else the standardized scale of their z-scores. covY is as supplied,
+# else the residual correlation the run's mash prior was fitted with, zero
+# between conditions on different LD references (`LD$group`), which are
+# fitted as different samples; without either, mr.mash.rss estimates it
+# from the near-null z-scores of the conditions on each reference. V is as
+# supplied, else each condition's residual variance under its heritability
+# (`stat$h2`, .rssResidualVariances()), which mr.mash.rss gives covY's
+# correlations; without either, mr.mash.rss starts from covY. A mr.mashr
+# that predates fits across studies (.mrmashFitsStudies()) neither
+# estimates covY nor takes V's variances alone: each is then the identity,
+# as before, and a heritability cannot be used.
+# @noRd
+#' @importFrom checkmate assertMatrix
+.mrmashRssResidual <- function(stat, LD, dataDrivenPriorMatrices, V, covY) {
+    K <- ncol(as.matrix(stat$z))
+    mash <- if (is.null(covY)) dataDrivenPriorMatrices$residualCorrelation
+    if (!is.null(mash)) {
+        assertMatrix(
+            mash,
+            nrows = K,
+            ncols = K,
+            .var.name = "dataDrivenPriorMatrices$residualCorrelation"
+        )
     }
-    if (is.null(w0)) {
-        w0 <- computeW0(ss$Bhat, length(S0))
+    originalScale <- !is.null(covY) &&
+        !is.null(stat$Bhat) &&
+        !is.null(stat$Shat)
+    variance <- if (originalScale) diag(covY) else 1
+    fitsStudies <- .mrmashFitsStudies()
+    if (!fitsStudies && is.null(V) && !is.null(stat$h2)) {
+        abort(glue(
+            "mrmashRssWeights() with a heritability (`h2`) needs a newer ",
+            "mr.mashr than the installed mr.mashr ",
+            "{packageVersion('mr.mashr')}."
+        ))
     }
-    if (is.null(V)) {
-        V <- diag(ss$K)
+    identity <- if (!fitsStudies) diag(K)
+    list(
+        covY = covY %||%
+            .rssMaskBetweenRefs(unname(mash), LD$group) %||%
+            identity,
+        V = V %||% .rssResidualVariances(stat$h2, variance) %||% identity,
+        originalScale = originalScale
+    )
+}
+
+# The statistics mr.mash.rss fits: their Bhat and Shat (`ss`,
+# .mrmashRssStats()) on the original scale, else their z-scores (`z`,
+# .rssFitZ()), whose effects are per standard deviation of the variant and
+# of the condition.
+# @noRd
+.mrmashRssEffects <- function(ss, z, originalScale) {
+    if (originalScale) {
+        return(list(Bhat = ss$Bhat, Shat = ss$Shat))
     }
-    if (is.null(covY)) {
-        covY <- diag(ss$K)
-    }
-    list(S0 = S0, w0 = w0, V = V, covY = covY)
+    list(Z = z)
 }
 
 
@@ -1219,18 +1409,35 @@ mrmashRssWeights <- function(
 #'   their \code{backend}, and each engine takes its own constructor:
 #'   \code{QggOptions} for qgg on either path, \code{BglrOptions} for BGLR,
 #'   \code{HibayesOptions} for hibayes on individual-level data and
-#'   \code{HibayesRssOptions} on summary statistics, and
-#'   \code{BayesAlphabetRssOptions} for pecotmr's own summary-statistics
-#'   sampler. Their wrappers set the iterations, burn-in, thinning and prior
-#'   inclusion probability themselves (\code{nIter}, \code{nBurnin},
-#'   \code{thin}, \code{pi}), so every constructor refuses its engine's
-#'   spelling of them, and hibayes' \code{seed} (drawn from R's random
-#'   number generator) and \code{threads} (one). A wrapper's \code{h2}
-#'   reaches its engine in that engine's spelling: \code{h2} for qgg and
-#'   pecotmr's sampler, \code{R2} for BGLR, and for hibayes, which fixes its
-#'   own at 0.5, the variances \code{vg} and \code{ve}. The constructors
+#'   \code{HibayesRssOptions} on summary statistics. Their wrappers set the
+#'   iterations, burn-in, thinning and prior inclusion probability
+#'   themselves (\code{nIter}, \code{nBurnin}, \code{thin}, \code{pi}), so
+#'   every constructor refuses its engine's spelling of them, and hibayes'
+#'   \code{seed} (drawn from R's random number generator) and
+#'   \code{threads} (one). A wrapper's \code{h2} reaches its engine in that
+#'   engine's spelling: \code{h2} for qgg, \code{R2} for BGLR, and for
+#'   hibayes, which fixes its own at 0.5, the variances \code{vg} and
+#'   \code{ve}. The constructors
 #'   still take those, for a run that does not set \code{h2}; setting both
 #'   is an error.
+#'
+#'   \code{BglrOptions} serves both of BGLR's functions: \code{BGLR()}, which
+#'   fits one phenotype, and \code{Multitrait()}, which \code{bayesC} and
+#'   \code{bayesN} run on several conditions at once (see
+#'   \code{\link{bayesAlphabetWeights}}). It takes any option either one
+#'   takes, and each call receives those it has, so a fit of one phenotype
+#'   ignores \code{Multitrait()}'s \code{resCov} and \code{intercept}, and a
+#'   joint fit ignores \code{BGLR()}'s \code{S0}, \code{df0} and the rest.
+#'   It also takes \code{Cov}, the covariance of the effects across
+#'   conditions, which goes into \code{Multitrait()}'s linear term as BGLR
+#'   spells it there: \code{list(type = "UN")} (the default, with an
+#'   inverse-Wishart prior), \code{"DIAG"}, \code{"FA"} or \code{"REC"}, with
+#'   the prior settings that type takes (\code{df0}, \code{S0}, and the
+#'   logical pattern \code{M} for \code{"FA"} and \code{"REC"}). BGLR draws
+#'   the covariance afresh every iteration under that prior; it has no way
+#'   to hold one fixed, so a large \code{df0} with \code{S0} set to the
+#'   matrix it should stay near is the closest to supplying it. A matrix
+#'   given there must have a row and a column per condition fitted.
 #'
 #'   \code{GlmnetOptions}, \code{NcvregOptions} and \code{DprOptions} cannot
 #'   check for an UNKNOWN name: \code{cv.glmnet}, \code{cv.ncvreg} and
@@ -1277,6 +1484,20 @@ mrmashRssWeights <- function(
 #'   its spectral norm. Default \code{1e-3}. Below it, as near-duplicate
 #'   contexts make it, the eigenvalues are raised to the floor, the covariance
 #'   is not updated during the fit, and a warning says so.
+#'
+#'   It also takes \code{vInitMethod}, likewise the wrapper's: where the
+#'   residual covariance starts. \code{"data"} (the default) starts it at the
+#'   covariance of Y; \code{"mash"} at the residual correlation of the mash
+#'   prior (\code{\link{mashPipeline}}), which \code{twasWeightsPipeline}
+#'   passes in \code{dataDrivenPriorMatrices}, scaled by the standard
+#'   deviations of Y's columns. Either start is zero for a pair of conditions
+#'   never observed together, and is floored by \code{vEigenFloor}.
+#'
+#'   \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
+#'   only when \code{dprGibbs} is fitted across studies as SDPRX fits
+#'   ancestries (\code{\link{twasWeightsPipeline}}'s \code{studyCoupling}):
+#'   which sets of the studies a component's effects lie in, and their
+#'   correlation (see \code{\link{sdpr}}). A single study ignores them.
 #' @param ... Arguments for the engine, under its own names.
 #' @return A \code{\link{MethodOptions}} object.
 #' @examples
@@ -1395,12 +1616,33 @@ BglrOptions <- function(...) {
         "BglrOptions"
     )
     .newMethodOptions(
-        "BGLR::BGLR",
+        .BGLR_CALLEES,
         defaults = list(),
-        extra = list(...),
+        extra = extra,
         label = "BglrOptions",
-        engine = "bglr"
+        engine = "bglr",
+        accepted = .bglrAcceptedNames(),
+        filtered = TRUE
     )
+}
+
+# BGLR's two functions: BGLR() on one phenotype, Multitrait() on several
+# conditions at once. bglrWeights() hands each only the options it takes
+# (.bglrOwnArgs()), so one record serves both.
+# @noRd
+.BGLR_CALLEES <- c("BGLR::BGLR", "BGLR::Multitrait")
+
+# The names BglrOptions() takes: either function's arguments, and the
+# settings of a Multitrait() linear term (.bglrTermSettings()), which
+# bglrWeights() moves into that term. NULL, checking nothing, where BGLR's
+# arguments cannot be read.
+# @noRd
+.bglrAcceptedNames <- function() {
+    formalNames <- .engineAcceptedNames(.BGLR_CALLEES, filtered = TRUE)
+    if (is.null(formalNames)) {
+        return(NULL)
+    }
+    c(formalNames, fn_fmls_names(.bglrTermSettings))
 }
 
 #' @rdname twasEngineOptions
@@ -1460,35 +1702,6 @@ HibayesRssOptions <- function(...) {
         extra = list(...),
         label = "HibayesRssOptions",
         engine = "hibayesRss"
-    )
-}
-
-#' @rdname twasEngineOptions
-#' @export
-BayesAlphabetRssOptions <- function(...) {
-    extra <- list(...)
-    .configRefuseOwned(
-        extra,
-        c(
-            bhat = "supplied from the data by the pipeline",
-            ldFactor = "supplied from the data by the pipeline",
-            n = "supplied from the data by the pipeline",
-            nPerVariant = "supplied from the data by the pipeline",
-            method = "the wrapper's `method` (the function called)",
-            nIter = "the wrapper's `nIter`",
-            nBurnin = "the wrapper's `nBurnin`",
-            thin = "the wrapper's `thin`",
-            pi = "the wrapper's `pi`",
-            shrinkCorr = "the wrapper's `shrinkCorr`"
-        ),
-        "BayesAlphabetRssOptions"
-    )
-    .newMethodOptions(
-        "pecotmr::bayesAlphabetRss",
-        defaults = list(),
-        extra = list(...),
-        label = "BayesAlphabetRssOptions",
-        engine = "bayesAlphabetRss"
     )
 }
 
@@ -1807,6 +2020,7 @@ MrmashOptions <- function(...) {
     )
     .configRefuseUnavailable(extra, .mrmashUnavailable(), "MrmashOptions")
     .mrmashCheckVEigenFloor(extra$vEigenFloor)
+    .mrmashCheckVInitMethod(extra$vInitMethod)
     .newMethodOptions(
         "mr.mashr::mr.mash",
         defaults = list(),
@@ -1817,13 +2031,28 @@ MrmashOptions <- function(...) {
         # routes the prior-covariance names to MrmashPriorParam() and the rest
         # to mr.mash. So the accepted set is both, read from the live
         # formals of each rather than transcribed, plus the wrapper's own
-        # vEigenFloor, which never reaches mr.mash.
+        # vEigenFloor and vInitMethod, which never reach mr.mash.
         accepted = unique(c(
             .engineAcceptedNames("mr.mashr::mr.mash"),
             names(formals(MrmashPriorParam)),
-            "vEigenFloor"
+            "vEigenFloor",
+            "vInitMethod"
         ))
     )
+}
+
+# @noRd
+.mrmashCheckVInitMethod <- function(vInitMethod) {
+    if (is.null(vInitMethod)) {
+        return(invisible(NULL))
+    }
+    isMethod <- is.character(vInitMethod) &&
+        length(vInitMethod) == 1L &&
+        is_in(vInitMethod, c("data", "mash"))
+    if (!isMethod) {
+        abort("MrmashOptions: `vInitMethod` must be \"data\" or \"mash\".")
+    }
+    invisible(NULL)
 }
 
 # @noRd
@@ -1851,7 +2080,9 @@ MrmashRssOptions <- function(...) {
         c(
             Bhat = "supplied from the data by the pipeline",
             Shat = "supplied from the data by the pipeline",
+            Z = "supplied from the data by the pipeline",
             R = "supplied from the data by the pipeline",
+            X = "supplied from the data by the pipeline",
             n = "supplied from the data by the pipeline",
             covY = "supplied from the data by the pipeline",
             V = "supplied from the data by the pipeline",
@@ -2296,54 +2527,40 @@ mrashWeights <- function(
     individual = list(
         bayesA = c(qgg = "QggOptions", hibayes = "HibayesOptions"),
         bayesB = c(bglr = "BglrOptions", hibayes = "HibayesOptions"),
-        bayesC = c(qgg = "QggOptions", hibayes = "HibayesOptions"),
+        bayesC = c(
+            qgg = "QggOptions",
+            hibayes = "HibayesOptions",
+            bglr = "BglrOptions"
+        ),
         bayesL = c(
             qgg = "QggOptions",
             bglr = "BglrOptions",
             hibayes = "HibayesOptions"
         ),
-        bayesN = c(qgg = "QggOptions", hibayes = "HibayesOptions"),
-        bayesR = c(qgg = "QggOptions", hibayes = "HibayesOptions")
-    ),
-    # On summary statistics the first is the default for an LD matrix; a
-    # genotype reference defaults to pecotmr (.rssBackend()).
-    sumstat = list(
-        bayesA = c(
-            qgg = "QggOptions",
-            hibayes = "HibayesRssOptions",
-            pecotmr = "BayesAlphabetRssOptions"
-        ),
-        bayesB = c(
-            hibayes = "HibayesRssOptions",
-            pecotmr = "BayesAlphabetRssOptions"
-        ),
-        bayesC = c(
-            qgg = "QggOptions",
-            hibayes = "HibayesRssOptions",
-            pecotmr = "BayesAlphabetRssOptions"
-        ),
-        bayesL = c(
-            hibayes = "HibayesRssOptions",
-            qgg = "QggOptions",
-            pecotmr = "BayesAlphabetRssOptions"
-        ),
         bayesN = c(
             qgg = "QggOptions",
-            hibayes = "HibayesRssOptions",
-            pecotmr = "BayesAlphabetRssOptions"
+            hibayes = "HibayesOptions",
+            bglr = "BglrOptions"
         ),
-        bayesR = c(
-            qgg = "QggOptions",
-            hibayes = "HibayesRssOptions",
-            pecotmr = "BayesAlphabetRssOptions"
-        )
+        bayesR = c(qgg = "QggOptions", hibayes = "HibayesOptions")
+    ),
+    # On summary statistics every engine reads the LD matrix, formed from the
+    # panel for a genotype reference. bayesB has hibayes alone there.
+    sumstat = list(
+        bayesA = c(qgg = "QggOptions", hibayes = "HibayesRssOptions"),
+        bayesB = c(hibayes = "HibayesRssOptions"),
+        bayesC = c(qgg = "QggOptions", hibayes = "HibayesRssOptions"),
+        bayesL = c(hibayes = "HibayesRssOptions", qgg = "QggOptions"),
+        bayesN = c(qgg = "QggOptions", hibayes = "HibayesRssOptions"),
+        bayesR = c(qgg = "QggOptions", hibayes = "HibayesRssOptions")
     )
 )
 
-# Every method with several engines on a data path: the Bayesian alphabet
-# (.alphabetBackends), and on summary statistics the lasso and LDpred2. Each
-# engine maps to its Options constructor, NA where it takes none. On summary
-# statistics the first engine is an LD matrix's default (.rssBackend()).
+# The engines of every method with a `backend` on a data path: the Bayesian
+# alphabet (.alphabetBackends), and on summary statistics the lasso. Each
+# engine maps to its Options constructor; the first is the default. A method
+# with one engine there (bayesB on summary statistics) leaves nothing to
+# choose (.methodHasBackends()).
 # @noRd
 .methodBackends <- list(
     individual = .alphabetBackends$individual,
@@ -2353,18 +2570,15 @@ mrashWeights <- function(
             lasso = c(
                 pecotmr = "LassosumOptions",
                 bigsnpr = "BigsnprOptions"
-            ),
-            ldpred2Auto = c(bigsnpr = NA_character_, pecotmr = NA_character_),
-            ldpred2Grid = c(bigsnpr = NA_character_, pecotmr = NA_character_)
+            )
         )
     )
 )
 
-# The summary-statistics methods whose pecotmr engine reads only a genotype
-# reference's factor of the LD: the alphabet's sampler and LDpred2's.
+# Whether `method` has engines to choose between on a data path.
 # @noRd
-.rssFactorOnlyMethods <- function() {
-    c(names(.alphabetBackends$sumstat), "ldpred2Auto", "ldpred2Grid")
+.methodHasBackends <- function(method, path) {
+    length(.methodBackends[[path]][[method]]) > 1L
 }
 
 # Each engine's name for each method. hibayes takes the variants that update
@@ -2378,7 +2592,12 @@ mrashWeights <- function(
         bayesN = "bayesN",
         bayesR = "bayesR"
     ),
-    bglr = c(bayesB = "BayesB", bayesL = "BL"),
+    bglr = c(
+        bayesB = "BayesB",
+        bayesC = "BayesC",
+        bayesL = "BL",
+        bayesN = "BRR"
+    ),
     hibayes = c(
         bayesA = "BayesA",
         bayesB = "BayesBpi",
@@ -2401,10 +2620,16 @@ mrashWeights <- function(
     ),
     sumstat = c(
         qgg = ".alphabetQggRssFit",
-        hibayes = ".alphabetHibayesRssFit",
-        pecotmr = ".alphabetPecotmrRssFit"
+        hibayes = ".alphabetHibayesRssFit"
     )
 )
+
+# BGLR's models with a form in its Multitrait(), which fits several
+# conditions' phenotypes at once: a spike and slab whose slab is correlated
+# across conditions, and a Gaussian prior with a covariance across them.
+# BayesB and BL have none.
+# @noRd
+.bglrMultitraitModels <- c(BayesC = "SpikeSlab", BRR = "BRR")
 
 # The prior proportion of non-null effects, for the methods that have one.
 # @noRd
@@ -2431,8 +2656,22 @@ mrashWeights <- function(
 #' spelling, and everything else goes through \code{methodArgs}, built with
 #' the backend's own constructor.
 #'
+#' On \code{"bglr"}, \code{bayesC} and \code{bayesN} also fit several
+#' conditions at once: given a matrix \code{y}, one column per condition,
+#' they run BGLR's \code{Multitrait()}. \code{bayesC} becomes its spike and
+#' slab, with each condition's own inclusion indicators and a slab
+#' correlated across conditions, and \code{bayesN} its Gaussian prior with a
+#' covariance across conditions. A missing phenotype is drawn within the
+#' sampler, so each condition may be measured on different samples, and
+#' \code{pi} starts every condition's inclusion probability. The covariance
+#' of the effects across conditions and the residual covariance are learned,
+#' under the structures and priors \code{BglrOptions(Cov = )} and
+#' \code{BglrOptions(resCov = )} give them.
+#'
 #' @param X A numeric matrix of genotypes (samples x variants).
-#' @param y A numeric vector of phenotypes, one per row of \code{X}.
+#' @param y A numeric vector of phenotypes, one per row of \code{X}; or, for
+#'   \code{bayesC} and \code{bayesN} on \code{"bglr"}, a matrix with one
+#'   column per condition, which may hold missing values (see Description).
 #' @param method The prior: \code{"bayesA"}, \code{"bayesB"},
 #'   \code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.
 #' @param backend The engine, one the method has (see Description);
@@ -2448,7 +2687,9 @@ mrashWeights <- function(
 #'   \code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
 #'   \code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
 #'   0.001 and capped at 0.99, and an estimate that cannot be made leaves
-#'   the engine's default, with a warning. qgg reads it as \code{h2} and
+#'   the engine's default, with a warning. For a matrix \code{y} the
+#'   estimator runs on each column's observed samples and their mean is
+#'   used, as \code{Multitrait()} takes one. qgg reads it as \code{h2} and
 #'   BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
 #'   genetic and residual variances (\code{vg}, \code{ve}) its defaults
 #'   would give at \code{h2}. Setting that engine's spelling through
@@ -2472,15 +2713,15 @@ mrashWeights <- function(
 #'   A bare list is refused: it cannot be checked against the engine, so a
 #'   misspelled option would be silently ignored.
 #' @return A numeric vector of weights, one per variant (column of
-#'   \code{X}); columns dropped for zero variance receive weight 0. Unless
-#'   \code{fitRetention = "none"} the fit is attached as attribute
+#'   \code{X}), or for a matrix \code{y} a matrix of them with one column
+#'   per condition; columns dropped for zero variance receive weight 0.
+#'   Unless \code{fitRetention = "none"} the fit is attached as attribute
 #'   \code{"fit"}.
 #' @examples
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' y <- eqtlRegionExample$yRes
 #' bayesAlphabetWeights(X, y, "bayesR", nIter = 1000, nBurnin = 200)
-#' @importFrom checkmate assertVector
 #' @export
 bayesAlphabetWeights <- function(
     X,
@@ -2505,23 +2746,36 @@ bayesAlphabetWeights <- function(
         .alphabetBackends$individual[[method]][[backend]],
         backend
     )
-    assertVector(y, len = nrow(X))
+    response <- .alphabetResponse(y, X, method, backend)
     keep <- .dropZeroVariance(X, "bayesAlphabetWeights")
     XKeep <- X[, keep, drop = FALSE]
     fit <- exec(
         .alphabetFitters$individual[[backend]],
         X = XKeep,
-        y = y,
+        y = response,
         method = method,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
         pi = pi,
-        h2 = .alphabetIndividualH2(h2, XKeep, y),
+        h2 = .alphabetIndividualH2(h2, XKeep, response),
         methodArgs = methodArgs
     )
+    .alphabetResult(fit, backend, fitRetention, keep, X, response)
+}
+
+# A fit's weights over every column of X (.weightsOnColumns()), with its
+# posterior summaries, or the engine's whole fit, attached unless
+# `fitRetention` is "none".
+# @noRd
+.alphabetResult <- function(fit, backend, fitRetention, keep, X, response) {
     posterior <- .alphabetPosterior(fit, backend)
-    weights <- replace(rep(0, ncol(X)), keep, posterior$coef)
+    weights <- .weightsOnColumns(
+        posterior$coef,
+        keep,
+        colnames(X),
+        colnames(response)
+    )
     if (identical(fitRetention, "none")) {
         return(weights)
     }
@@ -2529,10 +2783,85 @@ bayesAlphabetWeights <- function(
     `attr<-`(weights, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
 }
 
+# The phenotypes a fit reads: a vector, one per row of X, or, for a method
+# whose engine fits several conditions at once (.alphabetMultitraitMethods()
+# on BGLR), a matrix with a column per condition. A one-column matrix is that
+# column.
+# @noRd
+#' @importFrom checkmate assertMatrix assertVector
+.alphabetResponse <- function(y, X, method, backend) {
+    if (!is.matrix(y)) {
+        assertVector(y, len = nrow(X))
+        return(y)
+    }
+    assertMatrix(y, mode = "numeric", nrows = nrow(X), min.cols = 1L)
+    if (ncol(y) == 1L) {
+        return(y[, 1L])
+    }
+    multitrait <- .alphabetMultitraitMethods()
+    if (!identical(backend, "bglr") || !is_in(method, multitrait)) {
+        abort(glue(
+            "bayesAlphabetWeights: only backend = \"bglr\" fits a matrix ",
+            "`y` (several conditions at once), for ",
+            "{str_flatten(multitrait, ' and ')}; {method} on {backend} ",
+            "takes a vector."
+        ))
+    }
+    y
+}
+
+# The alphabet methods BGLR also fits on several conditions at once: those
+# whose BGLR model has a Multitrait() form (.bglrMultitraitModels).
+# @noRd
+.alphabetMultitraitMethods <- function() {
+    models <- .alphabetEngineMethods$bglr
+    names(models)[is_in(models, names(.bglrMultitraitModels))]
+}
+
+# Weights over every column of X from a fit over the kept ones (`keep`), zero
+# at a dropped column. A fit of several conditions gives a matrix, with a row
+# per column of X (`ids`) and a column per condition.
+# @noRd
+.weightsOnColumns <- function(coef, keep, ids, conditions = NULL) {
+    if (!is.matrix(coef)) {
+        return(replace(rep(0, length(keep)), keep, coef))
+    }
+    rowOf <- replace(cumsum(keep), !keep, nrow(coef) + 1L)
+    `dimnames<-`(
+        rbind(coef, 0)[rowOf, , drop = FALSE],
+        list(ids, conditions)
+    )
+}
+
 # The heritability an individual-level fit starts from (.h2Resolve()), an
-# estimate being made on the variants it fits.
+# estimate being made on the variants it fits. For several conditions an
+# estimator runs on each one's observed samples and the estimates' mean is
+# used, NULL when none could be made.
 # @noRd
 .alphabetIndividualH2 <- function(h2, X, y) {
+    if (!is.matrix(y) || !is.character(h2)) {
+        return(.alphabetConditionH2(h2, X, y))
+    }
+    estimates <- compact(map(
+        seq_len(ncol(y)),
+        .alphabetColumnH2,
+        h2 = h2,
+        X = X,
+        y = y
+    ))
+    if (length(estimates) == 0L) NULL else mean(list_c(estimates))
+}
+
+# Column `k`'s heritability, on the samples it was measured on.
+# @noRd
+.alphabetColumnH2 <- function(k, h2, X, y) {
+    seen <- !is.na(y[, k])
+    .alphabetConditionH2(h2, X[seen, , drop = FALSE], y[seen, k])
+}
+
+# One phenotype's heritability (.h2Resolve()).
+# @noRd
+.alphabetConditionH2 <- function(h2, X, y) {
     .h2Resolve(
         h2,
         .h2IndividualMethods(),
@@ -2579,19 +2908,37 @@ bayesAlphabetWeights <- function(
 
 # A backend's posterior summaries over the variants it fitted: the effects'
 # posterior means and, where it reports them, their posterior inclusion
-# probabilities.
+# probabilities. A fit of several conditions keeps them as matrices, a
+# column per condition.
 # @noRd
 .alphabetPosterior <- function(fit, backend) {
     parts <- switch(
         backend,
         qgg = list(coef = fit$bm, pip = fit$dm),
-        bglr = list(
-            coef = pluck(fit, "ETA", 1L, "b"),
-            pip = pluck(fit, "ETA", 1L, "d")
-        ),
+        bglr = .bglrPosterior(fit),
         hibayes = list(coef = fit$alpha, pip = fit$pip)
     )
-    map(compact(parts), as.numeric)
+    map(compact(parts), .posteriorValues)
+}
+
+# BGLR's posterior means for its one linear term. Multitrait() keeps a
+# condition's effects as `beta`, the slab draw times its inclusion, where
+# BGLR() keeps the effects as `b`.
+# @noRd
+.bglrPosterior <- function(fit) {
+    term <- pluck(fit, "ETA", 1L)
+    list(
+        coef = if (is.matrix(term$beta)) term$beta else term$b,
+        pip = term$d
+    )
+}
+
+# Posterior summaries as plain numbers: a matrix of several conditions' kept
+# whole, anything else (hibayes reports one phenotype's as a one-column
+# matrix) as a vector.
+# @noRd
+.posteriorValues <- function(x) {
+    if (is.matrix(x) && ncol(x) > 1L) unname(x) else as.numeric(x)
 }
 
 # The backend `backend` names for `method` on one data path, or the method's
@@ -2893,14 +3240,18 @@ bayesBWeights <- function(
 #'   normal whose variance every variant shares, through
 #'   \code{\link{bayesAlphabetWeights}}.
 #' @inheritParams bayesAlphabetWeights
-#' @param backend \code{"qgg"} (default) or \code{"hibayes"}.
+#' @param backend \code{"qgg"} (default), \code{"hibayes"} or
+#'   \code{"bglr"}; only \code{"bglr"} takes a matrix \code{y}, fitting its
+#'   conditions jointly (see \code{\link{bayesAlphabetWeights}}).
 #' @param pi The prior proportion of non-null effects, where each engine's
 #'   estimate of it starts. Default \code{0.1}.
 #' @param methodArgs Options for the backend's engine:
 #'   \code{\link{QggOptions}} for qgg, \code{\link{HibayesOptions}} for
-#'   hibayes. \code{NULL} keeps the engine's defaults.
+#'   hibayes, \code{\link{BglrOptions}} for BGLR. \code{NULL} keeps the
+#'   engine's defaults.
 #' @return A numeric vector of weights, one per variant (column of
-#'   \code{X}); columns dropped for zero variance receive weight 0.
+#'   \code{X}), or for a matrix \code{y} a matrix of them with one column
+#'   per condition; columns dropped for zero variance receive weight 0.
 #'   Unless \code{fitRetention = "none"} the fit is attached as
 #'   attribute \code{"fit"}.
 #' @examples
@@ -2912,7 +3263,7 @@ bayesBWeights <- function(
 bayesCWeights <- function(
     X,
     y,
-    backend = c("qgg", "hibayes"),
+    backend = c("qgg", "hibayes", "bglr"),
     pi = 0.1,
     h2 = NULL,
     nIter = 5000,
@@ -2987,12 +3338,16 @@ bayesLWeights <- function(
 #'   mean is the BLUP, a ridge regression, through
 #'   \code{\link{bayesAlphabetWeights}}.
 #' @inheritParams bayesAlphabetWeights
-#' @param backend \code{"qgg"} (default) or \code{"hibayes"}.
+#' @param backend \code{"qgg"} (default), \code{"hibayes"} or
+#'   \code{"bglr"}; only \code{"bglr"} takes a matrix \code{y}, fitting its
+#'   conditions jointly (see \code{\link{bayesAlphabetWeights}}).
 #' @param methodArgs Options for the backend's engine:
 #'   \code{\link{QggOptions}} for qgg, \code{\link{HibayesOptions}} for
-#'   hibayes. \code{NULL} keeps the engine's defaults.
+#'   hibayes, \code{\link{BglrOptions}} for BGLR. \code{NULL} keeps the
+#'   engine's defaults.
 #' @return A numeric vector of weights, one per variant (column of
-#'   \code{X}); columns dropped for zero variance receive weight 0.
+#'   \code{X}), or for a matrix \code{y} a matrix of them with one column
+#'   per condition; columns dropped for zero variance receive weight 0.
 #'   Unless \code{fitRetention = "none"} the fit is attached as
 #'   attribute \code{"fit"}.
 #' @examples
@@ -3004,7 +3359,7 @@ bayesLWeights <- function(
 bayesNWeights <- function(
     X,
     y,
-    backend = c("qgg", "hibayes"),
+    backend = c("qgg", "hibayes", "bglr"),
     h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
@@ -3072,42 +3427,39 @@ bayesRWeights <- function(
 
 # --- Bayesian alphabet on summary statistics --------------------------------
 #
-# qgg and hibayes read the LD as a matrix: given a genotype reference, the
-# matrix is formed from the panel for them. pecotmr's own sampler
-# (bayesAlphabetRss(), on rss_mcmc.h) reads a genotype reference's
-# factor and never forms it, and runs on nothing else; it is the default
-# there, while an LD matrix defaults to the first engine .alphabetBackends
-# lists.
+# qgg and hibayes read the LD as a matrix, formed from the panel for a
+# genotype reference (.alphabetRssDense()). It is formed once, and every
+# chain reads it.
 
 #' Bayesian Alphabet TWAS Weights From Summary Statistics
 #'
 #' Fits a Bayesian alphabet prior to marginal summary statistics and an LD
 #' reference and returns the posterior mean effects. Each method runs on
-#' several engines, chosen by \code{backend}:
+#' the LD matrix through one of these engines, chosen by \code{backend}:
 #' \itemize{
-#'   \item \code{"qgg"}: \code{qgg::gbayes} on the LD matrix, for
-#'     \code{bayesA}, \code{bayesC}, \code{bayesL}, \code{bayesN} and
-#'     \code{bayesR}.
-#'   \item \code{"hibayes"}: \code{hibayes::sbrm} on the LD matrix, for
-#'     every method.
-#'   \item \code{"pecotmr"}: pecotmr's own sampler, on a genotype
-#'     reference's factor of the LD without forming the matrix. Its priors
-#'     follow qgg's for \code{bayesA}, \code{bayesC}, \code{bayesN} and
-#'     \code{bayesR} and hibayes' for \code{bayesB}; \code{bayesL} takes
-#'     Park and Casella's form (hibayes') or Legarra et al.'s (qgg's
-#'     individual-level one), through
-#'     \code{\link{BayesAlphabetRssOptions}}. By default it reads the
-#'     statistics through SDPR's likelihood (Zhou and Zhao 2021), which
-#'     drops the part of the marginal effects the reference LD cannot
-#'     explain; \code{BayesAlphabetRssOptions(ldProjection = NULL)} turns
-#'     that off (see \code{ldProjection} of the internal
-#'     \code{bayesAlphabetRss()}).
+#'   \item \code{"qgg"}: \code{qgg::gbayes}, for \code{bayesA},
+#'     \code{bayesC}, \code{bayesL}, \code{bayesN} and \code{bayesR}.
+#'   \item \code{"hibayes"}: \code{hibayes::sbrm}, for every method.
 #' }
-#' \code{NULL} picks \code{"pecotmr"} for a genotype reference, and for an
-#' LD matrix qgg (\code{bayesA}, \code{bayesC}, \code{bayesN},
-#' \code{bayesR}) or hibayes (\code{bayesB}, \code{bayesL}). qgg and
-#' hibayes run on a genotype reference through the LD matrix formed from
-#' it; pecotmr's sampler does not run on an LD matrix.
+#' \code{NULL} picks qgg for \code{bayesA}, \code{bayesC}, \code{bayesN}
+#' and \code{bayesR}, and hibayes for \code{bayesB} and \code{bayesL}. For a
+#' genotype reference the matrix is formed from its genotypes.
+#'
+#' By default both engines read the statistics through SDPR's likelihood
+#' (\code{ldProjection}), given to each in its own terms: qgg takes the
+#' diagonal of the LD to be 1 and reads per-variant weights in its place,
+#' so it gets the LD at unit diagonal with those weights; hibayes reads
+#' the LD as it is.
+#'
+#' Several chains (\code{nChains}) run the engine once each, from seeds
+#' drawn from R's random number generator, and are combined as
+#' \code{\link{ldpred2AutoWeights}} combines LDpred2-auto's: a chain whose
+#' posterior mean effects' squares sum past twice the squared marginal
+#' effects has diverged and is dropped, and of the rest, those whose fitted
+#' correlations span less than 0.95 times the 95th percentile of the
+#' chains' spans are dropped too; the kept chains' estimates are averaged.
+#' The engines keep their draws to themselves, so a chain is tested on its
+#' posterior mean. A single chain that diverged is returned with a warning.
 #'
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
@@ -3121,7 +3473,7 @@ bayesRWeights <- function(
 #' @param method The prior: \code{"bayesA"}, \code{"bayesB"},
 #'   \code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.
 #' @param backend The engine, one the method has (see Description);
-#'   \code{NULL} picks the default for the LD reference.
+#'   \code{NULL} picks the method's default.
 #' @param h2 The trait's heritability in the window, which sets every
 #'   engine's starting variances and the scales of its priors: \code{NULL}
 #'   (the default) keeps each engine's own, 0.5; a number in [0, 1); or the
@@ -3130,35 +3482,43 @@ bayesRWeights <- function(
 #'   (see \code{\link{estimateH2}}), taking the reference to share no
 #'   samples with the study. It is used floored at 0.001 and capped at 0.99,
 #'   and an estimate that cannot be made leaves the engine's default, with a
-#'   warning. qgg and pecotmr's sampler read it as \code{h2}; hibayes, which
-#'   fixes its own at 0.5, gets the genetic and residual variances
-#'   (\code{vg}, \code{ve}) its defaults would give at \code{h2}. Setting
-#'   that engine's spelling through \code{methodArgs} as well is an error.
+#'   warning. qgg reads it as \code{h2}; hibayes, which fixes its own at
+#'   0.5, gets the genetic and residual variances (\code{vg}, \code{ve}) its
+#'   defaults would give at \code{h2}. Setting that engine's spelling
+#'   through \code{methodArgs} as well is an error.
 #' @inheritParams bayesAlphabetWeights
-#' @param shrinkCorr The LD shrinkage \eqn{c}: every engine reads
-#'   \eqn{cR + (1 - c)I}, qgg and hibayes as the matrix they are given,
-#'   pecotmr's sampler through the factor. Default 0.95, the LDpred2
-#'   vignette's. A reference with fewer samples than the window has variants
-#'   lacks directions the statistics have, and without shrinkage the
-#'   samplers' effects can grow without bound along them (pecotmr's sampler
-#'   also drops those directions by default, through SDPR's likelihood; see
-#'   \code{\link{bayesAlphabetRssWeights}}). A small or
-#'   mismatched reference does better with less, down to 0.4 as the LDpred2
-#'   vignette advises; the study's own genotypes as the reference need none,
-#'   up to 1.
+#' @param shrinkCorr The LD shrinkage \eqn{c}: both engines read
+#'   \eqn{cR + (1 - c)I}. Default 0.95, the LDpred2 vignette's. A reference
+#'   with fewer samples than the window has variants lacks directions the
+#'   statistics have, and without shrinkage the samplers' effects can grow
+#'   without bound along them. A small or mismatched reference does better
+#'   with less, down to 0.4 as the LDpred2 vignette advises; the study's own
+#'   genotypes as the reference need none, up to 1.
+#' @param ldProjection The ridge \eqn{a} of SDPR's likelihood (Zhou and Zhao
+#'   2021), under which both engines read the LD as
+#'   \eqn{R (R + aI)^{-1} R} and the marginal effects as
+#'   \eqn{R (R + aI)^{-1} \hat\beta}, before the shrinkage. Each of R's
+#'   eigen-directions keeps \eqn{\lambda / (\lambda + a)} of the effects, so
+#'   their part outside the reference LD's span, which a reference smaller
+#'   than the window or unlike the study leaves, never enters; that part
+#'   can make the statistics claim more of the trait's variance than any
+#'   phenotype has, which sends the samplers' residual variance negative.
+#'   Default 0.1, SDPR's; \code{NULL} reads the LD and the statistics as
+#'   they are.
+#' @param nChains The number of chains, each the engine run once from its
+#'   own seed and combined as Description says. Default 1.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing, \code{"slim"} and \code{"full"} attach the engine's estimates
-#'   (\code{betaEst}, and where the engine gives them the inclusion
-#'   probabilities \code{pip}, the non-null proportion \code{pi} and the
-#'   residual variance), \code{backend} and the \code{shrinkCorr} used. No
-#'   engine keeps trimmable intermediates, so the two retaining levels
-#'   behave alike.
+#'   (\code{betaEst}, and qgg's inclusion probabilities \code{pip}),
+#'   \code{backend}, the \code{shrinkCorr} and \code{ldProjection} used and,
+#'   with several chains, \code{chains}: each chain's seed, whether it
+#'   diverged and whether it was kept. No engine keeps trimmable
+#'   intermediates, so the two retaining levels behave alike.
 #' @param methodArgs Options for the backend's engine, built with its
 #'   constructor: \code{\link{QggOptions}} for qgg,
-#'   \code{\link{HibayesRssOptions}} for hibayes,
-#'   \code{\link{BayesAlphabetRssOptions}} for pecotmr's sampler. \code{NULL}
-#'   keeps the engine's defaults.
+#'   \code{\link{HibayesRssOptions}} for hibayes. \code{NULL} keeps the
+#'   engine's defaults.
 #' @return A numeric vector of the posterior mean effects on the
 #'   standardized scale, one per variant. Unless \code{fitRetention =
 #'   "none"}, the engine's estimates are attached as attribute \code{"fit"}.
@@ -3194,35 +3554,62 @@ bayesAlphabetRssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
-    fitRetention <- arg_match(fitRetention)
-    method <- arg_match(method, names(.alphabetBackends$sumstat))
-    backend <- .rssBackend(method, backend, ldReference)
-    .assertMcmcSchedule(nIter, nBurnin, thin)
-    .alphabetAssertSampleSize(stat$n, "bayesAlphabetRssWeights")
-    .assertShrinkCorr(shrinkCorr)
-    pi <- .alphabetPi(method, pi)
-    methodArgs <- .backendOptions(
-        methodArgs,
-        .alphabetBackends$sumstat[[method]][[backend]],
-        backend
-    )
-    fit <- exec(
-        .alphabetFitters$sumstat[[backend]],
-        stat = stat,
-        ldReference = ldReference,
-        method = method,
+    retention <- arg_match(fitRetention)
+    prior <- arg_match(method, names(.alphabetBackends$sumstat))
+    engine <- .methodBackend(prior, backend, "sumstat")
+    lds <- list(shrinkCorr = shrinkCorr, ldProjection = ldProjection)
+    .alphabetRssAssert(stat, nIter, nBurnin, thin, lds, nChains)
+    run <- list(
+        fitter = .alphabetFitters$sumstat[[engine]],
+        method = prior,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
-        pi = pi,
+        pi = .alphabetPi(prior, pi),
+        methodArgs = .backendOptions(
+            methodArgs,
+            .alphabetBackends$sumstat[[prior]][[engine]],
+            engine
+        ),
         h2 = .alphabetRssH2(h2, stat, ldReference),
-        shrinkCorr = shrinkCorr,
-        methodArgs = methodArgs
+        solverInput = .alphabetRssDense(stat, ldReference, lds, engine)
     )
-    .alphabetRssResult(fit, fitRetention, shrinkCorr, stat[["variantNames"]])
+    fit <- .mcmcChains(
+        ".alphabetRssChain",
+        run,
+        as.list(sample.int(.Machine$integer.max, nChains)),
+        .alphabetRssFields[[engine]],
+        "bayesAlphabetRssWeights",
+        run$solverInput$bhat
+    )
+    .alphabetRssResult(
+        c(fit, list(backend = engine), lds),
+        retention,
+        stat[["variantNames"]]
+    )
+}
+
+# What bayesAlphabetRssWeights() checks before it reads the LD; `lds` holds
+# its shrinkCorr and ldProjection.
+# @noRd
+.alphabetRssAssert <- function(stat, nIter, nBurnin, thin, lds, nChains) {
+    .assertMcmcSchedule(nIter, nBurnin, thin)
+    .alphabetAssertSampleSize(stat$n, "bayesAlphabetRssWeights")
+    .assertShrinkCorr(lds$shrinkCorr)
+    assertNumber(
+        lds$ldProjection,
+        lower = 0,
+        finite = TRUE,
+        null.ok = TRUE,
+        .var.name = "ldProjection"
+    )
+    assertCount(nChains, positive = TRUE)
+    invisible(NULL)
 }
 
 # The heritability a summary-statistics fit starts from (.h2Resolve()), an
@@ -3239,23 +3626,19 @@ bayesAlphabetRssWeights <- function(
     )
 }
 
-# A summary-statistics fit's weights, with its estimates, the shrinkage used
-# and the variants it was fitted on attached unless `fitRetention` is
-# "none".
+# A summary-statistics fit's weights, with the fit (its estimates and the
+# settings it carries) and the variants it was fitted on attached unless
+# `fitRetention` is "none".
 # @noRd
-.alphabetRssResult <- function(fit, fitRetention, shrinkCorr, ids) {
+.alphabetRssResult <- function(fit, fitRetention, ids) {
     if (identical(fitRetention, "none")) {
         return(fit$betaEst)
     }
-    `attr<-`(
-        fit$betaEst,
-        "fit",
-        .withFitVariantIds(c(fit, list(shrinkCorr = shrinkCorr)), ids)
-    )
+    `attr<-`(fit$betaEst, "fit", .withFitVariantIds(fit, ids))
 }
 
-# The alphabet's samplers divide by n - 1 and the matrix engines' standard
-# errors by n - 2, so the sample size (the median of `n`) must exceed 2.
+# The matrix engines' standard errors divide by n - 2, so the sample size
+# (the median of `n`) must exceed 2.
 # @noRd
 .alphabetAssertSampleSize <- function(n, label) {
     assertNumeric(n, any.missing = FALSE, min.len = 1L)
@@ -3265,48 +3648,170 @@ bayesAlphabetRssWeights <- function(
     invisible(NULL)
 }
 
-# The engine a summary-statistics method runs on: `backend`, or by default
-# pecotmr where the method has it and a genotype reference supplies the LD,
-# and otherwise the method's first engine. A pecotmr engine that reads only
-# a factor of the LD (.rssFactorOnlyMethods()) refuses an LD matrix.
+# What each engine's chain reports, which several chains average.
 # @noRd
-.rssBackend <- function(method, backend, ldReference) {
-    choices <- names(.methodBackends$sumstat[[method]])
-    genotypeRef <- .ldIsGenotypeRef(ldReference)
-    if (is.null(backend)) {
-        if (genotypeRef && is_in("pecotmr", choices)) {
-            return("pecotmr")
-        }
-        return(choices[[1L]])
+.alphabetRssFields <- list(qgg = c("betaEst", "pip"), hibayes = "betaEst")
+
+# One chain of a matrix engine: its adapter's fit, with R's random number
+# generator seeded by `seed` for the call (qgg draws its own seed from it,
+# and hibayes' is drawn from it). The engines keep their draws to
+# themselves, so a tracked chain is tested on its posterior mean, against
+# the marginal effects as given, and carries the fitted correlations that
+# .mcmcKeptChains() filters on (.alphabetFittedCorr()).
+# @noRd
+.alphabetRssChain <- function(fitter, solverInput, ..., seed, track) {
+    fit <- withr::with_seed(
+        seed,
+        exec(fitter, solverInput = solverInput, ...)
+    )
+    if (!track) {
+        return(fit)
     }
-    backend <- .methodBackend(method, backend, "sumstat")
-    factorOnly <- is_in(method, .rssFactorOnlyMethods())
-    if (identical(backend, "pecotmr") && factorOnly && !genotypeRef) {
-        others <- setdiff(choices, "pecotmr")
-        abort(glue(
-            "backend = \"pecotmr\" runs on a genotype reference's factor of ",
-            "the LD; with an LD matrix, use {str_flatten(others, ' or ')}."
-        ))
-    }
-    backend
+    c(
+        fit,
+        list(
+            corrEst = .alphabetFittedCorr(solverInput, fit$betaEst),
+            diverged = .mcmcMeanDiverged(fit$betaEst, solverInput$bhat)
+        )
+    )
 }
 
-# The standardized statistics and the LD matrix the matrix engines read,
-# formed from the panel for a genotype reference and shrunk to
-# c R + (1 - c) I.
+# The fitted correlations R b under the LD the likelihood reads: the
+# engine's matrix, or for the unit-diagonal matrix qgg reads under the
+# projection, that matrix taken back to its own diagonal through `scale`.
 # @noRd
-.alphabetRssDense <- function(stat, ldReference, shrinkCorr) {
+.alphabetFittedCorr <- function(solverInput, beta) {
+    s <- solverInput$scale %||% 1
+    as.vector(s * (solverInput$R %*% (s * beta)))
+}
+
+# What the matrix engines read: the LD matrix and the effects they fit, with
+# the standard errors that set their y'y; the marginal effects as given
+# (`bhat`), which a chain's divergence is tested against; n and the variant
+# ids. As given, the LD is formed from the panel for a genotype reference,
+# shrunk to c R + (1 - c) I, and both engines read it and the standardized
+# effects alike. Under `lds$ldProjection`, they read SDPR's likelihood, each
+# in its own terms (.alphabetRssProjected()).
+# @noRd
+.alphabetRssDense <- function(stat, ldReference, lds, engine) {
+    if (!is.null(lds$ldProjection)) {
+        return(.alphabetRssProjected(stat, ldReference, lds, engine))
+    }
     R <- .rssLdMatrix(stat, ldReference, "bayesAlphabetRssWeights")
     n <- median(stat$n)
     bhat <- .rssMarginalCor(stat, n = n, p = nrow(R))
     .rssValidateSource(bhat, list(R = R), n)
     list(
-        R = .rssShrunkMatrix(R, shrinkCorr),
-        bhat = bhat,
+        R = .rssShrunkMatrix(R, lds$shrinkCorr),
+        b = bhat,
         seb = sqrt((1 - bhat^2) / (n - 2)),
+        bhat = bhat,
         n = n,
         ids = stat$variantNames
     )
+}
+
+# SDPR's likelihood (Zhou and Zhao 2021, its optLlk = 1) for the matrix
+# engines: the RSS likelihood with the marginal effects' covariance
+# (R + aI) / n, under which a sampler reads R' = R (R + aI)^-1 R as the LD
+# and b' = R (R + aI)^-1 bhat as the effects. R' and b' come from the LD
+# source's eigendecomposition (.ldSourceEigen(): a genotype reference's
+# factor, so its p x p matrix is never needed for it, or an LD matrix), and
+# R' is then shrunk to c R' + (1 - c) I. Each engine gets them in its own
+# terms (.alphabetProjectedInputs).
+# @noRd
+.alphabetRssProjected <- function(stat, ldReference, lds, engine) {
+    ld <- .rssLdSource(stat, ldReference, "bayesAlphabetRssWeights")
+    n <- median(stat$n)
+    bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
+    .rssValidateSource(bhat, ld, n)
+    projected <- .alphabetProjection(
+        .ldSourceEigen(ld),
+        bhat,
+        lds$ldProjection
+    )
+    exec(
+        .alphabetProjectedInputs[[engine]],
+        R = .rssShrunkMatrix(projected$R, lds$shrinkCorr),
+        effects = projected$effects,
+        bhat = bhat,
+        n = n,
+        ids = stat$variantNames
+    )
+}
+
+# R' = V diag(lambda^2 / (lambda + a)) V' and
+# b' = V diag(lambda / (lambda + a)) V' bhat from the LD's eigendecomposition
+# `ev`, over the directions with a positive eigenvalue: each keeps
+# lambda / (lambda + a) of the effects, so their part outside the LD's span
+# is dropped.
+# @noRd
+.alphabetProjection <- function(ev, bhat, a) {
+    kept <- ev$values > sqrt(.Machine$double.eps) * max(ev$values)
+    lambda <- ev$values[kept]
+    V <- ev$vectors[, kept, drop = FALSE]
+    list(
+        R = V %*% ((lambda^2 / (lambda + a)) * t(V)),
+        effects = as.vector(V %*% (lambda / (lambda + a) * crossprod(V, bhat)))
+    )
+}
+
+# The projected likelihood in each engine's terms.
+# @noRd
+.alphabetProjectedInputs <- c(
+    qgg = ".alphabetProjectedQgg",
+    hibayes = ".alphabetProjectedHibayes"
+)
+
+# qgg takes the diagonal of X'X to be its per-variant weight ww, reading
+# the LD's diagonal as 1, and reads X'y as wy, both in `stat` when given.
+# So it gets the LD at unit diagonal, D^-1/2 R D^-1/2 for R's diagonal d,
+# with ww = n d and wy = n b': X'X = sqrt(ww ww') LD is then n R exactly,
+# and X'y n b'. `scale` takes the unit-diagonal matrix back to R. Its y'y,
+# median((b^2 + (n - 2) seb^2) ww), is n through the standard errors, with
+# b = b' / d (.alphabetProjectedSe()).
+# @noRd
+.alphabetProjectedQgg <- function(R, effects, bhat, n, ids) {
+    d <- diag(R)
+    b <- effects / d
+    list(
+        R = R / sqrt(outer(d, d)),
+        scale = sqrt(d),
+        b = b,
+        seb = .alphabetProjectedSe(b, d, n),
+        ww = n * d,
+        wy = n * effects,
+        bhat = bhat,
+        n = n,
+        ids = ids
+    )
+}
+
+# hibayes forms X'X = n ldm and X'y = n ldm_jj b, so given ldm = R and
+# b = b' / d for R's diagonal d it reads n R and n b' exactly. Its y'y, the
+# mean of n d (b^2 + (n - 2) se^2), is n through the standard errors
+# (.alphabetProjectedSe()).
+# @noRd
+.alphabetProjectedHibayes <- function(R, effects, bhat, n, ids) {
+    d <- diag(R)
+    b <- effects / d
+    list(
+        R = R,
+        b = b,
+        seb = .alphabetProjectedSe(b, d, n),
+        bhat = bhat,
+        n = n,
+        ids = ids
+    )
+}
+
+# The standard errors under which the engines' y'y is n, as it is for the
+# statistics as given: (b^2 + (n - 2) se^2) d = 1 for each variant. Only
+# statistics that claim more of y'y than there is can have b^2 d > 1; such
+# a variant gets se 0 and adds b^2 d to y'y's average instead of 1.
+# @noRd
+.alphabetProjectedSe <- function(b, d, n) {
+    sqrt(pmax(1 / d - b^2, 0) / (n - 2))
 }
 
 # qgg's summary-statistics sampler, on its in-memory LD: every variant's LD
@@ -3314,22 +3819,19 @@ bayesAlphabetRssWeights <- function(
 # iterations, so nit is nIter net of the burn-in.
 # @noRd
 .alphabetQggRssFit <- function(
-    stat,
-    ldReference,
+    solverInput,
     method,
     nIter,
     nBurnin,
     thin,
     pi,
     h2,
-    shrinkCorr,
     methodArgs
 ) {
     if (!requireNamespace("qgg", quietly = TRUE)) {
         abort("Package 'qgg' is required for backend = \"qgg\".")
     }
-    inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
-    qin <- .alphabetQggInputs(inp)
+    qin <- .alphabetQggInputs(solverInput)
     user <- as.list(.alphabetWithH2(
         .alphabetQggPi(methodArgs, pi),
         "QggOptions",
@@ -3350,33 +3852,35 @@ bayesAlphabetRssWeights <- function(
     )
     fit <- exec(qgg::gbayes, !!!callArgs)
     list(
-        betaEst = unname(fit$stat[inp$ids, "bm"]),
-        pip = unname(fit$stat[inp$ids, "dm"]),
-        backend = "qgg"
+        betaEst = unname(fit$stat[solverInput$ids, "bm"]),
+        pip = unname(fit$stat[solverInput$ids, "dm"])
     )
 }
 
 # qgg's summary statistics, map and LD for one window, built in memory: the
 # statistics on the standardized scale (allele labels and frequencies are
-# placeholders qgg carries but does not read), and each variant's LD with
-# every other.
+# placeholders qgg carries but does not read), with the per-variant weights
+# `ww` and `wy` when the input gives them (.alphabetProjectedQgg()), and
+# each variant's LD with every other.
 # @noRd
 .alphabetQggInputs <- function(inp) {
-    m <- length(inp$bhat)
+    m <- length(inp$b)
     ids <- inp$ids
     pos <- seq_len(m)
     list(
-        stat = data.frame(
+        stat = exec(
+            data.frame,
             rsids = ids,
             chr = 1L,
             pos = pos,
             ea = "A",
             nea = "G",
             eaf = 0.5,
-            b = inp$bhat,
+            b = inp$b,
             seb = inp$seb,
-            p = 2 * pnorm(-abs(inp$bhat / inp$seb)),
+            p = 2 * pnorm(-abs(inp$b / inp$seb)),
             n = inp$n,
+            !!!compact(list(ww = inp$ww, wy = inp$wy)),
             row.names = ids
         ),
         Glist = list(
@@ -3403,41 +3907,38 @@ bayesAlphabetRssWeights <- function(
 # is put back afterwards.
 # @noRd
 .alphabetHibayesRssFit <- function(
-    stat,
-    ldReference,
+    solverInput,
     method,
     nIter,
     nBurnin,
     thin,
     pi,
     h2,
-    shrinkCorr,
     methodArgs
 ) {
     if (!requireNamespace("hibayes", quietly = TRUE)) {
         abort("Package 'hibayes' is required for backend = \"hibayes\".")
     }
-    inp <- .alphabetRssDense(stat, ldReference, shrinkCorr)
     user <- as.list(.alphabetWithH2(
         .alphabetHibayesPi(methodArgs, pi, "HibayesRssOptions"),
         "HibayesRssOptions",
         "hibayes",
         h2,
-        .hibayesRssVary(inp)
+        .hibayesRssVary(solverInput)
     ))
     callArgs <- list_modify(
         list(
             sumstat = data.frame(
-                SNP = inp$ids,
+                SNP = solverInput$ids,
                 A1 = "A",
                 A2 = "G",
                 freq = 0.5,
-                b = inp$bhat,
-                se = inp$seb,
-                p = 2 * pnorm(-abs(inp$bhat / inp$seb)),
-                N = inp$n
+                b = solverInput$b,
+                se = solverInput$seb,
+                p = 2 * pnorm(-abs(solverInput$b / solverInput$seb)),
+                N = solverInput$n
             ),
-            ldm = inp$R,
+            ldm = solverInput$R,
             method = .alphabetEngineMethods$hibayes[[method]],
             niter = nIter,
             nburn = nBurnin,
@@ -3449,7 +3950,7 @@ bayesAlphabetRssWeights <- function(
         !!!user
     )
     fit <- withr::with_preserve_seed(exec(hibayes::sbrm, !!!callArgs))
-    list(betaEst = as.numeric(fit$alpha), backend = "hibayes")
+    list(betaEst = as.numeric(fit$alpha))
 }
 
 # The phenotypic variance hibayes' sbrm() computes from the statistics it is
@@ -3458,284 +3959,14 @@ bayesAlphabetRssWeights <- function(
 # @noRd
 .hibayesRssVary <- function(inp) {
     n <- as.integer(mean(inp$n))
-    mean(diag(inp$R) * n * (inp$bhat^2 + (inp$n - 2) * inp$seb^2)) / (n - 1)
-}
-
-# pecotmr's sampler, on a genotype reference's factor of the LD.
-# @noRd
-.alphabetPecotmrRssFit <- function(
-    stat,
-    ldReference,
-    method,
-    nIter,
-    nBurnin,
-    thin,
-    pi,
-    h2,
-    shrinkCorr,
-    methodArgs
-) {
-    ld <- .rssLdSource(stat, ldReference, "bayesAlphabetRssWeights")
-    n <- median(stat$n)
-    bhat <- .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
-    .rssValidateSource(bhat, ld, n)
-    user <- as.list(.alphabetWithH2(
-        methodArgs,
-        "BayesAlphabetRssOptions",
-        "pecotmr",
-        h2
-    ))
-    callArgs <- list_modify(
-        list(
-            bhat = bhat,
-            ldFactor = ld$ldFactor,
-            n = n,
-            method = method,
-            nIter = nIter,
-            nBurnin = nBurnin,
-            thin = thin,
-            pi = pi,
-            nPerVariant = stat$n,
-            shrinkCorr = shrinkCorr
-        ),
-        !!!user
-    )
-    c(exec(bayesAlphabetRss, !!!callArgs), list(backend = "pecotmr"))
-}
-
-#' pecotmr's Bayesian Alphabet Sampler on a Factor of the LD
-#'
-#' Internal: \code{\link{bayesAlphabetRssWeights}} is the public interface;
-#' its \code{backend = "pecotmr"} runs this, and
-#' \code{\link{BayesAlphabetRssOptions}} sets the arguments below other
-#' than the data and the wrapper's own.
-#'
-#' The LD is a factor F of R = F'F / (k - 1), as a genotype reference gives
-#' it, and is never formed: each effect's update costs O(k). The likelihood
-#' is SBayes's, X'X = W^1/2 R W^1/2 and X'y = w * bhat for per-variant
-#' weights w, read by default through SDPR's projection
-#' (\code{ldProjection}). The priors are qgg's (CRAN 1.1.6) for
-#' \code{bayesA}, \code{bayesC}, \code{bayesN} and \code{bayesR},
-#' hibayes' for \code{bayesB} (as BayesBpi), and for \code{bayesL} either.
-#'
-#' @param bhat The standardized marginal effects.
-#' @param ldFactor The factor F of the LD (k x p).
-#' @param n The sample size.
-#' @param method The prior, as in \code{\link{bayesAlphabetRssWeights}}.
-#' @param nIter,nBurnin,thin The chain's iterations (burn-in included),
-#'   burn-in and thinning.
-#' @param pi For \code{bayesB} and \code{bayesC}, where the estimate of the
-#'   non-null proportion starts.
-#' @param nPerVariant The per-variant sample sizes, read when
-#'   \code{perVariantWeights = TRUE}.
-#' @param bayesLForm For \code{bayesL} only: \code{"parkCasella"} (the
-#'   default, hibayes' form, the Laplace prior scaled by the residual
-#'   variance) or \code{"legarra"} (Legarra et al. 2011, qgg's
-#'   individual-level form, unscaled).
-#' @param perVariantWeights \code{FALSE} (default) weights every variant by
-#'   n; \code{TRUE} weights each by qgg's 1 / (se^2 + b^2 / n_j), from its
-#'   own sample size.
-#' @param h2 The prior guess of the heritability, which sets the starting
-#'   variances and the scales of their priors. Default \code{0.5}, qgg's and
-#'   hibayes'.
-#' @param shrinkCorr The LD shrinkage \eqn{c}: the sampler reads
-#'   \eqn{cR + (1 - c)I}. Default 1, none.
-#' @param ldProjection The ridge \eqn{a} of SDPR's likelihood (Zhou and Zhao
-#'   2021), under which the sampler reads the LD as
-#'   \eqn{R (R + aI)^{-1} R} and the marginal effects as
-#'   \eqn{R (R + aI)^{-1} \hat\beta}: each of R's eigen-directions keeps
-#'   \eqn{\lambda / (\lambda + a)} of the effects, so their part outside
-#'   the reference LD's span, which a reference smaller than the window or
-#'   unlike the study leaves, never enters. Without it the samplers' effects
-#'   can grow without bound along those directions. Default 0.1, SDPR's;
-#'   \code{NULL} reads the LD and the effects as they are.
-#' @param allowJumpSign Keep a drawn effect whose sign differs from the
-#'   current one; \code{FALSE} sets it to zero, and out of the slab,
-#'   instead. Default \code{TRUE}.
-#' @param raoBlackwell Report each effect's conditional posterior mean,
-#'   averaged over the kept iterations, rather than the draws' average.
-#'   Default \code{FALSE}.
-#' @param nChains The number of chains, each from a seed drawn from R's
-#'   random number generator; they are tested for divergence and, with more
-#'   than one, combined as \code{\link{prsCs}}'s are. Default 1.
-#' @param verbose Whether to report the chain's progress.
-#' @return A list: \code{betaEst} (the posterior mean effects), \code{pip}
-#'   (for \code{bayesB}, \code{bayesC} and \code{bayesR}, each effect's
-#'   posterior probability of being non-null), \code{pi} (the non-null
-#'   proportion) and \code{residualVariance}.
-#' @keywords internal
-bayesAlphabetRss <- function(
-    bhat,
-    ldFactor,
-    n,
-    method,
-    nIter = 5000,
-    nBurnin = 1000,
-    thin = 5,
-    pi = NULL,
-    nPerVariant = NULL,
-    bayesLForm = NULL,
-    perVariantWeights = FALSE,
-    h2 = 0.5,
-    shrinkCorr = 1,
-    ldProjection = 0.1,
-    allowJumpSign = TRUE,
-    raoBlackwell = FALSE,
-    nChains = 1,
-    verbose = FALSE
-) {
-    method <- arg_match(method, names(.alphabetBackends$sumstat))
-    .alphabetRssAssert(n, h2, ldProjection, allowJumpSign)
-    .mcmcAssertShared(shrinkCorr, raoBlackwell, nChains)
-    sampler <- list(
-        method = method,
-        legarra = .alphabetLegarra(method, bayesLForm),
-        pi = pi %||% 0,
-        h2 = h2,
-        nIter = as.integer(nIter),
-        nBurnin = as.integer(nBurnin),
-        thin = as.integer(thin),
-        verbose = verbose,
-        shrinkCorr = shrinkCorr,
-        allowJumpSign = allowJumpSign,
-        raoBlackwell = raoBlackwell
-    )
-    data <- .alphabetData(
-        bhat,
-        ldFactor,
-        n,
-        nPerVariant,
-        perVariantWeights,
-        ldProjection
-    )
-    .alphabetRssChains(c(data, sampler), method, nChains, bhat)
-}
-
-# What bayesAlphabetRss() checks besides the settings every sampler shares.
-# @noRd
-.alphabetRssAssert <- function(n, h2, ldProjection, allowJumpSign) {
-    .alphabetAssertSampleSize(n, "bayesAlphabetRss")
-    assertNumber(h2, lower = 0, upper = 1)
-    assertNumber(ldProjection, lower = 0, finite = TRUE, null.ok = TRUE)
-    assertFlag(allowJumpSign)
-    invisible(NULL)
-}
-
-# The data pecotmr's alphabet sampler reads: the marginal effects and the
-# factor of the LD, through SDPR's likelihood unless `ldProjection` is NULL
-# (.alphabetProjected()), the per-variant weights, taken from the marginal
-# effects as given, and n.
-# @noRd
-.alphabetData <- function(
-    bhat,
-    ldFactor,
-    n,
-    nPerVariant,
-    perVariantWeights,
-    ldProjection
-) {
-    projected <- .alphabetProjected(bhat, ldFactor, ldProjection)
-    list(
-        bhat = projected$bhat,
-        factorR = projected$ldFactor,
-        weights = .alphabetRssWeightsFor(
-            bhat,
-            n,
-            nPerVariant,
-            perVariantWeights
-        ),
-        n = as.integer(n)
-    )
-}
-
-# SDPR's likelihood (Zhou and Zhao 2021, its optLlk = 1) for the alphabet
-# sampler: the RSS likelihood with the marginal effects' covariance
-# (R + aI) / n, under which the sampler reads R (R + aI)^-1 R as the LD and
-# R (R + aI)^-1 bhat as the effects. Each eigen-direction of R keeps
-# lambda / (lambda + a) of the effects, so their part outside the reference
-# LD's span -- left by a reference smaller than the window, or unlike the
-# study -- never enters, nor does the runaway it drives through the variance
-# updates. From the thin SVD of `ldFactor` (.ldFactorEigen()), over the r
-# directions with a positive eigenvalue, the LD is the factor
-# sqrt(r) diag(lambda / sqrt(lambda + a)) V' and a zero row, so that the
-# sampler's normalization by its rows less one holds. NULL `a` leaves the
-# effects and `ldFactor` as they are.
-# @noRd
-.alphabetProjected <- function(bhat, ldFactor, a) {
-    if (is.null(a)) {
-        return(list(bhat = bhat, ldFactor = ldFactor))
-    }
-    ev <- .ldFactorEigen(ldFactor)
-    kept <- ev$values > sqrt(.Machine$double.eps) * max(ev$values)
-    lambda <- ev$values[kept]
-    V <- ev$vectors[, kept, drop = FALSE]
-    list(
-        bhat = as.numeric(V %*% (lambda / (lambda + a) * crossprod(V, bhat))),
-        ldFactor = rbind(
-            sqrt(length(lambda)) * (lambda / sqrt(lambda + a)) * t(V),
-            0
-        )
-    )
-}
-
-# The chains of pecotmr's alphabet sampler, combined (.mcmcChains()); its
-# divergence warning tests the effects against the marginal effects as
-# given. Only bayesB, bayesC and bayesR report inclusion probabilities.
-# @noRd
-.alphabetRssChains <- function(settings, method, nChains, bhat) {
-    fit <- .mcmcChains(
-        ".alphabetSamplerChain",
-        list(settings = settings),
-        as.list(sample.int(.Machine$integer.max, nChains)),
-        c("betaEst", "pip", "pi", "residualVariance"),
-        "bayesAlphabetRss",
-        bhat
-    )
-    if (!is_in(method, c("bayesB", "bayesC", "bayesR"))) {
-        fit$pip <- NULL
-    }
-    fit
-}
-
-# One chain of pecotmr's alphabet sampler.
-# @noRd
-.alphabetSamplerChain <- function(settings, seed, track) {
-    exec(bayesAlphabetFactorCpp, !!!settings, seed = seed, track = track)
-}
-
-# Whether bayesL takes Legarra et al.'s form; `bayesLForm` is bayesL's
-# alone.
-# @noRd
-.alphabetLegarra <- function(method, bayesLForm) {
-    if (is.null(bayesLForm)) {
-        return(FALSE)
-    }
-    if (!identical(method, "bayesL")) {
-        abort(glue("`bayesLForm` applies to bayesL, not {method}."))
-    }
-    identical(arg_match0(bayesLForm, c("parkCasella", "legarra")), "legarra")
-}
-
-# The per-variant weights: n for every variant, or qgg's
-# 1 / (se^2 + b^2 / n_j) from each one's own sample size.
-# @noRd
-.alphabetRssWeightsFor <- function(bhat, n, nPerVariant, perVariantWeights) {
-    if (!isTRUE(perVariantWeights)) {
-        return(rep(as.numeric(n), length(bhat)))
-    }
-    nj <- nPerVariant %||% rep(n, length(bhat))
-    if (length(nj) != length(bhat)) {
-        abort("`nPerVariant` must give one sample size per variant.")
-    }
-    seb2 <- (1 - bhat^2) / (nj - 2)
-    1 / (seb2 + bhat^2 / nj)
+    mean(diag(inp$R) * n * (inp$b^2 + (inp$n - 2) * inp$seb^2)) / (n - 1)
 }
 
 #' @title BayesA TWAS weights from summary statistics
 #' @description \code{\link{bayesAlphabetRssWeights}} with the BayesA prior.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"qgg"}, \code{"hibayes"} or \code{"pecotmr"};
-#'   \code{NULL} picks the default for the LD reference.
+#' @param backend \code{"qgg"} or \code{"hibayes"}; \code{NULL} picks
+#'   qgg.
 #' @return A numeric vector of the posterior mean effects, one per variant.
 #' @examples
 #' data(eqtlRegionExample)
@@ -3757,6 +3988,8 @@ bayesARssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3770,17 +4003,18 @@ bayesARssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
 }
 
 #' @title BayesB TWAS weights from summary statistics
-#' @description \code{\link{bayesAlphabetRssWeights}} with the BayesB prior.
+#' @description \code{\link{bayesAlphabetRssWeights}} with the BayesB prior,
+#'   which hibayes fits.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"hibayes"} or \code{"pecotmr"}; \code{NULL} picks
-#'   the default for the LD reference.
-#' @param pi The prior proportion of non-null effects, where each engine's
+#' @param pi The prior proportion of non-null effects, where hibayes'
 #'   estimate of it starts. Default \code{0.2}.
 #' @return A numeric vector of the posterior mean effects, one per variant.
 #' @examples
@@ -3796,13 +4030,14 @@ bayesARssWeights <- function(
 bayesBRssWeights <- function(
     stat,
     ldReference,
-    backend = NULL,
     pi = 0.2,
     h2 = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3810,13 +4045,14 @@ bayesBRssWeights <- function(
         stat,
         ldReference,
         "bayesB",
-        backend = backend,
         pi = pi,
         h2 = h2,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
@@ -3825,8 +4061,8 @@ bayesBRssWeights <- function(
 #' @title BayesC TWAS weights from summary statistics
 #' @description \code{\link{bayesAlphabetRssWeights}} with the BayesC prior.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"qgg"}, \code{"hibayes"} or \code{"pecotmr"};
-#'   \code{NULL} picks the default for the LD reference.
+#' @param backend \code{"qgg"} or \code{"hibayes"}; \code{NULL} picks
+#'   qgg.
 #' @param pi The prior proportion of non-null effects, where each engine's
 #'   estimate of it starts. Default \code{0.1}.
 #' @return A numeric vector of the posterior mean effects, one per variant.
@@ -3851,6 +4087,8 @@ bayesCRssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3865,6 +4103,8 @@ bayesCRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
@@ -3874,8 +4114,8 @@ bayesCRssWeights <- function(
 #' @description \code{\link{bayesAlphabetRssWeights}} with the Bayesian
 #'   LASSO.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"hibayes"}, \code{"qgg"} or \code{"pecotmr"};
-#'   \code{NULL} picks the default for the LD reference.
+#' @param backend \code{"hibayes"} or \code{"qgg"}; \code{NULL} picks
+#'   hibayes.
 #' @return A numeric vector of the posterior mean effects, one per variant.
 #' @examples
 #' data(eqtlRegionExample)
@@ -3896,6 +4136,8 @@ bayesLRssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3909,6 +4151,8 @@ bayesLRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
@@ -3918,8 +4162,8 @@ bayesLRssWeights <- function(
 #' @description \code{\link{bayesAlphabetRssWeights}} with a normal prior
 #'   shared by every effect.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"qgg"}, \code{"hibayes"} or \code{"pecotmr"};
-#'   \code{NULL} picks the default for the LD reference.
+#' @param backend \code{"qgg"} or \code{"hibayes"}; \code{NULL} picks
+#'   qgg.
 #' @return A numeric vector of the posterior mean effects, one per variant.
 #' @examples
 #' data(eqtlRegionExample)
@@ -3941,6 +4185,8 @@ bayesNRssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3954,6 +4200,8 @@ bayesNRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
@@ -3962,8 +4210,8 @@ bayesNRssWeights <- function(
 #' @title BayesR TWAS weights from summary statistics
 #' @description \code{\link{bayesAlphabetRssWeights}} with the BayesR prior.
 #' @inheritParams bayesAlphabetRssWeights
-#' @param backend \code{"qgg"}, \code{"hibayes"} or \code{"pecotmr"};
-#'   \code{NULL} picks the default for the LD reference.
+#' @param backend \code{"qgg"} or \code{"hibayes"}; \code{NULL} picks
+#'   qgg.
 #' @return A numeric vector of the posterior mean effects, one per variant.
 #' @examples
 #' data(eqtlRegionExample)
@@ -3985,6 +4233,8 @@ bayesRRssWeights <- function(
     nBurnin = 1000,
     thin = 5,
     shrinkCorr = 0.95,
+    ldProjection = 0.1,
+    nChains = 1,
     fitRetention = c("none", "slim", "full"),
     methodArgs = NULL
 ) {
@@ -3998,6 +4248,8 @@ bayesRRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         shrinkCorr = shrinkCorr,
+        ldProjection = ldProjection,
+        nChains = nChains,
         fitRetention = fitRetention,
         methodArgs = methodArgs
     )
@@ -4006,10 +4258,9 @@ bayesRRssWeights <- function(
 # --- LDpred2 -----------------------------------------------------------------
 #
 # LDpred2-auto and LDpred2-grid run on bigsnpr, on the LD matrix written to a
-# temporary file, or on pecotmr's port of its samplers (ldpred2FactorCpp()),
-# on a genotype reference's factor of the LD. Both take the statistics in
-# standardized units, the correlations for each variant's own sample size, and
-# return weights in the same units.
+# temporary file, formed from the panel for a genotype reference. Both take
+# the statistics in standardized units, the correlations for each variant's
+# own sample size, and return weights in the same units.
 
 #' LDpred2-auto Weights from Summary Statistics
 #'
@@ -4019,22 +4270,21 @@ bayesRRssWeights <- function(
 #' starting \eqn{p} in \code{pInit}. As in the LDpred2 vignette, a chain
 #' whose fitted correlations span less than 0.95 times the 95th percentile of
 #' the chains' spans is dropped, and the rest are averaged. A chain has
-#' diverged, and is dropped too, once a kept draw's squared effects sum past
-#' twice the squared marginal effects; bigsnpr's own sampler tests every
-#' iteration, burn-in included.
+#' diverged, and is dropped too, once a draw's squared effects sum past
+#' twice the squared marginal effects; bigsnpr tests every iteration,
+#' burn-in included.
 #'
 #' The defaults are the LDpred2 vignette's, without the MAF-dependent prior
 #' variance.
 #'
 #' @details
-#' \code{backend = "bigsnpr"} runs bigsnpr's \code{snp_ldpred2_auto()} on the
-#' LD matrix, written to a temporary file for the call; for a genotype
-#' reference the matrix is formed from its genotypes. \code{"pecotmr"} runs
-#' pecotmr's port of the same sampler on a genotype reference's factor of the
-#' LD, never forming the matrix. bigsnpr's functions call
+#' bigsnpr's \code{snp_ldpred2_auto()} runs on the LD matrix, written to a
+#' temporary file for the call; for a genotype reference the matrix is
+#' formed from its genotypes. bigsnpr's functions call
 #' \code{foreach::registerDoSEQ()}, which replaces any foreach parallel
-#' backend registered in the session. Both draw their seeds from R's random
-#' number generator, so \code{set.seed()} makes the weights reproducible.
+#' backend registered in the session. bigsnpr draws its seeds from R's
+#' random number generator, so \code{set.seed()} makes the weights
+#' reproducible.
 #'
 #' @param stat A list of summary statistics: \code{n} (per-variant sample
 #'   sizes) and the marginal effects as \code{cor} (standardized), \code{z},
@@ -4045,10 +4295,6 @@ bayesRRssWeights <- function(
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 #'   \code{\link{LdMatrix}}.
-#' @param backend \code{"bigsnpr"} or \code{"pecotmr"}. \code{NULL}
-#'   (default) is pecotmr for a genotype reference and bigsnpr for an
-#'   \code{\link{LdMatrix}}; pecotmr's sampler reads only a genotype
-#'   reference.
 #' @param h2Init The starting heritability: a number, or the estimator to
 #'   estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
 #'   \code{"fastHer"}, as \code{\link{estimateH2}} does for QTL summary
@@ -4096,7 +4342,6 @@ bayesRRssWeights <- function(
 ldpred2AutoWeights <- function(
     stat,
     ldReference,
-    backend = NULL,
     h2Init = NULL,
     pInit = exp(seq(log(1e-4), log(0.2), length.out = 30)),
     nIter = 700,
@@ -4106,9 +4351,8 @@ ldpred2AutoWeights <- function(
     pBounds = c(1e-5, 1),
     fitRetention = c("none", "slim", "full")
 ) {
-    fitRetention <- arg_match(fitRetention)
+    retention <- arg_match(fitRetention)
     label <- "ldpred2AutoWeights"
-    backend <- .rssBackend("ldpred2Auto", backend, ldReference)
     .assertMcmcSchedule(nIter, nBurnin, 1L)
     .ldpred2AssertProportions(pInit, "pInit")
     .ldpred2AssertProportions(pBounds, "pBounds")
@@ -4123,12 +4367,12 @@ ldpred2AutoWeights <- function(
         allowJumpSign = allowJumpSign,
         pBounds = sort(pBounds)
     )
-    engine <- .ldpred2Engine(inp, backend)
+    engine <- .bigsnprEngine(inp)
     on.exit(.bigsnprRelease(engine), add = TRUE)
     .withWeightsFitIds(
         .ldpred2AutoWeightsFrom(
             .ldpred2RunAuto(inp, engine, config),
-            fitRetention,
+            retention,
             label
         ),
         stat[["variantNames"]]
@@ -4143,19 +4387,16 @@ ldpred2AutoWeights <- function(
 #' the fits. Upstream picks it on a validation sample; here, as for the
 #' penalized summary-statistics methods, it is picked on held-out summary
 #' statistics by default (see Details of \code{\link{lassosumRssWeights}}). A
-#' grid point has diverged, and is not picked, once a kept draw's squared
-#' effects sum past twice the squared marginal effects; bigsnpr's own
-#' sampler tests every iteration, burn-in included.
+#' grid point has diverged, and is not picked, once a draw's squared effects
+#' sum past twice the squared marginal effects; bigsnpr tests every
+#' iteration, burn-in included.
 #'
 #' @details
-#' \code{backend = "bigsnpr"} runs bigsnpr's \code{snp_ldpred2_grid()} on the
-#' LD matrix, written to a temporary file for the call; \code{"pecotmr"} runs
-#' pecotmr's port of the same sampler on a genotype reference's factor of the
-#' LD. bigsnpr's grid sampler has no LD shrinkage of its own, so for it the
-#' matrix written is shrunk, \eqn{cR + (1 - c)I}, as the Bayesian alphabet's
-#' matrix engines are given theirs; it always allows a drawn effect to
-#' change sign, so it takes no \code{allowJumpSign}. pecotmr's sampler takes
-#' both, as LDpred2-auto's does. See \code{\link{ldpred2AutoWeights}} for the
+#' bigsnpr's \code{snp_ldpred2_grid()} runs on the LD matrix, written to a
+#' temporary file for the call. Its grid sampler has no LD shrinkage of its
+#' own, so the matrix written is shrunk, \eqn{cR + (1 - c)I}, as the
+#' Bayesian alphabet's engines are given theirs; it always lets a drawn
+#' effect change sign. See \code{\link{ldpred2AutoWeights}} for the
 #' temporary file, the foreach backend and the seeds.
 #'
 #' @inheritParams ldpred2AutoWeights
@@ -4167,11 +4408,9 @@ ldpred2AutoWeights <- function(
 #'   (default) is \code{"lava"}.
 #' @param sparse Whether each fit sets an effect whose inclusion probability
 #'   falls below \code{p} to zero; both by default.
-#' @param shrinkCorr The LD shrinkage \eqn{c}: both engines read
+#' @param shrinkCorr The LD shrinkage \eqn{c}: the matrix bigsnpr reads is
 #'   \eqn{cR + (1 - c)I}. Default 0.95, as for
 #'   \code{\link{ldpred2AutoWeights}}; bigsnpr's grid itself has none.
-#' @param allowJumpSign As for \code{\link{ldpred2AutoWeights}}; bigsnpr's
-#'   grid sampler takes only \code{TRUE}, the default.
 #' @param selection How the returned fit is chosen: \code{"heldOut"}
 #'   (default) or \code{"ldQuadratic"}, as for
 #'   \code{\link{lassosumRssWeights}}. \code{"heldOut"} needs the
@@ -4205,44 +4444,38 @@ ldpred2AutoWeights <- function(
 ldpred2GridWeights <- function(
     stat,
     ldReference,
-    backend = NULL,
     p = exp(seq(log(1e-5), 0, length.out = 21)),
     h2 = NULL,
     sparse = c(FALSE, TRUE),
     nIter = 150,
     nBurnin = 50,
     shrinkCorr = 0.95,
-    allowJumpSign = TRUE,
     selection = c("heldOut", "ldQuadratic"),
     fitRetention = c("none", "slim", "full")
 ) {
-    selection <- arg_match(selection)
-    fitRetention <- arg_match(fitRetention)
+    pick <- arg_match(selection)
+    retention <- arg_match(fitRetention)
     label <- "ldpred2GridWeights"
-    backend <- .rssBackend("ldpred2Grid", backend, ldReference)
     .assertMcmcSchedule(nIter, nBurnin, 1L)
     .ldpred2AssertProportions(p, "p")
-    .ldpred2AssertSampler(shrinkCorr, allowJumpSign)
-    .ldpred2CheckGridBackend(backend, allowJumpSign, label)
+    .assertShrinkCorr(shrinkCorr)
     inp <- .rssPerVariantInput(stat, ldReference, label)
-    if (identical(selection, "heldOut")) {
+    if (identical(pick, "heldOut")) {
         .rssCheckHeldOutLd(inp$ld, label)
     }
     config <- list(
         grid = .ldpred2Grid(p, .ldpred2GridH2(h2, inp, label), sparse),
         nIter = nIter,
-        nBurnin = nBurnin,
-        shrinkCorr = shrinkCorr,
-        allowJumpSign = allowJumpSign
+        nBurnin = nBurnin
     )
-    engine <- .ldpred2Engine(inp, backend, shrinkCorr)
+    engine <- .bigsnprEngine(inp, shrinkCorr)
     on.exit(.bigsnprRelease(engine), add = TRUE)
     .withWeightsFitIds(
         .ldpred2GridWeightsFrom(
             .ldpred2RunGrid(inp, engine, config),
             list(inp = inp, engine = engine, config = config),
-            selection,
-            fitRetention,
+            pick,
+            retention,
             label
         ),
         stat[["variantNames"]]
@@ -4266,24 +4499,8 @@ ldpred2GridWeights <- function(
     invisible(NULL)
 }
 
-# bigsnpr's grid sampler has neither the LD shrinkage nor the sign rule.
-# @noRd
-.ldpred2CheckGridBackend <- function(backend, allowJumpSign, label) {
-    if (identical(backend, "bigsnpr") && !allowJumpSign) {
-        abort(c(
-            glue(
-                "{label}: bigsnpr's grid sampler always allows a drawn ",
-                "effect to change sign, so it takes no `allowJumpSign`."
-            ),
-            i = "Use backend = \"pecotmr\" with a genotype reference."
-        ))
-    }
-    invisible(NULL)
-}
-
-# The statistics bigsnpr's engines and pecotmr's LDpred2 read: the LD source
-# (.rssLdSource()), the correlations (.rssMarginalCor()) and each
-# variant's sample size.
+# The statistics bigsnpr's engines read: the LD source (.rssLdSource()), the
+# correlations (.rssMarginalCor()) and each variant's sample size.
 # @noRd
 .rssPerVariantInput <- function(stat, ldReference, label) {
     ld <- .rssLdSource(stat, ldReference, label)
@@ -4351,24 +4568,17 @@ ldpred2GridWeights <- function(
     as_tibble(grid[order(-grid$p, grid$sparse, -grid$h2), ])
 }
 
-# What an LDpred2 run reads: pecotmr's sampler reads the factor in `inp`,
-# bigsnpr its sparse matrix (.bigsnprEngine()), shrunk to `shrinkCorr` for a
-# sampler of bigsnpr's with no shrinkage of its own (the grid's).
-# @noRd
-.ldpred2Engine <- function(inp, backend, shrinkCorr = 1) {
-    if (identical(backend, "pecotmr")) {
-        return(list(backend = backend))
-    }
-    .bigsnprEngine(inp, shrinkCorr)
-}
-
 # bigsnpr's LD: the matrix as bigsnpr's sparse matrix, written to a temporary
 # file that .bigsnprRelease() deletes; for a genotype reference, formed from
-# its factor; shrunk to `shrinkCorr` (.rssShrunkMatrix()).
+# its factor; shrunk to `shrinkCorr` (.rssShrunkMatrix()) for a sampler of
+# bigsnpr's with no shrinkage of its own (the grid's).
 # @noRd
 .bigsnprEngine <- function(inp, shrinkCorr = 1) {
     if (!requireNamespace("bigsnpr", quietly = TRUE)) {
-        abort("Package 'bigsnpr' is required for backend = \"bigsnpr\".")
+        abort(str_c(
+            "Package 'bigsnpr' is required for LDpred2 and for ",
+            "backend = \"bigsnpr\"."
+        ))
     }
     R <- .rssShrunkMatrix(
         inp$ld$R %||%
@@ -4380,7 +4590,7 @@ ldpred2GridWeights <- function(
         tempfile(),
         compact = TRUE
     )
-    list(backend = "bigsnpr", corr = corr)
+    list(corr = corr)
 }
 
 # The LD matrix shrunk toward the identity, c R + (1 - c) I, for an engine
@@ -4420,19 +4630,9 @@ ldpred2GridWeights <- function(
 # seed drawn from it, leaving the caller's stream one draw on.
 # @noRd
 .ldpred2RunAuto <- function(inp, engine, config) {
-    if (identical(engine$backend, "bigsnpr")) {
-        return(withr::with_seed(
-            .sessionSeedDraw(),
-            .ldpred2BigsnprAuto(inp, engine$corr, config)
-        ))
-    }
-    meanLd <- mean(.ldSquaredProduct(inp$ld, matrix(1, length(inp$bhat), 1L)))
-    map(
-        config$pInit,
-        .ldpred2PecotmrAutoChain,
-        inp = inp,
-        config = config,
-        meanLd = meanLd
+    withr::with_seed(
+        .sessionSeedDraw(),
+        .ldpred2BigsnprAuto(inp, engine$corr, config)
     )
 }
 
@@ -4467,88 +4667,21 @@ ldpred2GridWeights <- function(
     )
 }
 
-# One pecotmr chain from `pInit`; p and h2 are their means over the kept
-# sweeps, as bigsnpr reports them.
-# @noRd
-#' @importFrom utils tail
-.ldpred2PecotmrAutoChain <- function(pInit, inp, config, meanLd) {
-    run <- ldpred2FactorCpp(
-        inp$bhat,
-        inp$ld$ldFactor,
-        inp$n,
-        TRUE,
-        pInit,
-        config$h2,
-        FALSE,
-        config$shrinkCorr,
-        config$allowJumpSign,
-        config$pBounds[[1L]],
-        config$pBounds[[2L]],
-        meanLd,
-        as.integer(config$nIter),
-        as.integer(config$nBurnin),
-        FALSE,
-        .sessionSeedDraw()
-    )
-    kept <- config$nIter - config$nBurnin
-    missing <- rep(NA_real_, length(inp$bhat))
-    list(
-        betaEst = if (run$diverged) missing else run$betaEst,
-        corrEst = if (run$diverged) missing else run$corrEst,
-        postp = if (run$diverged) missing else run$postp,
-        h2 = if (run$diverged) NA_real_ else mean(tail(run$pathH2, kept)),
-        p = if (run$diverged) NA_real_ else mean(tail(run$pathP, kept)),
-        pInit = pInit,
-        diverged = run$diverged
-    )
-}
-
-# The grid's fits, variants x points, NA for a point that diverged.
+# The grid's fits, variants x points, NA for a point that diverged. bigsnpr
+# seeds from R's generator, so it runs under a seed drawn from it.
 # @noRd
 .ldpred2RunGrid <- function(inp, engine, config) {
-    if (identical(engine$backend, "bigsnpr")) {
-        return(withr::with_seed(
-            .sessionSeedDraw(),
-            bigsnpr::snp_ldpred2_grid(
-                engine$corr,
-                .bigsnprDfBeta(inp),
-                as.data.frame(config$grid),
-                burn_in = config$nBurnin,
-                num_iter = config$nIter - config$nBurnin,
-                ncores = 1
-            )
-        ))
-    }
-    fits <- pmap(
-        config$grid,
-        .ldpred2PecotmrGridPoint,
-        inp = inp,
-        config = config
+    withr::with_seed(
+        .sessionSeedDraw(),
+        bigsnpr::snp_ldpred2_grid(
+            engine$corr,
+            .bigsnprDfBeta(inp),
+            as.data.frame(config$grid),
+            burn_in = config$nBurnin,
+            num_iter = config$nIter - config$nBurnin,
+            ncores = 1
+        )
     )
-    exec(cbind, !!!fits)
-}
-
-# @noRd
-.ldpred2PecotmrGridPoint <- function(p, h2, sparse, inp, config) {
-    run <- ldpred2FactorCpp(
-        inp$bhat,
-        inp$ld$ldFactor,
-        inp$n,
-        FALSE,
-        p,
-        h2,
-        sparse,
-        config$shrinkCorr,
-        config$allowJumpSign,
-        1e-5,
-        1,
-        1,
-        as.integer(config$nIter),
-        as.integer(config$nBurnin),
-        FALSE,
-        .sessionSeedDraw()
-    )
-    if (run$diverged) rep(NA_real_, length(inp$bhat)) else run$betaEst
 }
 
 # The chains LDpred2's vignette keeps: those whose fitted correlations span
@@ -4599,12 +4732,12 @@ ldpred2GridWeights <- function(
 }
 
 # A single chain's posterior mean effects `beta` tested as a tracked chain's
-# draws are: their squares summing past twice the marginal effects'. The
-# draws themselves are not tested, since one noisy draw passes that bound
-# on some null windows while the chain's mean stays near zero.
+# draws are (.mcmcMeanDiverged()). The draws themselves are not tested,
+# since one noisy draw passes that bound on some null windows while the
+# chain's mean stays near zero.
 # @noRd
 .mcmcWarnDiverged <- function(beta, bhat, label) {
-    if (sum(beta^2) > 2 * sum(bhat^2)) {
+    if (.mcmcMeanDiverged(beta, bhat)) {
         warn(glue(
             "{label}: the posterior mean effects' squares sum past twice ",
             "the squared marginal effects, so the chain diverged and its ",
@@ -4613,6 +4746,13 @@ ldpred2GridWeights <- function(
         ))
     }
     invisible(NULL)
+}
+
+# Whether effects `beta` have diverged: their squares summing past twice the
+# marginal effects' `bhat`, LDpred2's bound.
+# @noRd
+.mcmcMeanDiverged <- function(beta, bhat) {
+    sum(beta^2) > 2 * sum(bhat^2)
 }
 
 # @noRd
@@ -5300,6 +5440,331 @@ lassosumRss <- function(
     .ldFromRef(ldReference, ids[perm %||% seq_along(ids)], label)
 }
 
+# The LD a fit taking one LD per condition (mr.mash.rss, mvsusie_rss) is
+# given, as list(R, X, n, group): a factor of it (X) when every reference is a
+# genotype reference, so the p x p matrix is never formed, or else the
+# matrix (R). One reference's LD is over the statistics' variants (n and group
+# NULL, left to the caller); for a list of one reference per condition, there
+# is one LD per reference over the variants its conditions carry
+# (.rssGroupLd()), each condition the median sample size of the conditions
+# of its sample group, which the fit takes as one sample, and that group
+# (.rssSampleGroups()): the conditions on one reference, split by
+# `stat$sampleGroups` when given (one label per condition, such as its
+# study), as studies that share a reference panel are on different samples.
+# One reference shared by several sample groups is taken as one per
+# condition.
+# @noRd
+#' @importFrom stats ave median
+.rssConditionLd <- function(stat, ldReference, label) {
+    Z <- as.matrix(stat$z)
+    perCondition <- .jgIsPerConditionLd(ldReference)
+    if (!perCondition && length(unique(stat$sampleGroups)) <= 1L) {
+        return(.rssOneLd(stat, ldReference, label))
+    }
+    refs <- if (perCondition) {
+        ldReference
+    } else {
+        rep(list(ldReference), ncol(Z))
+    }
+    if (length(refs) != ncol(Z)) {
+        abort(glue(
+            "{label}: a list `ldReference` holds one LD reference ",
+            "per column of stat$z ({ncol(Z)}); got {length(refs)}."
+        ))
+    }
+    refGroups <- .rssRefGroups(refs)
+    useFactor <- all(map_lgl(refs, .ldIsGenotypeRef))
+    ld <- map(
+        seq_len(max(refGroups)),
+        .rssGroupLd,
+        groups = refGroups,
+        refs = refs,
+        Z = Z,
+        ids = .rssStatVariantIds(stat, label),
+        label = label,
+        useFactor = useFactor
+    )
+    groups <- .rssSampleGroups(refGroups, stat$sampleGroups)
+    n <- ave(rep_len(as.numeric(stat$n), ncol(Z)), groups, FUN = median)
+    if (useFactor) {
+        list(X = ld[refGroups], n = n, group = groups)
+    } else {
+        list(R = ld[refGroups], n = n, group = groups)
+    }
+}
+
+# The groups of conditions a fit takes as measured on the same samples: the
+# conditions on one LD reference (`refGroups`), split by `sampleGroups` (one
+# label per condition) when given. Numbered in order of first appearance.
+# @noRd
+.rssSampleGroups <- function(refGroups, sampleGroups) {
+    if (is.null(sampleGroups)) {
+        return(refGroups)
+    }
+    key <- paste(refGroups, sampleGroups, sep = "\r")
+    match(key, unique(key))
+}
+
+# The residual variance each condition's heritability implies (`h2`, one
+# per condition, NA for none), as SuSiE-RSS's 1 - h2: that fraction of the
+# condition's variance (`variance`, 1 on the standardized scale), which the
+# multivariate fits give their residual correlations. NULL without `h2`.
+# @noRd
+.rssResidualVariances <- function(h2, variance = 1) {
+    if (is.null(h2)) {
+        return(NULL)
+    }
+    (1 - replace(h2, is.na(h2), 0)) * variance
+}
+
+# `V` with zero between conditions on different samples (`group`, as
+# .rssConditionLd() gives it: on different LD references, or in different
+# sample groups); as it is when they share their samples (`group` NULL).
+# @noRd
+.rssMaskBetweenRefs <- function(V, group) {
+    if (is.null(V) || is.null(group)) {
+        return(V)
+    }
+    replace(V, outer(group, group, "!="), 0)
+}
+
+# One reference's LD over the statistics' variants, as .rssConditionLd()
+# gives it: its factor for a genotype reference, else its matrix.
+# @noRd
+.rssOneLd <- function(stat, ldReference, label) {
+    if (!.ldIsGenotypeRef(ldReference)) {
+        return(list(R = .rssLdMatrix(stat, ldReference, label), n = NULL))
+    }
+    ids <- .rssStatVariantIds(stat, label)
+    list(X = .ldFactorFromRef(ldReference, ids, label), n = NULL)
+}
+
+# Each condition's reference group: conditions with one (identical) reference
+# share a group, numbered in order of first appearance.
+# @noRd
+#' @importFrom purrr detect_index
+.rssRefGroups <- function(refs) {
+    first <- map_int(seq_along(refs), .rssFirstRef, refs = refs)
+    match(first, unique(first))
+}
+
+# @noRd
+.rssFirstRef <- function(i, refs) {
+    detect_index(refs, identical, refs[[i]])
+}
+
+# The LD of the conditions in group `g`: their reference's over the variants
+# they carry that it holds, laid on the statistics' variants with zero rows
+# and columns (and diagonal) for the rest, which carry no information in
+# them. With `useFactor`, its factor, with zero columns for the rest.
+# @noRd
+.rssGroupLd <- function(g, groups, refs, Z, ids, label, useFactor = FALSE) {
+    cols <- which(groups == g)
+    carried <- .rssGroupCarried(cols, Z, ids)
+    fromRef <- if (useFactor) .ldFactorFromRef else .ldFromRef
+    ld <- if (length(carried) > 0L) {
+        fromRef(refs[[cols[[1L]]]], carried, label, onMissing = "drop")
+    }
+    if (useFactor) .rssEmbedFactor(ld, ids) else .rssEmbedLd(ld, ids)
+}
+
+# The variants the conditions `cols` carry: those with a statistic in at
+# least one of them.
+# @noRd
+.rssGroupCarried <- function(cols, Z, ids) {
+    ids[rowSums(!is.na(Z[, cols, drop = FALSE])) > 0L]
+}
+
+# The panels of the conditions in group `g` when their reference is a
+# GenotypeMixture -- each panel's LD, or with `useFactor` its factor
+# (.ldPanelsFromRef()) -- laid on the statistics' variants as .rssGroupLd()
+# lays the reference's LD; NULL for any other reference.
+# @noRd
+.rssGroupPanels <- function(
+    g,
+    groups,
+    refs,
+    Z,
+    ids,
+    label,
+    useFactor = FALSE
+) {
+    cols <- which(groups == g)
+    ref <- refs[[cols[[1L]]]]
+    if (!.ldIsMixtureRef(ref)) {
+        return(NULL)
+    }
+    carried <- .rssGroupCarried(cols, Z, ids)
+    panels <- if (length(carried) > 0L) {
+        .ldPanelsFromRef(ref, carried, label, "drop", useFactor = useFactor)
+    }
+    map(
+        panels %||% vector("list", length(.gmComponents(ref))),
+        if (useFactor) .rssEmbedFactor else .rssEmbedLd,
+        ids = ids
+    )
+}
+
+# A factor `ldFactor` of LD laid on the variants `ids`: a zero column where
+# it holds none (one row of zeros when it holds no variant at all), which
+# gives that variant a zero row and column of the LD.
+# @noRd
+#' @importFrom dplyr coalesce
+.rssEmbedFactor <- function(ldFactor, ids) {
+    if (is.null(ldFactor)) {
+        return(matrix(0, 1L, length(ids), dimnames = list(NULL, ids)))
+    }
+    padded <- cbind(ldFactor, 0)
+    at <- coalesce(match(ids, colnames(ldFactor)), ncol(padded))
+    `dimnames<-`(padded[, at, drop = FALSE], list(NULL, ids))
+}
+
+# `ld` laid on the variants `ids`: zero where it holds no row.
+# @noRd
+.rssEmbedLd <- function(ld, ids) {
+    if (is.null(ld)) {
+        return(matrix(0, length(ids), length(ids), dimnames = list(ids, ids)))
+    }
+    at <- match(ids, rownames(ld))
+    embedded <- unname(as.matrix(ld)[at, at, drop = FALSE])
+    `dimnames<-`(replace(embedded, is.na(embedded), 0), list(ids, ids))
+}
+
+# The LD a fit's credible sets' purity reads, as list(R, X): `ld`'s, or,
+# when the fit estimated a mixture's weights (`omega`) from its panels
+# (`ld$panels`), the panels mixed with them -- from their factors when
+# there are, as for the block's own.
+# @noRd
+.rssPurityLd <- function(ld, omega) {
+    if (is.null(ld$panels) || is.null(omega)) {
+        return(list(R = ld$R, X = ld$X))
+    }
+    if (!is.null(ld$panels$X)) {
+        return(list(X = .rssWeightedFactor(ld$panels$X, omega)))
+    }
+    list(R = .rssWeightedLd(ld$panels$R, omega))
+}
+
+# Whether a condition's LD is a list of panels, whose weights the fit
+# estimates, rather than one matrix or factor.
+# @noRd
+.rssIsPanels <- function(ld) {
+    is.list(ld) && !is.matrix(ld)
+}
+
+# A condition's LD mixed from its panels with the weights `omega`
+# (.rssWeightedFactor(), or .rssWeightedLd() without `useFactor`); its LD as
+# it is when it has no panels.
+# @noRd
+.rssMixedPanels <- function(ld, omega, useFactor) {
+    if (!.rssIsPanels(ld)) {
+        return(ld)
+    }
+    if (useFactor) .rssWeightedFactor(ld, omega) else .rssWeightedLd(ld, omega)
+}
+
+# The LD of panels mixed with the weights `omega`: the weighted sum of
+# their matrices.
+# @noRd
+.rssWeightedLd <- function(panels, omega) {
+    reduce(map2(panels, omega, `*`), `+`)
+}
+
+# A factor (.ldRefFactor()'s contract) of the panels, given by their
+# factors, mixed with the weights `omega`: each panel's rows scaled so that
+# its crossproduct is omega_k times its LD, stacked, and rescaled for the
+# rows of the stack.
+# @noRd
+.rssWeightedFactor <- function(panels, omega) {
+    stacked <- exec(rbind, !!!map2(panels, omega, .rssWeightedFactorBlock))
+    stacked * sqrt(nrow(stacked) - 1)
+}
+
+# @noRd
+.rssWeightedFactorBlock <- function(ldFactor, w) {
+    ldFactor * sqrt(w / (nrow(ldFactor) - 1))
+}
+
+# The statistics as a fit on its LD (.rssConditionLd()) is given them: a
+# variant a condition lacks -- no statistic there, or, with one LD per
+# condition, no LD, its reference not holding it -- has z and Bhat 0 and
+# Shat 1, carrying no information there.
+# @noRd
+.rssCarriedStat <- function(stat, LD) {
+    lacked <- if (is.list(LD$R) || is.list(LD$X)) {
+        .rssLackedVariants(LD)
+    } else {
+        FALSE
+    }
+    held <- intersect(c("z", "Bhat", "Shat"), names(compact(stat)))
+    list_assign(
+        stat,
+        !!!set_names(
+            map(held, .rssFillLacked, stat = stat, lacked = lacked),
+            held
+        )
+    )
+}
+
+# The z-scores an RSS fit reads (`LD` as .rssConditionLd() gives it): 0 for
+# a variant a condition's LD lacks, which carries no information there, and
+# missing where the condition has no z-score for a variant its LD holds.
+# The engines fit a missing z-score as 0 but leave it out of their estimate
+# of the conditions' residual correlation, which a 0 would pull toward 0.
+# @noRd
+.rssFitZ <- function(stat, LD) {
+    z <- as.matrix(stat$z)
+    if (!is.list(LD$R) && !is.list(LD$X)) {
+        return(z)
+    }
+    replace(z, .rssLackedVariants(LD), 0)
+}
+
+# `expr`, an RSS fit given missing z-scores (.rssFitZ()), without the
+# warning its engine raises on fitting them as 0: they are missing by
+# design, a condition with no statistic for a variant. Nothing else is
+# muffled.
+# @noRd
+.rssQuietMissingZ <- function(expr) {
+    withCallingHandlers(expr, warning = .rssMuffleMissingZ)
+}
+
+# @noRd
+.rssMuffleMissingZ <- function(w) {
+    if (str_detect(conditionMessage(w), "z-scores are replaced with 0")) {
+        invokeRestart("muffleWarning")
+    }
+}
+
+# The variants each condition's LD lacks (variants x conditions), from the
+# per-condition LD of .rssConditionLd(): a zero diagonal of its matrix, or a
+# zero column of its factor.
+# @noRd
+.rssLackedVariants <- function(LD) {
+    diagonals <- if (is.null(LD$X)) {
+        map(LD$R, diag)
+    } else {
+        map(LD$X, .rssFactorDiagonal)
+    }
+    matrix(list_c(diagonals), ncol = length(diagonals)) == 0
+}
+
+# The diagonal of the LD a factor gives, up to its scale.
+# @noRd
+.rssFactorDiagonal <- function(ldFactor) {
+    colSums(ldFactor^2)
+}
+
+# @noRd
+.rssFillLacked <- function(field, stat, lacked) {
+    values <- as.matrix(stat[[field]])
+    replace(
+        values,
+        is.na(values) | lacked,
+        if (identical(field, "Shat")) 1 else 0
+    )
+}
+
 # The variant ids an LD reference is matched on.
 # @noRd
 .rssStatVariantIds <- function(stat, label) {
@@ -5317,8 +5782,22 @@ lassosumRss <- function(
 # check a fit against them: their variant ids, all of which must be in
 # `ldReference` when one is given, or else their z-scores or effects (rows,
 # for a multi-condition matrix). NA when the statistics carry none of these.
+# A list of one reference per condition holds one per column of `stat$z`,
+# each a valid reference; the variants a condition's reference lacks are
+# missing there, as the fit had them (.rssConditionLd()).
 # @noRd
 .rssVariantCount <- function(stat, ldReference, label) {
+    if (.jgIsPerConditionLd(ldReference)) {
+        nCond <- NCOL(stat$z)
+        if (length(ldReference) != nCond) {
+            abort(glue(
+                "{label}: a list `ldReference` holds one LD reference ",
+                "per column of stat$z ({nCond}); got {length(ldReference)}."
+            ))
+        }
+        walk(ldReference, .ldFromRefValidate, label = label)
+        return(length(.rssStatVariantIds(stat, label)))
+    }
     if (!is.null(ldReference)) {
         ids <- .rssStatVariantIds(stat, label)
         .ldFromRefValidate(ldReference, label)
@@ -5621,7 +6100,7 @@ lassosumRssWeights <- function(
 ) {
     selection <- arg_match(selection)
     fitRetention <- arg_match(fitRetention)
-    backend <- .rssBackend("lasso", backend, ldReference)
+    backend <- .methodBackend("lasso", backend, "sumstat")
     methodArgs <- .backendOptions(
         methodArgs,
         .methodBackends$sumstat$lasso[[backend]],
@@ -6886,32 +7365,1468 @@ l0learnWeights <- function(
     )
 }
 
+# ---- Fits across studies (difference penalty) ------------------------------
+#
+# A study-axis group of a MultiStudyQtlDataset stacks its studies' samples
+# (.xsStack()): X holds every study's rows over the union of their variants,
+# zero where a study lacks one, and Y one column per study, missing outside
+# the study's own rows. lasso, elastic net, ridge and L0Learn fit such a group
+# with a penalty on the difference between the studies' per-SD effects, the
+# individual-level analogue of PROSPER:
+#
+#   sum_k [RSS_k / (2 n_k) + lambda P(b_k)]
+#       + (c / 2) sum_j sum_{k < k'} (s_jk b_jk - s_jk' b_jk')^2
+#
+# Each study's loss is its own mean squared error, on its phenotype scaled to
+# unit variance, and s_jk is variant j's SD in study k. The engines solve it
+# as one augmented least-squares problem (.coupledDesign()). Each study takes
+# the (lambda, c) its own held-out rows score best, on folds drawn within each
+# study with the pseudo-rows always training (.coupledFit()). At c = 0 the fit
+# is the studies' separate fits; as c grows it becomes one pooled fit.
+
+# lasso across a group's studies (.glmnetCoupledWeights()).
+# @noRd
+.lassoCoupledWeights <- function(
+    X,
+    Y,
+    strengths,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = GlmnetOptions()
+) {
+    .glmnetCoupledWeights(
+        X,
+        Y,
+        1,
+        strengths,
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# The elastic net across a group's studies, at the mixing `alpha` enetWeights()
+# takes (.glmnetCoupledWeights()).
+# @noRd
+.enetCoupledWeights <- function(
+    X,
+    Y,
+    strengths,
+    alpha = 0.5,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = GlmnetOptions()
+) {
+    assertNumber(alpha, lower = 0, upper = 1)
+    .glmnetCoupledWeights(
+        X,
+        Y,
+        alpha,
+        strengths,
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# Ridge across a group's studies (.glmnetCoupledWeights()).
+# @noRd
+.ridgeCoupledWeights <- function(
+    X,
+    Y,
+    strengths,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = GlmnetOptions()
+) {
+    .glmnetCoupledWeights(
+        X,
+        Y,
+        0,
+        strengths,
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# glmnet's fit of a group across its studies: the weights (variants x
+# studies) each study's own best (lambda, c) gives it, zero for a variant the
+# study does not carry. lambda is on each study's own scale: at c = 0, study
+# k's weights are glmnetWeights()' at lambda times its phenotype's SD.
+# @noRd
+.glmnetCoupledWeights <- function(
+    X,
+    Y,
+    alpha,
+    strengths,
+    fitRetention,
+    methodArgs
+) {
+    if (!requireNamespace("glmnet", quietly = TRUE)) {
+        abort("Package 'glmnet' is required for this function.")
+    }
+    .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
+    opts <- .coupledGlmnetOptions(methodArgs)
+    studies <- .coupledStudies(X, Y, strengths)
+    engine <- list(
+        path = .coupledGlmnetPath,
+        alpha = alpha,
+        lambda = opts$lambda %||% .coupledGlmnetLambda(studies, alpha, opts),
+        args = opts$engine
+    )
+    .coupledFit(studies, engine, opts$nfolds, fitRetention)
+}
+
+# The GlmnetOptions a fit across studies honours: its folds' count
+# (`nfolds`), its lambda grid (`lambda`, `nlambda`, `lambda.min.ratio`) and
+# glmnet's tolerances. The rest set up what this fit does not do --
+# cv.glmnet's own folds, or a per-variant layout the stacked design lacks.
+# @noRd
+.coupledGlmnetOptions <- function(methodArgs) {
+    user <- as.list(methodArgs)
+    honoured <- c(
+        "nfolds",
+        "lambda",
+        "nlambda",
+        "lambda.min.ratio",
+        "thresh",
+        "maxit",
+        "type.measure"
+    )
+    .coupledRefuseOptions(setdiff(names(user), honoured), "GlmnetOptions")
+    .coupledRefuseMeasure(user$type.measure)
+    list(
+        nfolds = user$nfolds %||% 5L,
+        lambda = user$lambda,
+        nlambda = user$nlambda %||% 100L,
+        ratio = user$lambda.min.ratio %||% 0.01,
+        engine = user[intersect(names(user), c("thresh", "maxit"))]
+    )
+}
+
+# A fit across studies picks its grid point by mean squared error, which is
+# what cv.glmnet's "mse" and, for a gaussian response, "deviance" measure.
+# @noRd
+.coupledRefuseMeasure <- function(measure) {
+    if (is.null(measure) || is_in(measure, c("default", "mse", "deviance"))) {
+        return(invisible(NULL))
+    }
+    abort(glue(
+        "GlmnetOptions(type.measure = \"{measure}\"): a fit across studies ",
+        "chooses its (lambda, c) by mean squared error."
+    ))
+}
+
+# Engine options that have no meaning for a fit across studies.
+# @noRd
+.coupledRefuseOptions <- function(unsupported, label) {
+    if (length(unsupported) == 0L) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "{label}({str_flatten(unsupported, ', ')}) does not apply to a ",
+            "fit across studies, whose folds, grid and columns are its own."
+        ),
+        i = str_c(
+            "Leave it unset, or pass studyCoupling = NULL to fit each study ",
+            "on its own."
+        )
+    ))
+}
+
+# glmnet's lambda grid: from the largest any study's own fit starts at, where
+# every effect is zero, down by `ratio`. The pseudo-rows add nothing to the
+# gradient at zero, so one grid serves every c.
+# @noRd
+.coupledGlmnetLambda <- function(studies, alpha, opts) {
+    top <- max(map2_dbl(
+        seq_along(studies$rows),
+        studies$rows,
+        .coupledLambdaMax,
+        studies = studies,
+        alpha = alpha
+    ))
+    exp(seq(log(top), log(top * opts$ratio), length.out = opts$nlambda))
+}
+
+# Study `k`'s own largest lambda: glmnet's, which takes a ridge's from
+# alpha = 0.001.
+# @noRd
+.coupledLambdaMax <- function(k, rows, studies, alpha) {
+    block <- .coupledBlock(k, rows, studies)
+    max(abs(crossprod(block$X, block$y))) / (length(rows) * max(alpha, 1e-3))
+}
+
+# One glmnet path on `design`, its coefficients over the grid (columns),
+# padded with the last fit where glmnet stopped early, its deviance no longer
+# moving. The design's loss is the studies' mean, so lambda is divided by K.
+# @noRd
+.coupledGlmnetPath <- function(design, engine) {
+    fit <- exec(
+        glmnet::glmnet,
+        x = design$X,
+        y = design$y,
+        family = "gaussian",
+        alpha = engine$alpha,
+        lambda = engine$lambda / design$K,
+        standardize = FALSE,
+        intercept = FALSE,
+        !!!engine$args
+    )
+    .coupledPadPath(as.matrix(fit$beta), length(engine$lambda))
+}
+
+# L0Learn across a group's studies, with the L0 penalty: its lambda reads the
+# same at every c, where the L1 and L2 terms' would not, as they see
+# L0Learn's own rescaling of the columns, which the pseudo-rows change.
+# @noRd
+.l0learnCoupledWeights <- function(
+    X,
+    Y,
+    strengths,
+    penalty = "L0",
+    nFolds = 5,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = L0learnOptions()
+) {
+    if (!requireNamespace("L0Learn", quietly = TRUE)) {
+        abort("Package 'L0Learn' is required for this function.")
+    }
+    .assertMethodOptions(methodArgs, "L0learnOptions", "methodArgs")
+    .coupledRequireL0(penalty)
+    assertCount(nFolds, positive = TRUE)
+    studies <- .coupledStudies(X, Y, strengths)
+    engine <- list(
+        path = .coupledL0learnPath,
+        args = .coupledL0learnOptions(methodArgs)
+    )
+    .coupledFit(
+        studies,
+        list_assign(engine, lambda = .coupledL0learnLambda(studies, engine)),
+        nFolds,
+        arg_match(fitRetention)
+    )
+}
+
+# @noRd
+.coupledRequireL0 <- function(penalty) {
+    if (identical(penalty, "L0")) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "l0learn across studies fits penalty = \"L0\" only, not ",
+            "\"{penalty}\": the L1 and L2 terms see L0Learn's own rescaling ",
+            "of the columns, which the coupling changes."
+        ),
+        i = str_c(
+            "Use penalty = \"L0\", or pass studyCoupling = NULL to fit each ",
+            "study on its own."
+        )
+    ))
+}
+
+# The L0learnOptions a fit across studies honours: those of L0Learn's search
+# and grid. `seed` sets L0Learn.cvfit()'s folds, which this fit does not use;
+# its own folds follow the run's seed.
+# @noRd
+.coupledL0learnOptions <- function(methodArgs) {
+    user <- as.list(methodArgs)
+    honoured <- c(
+        "maxSuppSize",
+        "nLambda",
+        "scaleDownFactor",
+        "algorithm",
+        "maxSwaps",
+        "maxIters",
+        "rtol",
+        "atol",
+        "activeSet",
+        "activeSetNum",
+        "screenSize"
+    )
+    .coupledRefuseOptions(
+        setdiff(names(user), c(honoured, "seed")),
+        "L0learnOptions"
+    )
+    user[intersect(names(user), honoured)]
+}
+
+# L0Learn's own lambda grid for the full data at the weakest coupling. Its
+# lambda is relative to the phenotype's norm, which every design fixes, so the
+# grid reads the same at every c and in every fold.
+# @noRd
+.coupledL0learnLambda <- function(studies, engine) {
+    design <- .coupledDesign(
+        studies,
+        studies$rows,
+        min(studies$strengths)
+    )
+    fit <- exec(
+        L0Learn::L0Learn.fit,
+        x = design$X,
+        y = design$y,
+        penalty = "L0",
+        intercept = FALSE,
+        !!!engine$args
+    )
+    fit$lambda[[1L]]
+}
+
+# One L0Learn path on `design` over the grid, padded as glmnet's is.
+# @noRd
+.coupledL0learnPath <- function(design, engine) {
+    gridArgs <- engine$args[
+        setdiff(names(engine$args), c("nLambda", "scaleDownFactor"))
+    ]
+    fit <- exec(
+        L0Learn::L0Learn.fit,
+        x = design$X,
+        y = design$y,
+        penalty = "L0",
+        intercept = FALSE,
+        lambdaGrid = list(engine$lambda),
+        !!!gridArgs
+    )
+    .coupledPadPath(as.matrix(fit$beta[[1L]]), length(engine$lambda))
+}
+
+# A path's coefficients over `n` grid points: an engine that stopped early
+# has reached its last fit, which then stands for the rest.
+# @noRd
+.coupledPadPath <- function(B, n) {
+    if (ncol(B) >= n) {
+        return(B[, seq_len(n), drop = FALSE])
+    }
+    cbind(B, B[, rep(ncol(B), n - ncol(B)), drop = FALSE])
+}
+
+# The studies of a stacked group, with the coupling strengths to fit: each
+# study's rows, those holding its phenotype. A sample is in one study, so two
+# studies' rows must not meet.
+# @noRd
+#' @importFrom checkmate assertNumeric
+.coupledStudies <- function(X, Y, strengths) {
+    assertNumeric(
+        strengths,
+        lower = 0,
+        finite = TRUE,
+        any.missing = FALSE,
+        min.len = 1L
+    )
+    rows <- map(seq_len(ncol(Y)), .coupledStudyRows, Y = Y)
+    if (anyDuplicated(list_c(rows, ptype = integer())) > 0L) {
+        abort(str_c(
+            "A fit across studies needs each sample in one study, but some ",
+            "rows hold the phenotypes of several."
+        ))
+    }
+    list(X = X, Y = Y, rows = rows, strengths = strengths)
+}
+
+# @noRd
+.coupledStudyRows <- function(k, Y) {
+    which(!is.na(Y[, k]))
+}
+
+# The coupled fit of `studies` on `engine` (its path function, lambda grid and
+# engine arguments): every c's full-data path, each study's cross-validated
+# error over the (lambda, c) grid, and the weights of each study's own best
+# grid point, with the fit kept as `fitRetention` asks.
+# @noRd
+.coupledFit <- function(studies, engine, nfolds, fitRetention) {
+    folds <- map(studies$rows, .coupledFoldIds, nfolds = nfolds)
+    full <- map(
+        studies$strengths,
+        .coupledFullPath,
+        studies = studies,
+        engine = engine
+    )
+    cv <- .coupledCvError(studies, engine, folds, nfolds)
+    choice <- map(cv, .coupledChoice)
+    W <- .coupledWeightMatrix(studies, full, choice)
+    if (identical(fitRetention, "none")) {
+        return(W)
+    }
+    fit <- .coupledFitRecord(studies, engine, full, cv, choice, fitRetention)
+    `attr<-`(W, "fit", .withFitVariantIds(fit, colnames(studies$X)))
+}
+
+# A study's rows dealt into `nfolds` folds at random, so every fold holds out
+# a share of every study.
+# @noRd
+.coupledFoldIds <- function(rows, nfolds) {
+    sample(rep_len(seq_len(nfolds), length(rows)))
+}
+
+# The full-data path at coupling `strength`, with the scales its coefficients
+# are on.
+# @noRd
+.coupledFullPath <- function(strength, studies, engine) {
+    design <- .coupledDesign(studies, studies$rows, strength)
+    list(blocks = design$blocks, beta = engine$path(design, engine))
+}
+
+# Each study's cross-validated error over the (lambda, c) grid: every fold
+# fitted at every c on the other folds' rows -- the pseudo-rows always among
+# them -- and scored on its own.
+# @noRd
+.coupledCvError <- function(studies, engine, folds, nfolds) {
+    perFold <- map(
+        seq_len(nfolds),
+        .coupledFoldSse,
+        studies = studies,
+        engine = engine,
+        folds = folds
+    )
+    map(
+        seq_along(studies$rows),
+        .coupledStudyCv,
+        perFold = perFold,
+        folds = folds,
+        nfolds = nfolds
+    )
+}
+
+# Fold `f`'s squared errors: per study, its held-out rows' summed squared
+# error at each grid point (rows: lambda; columns: c).
+# @noRd
+.coupledFoldSse <- function(f, studies, engine, folds) {
+    train <- map2(studies$rows, folds, .coupledRowsOut, f = f)
+    test <- map2(studies$rows, folds, .coupledRowsIn, f = f)
+    byStrength <- map(
+        studies$strengths,
+        .coupledStrengthSse,
+        studies = studies,
+        train = train,
+        test = test,
+        engine = engine
+    )
+    map(seq_along(test), .coupledSseByStrength, byStrength = byStrength)
+}
+
+# @noRd
+.coupledRowsOut <- function(rows, ids, f) {
+    rows[ids != f]
+}
+
+# @noRd
+.coupledRowsIn <- function(rows, ids, f) {
+    rows[ids == f]
+}
+
+# Each study's held-out squared errors along the path fitted at coupling
+# `strength` on the rows `train`.
+# @noRd
+.coupledStrengthSse <- function(strength, studies, train, test, engine) {
+    design <- .coupledDesign(studies, train, strength)
+    beta <- engine$path(design, engine)
+    map2(
+        seq_along(test),
+        test,
+        .coupledHeldOutSse,
+        design = design,
+        beta = beta,
+        studies = studies
+    )
+}
+
+# @noRd
+.coupledSseByStrength <- function(k, byStrength) {
+    exec(cbind, !!!map(byStrength, k))
+}
+
+# Study `k`'s held-out rows' summed squared error at each lambda.
+# @noRd
+.coupledHeldOutSse <- function(k, rows, design, beta, studies) {
+    if (length(rows) == 0L) {
+        return(numeric(ncol(beta)))
+    }
+    pred <- .coupledPredict(
+        design$blocks[[k]],
+        beta,
+        studies$X[rows, , drop = FALSE]
+    )
+    colSums((studies$Y[rows, k] - pred)^2)
+}
+
+# Phenotype predictions for the rows of `X` from a study's coefficients along
+# a path `beta`, on the centring and scale its fit was made on.
+# @noRd
+.coupledPredict <- function(block, beta, X) {
+    Xc <- sweep(X[, block$carried, drop = FALSE], 2L, block$xMean)
+    coefs <- block$sigma * beta[block$cols, , drop = FALSE]
+    as.matrix(Xc %*% coefs) + block$yMean
+}
+
+# Study `k`'s cross-validated mean squared error over the grid, and its
+# standard error, computed from the folds' errors as cv.glmnet computes them.
+# @noRd
+.coupledStudyCv <- function(k, perFold, folds, nfolds) {
+    sse <- map(perFold, k)
+    held <- tabulate(folds[[k]], nbins = nfolds)
+    cvm <- reduce(sse, `+`) / sum(held)
+    used <- which(held > 0L)
+    deviations <- map2(
+        sse[used],
+        held[used],
+        .coupledFoldDeviation,
+        cvm = cvm
+    )
+    weighted <- map2(deviations, held[used] / sum(held), `*`)
+    list(
+        cvm = cvm,
+        cvsd = sqrt(reduce(weighted, `+`) / max(length(used) - 1L, 1L))
+    )
+}
+
+# @noRd
+.coupledFoldDeviation <- function(sse, n, cvm) {
+    (sse / n - cvm)^2
+}
+
+# A study's best grid point: the (lambda, c) of its least cross-validated
+# error, the first of ties.
+# @noRd
+.coupledChoice <- function(cv) {
+    at <- arrayInd(which.min(cv$cvm), dim(cv$cvm))
+    list(lambda = at[[1L]], strength = at[[2L]])
+}
+
+# The weights (variants x studies), each study's from the full-data path at
+# its own grid point.
+# @noRd
+.coupledWeightMatrix <- function(studies, full, choice) {
+    cols <- map2(
+        seq_along(choice),
+        choice,
+        .coupledStudyWeights,
+        full = full,
+        nVariants = ncol(studies$X)
+    )
+    `dimnames<-`(
+        exec(cbind, !!!cols),
+        list(colnames(studies$X), colnames(studies$Y))
+    )
+}
+
+# Study `k`'s weights, on its phenotype's own scale, zero for each variant it
+# does not carry.
+# @noRd
+.coupledStudyWeights <- function(k, pick, full, nVariants) {
+    path <- full[[pick$strength]]
+    block <- path$blocks[[k]]
+    replace(
+        numeric(nVariants),
+        block$carried,
+        block$sigma * path$beta[block$cols, pick$lambda]
+    )
+}
+
+# The fit as `fitRetention` keeps it. "slim": each study's grid point (its c
+# and lambda) and the cross-validated error there. "full" adds the grid,
+# every c's full-data path (coefficients over each study's carried variants,
+# with their scales) and each study's errors over the whole grid.
+# @noRd
+.coupledFitRecord <- function(studies, engine, full, cv, choice, fitRetention) {
+    named <- colnames(studies$Y)
+    slim <- list(
+        strength = set_names(
+            studies$strengths[map_int(choice, "strength")],
+            named
+        ),
+        lambda = set_names(engine$lambda[map_int(choice, "lambda")], named),
+        cvm = set_names(map2_dbl(cv, choice, .coupledAt, field = "cvm"), named),
+        cvsd = set_names(
+            map2_dbl(cv, choice, .coupledAt, field = "cvsd"),
+            named
+        )
+    )
+    if (identical(fitRetention, "slim")) {
+        return(slim)
+    }
+    c(
+        slim,
+        list(
+            strengths = studies$strengths,
+            lambdaPath = engine$lambda,
+            paths = map(full, .coupledSparsePath),
+            cvmPath = set_names(map(cv, "cvm"), named),
+            cvsdPath = set_names(map(cv, "cvsd"), named)
+        )
+    )
+}
+
+# @noRd
+.coupledAt <- function(cv, pick, field) {
+    cv[[field]][pick$lambda, pick$strength]
+}
+
+# @noRd
+#' @importFrom Matrix Matrix
+.coupledSparsePath <- function(path) {
+    list_assign(path, beta = Matrix(path$beta, sparse = TRUE))
+}
+
+# The augmented least-squares problem of the studies' rows `train` (one index
+# vector per study) at coupling `strength`. Each study's rows are centred, its
+# phenotype scaled to unit variance, and both scaled by sqrt(N / (K n_k)):
+# each study's loss is then its mean squared error, and the stacked phenotype
+# has unit variance, so glmnet's own rescaling of it changes nothing. For each
+# variant two studies carry, the pseudo-rows +/- sqrt(N c / (2 K)) (s_jk e_jk -
+# s_jk' e_jk') add (c / (2 K)) (s_jk b_jk - s_jk' b_jk')^2, the difference
+# penalty on the per-SD effects; in +/- pairs they leave every column's mean at
+# zero. Columns: each study's variants that vary in its rows.
+# @noRd
+#' @importFrom Matrix bdiag
+.coupledDesign <- function(studies, train, strength) {
+    blocks <- .coupledPlaced(map2(
+        seq_along(train),
+        train,
+        .coupledBlock,
+        studies = studies
+    ))
+    K <- length(blocks)
+    n <- map_int(train, length)
+    pairs <- if (strength > 0) .coupledPairs(blocks) else list()
+    nPseudo <- 2L * sum(map_int(pairs, .coupledPairSize))
+    N <- sum(n) + nPseudo
+    a <- sqrt(N / (K * n))
+    data <- bdiag(map2(blocks, a, .coupledScaledX))
+    pseudo <- .coupledPseudo(
+        pairs,
+        blocks,
+        sqrt(N * strength / (2 * K)),
+        ncol(data)
+    )
+    list(
+        X = if (is.null(pseudo)) data else rbind(data, pseudo, -pseudo),
+        y = c(list_c(map2(blocks, a, .coupledScaledY)), numeric(nPseudo)),
+        blocks = map(blocks, .coupledBlockScales),
+        K = K
+    )
+}
+
+# Study `k` on the rows `rows`: its centred genotypes over the variants that
+# vary there, their SDs, and its centred phenotype in units of its SD (one
+# that does not vary is left unscaled).
+# @noRd
+.coupledBlock <- function(k, rows, studies) {
+    Xk <- studies$X[rows, , drop = FALSE]
+    xMean <- colMeans(Xk)
+    centred <- sweep(Xk, 2L, xMean)
+    s <- sqrt(colMeans(centred^2))
+    carried <- which(s > sqrt(.Machine$double.eps))
+    y <- studies$Y[rows, k]
+    yMean <- mean(y)
+    spread <- sqrt(mean((y - yMean)^2))
+    sigma <- if (spread > 0) spread else 1
+    list(
+        X = centred[, carried, drop = FALSE],
+        y = (y - yMean) / sigma,
+        carried = carried,
+        xMean = xMean[carried],
+        s = s[carried],
+        yMean = yMean,
+        sigma = sigma
+    )
+}
+
+# The blocks with their columns in the design, each study's after the last.
+# @noRd
+.coupledPlaced <- function(blocks) {
+    widths <- map_int(blocks, .coupledWidth)
+    starts <- cumsum(c(0L, widths[-length(widths)]))
+    map2(blocks, starts, .coupledPlaceBlock)
+}
+
+# @noRd
+.coupledWidth <- function(block) {
+    length(block$carried)
+}
+
+# @noRd
+.coupledPlaceBlock <- function(block, start) {
+    list_assign(block, cols = start + seq_along(block$carried))
+}
+
+# Each pair of studies with the variants both carry, as positions in each
+# one's block; a pair sharing none is dropped.
+# @noRd
+.coupledPairs <- function(blocks) {
+    compact(map(
+        utils::combn(length(blocks), 2L, simplify = FALSE),
+        .coupledPair,
+        blocks = blocks
+    ))
+}
+
+# @noRd
+.coupledPair <- function(pair, blocks) {
+    first <- blocks[[pair[[1L]]]]$carried
+    second <- blocks[[pair[[2L]]]]$carried
+    shared <- intersect(first, second)
+    if (length(shared) == 0L) {
+        return(NULL)
+    }
+    list(
+        studies = pair,
+        at1 = match(shared, first),
+        at2 = match(shared, second)
+    )
+}
+
+# @noRd
+.coupledPairSize <- function(pair) {
+    length(pair$at1)
+}
+
+# The pseudo-rows of every pair of studies, before their negated copies; NULL
+# when nothing is coupled.
+# @noRd
+.coupledPseudo <- function(pairs, blocks, scale, nCoef) {
+    if (length(pairs) == 0L) {
+        return(NULL)
+    }
+    exec(
+        rbind,
+        !!!map(
+            pairs,
+            .coupledPairRows,
+            blocks = blocks,
+            scale = scale,
+            nCoef = nCoef
+        )
+    )
+}
+
+# One pair's pseudo-rows: one per shared variant, `scale` times its SD in the
+# first study and minus its SD in the second.
+# @noRd
+#' @importFrom Matrix sparseMatrix
+.coupledPairRows <- function(pair, blocks, scale, nCoef) {
+    first <- blocks[[pair$studies[[1L]]]]
+    second <- blocks[[pair$studies[[2L]]]]
+    m <- length(pair$at1)
+    sparseMatrix(
+        i = rep(seq_len(m), 2L),
+        j = c(first$cols[pair$at1], second$cols[pair$at2]),
+        x = scale * c(first$s[pair$at1], -second$s[pair$at2]),
+        dims = c(m, nCoef)
+    )
+}
+
+# @noRd
+.coupledScaledX <- function(block, a) {
+    a * block$X
+}
+
+# @noRd
+.coupledScaledY <- function(block, a) {
+    a * block$y
+}
+
+# What predicting from and reading a block's coefficients needs: its variants,
+# columns and centring and phenotype scale.
+# @noRd
+.coupledBlockScales <- function(block) {
+    block[c("carried", "cols", "xMean", "yMean", "sigma")]
+}
+
+# ---- Penalized RSS across studies (difference penalty) ---------------------
+#
+# A study-axis group of summary statistics (.enumCrossStudyGroup()) holds its
+# studies' z-scores over the union of their variants, NA where a study lacks
+# one, with each study's own LD reference. The penalized RSS methods fit it
+# under the penalty on the difference between the studies' per-SD effects,
+# PROSPER's coupling: penalizedRssCoupledCpp() solves
+#
+#   sum_k [b_k'R_k,s b_k - 2 b_k'z_k + penalty(b_k)]
+#       + c sum_j sum_{k < k'} (b_jk - b_jk')^2,
+#
+# twice the individual-level objective of .glmnetCoupledWeights() on
+# standardized data, so c means the same on either. Each study is fitted
+# against its own LD over the grid of shrinkage s, coupling c and the shared
+# lambda path, and takes the grid point its own held-out statistics score
+# best, by .rssSelectHeldOut()'s rule; each split refits the coupled grid on
+# every study's training part at once.
+
+# The weights (union variants `ids` x studies) each study's own best (s, c,
+# lambda) gives it, zero at a variant the study does not carry. `stats` holds
+# one statistics record per study (z or b with seb, n, and variantNames among
+# `ids`, in their spelling), `ldReferences` each study's reference, `spec` the
+# penalty (.rssPenalty()) and `options` the path options a
+# PenalizedRssOptions holds.
+# @noRd
+.rssCoupledWeights <- function(
+    stats,
+    ldReferences,
+    ids,
+    spec,
+    s,
+    strengths,
+    options,
+    fitRetention,
+    label
+) {
+    assertNumeric(strengths, lower = 0, finite = TRUE, min.len = 1L)
+    lds <- .rssCoupledLd(map2(stats, ldReferences, .rssLdSource, label = label))
+    walk(lds, .rssCheckHeldOutLd, label = label)
+    ns <- map_dbl(stats, .rssCoupledN)
+    run <- list(
+        lds = lds,
+        idx = map(stats, .rssCoupledIndex, ids = ids),
+        nUnion = length(ids),
+        spec = spec,
+        options = .rssCoupledOptions(options, spec),
+        cells = .rssCoupledCells(s, strengths)
+    )
+    cors <- pmap(list(stats, ns, lds), .rssCoupledCor)
+    search <- .rssCoupledGrid(
+        cors,
+        run,
+        run$options$lambda %||% .rssCoupledLambda(cors, spec, ns)
+    )
+    picks <- .rssCoupledSelect(search, cors, ns, run)
+    .rssCoupledResult(search, picks, run, ids, fitRetention)
+}
+
+# The studies' LD sources in one form for the coupled solver: their factors
+# when every study has one, else each one's matrix.
+# @noRd
+.rssCoupledLd <- function(lds) {
+    if (all(map_lgl(lds, .rssHasFactor))) {
+        return(lds)
+    }
+    map(lds, .rssDenseSource)
+}
+
+# @noRd
+.rssHasFactor <- function(ld) {
+    !is.null(ld$ldFactor)
+}
+
+# @noRd
+.rssDenseSource <- function(ld) {
+    list(R = .ldSourceMatrix(ld), nSamples = ld$nSamples)
+}
+
+# A study's sample size, the median of its per-variant ones.
+# @noRd
+.rssCoupledN <- function(stat) {
+    stats::median(stat$n)
+}
+
+# A study's variants as 1-based positions in the union.
+# @noRd
+.rssCoupledIndex <- function(stat, ids) {
+    match(stat$variantNames, ids)
+}
+
+# A study's marginal correlations, clamped as every RSS fit clamps them.
+# @noRd
+.rssCoupledCor <- function(stat, n, ld) {
+    .lassosumClampCor(.rssMarginalCor(stat, n = n, p = .ldSourceSize(ld)))
+}
+
+# The path options, penalizedRss()'s own defaults filling what `options`
+# leaves unset, with the strategy resolved for the penalty.
+# @noRd
+.rssCoupledOptions <- function(options, spec) {
+    path <- list_modify(
+        .formalDefaults(
+            penalizedRss,
+            c("lambda", "thr", "maxiter", "strategy")
+        ),
+        !!!options
+    )
+    list_assign(path, strategy = .rssStrategy(path$strategy, spec$penalty))
+}
+
+# The grid's cells, every shrinkage s with every coupling strength, in the
+# order the candidates are laid out.
+# @noRd
+.rssCoupledCells <- function(s, strengths) {
+    shrink <- rep(s, each = length(strengths))
+    coupling <- rep(strengths, times = length(s))
+    tibble(s = shrink, strength = coupling)
+}
+
+# The shared lambda path, as .rssDefaultLambda() makes one study's: from the
+# largest any study starts at, down by the ratio for the fewest samples any
+# study has against its variants. None for the L0 family, whose solver takes
+# a geometric one from the joint start.
+# @noRd
+.rssCoupledLambda <- function(cors, spec, ns) {
+    if (.rssIsL0(spec$penalty)) {
+        return(numeric(0))
+    }
+    control <- .rssPathControl()
+    few <- spec$alpha != 0 && any(ns <= map_int(cors, length))
+    ratio <- if (few) control$ratioFewSamples else control$ratio
+    top <- max(map_dbl(cors, .rssAbsMax)) / max(spec$alpha, 1e-3)
+    top * ratio^seq(0, 1, length.out = control$points)
+}
+
+# @noRd
+.rssAbsMax <- function(x) {
+    max(abs(x), 0)
+}
+
+# The coupled grid on the studies' correlations `cors`: one path per cell, at
+# `path` or at each cell's own `grids`. Returns each study's candidates
+# (`beta`, a matrix per study, cells' paths side by side), the cells' path
+# values (`grids`) and the candidates' table (`meta`).
+# @noRd
+.rssCoupledGrid <- function(cors, run, path = NULL, grids = NULL) {
+    fits <- pmap(
+        list(
+            run$cells$s,
+            run$cells$strength,
+            grids %||% rep(list(path), nrow(run$cells))
+        ),
+        .rssCoupledFit,
+        cors = cors,
+        run = run
+    )
+    list(
+        beta = map(seq_along(cors), .rssCoupledStudyBeta, fits = fits),
+        grids = map(fits, "lambda"),
+        meta = list_rbind(map2(
+            seq_along(fits),
+            fits,
+            .rssCoupledCellMeta,
+            cells = run$cells
+        ))
+    )
+}
+
+# One cell's coupled path, through the factor solver when the studies' LD
+# sources are factors.
+# @noRd
+.rssCoupledFit <- function(sVal, strength, path, cors, run) {
+    spec <- run$spec
+    settings <- list(
+        zList = cors,
+        unionIdxList = map(run$idx, as.integer),
+        nUnion = as.integer(run$nUnion),
+        strength = strength,
+        shrink = sVal,
+        pathR = path,
+        penaltyStr = spec$penalty,
+        strategyStr = run$options$strategy,
+        gamma = spec$gamma,
+        alpha = spec$alpha,
+        lambda1 = spec$lambda1,
+        lambda2 = spec$lambda2,
+        thr = run$options$thr,
+        maxiter = as.integer(run$options$maxiter),
+        maxSwaps = as.integer(spec$maxSwaps),
+        control = .rssPathControl()
+    )
+    if (.rssHasFactor(run$lds[[1L]])) {
+        return(exec(
+            penalizedRssCoupledFactorCpp,
+            factorList = map(run$lds, "ldFactor"),
+            !!!settings
+        ))
+    }
+    exec(penalizedRssCoupledCpp, ldList = map(run$lds, "R"), !!!settings)
+}
+
+# Study `k`'s candidates across the cells.
+# @noRd
+.rssCoupledStudyBeta <- function(k, fits) {
+    exec(cbind, !!!map(fits, list("studies", k, "beta")))
+}
+
+# One cell's candidates: its s and coupling, each lambda, the convergence
+# flag and the coupling term there.
+# @noRd
+.rssCoupledCellMeta <- function(i, fit, cells) {
+    tibble(
+        s = cells$s[[i]],
+        strength = cells$strength[[i]],
+        lambda = as.numeric(fit$lambda),
+        conv = as.integer(fit$studies[[1L]]$conv),
+        coupling = as.numeric(fit$coupling)
+    )
+}
+
+# Each study's pick by held-out statistics (.rssSelectHeldOut()): its own
+# splits, drawn from its own LD, with the coupled grid refit on every
+# study's training part at once and each study scored on its own held-out
+# part.
+# @noRd
+#' @importFrom stats rnorm
+.rssCoupledSelect <- function(search, cors, ns, run) {
+    nSplits <- .rssHeldOutSplits()
+    ws <- map(run$lds, .rssCoupledIntensity)
+    noise <- pmap(
+        list(run$lds, ws, ns, cors),
+        .rssCoupledNoise,
+        nSplits = nSplits
+    )
+    scores <- map(
+        seq_len(nSplits),
+        .rssCoupledSplitScore,
+        noise = noise,
+        cors = cors,
+        ws = ws,
+        run = run,
+        grids = search$grids
+    )
+    map(seq_along(cors), .rssCoupledPick, scores = scores, search = search)
+}
+
+# @noRd
+.rssCoupledIntensity <- function(ld) {
+    .ldShrinkIntensity(ld, ld$nSamples)
+}
+
+# A study's splits' noise, as .rssSelectHeldOut() draws it.
+# @noRd
+.rssCoupledNoise <- function(ld, w, n, cor, nSplits) {
+    share <- .rssHeldOutTrainShare()
+    draws <- sqrt(1 - w) *
+        .ldSourceDraws(ld, nSplits) +
+        sqrt(w) * matrix(rnorm(length(cor) * nSplits), ncol = nSplits)
+    draws * sqrt((1 - share) / (share * n))
+}
+
+# Split `i`: the coupled grid refit on each study's training part and each
+# study's candidates scored on its own held-out part.
+# @noRd
+.rssCoupledSplitScore <- function(i, noise, cors, ws, run, grids) {
+    share <- .rssHeldOutTrainShare()
+    train <- map2(cors, noise, .rssCoupledTrainCor, i = i)
+    held <- map2(cors, train, .rssCoupledHeldCor, share = share)
+    refit <- .rssCoupledGrid(train, run, grids = grids)
+    pmap(list(refit$beta, held, run$lds, ws), .rssCoupledMoments)
+}
+
+# @noRd
+.rssCoupledTrainCor <- function(cor, noise, i) {
+    .lassosumClampCor(cor + noise[, i])
+}
+
+# @noRd
+.rssCoupledHeldCor <- function(cor, train, share) {
+    (cor - share * train) / (1 - share)
+}
+
+# A study's candidates' correlation with its held-out part and the variance
+# of it they explain (.rssHeldOutScore()).
+# @noRd
+.rssCoupledMoments <- function(beta, held, ld, w) {
+    moments <- .rssShrunkLdMoments(beta, held, ld, w)
+    list(
+        cor = .rssCorrelationScore(moments),
+        explained = 2 * moments$bxy - moments$bxxb
+    )
+}
+
+# Study `k`'s candidate (.rssHeldOutPick()): one empty on the full data has
+# nothing to return.
+# @noRd
+.rssCoupledPick <- function(k, scores, search) {
+    cor <- rowMeans(exec(cbind, !!!map(scores, list(k, "cor"))))
+    explained <- rowMeans(exec(cbind, !!!map(scores, list(k, "explained"))))
+    empty <- colSums(search$beta[[k]] != 0) == 0
+    .rssHeldOutPick(replace(cor, empty, -Inf), explained)
+}
+
+# The weights over the union, each study's at its pick, with the search kept
+# as `fitRetention` asks: "slim" each study's grid point, "full" every
+# candidate too.
+# @noRd
+.rssCoupledResult <- function(search, picks, run, ids, fitRetention) {
+    cols <- pmap(
+        list(search$beta, picks, run$idx),
+        .rssCoupledStudyWeights,
+        nUnion = length(ids)
+    )
+    W <- `rownames<-`(exec(cbind, !!!cols), ids)
+    if (identical(fitRetention, "none")) {
+        return(W)
+    }
+    chosen <- search$meta[unlist(picks), , drop = FALSE]
+    fit <- if (identical(fitRetention, "slim")) {
+        list(selection = chosen)
+    } else {
+        list(selection = chosen, beta = search$beta, meta = search$meta)
+    }
+    `attr<-`(W, "fit", .withFitVariantIds(fit, ids))
+}
+
+# @noRd
+.rssCoupledStudyWeights <- function(beta, pick, idx, nUnion) {
+    replace(numeric(nUnion), idx, beta[, pick])
+}
+
+# ---- Samplers across studies: PRS-CSx / JointPRS and SDPRX ------------------
+#
+# A study-axis group of summary statistics fitted by one sampler across its
+# studies, each study against its own LD reference, over the union of the
+# studies' variants. PRS-CS runs as JointPRS fits ancestries (PrsCsChain in
+# rss_mcmc.h): the studies share each variant's local shrinkage and the
+# global shrinkage, as PRS-CSx shares them, and their effects on a variant
+# are correlated by rho, learned on [0, 0.99]. SDPR runs as SDPRX fits them
+# (the SDPR chain in rss_mcmc.cpp): each non-null component draws a
+# variant's effects in a set of the studies, correlated by rho.
+
+# The studies' inputs to a sampler across studies: their LD sources in one
+# form, sample sizes, variants' places in the union of size `nUnion`, and
+# marginal correlations.
+# @noRd
+.mcmcCoupledInputs <- function(stats, ldReferences, ids, label) {
+    lds <- .rssCoupledLd(map2(stats, ldReferences, .rssLdSource, label = label))
+    ns <- map_dbl(stats, .rssCoupledN)
+    list(
+        lds = lds,
+        ns = ns,
+        idx = map(stats, .rssCoupledIndex, ids = ids),
+        bhats = pmap(list(stats, ns, lds), .coupledMarginalCor),
+        nUnion = length(ids)
+    )
+}
+
+# A study's marginal correlations, as prsCsWeights() and sdprWeights() read
+# them.
+# @noRd
+.coupledMarginalCor <- function(stat, n, ld) {
+    .rssMarginalCor(stat, n = n, p = .ldSourceSize(ld))
+}
+
+# A study's values over the union, zero at a variant it does not carry.
+# @noRd
+.coupledUnionColumn <- function(values, idx, nUnion) {
+    replace(numeric(nUnion), idx, values)
+}
+
+# The studies' marginal correlations over the union (union x studies), the
+# bound a single chain's effects are checked against.
+# @noRd
+.coupledUnionMatrix <- function(run) {
+    exec(
+        cbind,
+        !!!map2(run$bhats, run$idx, .coupledUnionColumn, nUnion = run$nUnion)
+    )
+}
+
+# A sampler's weights across studies (union variants `ids` x studies), with
+# its estimates as the "fit" attribute unless `fitRetention` is "none".
+# @noRd
+.mcmcCoupledResult <- function(fit, ids, fitRetention) {
+    W <- `dimnames<-`(fit$betaEst, list(ids, NULL))
+    if (identical(fitRetention, "none")) {
+        return(W)
+    }
+    `attr<-`(W, "fit", .withFitVariantIds(fit, ids))
+}
+
+# PRS-CS's weights across studies (union variants `ids` x studies), zero at a
+# variant a study does not carry. `stats` and `ldReferences` are as
+# .rssCoupledWeights() takes them, and `user` the method's settings, as
+# PrsCsOptions() holds them.
+# @noRd
+.prsCsCoupledWeights <- function(
+    stats,
+    ldReferences,
+    ids,
+    user,
+    fitRetention,
+    label
+) {
+    settings <- .prsCsCoupledSettings(user, label)
+    run <- c(
+        list(settings = settings),
+        .mcmcCoupledInputs(stats, ldReferences, ids, label)
+    )
+    fit <- .mcmcChains(
+        ".jointPrsChain",
+        list(run = run),
+        .mcmcSeeds(settings$seed, settings$nChains),
+        c("betaEst", "psiEst", "sigmaEst", "phiEst", "rhoEst"),
+        label,
+        .coupledUnionMatrix(run)
+    )
+    .mcmcCoupledResult(fit, ids, fitRetention)
+}
+
+# The sampler's settings, prsCs()'s defaults filling what `user` leaves unset.
+# The weights across studies stay on the standardized scale, so a `maf` to put
+# one study's on its alleles' is refused.
+# @noRd
+.prsCsCoupledSettings <- function(user, label) {
+    if (!is.null(user$maf)) {
+        abort(c(
+            glue(
+                "{label}: `maf` puts one study's weights on its alleles' ",
+                "scale, and the weights across studies stay standardized."
+            ),
+            i = "Leave `maf` unset, or pass studyCoupling = NULL."
+        ))
+    }
+    honoured <- c(
+        "a",
+        "b",
+        "phi",
+        "nIter",
+        "nBurnin",
+        "thin",
+        "verbose",
+        "seed",
+        "shrinkCorr",
+        "raoBlackwell",
+        "nChains"
+    )
+    settings <- list_modify(
+        .formalDefaults(prsCs, honoured),
+        !!!user[intersect(names(user), honoured)]
+    )
+    .mcmcAssertShared(
+        settings$shrinkCorr,
+        settings$raoBlackwell,
+        settings$nChains
+    )
+    settings
+}
+
+# One chain of the sampler across studies, on their LD matrices or factors,
+# each study's correlations learned (a constraint of 1).
+# @noRd
+.jointPrsChain <- function(run, seed, track) {
+    s <- run$settings
+    args <- list(
+        a = s$a,
+        b = s$b,
+        phi = s$phi,
+        constraint = rep(1, length(run$bhats)),
+        bhatList = run$bhats,
+        n = run$ns,
+        unionIdxList = map(run$idx, as.integer),
+        nUnion = as.integer(run$nUnion),
+        nIter = as.integer(s$nIter),
+        nBurnin = as.integer(s$nBurnin),
+        thin = as.integer(s$thin),
+        verbose = s$verbose,
+        seed = seed,
+        shrinkCorr = s$shrinkCorr,
+        raoBlackwell = s$raoBlackwell,
+        track = track
+    )
+    if (.rssHasFactor(run$lds[[1L]])) {
+        return(exec(
+            jointPrsFactorCpp,
+            factorList = map(run$lds, "ldFactor"),
+            !!!args
+        ))
+    }
+    exec(jointPrsCpp, ldList = map(run$lds, "R"), !!!args)
+}
+
+# The settings of sdpr() that act across studies only.
+# @noRd
+.SDPR_ACROSS <- c("sharing", "rho")
+
+# SDPR's weights across studies (union variants `ids` x studies), zero at a
+# variant a study does not carry, as .prsCsCoupledWeights() takes its
+# arguments, with `user` as SdprOptions() holds the settings.
+# @noRd
+.sdprCoupledWeights <- function(
+    stats,
+    ldReferences,
+    ids,
+    user,
+    fitRetention,
+    label
+) {
+    settings <- .sdprCoupledSettings(user, length(stats), label)
+    run <- c(
+        list(settings = settings),
+        .mcmcCoupledInputs(stats, ldReferences, ids, label)
+    )
+    fit <- .mcmcChains(
+        ".sdprxChain",
+        list(run = run),
+        .mcmcSeeds(settings$seed, settings$nChains),
+        c("betaEst", "h2", "rhoEst"),
+        label,
+        .coupledUnionMatrix(run)
+    )
+    .mcmcCoupledResult(fit, ids, fitRetention)
+}
+
+# The sampler's settings, sdpr()'s defaults filling what `user` leaves unset,
+# with the kinds `sharing` gives `K` studies and rho as a matrix (NULL to
+# learn it). Per-variant sample sizes, arrays and optLlk = 2 describe one
+# study's variants, so they are refused.
+# @noRd
+.sdprCoupledSettings <- function(user, K, label) {
+    perVariant <- c("perVariantSampleSize", "array")
+    given <- names(compact(user[intersect(names(user), perVariant)]))
+    llk2 <- !is.null(user$optLlk) && user$optLlk != 1
+    if (length(given) > 0L || llk2) {
+        abort(c(
+            glue(
+                "{label}: `perVariantSampleSize`, `array` and `optLlk = 2` ",
+                "describe one study's variants; a fit across studies reads ",
+                "each study's sample size and the optLlk = 1 likelihood."
+            ),
+            i = "Leave them unset, or pass studyCoupling = NULL."
+        ))
+    }
+    honoured <- c(
+        "a",
+        "c",
+        "M",
+        "a0k",
+        "b0k",
+        "iter",
+        "burn",
+        "thin",
+        "verbose",
+        "seed",
+        "raoBlackwell",
+        "nChains",
+        .SDPR_ACROSS
+    )
+    settings <- list_modify(
+        .formalDefaults(sdpr, honoured),
+        !!!user[intersect(names(user), honoured)]
+    )
+    .sdprValidate(settings$M, NULL, NULL)
+    .mcmcAssertShared(1, settings$raoBlackwell, settings$nChains)
+    sharing <- arg_match0(
+        settings$sharing,
+        .formalDefaults(sdpr, "sharing")[[1L]],
+        "sharing"
+    )
+    c(
+        settings[setdiff(names(settings), .SDPR_ACROSS)],
+        list(
+            kinds = .sdprKinds(sharing, K),
+            rho = .sdprCoupledRho(settings$rho, K, label)
+        )
+    )
+}
+
+# The kinds of non-null component `sharing` gives K studies, each the
+# studies its effects lie in: each alone and all together, every nonempty
+# set by size, or all together only.
+# @noRd
+#' @importFrom utils combn
+.sdprKinds <- function(sharing, K) {
+    switch(
+        sharing,
+        eachOrAll = unique(c(as.list(seq_len(K)), list(seq_len(K)))),
+        everySubset = list_flatten(
+            map(seq_len(K), combn, x = K, simplify = FALSE)
+        ),
+        all = list(seq_len(K))
+    )
+}
+
+# rho as the sampler takes it: NULL to learn it, else the K x K correlation
+# matrix a number in [0, 1) gives for every pair, or the one given.
+# @noRd
+.sdprCoupledRho <- function(rho, K, label) {
+    if (is.null(rho)) {
+        return(NULL)
+    }
+    if (is.numeric(rho) && length(rho) == 1L && is.null(dim(rho))) {
+        if (is.na(rho) || rho < 0 || rho >= 1) {
+            abort(glue("{label}: a single `rho` must lie in [0, 1)."))
+        }
+        return(`diag<-`(matrix(rho, K, K), 1))
+    }
+    if (!.sdprIsCorrelation(rho, K)) {
+        abort(glue(
+            "{label}: `rho` must be NULL, a number in [0, 1) or a {K} x {K} ",
+            "positive-definite correlation matrix."
+        ))
+    }
+    unname((rho + t(rho)) / 2)
+}
+
+# Whether `rho` is a K x K positive-definite correlation matrix.
+# @noRd
+.sdprIsCorrelation <- function(rho, K) {
+    is.matrix(rho) &&
+        is.numeric(rho) &&
+        identical(dim(rho), c(K, K)) &&
+        !anyNA(rho) &&
+        isSymmetric(unname(rho)) &&
+        all(diag(rho) == 1) &&
+        min(eigen(rho, symmetric = TRUE, only.values = TRUE)$values) > 0
+}
+
+# One chain of SDPR across studies, on their LD matrices or factors.
+# @noRd
+.sdprxChain <- function(run, seed, track) {
+    s <- run$settings
+    args <- list(
+        bhatList = run$bhats,
+        n = as.integer(run$ns),
+        unionIdxList = map(run$idx, as.integer),
+        nUnion = as.integer(run$nUnion),
+        kinds = map(s$kinds, as.integer),
+        rho = s$rho,
+        a = s$a,
+        c = s$c,
+        M = as.integer(s$M),
+        a0k = s$a0k,
+        b0k = s$b0k,
+        iter = as.integer(s$iter),
+        burn = as.integer(s$burn),
+        thin = as.integer(s$thin),
+        verbose = s$verbose,
+        seed = seed,
+        raoBlackwell = s$raoBlackwell,
+        track = track
+    )
+    if (.rssHasFactor(run$lds[[1L]])) {
+        return(exec(
+            sdprxFactorCpp,
+            factorList = map(run$lds, "ldFactor"),
+            !!!args
+        ))
+    }
+    exec(sdprxCpp, ldList = map(run$lds, "R"), !!!args)
+}
+
 #' Compute Weights Using a BGLR Linear Regression Model
 #'
 #' Internal helper that fits a `BGLR::BGLR` linear regression with a single
 #' linear term whose `model` is one of BGLR's marker-effect priors (e.g.
-#' "BayesB", "BL"), then returns the posterior mean of the marker effects. BGLR
+#' "BayesB", "BL"), then returns the posterior mean of the marker effects.
+#' Given a matrix `y`, one column per condition, it fits the conditions
+#' jointly with `BGLR::Multitrait` instead, under the multivariate form of
+#' `model`: "SpikeSlab" for "BayesC" and "BRR" for "BRR", the only two
+#' Multitrait() has. A missing phenotype is drawn within its sampler. BGLR
 #' writes per-call temporary files to disk; this helper sandboxes them in a
 #' fresh `tempdir()` that is cleaned up on exit.
 #'
 #' @param X A numeric matrix of predictors.
-#' @param y A numeric response vector.
+#' @param y A numeric response vector, or a matrix with one column per
+#'   condition (missing values allowed).
 #' @param model A BGLR marker-effect model name (e.g. "BayesB" or "BL").
 #' @param nIter Number of MCMC iterations.
 #' @param burnIn Number of burn-in iterations.
 #' @param thin Thinning interval.
 #' @param etaArgs Optional named list of additional arguments included in the
 #'   `ETA` linear-term specification (e.g. `list(probIn = 0.05)` for BayesB).
+#'   For a matrix `y`, a `probIn` starts every condition's inclusion
+#'   probability.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing, \code{"slim"} and \code{"full"} the fitted \code{BGLR} object,
 #'   which keeps no copy of the data, so the two retaining levels behave
 #'   alike here.
-#' @param methodArgs Options forwarded to \code{BGLR::BGLR}, built
-#'   with \code{\link{BglrOptions}}. A bare list is refused: it cannot be
-#'   checked against the engine, so a misspelled option would be
-#'   silently ignored.
-#' @return A numeric vector of length `ncol(X)` of variant weights, with the
+#' @param methodArgs Options for \code{BGLR::BGLR} or
+#'   \code{BGLR::Multitrait}, built with \code{\link{BglrOptions}}; each call
+#'   receives the options it takes, and \code{Cov} goes into Multitrait()'s
+#'   linear term. A bare list is refused: it cannot be checked against the
+#'   engine, so a misspelled option would be silently ignored.
+#' @return A numeric vector of length `ncol(X)` of variant weights, or for a
+#'   matrix `y` a matrix of them with one column per condition, with the
 #'   fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @keywords internal
@@ -6931,34 +8846,158 @@ bglrWeights <- function(
     if (!requireNamespace("BGLR", quietly = TRUE)) {
         abort("Package 'BGLR' is required for this function.")
     }
-    eff.wgt <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "bglrWeights")
-
     tmpdir <- tempfile("bglr_")
     dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
     on.exit(unlink(tmpdir, recursive = TRUE), add = TRUE)
-    saveAt <- str_c(tmpdir, .Platform$file.sep)
-
-    eta <- list(c(list(X = X[, keep, drop = FALSE], model = model), etaArgs))
-    user <- as.list(methodArgs)
-    callArgs <- list_modify(
-        list(
-            y = y,
-            ETA = eta,
-            nIter = nIter,
-            burnIn = burnIn,
-            thin = thin,
-            saveAt = saveAt,
-            verbose = FALSE
-        ),
-        !!!user
+    run <- list(
+        nIter = nIter,
+        burnIn = burnIn,
+        thin = thin,
+        saveAt = str_c(tmpdir, .Platform$file.sep),
+        verbose = FALSE
     )
-    fit <- exec(BGLR::BGLR, !!!callArgs)
-    weights <- replace(eff.wgt, keep, as.numeric(fit$ETA[[1]]$b))
+    XKeep <- X[, keep, drop = FALSE]
+    multitrait <- is.matrix(y) && ncol(y) > 1L
+    fit <- if (multitrait) {
+        .bglrMultitraitFit(XKeep, y, model, etaArgs, methodArgs, run)
+    } else {
+        .bglrFit(XKeep, y, model, etaArgs, methodArgs, run)
+    }
+    coef <- if (multitrait) fit$ETA[[1L]]$beta else as.numeric(fit$ETA[[1L]]$b)
+    weights <- .weightsOnColumns(coef, keep, colnames(X), colnames(y))
     if (identical(fitRetention, "none")) {
         return(weights)
     }
     `attr<-`(weights, "fit", .withFitVariantIds(fit, colnames(X)[keep]))
+}
+
+# bayesC or bayesN (`method`) on BGLR fitted across a joint group's
+# conditions at once (Multitrait()), as the pipeline fits them on a group of
+# two or more (.jointTwasMultitrait()): `Y` has a column per condition,
+# missing where a condition's phenotype was not measured. Taking `Y` is what
+# sends the pipeline's fits, and each cross-validation fold's, down the
+# whole-Y path (.twasFitsWholeY()). Across studies the residuals are
+# independent (.bglrStudyResiduals()).
+# @noRd
+.bglrJointWeights <- function(
+    X,
+    Y,
+    method,
+    acrossStudies = FALSE,
+    backend = "bglr",
+    pi = NULL,
+    h2 = NULL,
+    nIter = 5000,
+    nBurnin = 1000,
+    thin = 5,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = BglrOptions()
+) {
+    bayesAlphabetWeights(
+        X,
+        Y,
+        method,
+        backend = backend,
+        pi = pi,
+        h2 = h2,
+        nIter = nIter,
+        nBurnin = nBurnin,
+        thin = thin,
+        fitRetention = arg_match(fitRetention),
+        methodArgs = .bglrStudyResiduals(methodArgs, acrossStudies)
+    )
+}
+
+# The residual covariance of a joint fit across studies: their samples are
+# disjoint, so it is diagonal there whatever `resCov` says, which keeps its
+# prior settings only when it is diagonal already.
+# @noRd
+.bglrStudyResiduals <- function(methodArgs, acrossStudies) {
+    settings <- as.list(methodArgs)
+    if (!acrossStudies || identical(settings$resCov$type, "DIAG")) {
+        return(methodArgs)
+    }
+    diagonal <- list_assign(settings, resCov = list(type = "DIAG"))
+    exec(BglrOptions, !!!diagonal)
+}
+
+# BGLR() on one phenotype, its one linear term `model` with `etaArgs`. Of
+# the options only those BGLR() takes reach it: BglrOptions() also holds
+# Multitrait()'s and the covariance of a joint fit's linear term.
+# @noRd
+.bglrFit <- function(X, y, model, etaArgs, methodArgs, run) {
+    own <- .bglrOwnArgs(methodArgs, BGLR::BGLR)
+    callArgs <- list_modify(
+        c(
+            list(
+                y = if (is.matrix(y)) y[, 1L] else y,
+                ETA = list(c(list(X = X, model = model), etaArgs))
+            ),
+            run
+        ),
+        !!!own
+    )
+    exec(BGLR::BGLR, !!!callArgs)
+}
+
+# BGLR's Multitrait() on a matrix of phenotypes, one column per condition,
+# under the multivariate form of `model` (.bglrMultitraitModels), its linear
+# term holding the covariance across conditions `methodArgs` gives
+# (.bglrMultitraitTerm()). Only the options Multitrait() takes reach it. It
+# prints its priors whatever `verbose` says, so the call is quieted.
+# @noRd
+.bglrMultitraitFit <- function(X, Y, model, etaArgs, methodArgs, run) {
+    if (!is_in(model, names(.bglrMultitraitModels))) {
+        abort(glue(
+            "bglrWeights: BGLR's Multitrait() has no form of {model}; a ",
+            "matrix `y` takes ",
+            "{str_flatten(names(.bglrMultitraitModels), ' or ')}."
+        ))
+    }
+    mtModel <- .bglrMultitraitModels[[model]]
+    term <- c(
+        list(X = X, model = mtModel),
+        .bglrMultitraitTerm(mtModel, etaArgs, methodArgs, ncol(Y))
+    )
+    own <- .bglrOwnArgs(methodArgs, BGLR::Multitrait)
+    callArgs <- list_modify(c(list(y = Y, ETA = list(term)), run), !!!own)
+    .quietEval(exec(BGLR::Multitrait, !!!callArgs))
+}
+
+# The settings of a Multitrait() linear term: those `methodArgs` gives it
+# (.bglrTermSettings()), and for a spike and slab a prior inclusion
+# probability (`probIn`) starting every condition, with BGLR's default prior
+# counts (2): Multitrait() fails when `probIn` is given without them.
+# @noRd
+.bglrMultitraitTerm <- function(mtModel, etaArgs, methodArgs, nCond) {
+    termArgs <- .bglrOwnArgs(methodArgs, .bglrTermSettings)
+    inclusion <- if (
+        identical(mtModel, "SpikeSlab") && !is.null(etaArgs$probIn)
+    ) {
+        list(probIn = rep_len(etaArgs$probIn, nCond), counts = rep(2, nCond))
+    }
+    c(
+        exec(.bglrTermSettings, !!!termArgs),
+        compact(list(inclusionProb = inclusion))
+    )
+}
+
+# The settings of a Multitrait() linear term BglrOptions() takes, as BGLR
+# spells them there: `Cov`, the covariance of the effects across
+# conditions. Its formals are what BglrOptions() and the pipeline's check of
+# a method's options (.alphabetEngineCallees) read them from.
+# @noRd
+.bglrTermSettings <- function(Cov = NULL) {
+    compact(list(Cov = Cov))
+}
+
+# The options in the record `methodArgs` that the BGLR function `fn` takes.
+# @noRd
+#' @importFrom rlang fn_fmls_names
+.bglrOwnArgs <- function(methodArgs, fn) {
+    user <- as.list(methodArgs)
+    user[is_in(names(user), fn_fmls_names(fn))]
 }
 
 #' Compute Weights Using Dirichlet Process Regression (RcppDPR)
@@ -7243,7 +9282,8 @@ sparsevbWeights <- function(
     bInitMethod,
     sumstats,
     standardize,
-    threads
+    threads,
+    gridSd = 1
 ) {
     .mrmashRequirePackages()
     .assertMethodParam(prior, "MrmashPriorParam")
@@ -7258,13 +9298,15 @@ sparsevbWeights <- function(
     if (is.null(sumstats)) {
         sumstats <- .mrmashComputeSumstats(X, Y, standardize, threads)
     }
+    # The grid is in units of the residual standard deviations `gridSd`
+    # when the prior is relative to them (.mrmashGridSd())
     list(
         bInitMethod = .mrmashResolveBInit(Y, bInitMethod),
         # Shared prior-covariance builder (also used by mrmashRssWeights).
         priorBuilt = exec(
             buildMrmashPriorMatrices,
-            Bhat = sumstats$Bhat,
-            Shat = sumstats$Shat,
+            Bhat = t(t(sumstats$Bhat) / gridSd),
+            Shat = t(t(sumstats$Shat) / gridSd),
             K = ncol(Y),
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             !!!priorOpts
@@ -7281,9 +9323,15 @@ sparsevbWeights <- function(
 #'   individuals and p is the number of SNPs.
 #' @param Y An n x r matrix of residual expression data, where n is the total
 #'   number of individuals and r is the total number of conditions
-#'   (tissue/cell-types).
-#' @param dataDrivenPriorMatrices A list of data-driven covariance matrices.
-#'   Default is NULL.
+#'   (tissue/cell-types). Missing values are allowed: each condition is
+#'   fitted on the individuals it is observed in (mr.mash's
+#'   \code{missing_y_method = "approximate"}), as when studies on different
+#'   individuals are stacked.
+#' @param dataDrivenPriorMatrices A list of data-driven covariance matrices
+#'   (\code{U}), and optionally the residual correlation of the mash prior
+#'   they come from (\code{residualCorrelation}, conditions x conditions),
+#'   which \code{MrmashOptions(vInitMethod = "mash")} starts the residual
+#'   covariance from. Default is NULL.
 #' @param prior Prior-covariance construction options, built with
 #'   \code{\link{MrmashPriorParam}}.
 #' @param bInitMethod The method for initializing the coefficient matrix.
@@ -7308,11 +9356,13 @@ sparsevbWeights <- function(
 #'   \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 #'   residual covariance, the coefficient initialisation --- cannot be set
 #'   here. It also takes the wrapper's own \code{vEigenFloor}, the floor on
-#'   the estimated residual covariance's eigenvalues; see
-#'   \code{\link{twasEngineOptions}}.
+#'   the estimated residual covariance's eigenvalues, and \code{vInitMethod},
+#'   where that covariance starts; see \code{\link{twasEngineOptions}}.
 #'
 #' @param V Optional residual covariance matrix (conditions x conditions), or
-#'   \code{NULL} to estimate it.
+#'   \code{NULL} to estimate it, starting where \code{vInitMethod} says. A
+#'   supplied \code{V} is its own start, so it cannot be given with
+#'   \code{vInitMethod}.
 #' @param sumstats Optional list of summary statistics for the RSS variant of
 #'   mr.mash, or \code{NULL} for the individual-data variant.
 #' @return A mr.mash fit, stored as a list with some or all of the following
@@ -7341,8 +9391,8 @@ sparsevbWeights <- function(
 #' \item{converged}{A logical indicating whether the optimization algorithm
 #' converged to a solution within the chosen tolerance level.}
 #' \item{elapsed_time}{The computation runtime for fitting mr.mash.}
-#' \item{Y}{An n x r matrix of responses at the last iteration (only relevant
-#' when missing values are present in the input Y).}
+#' \item{Y}{An n x r matrix of responses at the last iteration (only when
+#' missing values in Y are imputed, \code{missing_y_method = "impute"}).}
 #'
 #' @examples
 #' data(multiTraitData)
@@ -7378,22 +9428,22 @@ mrmashWrapper <- function(
         bInitMethod = bInitMethod,
         sumstats = sumstats,
         standardize = standardize,
-        threads = threads
+        threads = threads,
+        gridSd = .mrmashGridSd(methodArgs, V, Y)
     )
-    bInitMethod <- setup$bInitMethod
-    priorBuilt <- setup$priorBuilt
     time1 <- proc.time()
-    bInit <- .mrmashInitB(X, Y, bInitMethod, standardize, BPPARAM)
+    bInit <- .mrmashInitB(X, Y, setup$bInitMethod, standardize, BPPARAM)
     vInit <- .mrmashInitV(
-        X,
         Y,
         V,
         updateV,
         updateVMethod,
-        as.list(methodArgs)$vEigenFloor %||% 1e-3
+        as.list(methodArgs)$vEigenFloor %||% 1e-3,
+        as.list(methodArgs)$vInitMethod,
+        dataDrivenPriorMatrices$residualCorrelation
     )
     fitMrmash <- .mrmashFit(
-        priorBuilt$S0,
+        setup$priorBuilt$S0,
         bInit,
         vInit,
         X = X,
@@ -7500,59 +9550,122 @@ mrmashWrapper <- function(
     )
 }
 
-# Robust residual-covariance init. Returns list(V, updateV); a V whose smallest
-# eigenvalue is under vEigenFloor times its spectral norm has its eigenvalues
-# raised to that floor and its update disabled, since updating would take it
-# back to singular. Near-duplicate contexts make such a V, and mr.mash's ELBO
-# can turn NaN on one.
+# Robust residual-covariance init. Returns list(V, updateV): a supplied V as
+# it is, else the start `vInitMethod` names (.mrmashVStart()), whose
+# eigenvalues are floored (.mrmashFloorV()).
 # @noRd
-.mrmashInitV <- function(X, Y, V, updateV, updateVMethod, vEigenFloor) {
+.mrmashInitV <- function(
+    Y,
+    V,
+    updateV,
+    updateVMethod,
+    vEigenFloor,
+    vInitMethod = NULL,
+    residualCorrelation = NULL
+) {
     if (!is.null(V)) {
+        if (!is.null(vInitMethod)) {
+            abort(glue(
+                "mrmashWrapper: a supplied `V` is where the residual ",
+                "covariance starts, so `vInitMethod` in MrmashOptions() ",
+                "cannot also be given."
+            ))
+        }
         return(list(V = V, updateV = updateV))
     }
-    V <- .mrmashComputeVInit(X, Y, any(is.na(Y)))
+    start <- .mrmashVStart(Y, vInitMethod %||% "data", residualCorrelation)
     if (updateVMethod == "diagonal") {
-        return(list(V = diag(diag(V)), updateV = updateV))
-    }
-    eigenvalues <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
-    floorValue <- vEigenFloor * max(eigenvalues)
-    if (min(eigenvalues) < floorValue) {
-        warn(glue(
-            "mrmashWrapper: the residual covariance of Y is close to singular ",
-            "(smallest / largest eigenvalue ",
-            "{signif(min(eigenvalues) / max(eigenvalues), 3)}), as ",
-            "near-duplicate contexts make it. Raising its eigenvalues to ",
-            "vEigenFloor = {vEigenFloor} of the largest and not updating it ",
-            "during the fit; `vEigenFloor` in MrmashOptions() sets the floor."
-        ))
         return(list(
-            V = V + diag(floorValue - min(eigenvalues), nrow(V)),
-            updateV = FALSE
+            V = diag(diag(start), nrow = nrow(start)),
+            updateV = updateV
         ))
     }
-    list(V = V, updateV = updateV)
+    .mrmashFloorV(start, updateV, vEigenFloor)
 }
 
-# Compute V_init via mr.mashr (cov for complete Y, flash when Y has missing).
+# A starting V whose smallest eigenvalue is under vEigenFloor times its
+# spectral norm has its eigenvalues raised to that floor and its update
+# disabled, since updating would take it back to singular. Near-duplicate
+# contexts make such a V, and mr.mash's ELBO can turn NaN on one.
 # @noRd
-.mrmashComputeVInit <- function(X, Y, yHasMissing) {
-    zeroB <- matrix(0, nrow = ncol(X), ncol = ncol(Y))
-    if (!yHasMissing) {
-        return(mr.mashr:::compute_V_init(
-            X,
-            Y,
-            zeroB,
-            rep(0, ncol(Y)),
-            method = "cov"
+.mrmashFloorV <- function(V, updateV, vEigenFloor) {
+    eigenvalues <- eigen(V, symmetric = TRUE, only.values = TRUE)$values
+    floorValue <- vEigenFloor * max(eigenvalues)
+    if (min(eigenvalues) >= floorValue) {
+        return(list(V = V, updateV = updateV))
+    }
+    warn(glue(
+        "mrmashWrapper: the residual covariance of Y is close to singular ",
+        "(smallest / largest eigenvalue ",
+        "{signif(min(eigenvalues) / max(eigenvalues), 3)}), as ",
+        "near-duplicate contexts make it. Raising its eigenvalues to ",
+        "vEigenFloor = {vEigenFloor} of the largest and not updating it ",
+        "during the fit; `vEigenFloor` in MrmashOptions() sets the floor."
+    ))
+    list(
+        V = V + diag(floorValue - min(eigenvalues), nrow(V)),
+        updateV = FALSE
+    )
+}
+
+# Where the residual covariance starts (MrmashOptions(vInitMethod)): the
+# covariance of Y ("data", .mrmashComputeVInit()), or the mash prior's
+# residual correlation scaled by the standard deviations of Y's columns
+# ("mash"), zero for a pair of responses never observed together and only
+# its diagonal when that is not positive definite, as the covariance of Y is.
+# @noRd
+#' @importFrom checkmate assertMatrix
+#' @importFrom stats sd
+.mrmashVStart <- function(Y, vInitMethod, residualCorrelation) {
+    if (identical(vInitMethod, "data")) {
+        return(.mrmashComputeVInit(Y))
+    }
+    if (is.null(residualCorrelation)) {
+        abort(glue(
+            "mrmashWrapper: vInitMethod = \"mash\" starts the residual ",
+            "covariance at the mash prior's residual correlation, but ",
+            "`dataDrivenPriorMatrices` carries no `residualCorrelation` (a ",
+            "MashPrior from mashPipeline() gives one)."
         ))
     }
-    mr.mashr:::compute_V_init(
-        X,
-        Y,
-        zeroB,
-        colMeans(Y, na.rm = TRUE),
-        method = "flash"
+    assertMatrix(
+        residualCorrelation,
+        nrows = ncol(Y),
+        ncols = ncol(Y),
+        .var.name = "dataDrivenPriorMatrices$residualCorrelation"
     )
+    sds <- unname(apply(Y, 2L, sd, na.rm = TRUE))
+    together <- crossprod(!is.na(Y)) > 0L
+    scaled <- replace(
+        unname(residualCorrelation) * tcrossprod(sds),
+        !together,
+        0
+    )
+    .mrmashPdOrDiagonal(`dimnames<-`(scaled, list(colnames(Y), colnames(Y))))
+}
+
+# The residual covariance mr.mash starts from, its coefficients starting at
+# zero: the covariance of Y. With missing values, each pair of responses
+# over the rows where both are observed and zero for a pair never observed
+# together, as mr.mash's approximate method for missing Y starts; only the
+# diagonal when that is not positive definite.
+# @noRd
+#' @importFrom stats cov
+.mrmashComputeVInit <- function(Y) {
+    if (!anyNA(Y)) {
+        return(cov(Y))
+    }
+    pairwise <- cov(Y, use = "pairwise.complete.obs")
+    .mrmashPdOrDiagonal(replace(pairwise, is.na(pairwise), 0))
+}
+
+# A starting V as it is when positive definite, else its diagonal.
+# @noRd
+.mrmashPdOrDiagonal <- function(V) {
+    if (min(eigen(V, symmetric = TRUE, only.values = TRUE)$values) > 0) {
+        return(V)
+    }
+    `dimnames<-`(diag(diag(V), nrow = nrow(V)), dimnames(V))
 }
 
 # Run mr.mash with the resolved prior / init / V. Everything pecotmr derives --
@@ -7585,8 +9698,9 @@ mrmashWrapper <- function(
         # One thread: see .mrmashUnavailable().
         nthreads = 1L
     )
-    # vEigenFloor is the wrapper's own, read by .mrmashInitV().
-    user <- discard_at(as.list(methodArgs), "vEigenFloor")
+    # vEigenFloor and vInitMethod are the wrapper's own, read by
+    # .mrmashInitV().
+    user <- discard_at(as.list(methodArgs), c("vEigenFloor", "vInitMethod"))
     clash <- intersect(names(user), names(derived))
     if (length(clash) > 0L) {
         abort(glue(
@@ -7597,17 +9711,67 @@ mrmashWrapper <- function(
             "`methodArgs`."
         ))
     }
-    defaults <- list(
-        update_w0 = TRUE,
-        tol = 0.01,
-        max_iter = 5000,
-        convergence_criterion = "ELBO",
-        compute_ELBO = TRUE,
-        verbose = FALSE,
-        w0_threshold = 1e-8
-    )
-    mrMashArgs <- c(derived, list_modify(defaults, !!!user))
+    mrMashArgs <- c(derived, list_modify(.mrmashFitDefaults(user), !!!user))
+    .engineRequire("mr.mashr::mr.mash", names(mrMashArgs), "mrmashWrapper()")
     exec(mr.mashr::mr.mash, !!!mrMashArgs)
+}
+
+# pecotmr's defaults for the mr.mash options the caller (`user`) leaves:
+# the prior relative to the residual standard deviations where mr.mashr can
+# (.mrmashRelativeS0(); its grid then built in their units,
+# .mrmashGridSd()); DAAREM cannot drop components.
+# @noRd
+.mrmashFitDefaults <- function(user) {
+    c(
+        list(
+            update_w0 = TRUE,
+            tol = 0.01,
+            max_iter = 5000,
+            convergence_criterion = "ELBO",
+            compute_ELBO = TRUE,
+            verbose = FALSE,
+            w0_threshold = if (identical(user$acceleration, "daarem")) {
+                0
+            } else {
+                1e-8
+            }
+        ),
+        compact(list(relative_S0 = if (.mrmashRelativeS0()) TRUE))
+    )
+}
+
+# Whether mr.mash and mr.mash.rss take a prior relative to the residual
+# standard deviations (their relative_S0, which mr.mashr 0.3.44 lacks): the
+# wrappers' default where they do; otherwise the prior grid is on the
+# outcomes' scale, as it was before relative_S0.
+# @noRd
+.mrmashRelativeS0 <- function() {
+    .engineTakes("mr.mashr::mr.mash", "relative_S0") &&
+        .engineTakes("mr.mashr::mr.mash.rss", "relative_S0")
+}
+
+# Whether the installed mr.mashr fits summary statistics across studies:
+# an LD reference per study (sample_groups), and mr.mash.rss estimating the
+# residual and Y covariances it is not given (V, covY) or giving residual
+# variances covY's correlations -- which the mr.mashr that has them marks
+# by mr.mash.rss's sample_groups, the covariances' handling showing in no
+# formal.
+# @noRd
+.mrmashFitsStudies <- function() {
+    .engineTakes("mr.mashr::mr.mash.rss", "sample_groups")
+}
+
+# The residual standard deviations mr.mash's prior grid is built in units
+# of when the prior is relative to them (mr.mash's relative_S0, the
+# wrappers' default where mr.mashr takes it, .mrmashRelativeS0()): those of
+# the residual covariance the fit starts from (.residualSd()); 1 when the
+# prior is not relative.
+# @noRd
+.mrmashGridSd <- function(methodArgs, V, Y = NULL) {
+    if (!isTRUE(as.list(methodArgs)$relative_S0 %||% .mrmashRelativeS0())) {
+        return(1)
+    }
+    .residualSd(V, Y)
 }
 
 # @noRd

@@ -15,13 +15,26 @@ Input container packaging a full-data data-driven prior with
 \section{Slots}{
 
 \describe{
-\item{\code{fullFit}}{The full-data data-driven prior payload -- the
-\code{mashPipeline()} output \code{list(U, w)}; fed to mr.mash as
-\code{dataDrivenPriorMatrices} for the full-data fit. \code{NULL} when only
-per-fold priors are supplied (a CV-only run).}
+\item{\code{fullFit}}{The full-data priors -- the \code{\link{mashPipeline}}
+output: a named list with one prior per joint spec, each a list of
+\code{U}, \code{w}, \code{residualCorrelation}, \code{alpha},
+\code{inputScale}, \code{axes}, \code{scope} and \code{conditions}.
+Each mr.mash group takes the prior over its joint spec's axes whose
+conditions include the group's (and whose scope does); its \code{U} is
+taken on the group's conditions, in their order, and put on the per-SD
+scale mr.mash fits on by dividing entry \eqn{(k, l)} by
+\eqn{(n_k n_l)^{e/2}}, where \eqn{n} is the conditions' sample size and
+\eqn{e} is 1 on the z scale and \code{alpha} otherwise. Its
+\code{residualCorrelation}, a correlation, is taken on the group's
+conditions unscaled. A prior without one (from an earlier
+\code{mashPipeline()}) is accepted, and the mr.mash fits then take
+their residual covariance from the data. No such prior, or several, is
+an error. \code{NULL} when only per-fold priors are supplied (a CV-only
+run).}
 
 \item{\code{cvFits}}{\code{NULL}, or a list with \code{samplePartition}
 (\code{data.frame(Sample, Fold)}) and \code{perFoldFits} (a list of
-per-fold prior payloads, \code{perFoldFits[[j]]} for fold \code{j}).}
+per-fold priors, each the shape of \code{fullFit},
+\code{perFoldFits[[j]]} for fold \code{j}).}
 }}
 

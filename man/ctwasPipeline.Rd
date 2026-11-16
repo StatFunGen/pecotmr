@@ -9,7 +9,6 @@ ctwasPipeline(
   twasWeights,
   twasZ = NULL,
   fineMappingResult = NULL,
-  fineMappingMethod = NULL,
   weightSelectionParam = WeightSelectionParam(),
   maxNumSingleEffects = 5L,
   BPPARAM = SerialParam(),
@@ -46,41 +45,51 @@ variants, so its weights are not renormalized over the variants kept.}
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, each weighted
 gene's Z -- the TWAS row of its \code{(qtlStudy, context, trait,
-method)} for the GWAS study of \code{gwasSumStats} -- is used as the
-\code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
-Every weighted gene needs exactly one, so \code{twasZ} must hold the
+method)} and joint group (\code{jointStudies}, \code{jointContexts},
+\code{jointTraits}) for the GWAS study of \code{gwasSumStats} -- is used
+as the \code{z_gene} input to \code{ctwas_sumstats} so it is not
+recomputed. A gene whose weights the pipeline then changes -- dropping
+variants the GWAS LD panel lacks (renormalizing a SuSiE fit's weights
+over the rest), or through \code{variantPruningParam} -- gets its Z
+recomputed from the weights cTWAS models instead, with a message naming
+it, since \code{twasZ} scored the weights before they changed. Every
+other weighted gene needs exactly one, so \code{twasZ} must hold the
 method each gene is run with: chosen with the same
 \code{weightSelectionParam}, or a superset such as \code{methods =
 "all"}. Rows for other genes, methods or GWAS studies, and MR rows, are
 ignored.}
 
-\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
-own fine-mapping, whose per-variant PIP and credible-set membership the
-CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
-Each gene is looked up by its weights' \code{(study, context, trait)} in
-the fits of \code{fineMappingMethod}; a gene with no fit there gets no
-rescue. When \code{NULL} (default) the smart filters are no-ops; only the
-magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
-(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
+\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the fits a
+fine-mapping method's weights came from (\code{susie}, \code{mvsusie}
+and the like, read off them by \code{\link{twasWeightsPipeline}}). Each
+such weight reads the row of its own method, \code{(study, context,
+trait)} and joint group (\code{jointStudies}, \code{jointContexts},
+\code{jointTraits}). Its fit renormalizes the weights over the variants
+kept, and its per-variant PIPs and credible sets order the variants under
+the per-gene cap (\code{variantPruningParam}'s \code{csMinCor},
+\code{pipRescue} and \code{maxVariants}). Every other method's weights,
+and a fine-mapping weight with no row here, are capped by
+\code{|weight|}: another model's PIPs say nothing about which of a
+regression's variants carry its prediction. A \code{QtlFineMappingResult}
+passed as \code{twasWeights} is its own fit. When \code{NULL} (default)
+only the magnitude filter and the cap by \code{|weight|} apply.}
 
-\item{fineMappingMethod}{Character (length 1): the method of
-\code{fineMappingResult} whose fits the rescues read, e.g.
-\code{"susie"}. Required with a \code{fineMappingResult}, since the
-weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
-names no fine-mapping fit. Default \code{NULL}.}
-
-\item{weightSelectionParam}{Which method's weights each gene (each
+\item{weightSelectionParam}{Which weight set each gene (each
 \code{(study, context, trait)}) is modelled with, built with
 \code{\link{WeightSelectionParam}}, as in
-\code{\link{causalInferencePipeline}}. A cTWAS run models one weight per
-gene. By default (\code{methods = "best"}) one run takes each gene's
-best method by cross-validated r-squared, the genes' methods mixed, and
+\code{\link{causalInferencePipeline}}: a method, and, where the gene
+holds that method's weights from several kinds of joint fit, which one
+(its \code{jointAxes}). A cTWAS run models one weight set per gene. By
+default (\code{methods = "best"}) one run takes each gene's best weight
+set by cross-validated r-squared, the genes' methods and kinds mixed, and
 its results are labelled \code{method = "best"}; the gene ids keep each
-gene's own method. A gene whose methods carry no r-squared to pick one
-by is then refused, unless it has just one. \code{methods = "all"}, or
-several named methods, runs cTWAS once per method, one after another,
-the results labelled by method in one \code{CtwasResult}; a single
-named method is one run.}
+gene's own method, and its result rows its weights' joint members
+(\code{joint_twas_studies} and so on). A gene whose weight sets carry no
+r-squared to pick one by is then refused, unless it has just one.
+\code{methods = "all"}, or several named methods, runs cTWAS once per
+method and kind of joint fit, one after another, the results labelled by
+method and, when some weights are of a joint fit, \code{jointTwasAxes} in
+one \code{CtwasResult}; a single named method of one kind is one run.}
 
 \item{maxNumSingleEffects}{Integer. Max number of single effects in cTWAS
 fine-mapping. Default \code{5}. Pass-through to
@@ -198,16 +207,25 @@ Pipeline that hands a per-block set of
 
 \section{LD reference compatibility check}{
  Per block: the block's GWAS
-  rows must share one LD reference (a block's LD is one matrix), and every
-  weight row placed in the block that carries a reference must be the same
-  LD reference as theirs. Blocks may sit on different references.
-  The two must be the same kind of reference. Two genotype panels must
-  share their samples and allele orientation; two \code{LdMatrix} objects
-  must agree on the LD they share; two \code{GenotypeMixture} objects must
-  average the same panels with the same weights. The two need NOT carry the
-  same variants; a partial overlap, which is what QC-ing the two sides
-  separately produces, only warns. A mismatch of any of those, or no shared
-  variant at all, is a hard error.
+  rows must share one LD reference (a block's LD is one matrix). Blocks
+  may sit on different references.
+
+  Every gene z-score and every correlation is computed on that GWAS LD,
+  never on the panel a weight was trained on, so weights are not checked
+  against it: weights from another panel -- another study's, or another
+  ancestry's -- are used as they are. Each weight variant is matched to
+  the GWAS panel by position and alleles, its sign flipped where the two
+  spell the alleles the other way round. A variant the panel lacks, or a
+  strand-ambiguous one, is dropped, as cTWAS's own weight preparation
+  drops it, and a message reports the share of the genes' sum |w| lost
+  that way. A gene left with no variant on the panel is dropped with a
+  warning naming it. Each group of weights gets its own prior and effect
+  size, so weights that carry over less well to the GWAS's ancestry are
+  weighed accordingly.
+
+  A GWAS meta-analysed across ancestries is modelled against the mixture
+  of their panels: give its blocks a \code{GenotypeMixture} as their LD
+  reference.
 }
 
 \examples{

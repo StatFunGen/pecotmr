@@ -533,6 +533,23 @@ setMethod("show", "GenotypeMixture", function(object) {
     signed * sqrt(mixtureWeights(x)[[k]] / (nrow(scaled) - 1))
 }
 
+# Panel `k` of mixture `x` over the variants .ldFromRefMatch() matched
+# (`matched`): its LD, or with `useFactor` its factor (.ldRefFactor()), put
+# into the first panel's allele coding and then the caller's
+# (.ldPanelsFromRef()).
+# @noRd
+.gmPanelAt <- function(k, x, matched, useFactor) {
+    panel <- .gmComponents(x)[[k]]
+    sign <- .gmSign(x)[matched$idx, k] * matched$sign
+    ids <- matched$keptIds
+    if (useFactor) {
+        signed <- sweep(.ldRefFactor(panel, matched$idx), 2L, sign, `*`)
+        return(`dimnames<-`(signed, list(NULL, ids)))
+    }
+    ld <- .ldSignFlipped(unname(.ldRefLdAt(panel, matched$idx)), sign)
+    `dimnames<-`(ld, list(ids, ids))
+}
+
 # TRUE when two mixtures average the same panels -- the same samples, in the
 # same order -- with the same weights. Their variant sets may differ, as two
 # QC'd subsets of one mixture's do.

@@ -21,7 +21,9 @@ bayesAlphabetWeights(
 \arguments{
 \item{X}{A numeric matrix of genotypes (samples x variants).}
 
-\item{y}{A numeric vector of phenotypes, one per row of \code{X}.}
+\item{y}{A numeric vector of phenotypes, one per row of \code{X}; or, for
+\code{bayesC} and \code{bayesN} on \code{"bglr"}, a matrix with one
+column per condition, which may hold missing values (see Description).}
 
 \item{method}{The prior: \code{"bayesA"}, \code{"bayesB"},
 \code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.}
@@ -41,7 +43,9 @@ estimator to estimate it with first, on \code{X} and \code{y}:
 \code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
 \code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
 0.001 and capped at 0.99, and an estimate that cannot be made leaves
-the engine's default, with a warning. qgg reads it as \code{h2} and
+the engine's default, with a warning. For a matrix \code{y} the
+estimator runs on each column's observed samples and their mean is
+used, as \code{Multitrait()} takes one. qgg reads it as \code{h2} and
 BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
 genetic and residual variances (\code{vg}, \code{ve}) its defaults
 would give at \code{h2}. Setting that engine's spelling through
@@ -72,8 +76,9 @@ misspelled option would be silently ignored.}
 }
 \value{
 A numeric vector of weights, one per variant (column of
-  \code{X}); columns dropped for zero variance receive weight 0. Unless
-  \code{fitRetention = "none"} the fit is attached as attribute
+  \code{X}), or for a matrix \code{y} a matrix of them with one column
+  per condition; columns dropped for zero variance receive weight 0.
+  Unless \code{fitRetention = "none"} the fit is attached as attribute
   \code{"fit"}.
 }
 \description{
@@ -95,6 +100,19 @@ The same settings reach every engine: \code{nIter}, \code{nBurnin},
 \code{thin}, \code{pi} and \code{h2} are renamed to each engine's own
 spelling, and everything else goes through \code{methodArgs}, built with
 the backend's own constructor.
+}
+\details{
+On \code{"bglr"}, \code{bayesC} and \code{bayesN} also fit several
+conditions at once: given a matrix \code{y}, one column per condition,
+they run BGLR's \code{Multitrait()}. \code{bayesC} becomes its spike and
+slab, with each condition's own inclusion indicators and a slab
+correlated across conditions, and \code{bayesN} its Gaussian prior with a
+covariance across conditions. A missing phenotype is drawn within the
+sampler, so each condition may be measured on different samples, and
+\code{pi} starts every condition's inclusion probability. The covariance
+of the effects across conditions and the residual covariance are learned,
+under the structures and priors \code{BglrOptions(Cov = )} and
+\code{BglrOptions(resCov = )} give them.
 }
 \examples{
 data(eqtlRegionExample)

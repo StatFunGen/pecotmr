@@ -645,7 +645,7 @@ test_that("gradientRanked follows L0Learn's lambda0 path for L0", {
         expect_identical(
             which(ours$beta[, i] != 0),
             which(theirs[, i] != 0),
-            info = i
+            info = paste("point", i)
         )
     }
 })
@@ -773,6 +773,38 @@ test_that("the adaptive lambda0 path follows L0Learn's rule", {
     }
 })
 
+test_that("the adaptive lambda0 path steps on past an unchanged support", {
+    # Real LD gives points whose support is the one before theirs; the next
+    # value is then the smaller of 0.8 of the last and 0.97 of the entry
+    # value (.prs_nextLambda0()).
+    d <- .rrwTwoStudies()[[2L]]
+    fit <- .prs_solve(
+        d$z,
+        d$R,
+        numeric(0),
+        "L0L1",
+        "gradientRanked",
+        lambda1 = 0.02,
+        maxSwaps = 10L,
+        control = list(offEdge = FALSE)
+    )
+    nz <- fit$beta != 0
+    unchanged <- map_lgl(seq_len(ncol(nz) - 2L) + 2L, function(k) {
+        identical(nz[, k - 1L], nz[, k - 2L])
+    })
+    expect_true(any(unchanged))
+    expected <- map_dbl(
+        seq_along(fit$lambda)[-1L],
+        .prs_nextLambda0,
+        fit = fit,
+        z = d$z,
+        R = d$R,
+        lambda1 = 0.02,
+        lambda2 = 0
+    )
+    expect_equal(fit$lambda[-1L], expected, tolerance = 1e-10)
+})
+
 test_that("the adaptive default is solved at the midpoints of its values", {
     # Its values sit at the full data's entry thresholds, where held-out
     # refits take a different support than the full data did; the default
@@ -859,6 +891,47 @@ test_that("the solver refuses a convex penalty without a path, or rising", {
         penalizedRss(d$z * sqrt(d$n), d$R, d$n, strategy = "sideways"),
         "strategy"
     )
+})
+
+test_that("the solver refuses an unknown penalty, and LD the z-scores miss", {
+    d <- .rrwTwoStudies()[[1L]]
+    expect_error(
+        .prs_solve(d$z, d$R, 0.1, "ridge", "strongRule"),
+        "Unknown penalty: 'ridge'"
+    )
+    expect_error(
+        .prs_solve(d$z, d$R[1:29, 1:29], 0.1, "lasso", "strongRule"),
+        "The LD matrix is 29 x 29 but there are 30 z-scores"
+    )
+    expect_error(
+        .prs_solve(
+            d$z,
+            d$X[, 1:29],
+            0.1,
+            "lasso",
+            "strongRule",
+            factor = TRUE
+        ),
+        "The LD factor has 29 columns but there are 30 z-scores"
+    )
+})
+
+test_that("the solver flags a point it ran out of sweeps on", {
+    d <- .rrwTwoStudies()[[1L]]
+    for (strategy in c("strongRule", "gradientRanked")) {
+        short <- .prs_solve(
+            d$z,
+            d$R,
+            c(0.05, 0.01),
+            "lasso",
+            strategy,
+            maxiter = 1L,
+            thr = 1e-14
+        )
+        expect_equal(short$conv, c(0L, 0L), info = strategy)
+        enough <- .prs_solve(d$z, d$R, c(0.05, 0.01), "lasso", strategy)
+        expect_equal(enough$conv, c(1L, 1L), info = strategy)
+    }
 })
 
 test_that("the solver is deterministic on both routes and strategies", {

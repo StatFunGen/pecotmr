@@ -7,7 +7,6 @@
 ldpred2AutoWeights(
   stat,
   ldReference,
-  backend = NULL,
   h2Init = NULL,
   pInit = exp(seq(log(1e-04), log(0.2), length.out = 30)),
   nIter = 700,
@@ -29,11 +28,6 @@ z / sqrt(z^2 + n - 2), for each variant's own sample size.}
 to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 \code{\link{LdMatrix}}.}
-
-\item{backend}{\code{"bigsnpr"} or \code{"pecotmr"}. \code{NULL}
-(default) is pecotmr for a genotype reference and bigsnpr for an
-\code{\link{LdMatrix}}; pecotmr's sampler reads only a genotype
-reference.}
 
 \item{h2Init}{The starting heritability: a number, or the estimator to
 estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
@@ -78,23 +72,22 @@ within its Gibbs sampler, so nothing is tuned. One chain runs from each
 starting \eqn{p} in \code{pInit}. As in the LDpred2 vignette, a chain
 whose fitted correlations span less than 0.95 times the 95th percentile of
 the chains' spans is dropped, and the rest are averaged. A chain has
-diverged, and is dropped too, once a kept draw's squared effects sum past
-twice the squared marginal effects; bigsnpr's own sampler tests every
-iteration, burn-in included.
+diverged, and is dropped too, once a draw's squared effects sum past
+twice the squared marginal effects; bigsnpr tests every iteration,
+burn-in included.
 }
 \details{
 The defaults are the LDpred2 vignette's, without the MAF-dependent prior
 variance.
 
 
-\code{backend = "bigsnpr"} runs bigsnpr's \code{snp_ldpred2_auto()} on the
-LD matrix, written to a temporary file for the call; for a genotype
-reference the matrix is formed from its genotypes. \code{"pecotmr"} runs
-pecotmr's port of the same sampler on a genotype reference's factor of the
-LD, never forming the matrix. bigsnpr's functions call
+bigsnpr's \code{snp_ldpred2_auto()} runs on the LD matrix, written to a
+temporary file for the call; for a genotype reference the matrix is
+formed from its genotypes. bigsnpr's functions call
 \code{foreach::registerDoSEQ()}, which replaces any foreach parallel
-backend registered in the session. Both draw their seeds from R's random
-number generator, so \code{set.seed()} makes the weights reproducible.
+backend registered in the session. bigsnpr draws its seeds from R's
+random number generator, so \code{set.seed()} makes the weights
+reproducible.
 }
 \examples{
 if (requireNamespace("bigsnpr", quietly = TRUE)) {

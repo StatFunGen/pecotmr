@@ -25,16 +25,24 @@ individuals and p is the number of SNPs.}
 
 \item{Y}{An n x r matrix of residual expression data, where n is the total
 number of individuals and r is the total number of conditions
-(tissue/cell-types).}
+(tissue/cell-types). Missing values are allowed: each condition is
+fitted on the individuals it is observed in (mr.mash's
+\code{missing_y_method = "approximate"}), as when studies on different
+individuals are stacked.}
 
 \item{V}{Optional residual covariance matrix (conditions x conditions), or
-\code{NULL} to estimate it.}
+\code{NULL} to estimate it, starting where \code{vInitMethod} says. A
+supplied \code{V} is its own start, so it cannot be given with
+\code{vInitMethod}.}
 
 \item{sumstats}{Optional list of summary statistics for the RSS variant of
 mr.mash, or \code{NULL} for the individual-data variant.}
 
-\item{dataDrivenPriorMatrices}{A list of data-driven covariance matrices.
-Default is NULL.}
+\item{dataDrivenPriorMatrices}{A list of data-driven covariance matrices
+(\code{U}), and optionally the residual correlation of the mash prior
+they come from (\code{residualCorrelation}, conditions x conditions),
+which \code{MrmashOptions(vInitMethod = "mash")} starts the residual
+covariance from. Default is NULL.}
 
 \item{prior}{Prior-covariance construction options, built with
 \code{\link{MrmashPriorParam}}.}
@@ -66,8 +74,8 @@ own names, built with \code{\link{MrmashOptions}}
 \code{verbose}, ...). Arguments the wrapper derives --- the prior, the
 residual covariance, the coefficient initialisation --- cannot be set
 here. It also takes the wrapper's own \code{vEigenFloor}, the floor on
-the estimated residual covariance's eigenvalues; see
-\code{\link{twasEngineOptions}}.}
+the estimated residual covariance's eigenvalues, and \code{vInitMethod},
+where that covariance starts; see \code{\link{twasEngineOptions}}.}
 }
 \value{
 A mr.mash fit, stored as a list with some or all of the following
@@ -96,8 +104,8 @@ criteria at each iteration.}
 \item{converged}{A logical indicating whether the optimization algorithm
 converged to a solution within the chosen tolerance level.}
 \item{elapsed_time}{The computation runtime for fitting mr.mash.}
-\item{Y}{An n x r matrix of responses at the last iteration (only relevant
-when missing values are present in the input Y).}
+\item{Y}{An n x r matrix of responses at the last iteration (only when
+missing values in Y are imputed, \code{missing_y_method = "impute"}).}
 }
 \description{
 Compute weights with mr.mash using a precomputed prior grid and

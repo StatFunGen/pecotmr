@@ -11,7 +11,8 @@ mashPosterior(
   vhat = NULL,
   excludeCondition = character(0),
   outputPosteriorCov = TRUE,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   posteriorArgs = MashPosteriorOptions()
 )
@@ -36,7 +37,12 @@ none.}
 \item{outputPosteriorCov}{Return the full posterior covariance array (needed
 by \code{\link{fitMashContrast}}). Default \code{TRUE}.}
 
-\item{inputScale}{SumStats -> matrix conversion scale.}
+\item{inputScale}{SumStats -> matrix conversion scale (see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts). Match the prior's.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

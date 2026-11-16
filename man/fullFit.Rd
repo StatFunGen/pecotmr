@@ -3,7 +3,7 @@
 \name{fullFit}
 \alias{fullFit}
 \alias{fullFit,MashPrior-method}
-\title{Get the Full-Data Prior from a MashPrior}
+\title{Get the Full-Data Priors from a MashPrior}
 \usage{
 fullFit(x, ...)
 
@@ -15,14 +15,21 @@ fullFit(x, ...)
 \item{...}{Unused.}
 }
 \value{
-The full-data prior payload, or \code{NULL}.
+The full-data priors, or \code{NULL}.
 }
 \description{
-Accessor for the \code{fullFit} slot (the full-data data-driven
-  prior payload).
+Accessor for the \code{fullFit} slot (the full-data
+  data-driven priors, one per joint spec).
 }
 \examples{
-U <- list(shared = diag(3), singleton = matrix(0.3, 3, 3) + diag(0.7, 3))
-mp <- MashPrior(fullFit = list(U = U, w = c(0.5, 0.5)))
-fullFit(mp)
+conditions <- data.frame(
+  study = NA, context = c("brain", "liver"), trait = NA, n = 100
+)
+prior <- list(
+  U = list(shared = matrix(1, 2, 2)), w = 1, alpha = 0,
+  inputScale = "standardized", axes = "context", scope = NULL,
+  conditions = conditions
+)
+mp <- MashPrior(fullFit = list(context = prior))
+names(fullFit(mp))
 }

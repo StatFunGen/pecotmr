@@ -128,3 +128,72 @@
     d$stat$z <- as.vector(signal + noise)
     d
 }
+
+# Two studies on disjoint halves of eqtlRegionExample's people: each one's
+# marginal correlations and in-sample LD over 30 common variants, scaled to
+# population SD, with an effect on four of them. The variants are the 30
+# common ones from the `from`-th on, several in perfect LD, or with `maxR`
+# the first 30 there no two of which pass |r| = maxR in either study.
+.rrwTwoStudies <- function(from = 301L, maxR = NULL) {
+    data(eqtlRegionExample, envir = environment())
+    X0 <- eqtlRegionExample$X
+    p <- colMeans(X0) / 2
+    pool <- which(pmin(p, 1 - p) >= 0.05)[from + 0:199]
+    halves <- list(1:250, 251:415)
+    cols <- pool[.rrwApart(X0, pool, halves, maxR)]
+    withr::local_seed(5L)
+    effects <- stats::rnorm(4L)
+    map(halves, function(rows) {
+        X <- scale(X0[rows, cols]) * sqrt(length(rows) / (length(rows) - 1))
+        g <- drop(X[, c(3, 10, 17, 25)] %*% effects)
+        y <- scale(g + stats::rnorm(length(rows)))[, 1L]
+        list(
+            X = X,
+            z = as.numeric(crossprod(X, y)) / length(rows),
+            R = crossprod(X) / length(rows),
+            n = length(rows)
+        )
+    })
+}
+
+# The positions in `pool` of its first 30 variants no two of which pass
+# |r| = maxR in any of `halves`; with no `maxR`, its first 30.
+.rrwApart <- function(X0, pool, halves, maxR) {
+    if (is.null(maxR)) {
+        return(1:30)
+    }
+    ld <- map(halves, function(rows) abs(stats::cor(X0[rows, pool])))
+    kept <- reduce(
+        seq_along(pool),
+        function(kept, j) {
+            apart <- every(ld, function(r) all(r[j, kept] < maxR))
+            if (length(kept) < 30L && apart) c(kept, j) else kept
+        },
+        .init = integer()
+    )
+    stopifnot(length(kept) == 30L)
+    kept
+}
+
+# .rrwTwoStudies()'s studies as the samplers across studies take them: each
+# one's statistics (z-scores) and LdMatrix over the variants it keeps, the
+# second lacking the last, with the union's ids.
+.rrwStudyInputs <- function(studies, keep = list(1:30, 1:29)) {
+    ids <- .rrwIds(30L)
+    list(
+        ids = ids,
+        stats = map2(studies, keep, function(s, k) {
+            list(
+                z = (s$z * sqrt(s$n))[k],
+                n = rep(s$n, length(k)),
+                variantNames = ids[k]
+            )
+        }),
+        refs = map2(studies, keep, function(s, k) {
+            LdMatrix(
+                `dimnames<-`(s$R[k, k], list(ids[k], ids[k])),
+                nSamples = s$n
+            )
+        })
+    )
+}

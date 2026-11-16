@@ -11,43 +11,63 @@ SusieRssParam(
   keepFullFit = c("fallback", "all", "none"),
   rFinite = NULL,
   rMismatch = "none",
-  control = NULL
+  control = NULL,
+  estimateMixtureWeights = FALSE
 )
 }
 \arguments{
-\item{serFallback}{Logical. Fall back to a single-effect fit when the
-multi-effect fit is judged unreliable. Default \code{FALSE}.}
+\item{serFallback}{Logical. Fall back to the single-effect fit when the
+multi-effect fit is judged unreliable. Default \code{FALSE}. That fit is
+the one the mismatch correction starts from, so the fallback needs
+\code{rMismatch}; the joint mvSuSiE fits fall back to theirs the same
+way.}
 
 \item{keepFullFit}{Which pre-fallback multi-effect fits to retain:
 \code{"fallback"} (default) keeps them only for regions that fell back,
 \code{"all"} for every region, \code{"none"} for none. Only meaningful
 when \code{serFallback} is \code{TRUE}.}
 
-\item{rFinite}{Sample size used for the LD matrix's finiteness check, or
-\code{NULL} (default) to use the panel's own.}
+\item{rFinite}{The LD references' sample size for the finite-reference
+correction, or \code{NULL} (default) for each reference's own, which
+the correction uses when \code{serFallback} or \code{rMismatch} is on
+(an \code{\link{LdMatrix}} must then record its size). A
+\code{\link{GenotypeMixture}}'s own is the size its weights pool its
+panels to, \eqn{1 / \sum_k w_k^2 / n_k}; with
+\code{estimateMixtureWeights}, each panel's.}
 
-\item{rMismatch}{How to treat an LD / z-score mismatch. Default
-\code{"none"}.}
+\item{rMismatch}{How to treat an LD / z-score mismatch:
+\code{susie_rss}'s \code{R_mismatch}. Default \code{"none"}.}
 
 \item{control}{Options for \code{susieR::susie_rss_control()}, forwarded as
-\code{susie_rss()}'s \code{control} argument. Built with
-\code{\link{SusieRssControlOptions}}; \code{NULL} (default) leaves that
-function's own defaults in place.}
+the \code{control} argument of \code{susie_rss()} and
+\code{mvsusie_rss()}. Built with \code{\link{SusieRssControlOptions}};
+\code{NULL} (default) leaves that function's own defaults in place.}
+
+\item{estimateMixtureWeights}{Logical. For an LD reference that is a
+\code{\link{GenotypeMixture}}, the fits estimate the weights of its
+panels instead of using its own (susieR's multi-panel
+\code{susie_rss}; \code{mvsusie_rss} for each group of conditions from
+the same samples). Default \code{FALSE}. The steps before the fits
+(quality control, heritability, mr.mash priors) keep the mixture's own
+weights; the credible sets' purity reads the reference with the
+estimated ones.}
 }
 \value{
 A \code{SusieRssParam} object, a \code{\link{MethodParam}}.
 }
 \description{
-How the SuSiE-RSS fit is conditioned and what it falls back
-  to, on \code{QtlSumStats} / \code{GwasSumStats} input.
+How the summary-statistics fits are conditioned on their LD
+  references and what they fall back to, on \code{QtlSumStats} /
+  \code{GwasSumStats} input: the \code{susieR::susie_rss} fits, and the
+  joint \code{mvsusieR::mvsusie_rss} fits, which take the same settings
+  with one LD reference per condition.
 
-  SuSiE-family only, which is what the name says: every field is a
-  \code{susieR} concept --- \code{serFallback} drops to
-  \code{susie_ser}, \code{rFinite} / \code{rMismatch} are
-  \code{susie_rss}'s \code{R_finite} / \code{R_mismatch}, and
-  \code{control} is \code{susie_rss_control}. The other
-  summary-statistics engine, \code{mvsusieR::mvsusie_rss}, has none of
-  these formals and is not configured by this.
+  Every field is a \code{susieR} concept, as the name says ---
+  \code{serFallback} drops to the single-effect model, \code{rFinite} /
+  \code{rMismatch} are \code{R_finite} / \code{R_mismatch}, and
+  \code{control} is \code{susie_rss_control}. \code{mvsusie_rss} takes
+  them under the same names, with a reference size and a mismatch
+  variance for each LD reference.
 }
 \examples{
 SusieRssParam(serFallback = TRUE, keepFullFit = "all")

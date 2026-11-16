@@ -12,7 +12,8 @@ mashInput(
   coverage = 0.95,
   zOnly = FALSE,
   sigPCutoff = 1e-06,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   independentVariants = NULL,
   seed = 999L
 )
@@ -22,8 +23,10 @@ mashInput(
 fine-mapping result objects, one per region. Names disambiguate
 rownames across regions (defaults to \code{region1}, \code{region2}, ...).
 For \code{QtlSumStats} inputs \code{\link{summaryStatsQc}} must have been
-run (the matrix builder rejects un-QC'd SumStats). The conditions are a
-QTL object's contexts and a GWAS object's studies.}
+run (the matrix builder rejects un-QC'd SumStats). A fine-mapping
+result's marginal effects are taken as the summary statistics they are,
+which needs its genome build. Without a \code{jointSpecification} the
+conditions are a QTL object's contexts and a GWAS object's studies.}
 
 \item{nRandom, nNull}{Per-object random / null sample sizes (default 10 each).}
 
@@ -38,9 +41,15 @@ fine-mapping results (default 0.95).}
 \item{sigPCutoff}{Significance cutoff applied to the strong partition
 (default 1e-6).}
 
-\item{inputScale}{Matrix scale for \code{QtlSumStats} inputs
-(\code{"auto"}/\code{"beta"}/\code{"z"}); ignored for
-fine-mapping results (always effect-size scale).}
+\item{inputScale}{Matrix scale, for summary statistics and a fine-mapping
+result's marginal effects alike (\code{"auto"} / \code{"beta"} /
+\code{"z"} / \code{"standardized"}; see \code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+how each object is laid out -- its conditions the combinations of the
+spec's axes, the other axes blocks of rows, studies joined by allele.
+\code{NULL} (the default) takes a QTL object's contexts, a GWAS object's
+studies.}
 
 \item{independentVariants}{Optional character vector of variant ids (e.g. an
 LD-pruned independent SNP list). When supplied, the \emph{random} and
@@ -58,7 +67,10 @@ A flat \code{list}: \code{strong.b}, \code{strong.s},
   \code{strong.z}, \code{random.*}, \code{null.*} (each a \code{variants x
   conditions} matrix) and \code{XtX} (a \code{conditions x conditions}
   matrix). The \code{.b} / \code{.s} matrices are omitted when \code{zOnly =
-  TRUE}.
+  TRUE}. And \code{sumStatsList}: the partitions as the summary statistics
+  they were taken from (\code{strong}, \code{random}, \code{null}), each
+  kept to its variants and still missing where a study lacks one, for
+  \code{\link{mashPipeline}} with the same \code{jointSpecification}.
 }
 \description{
 Unified, S4-native replacement for the legacy

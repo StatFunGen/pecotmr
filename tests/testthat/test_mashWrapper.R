@@ -338,3 +338,42 @@ test_that("UdFitOptions checks unconstrained.update's value, not its name", {
     # Name checking is unchanged.
     expect_error(UdFitOptions(maxitr = 5), "unknown argument")
 })
+
+test_that(".mashCovSubsets: every partial subset, at each correlation", {
+    # Only the condition count and names are read off the mash data.
+    mk <- function(k, names = NULL) {
+        list(Bhat = matrix(0, 2L, k, dimnames = list(NULL, names)))
+    }
+    named <- pecotmr:::.mashCovSubsets(
+        mk(3L, c("A", "B", "C")),
+        corr = c(1, 0.5)
+    )
+    # Three pairs of three conditions, two correlations each.
+    expect_length(named, 6L)
+    expect_equal(
+        names(named)[1:2],
+        c("subset_A_B_corr1", "subset_A_B_corr0.5")
+    )
+    half <- named[["subset_A_C_corr0.5"]]
+    expect_equal(half, matrix(c(1, 0, 0.5, 0, 0, 0, 0.5, 0, 1), 3L, 3L))
+    # Pairs and triples of four: ten subsets.
+    expect_length(pecotmr:::.mashCovSubsets(mk(4L), corr = 1), 10L)
+    expect_length(pecotmr:::.mashCovSubsets(mk(4L)), 40L)
+    # Two conditions have no subset short of both.
+    expect_message(
+        expect_null(pecotmr:::.mashCovSubsets(mk(2L))),
+        "needs three or more conditions \\(got 2\\)"
+    )
+    expect_error(
+        pecotmr:::.mashCovSubsets(mk(10L)),
+        "would build 4048 matrices for 10 conditions"
+    )
+})
+
+test_that("CovSubsetsOptions takes distinct correlations in [0, 1]", {
+    expect_equal(CovSubsetsOptions()$corr, c(1, 0.25, 0.5, 0.75))
+    expect_equal(CovSubsetsOptions(corr = 1)$corr, 1)
+    expect_error(CovSubsetsOptions(corr = 1.5), "not <= 1")
+    expect_error(CovSubsetsOptions(corr = c(1, 1)), "duplicated")
+    expect_error(CovSubsetsOptions(corr = numeric(0)), "length")
+})

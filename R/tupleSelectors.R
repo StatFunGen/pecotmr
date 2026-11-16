@@ -9,11 +9,12 @@
 # =============================================================================
 
 # Internal: return integer row indices of `x` where every (column, value)
-# pair in `keys` matches as.character(x[[column]]) == value. Shared
-# building block for tuple-keyed row selectors and cache lookups
-# (.tupleSelectRow, .qtlSumStatsSelectRow, .gwasSelectStudy,
-# .fmCacheLookup, .cipFmrHasTuple, etc.). Pure vectorised AND-match with
-# character coercion -- no validation, no error reporting.
+# pair in `keys` matches as.character(x[[column]]) == value, a joint column
+# by the joint-key rules below (.jointMembersMatch()). Shared building block
+# for tuple-keyed row selectors and cache lookups (.tupleSelectRow,
+# .qtlSumStatsSelectRow, .gwasSelectStudy, .fmCacheLookup, .cipFmrRowIndex,
+# etc.). Pure vectorised AND-match with character coercion -- no
+# validation, no error reporting.
 .matchTupleRows <- function(x, keys) {
     if (length(keys) == 0L) {
         return(seq_len(nrow(x)))
@@ -27,6 +28,9 @@
 
 # @noRd
 .tupleKeyEquals <- function(k, x, keys) {
+    if (is_in(k, .JOINT_COLUMNS)) {
+        return(.jointMembersMatch(.fmrIdentityColumn(x, k), keys[[k]]))
+    }
     as.character(.tupleColumn(x, k)) == keys[[k]]
 }
 
@@ -36,6 +40,111 @@
 # @noRd
 .tupleColumn <- function(x, k) {
     mcols(x)[[k]]
+}
+
+# ---- joint groups ------------------------------------------------------------
+# A row's joint key -- its jointStudies, jointContexts and jointTraits -- names
+# the conditions its fit joined: each axis's members ";"-joined, NA on an axis
+# the fit did not join. A lookup names the group it means by one, matched like
+# any identity column but for two rules: NA (no joint group, or a collection
+# without the column) matches only NA, and members compare as sets.
+
+# The joint-key columns.
+# @noRd
+.JOINT_COLUMNS <- c("jointStudies", "jointContexts", "jointTraits")
+
+# The joint key of a fit from no joint group.
+# @noRd
+.noJointKey <- function() {
+    set_names(as.list(rep(NA_character_, 3L)), .JOINT_COLUMNS)
+}
+
+# Row `i`'s joint key.
+# @noRd
+.jointKeyAt <- function(x, i) {
+    set_names(map(.JOINT_COLUMNS, .fmrIdentityAt, x = x, i = i), .JOINT_COLUMNS)
+}
+
+# Row `i`'s position in its joint fit's condition axis, NA for a row from no
+# joint fit (or one that records none). A result made before rows recorded it
+# has no such column; there a joint row's position is its rank among its
+# fit's rows, which were stored in the fit's condition order.
+# @noRd
+.fmrJointIndexAt <- function(x, i) {
+    jointIndex <- mcols(x, use.names = FALSE)$jointIndex
+    if (!is.null(jointIndex)) {
+        return(jointIndex[[i]])
+    }
+    .fmrJointRankAt(x, i)
+}
+
+# Row `i`'s rank among its joint fit's rows: those of its method and joint
+# key that share its values on the axes the fit did not join. NA for a row
+# from no joint fit.
+# @noRd
+.fmrJointRankAt <- function(x, i) {
+    joint <- .jointKeyAt(x, i)
+    if (all(map_lgl(joint, is.na))) {
+        return(NA_integer_)
+    }
+    fixed <- c(c("study", "context", "trait")[map_lgl(joint, is.na)], "method")
+    keys <- c(
+        set_names(map(fixed, .fmrIdentityAt, x = x, i = i), fixed),
+        joint
+    )
+    as.integer(match(i, .matchTupleRows(x, keys)))
+}
+
+# Every kind of joint fit (.jointKinds()): none, or the axes joined.
+# @noRd
+.JOINT_KINDS <- c(
+    "none",
+    "study",
+    "context",
+    "trait",
+    "study+context",
+    "study+trait",
+    "context+trait",
+    "study+context+trait"
+)
+
+# Each weight set's kind of joint fit, from its joint columns `joint` (a list
+# or table holding the three, NA where a set joined nothing on that axis): the
+# axes its fit joined, "+"-joined in study, context, trait order, or "none"
+# for a fit of the tuple alone. WeightSelectionParam(jointAxes =) selects by
+# it, and cTWAS splits its runs by it.
+# @noRd
+#' @importFrom purrr pmap_chr
+.jointKinds <- function(joint) {
+    pmap_chr(map(joint[.JOINT_COLUMNS], .jointIsSet), .jointKindLabel)
+}
+
+# @noRd
+.jointIsSet <- function(values) {
+    !is.na(values)
+}
+
+# @noRd
+.jointKindLabel <- function(jointStudies, jointContexts, jointTraits) {
+    axes <- c("study", "context", "trait")[
+        c(jointStudies, jointContexts, jointTraits)
+    ]
+    if (length(axes) == 0L) "none" else str_flatten(axes, "+")
+}
+
+# Whether each joint-column value in `values` names the members `key` does.
+# @noRd
+.jointMembersMatch <- function(values, key) {
+    if (is.na(key)) {
+        return(is.na(values))
+    }
+    map_lgl(values, .sameJointMembers, key = key)
+}
+
+# @noRd
+.sameJointMembers <- function(value, key) {
+    !is.na(value) &&
+        setequal(str_split_1(value, fixed(";")), str_split_1(key, fixed(";")))
 }
 
 # ---- flavour-agnostic identity reads ----------------------------------------
@@ -1151,6 +1260,10 @@ setMethod("dataType", "RangedTupleList", function(x) {
 #     metadata prefix is attached (so an added `method` never duplicates).
 #   onSingle(entry) -> any        : returned verbatim when selectors pin one
 #     entry (defaults to perEntry).
+#   rowArgs : NULL, or one list of further arguments per row of `x` for its
+#     perEntry view: what only the collection knows of a row, such as its
+#     position in its joint fit. Read on the aggregate path, which every
+#     call without selectors takes.
 .fmrAggregateView <- function(
     x,
     studyName = NULL,
@@ -1160,7 +1273,8 @@ setMethod("dataType", "RangedTupleList", function(x) {
     blockId = NULL,
     perEntry,
     onSingle = perEntry,
-    viewArgs = list()
+    viewArgs = list(),
+    rowArgs = NULL
 ) {
     sel <- list(
         studyName = studyName,
@@ -1184,7 +1298,8 @@ setMethod("dataType", "RangedTupleList", function(x) {
         x = x,
         perEntry = perEntry,
         meta = meta,
-        viewArgs = viewArgs
+        viewArgs = viewArgs,
+        rowArgs = rowArgs
     ))
     if (length(parts) == 0L) {
         return(slice(meta, integer(0)))
@@ -1226,11 +1341,12 @@ setMethod("dataType", "RangedTupleList", function(x) {
 # Project one entry to its per-entry view with the row's identity metadata
 # prepended; NULL when the entry yields no rows.
 # @noRd
-.fmrEntryPart <- function(i, x, perEntry, meta, viewArgs) {
+.fmrEntryPart <- function(i, x, perEntry, meta, viewArgs, rowArgs = NULL) {
     # `perEntry` is an internal per-row function taking the stored payload, not
     # an S4 generic dispatching on a rebuilt entry. That indirection is what
     # the retired FineMappingEntry class existed for.
-    raw <- exec(perEntry, .fmrRowParts(x, i), !!!viewArgs)
+    ownArgs <- if (is.null(rowArgs)) list() else rowArgs[[i]]
+    raw <- exec(perEntry, .fmrRowParts(x, i), !!!viewArgs, !!!ownArgs)
     if (is.null(raw) || nrow(raw) == 0L) {
         return(NULL)
     }
@@ -1578,14 +1694,74 @@ setMethod("dataType", "RangedTupleList", function(x) {
     bind_cols(tibble(variant_id = as.character(vids[held])), w)
 }
 
+# `jointIndex`: the row's position in its joint fit's condition axis, which
+# picks the summary's per-condition columns (.fmrJointIndexArgs()).
 # @noRd
-.fmrRowCredibleSetSummary <- function(parts, coverage = 0.95) {
+.fmrRowCredibleSetSummary <- function(
+    parts,
+    coverage = 0.95,
+    jointIndex = NA_integer_
+) {
     fit <- susieFit(parts)
     .csSummaryFit(
         .fmrPartsTopLoci(parts),
         fit,
         coverage,
-        .partsFitIds(parts, fit$alpha)
+        .partsFitIds(parts, fit$alpha),
+        condition = jointIndex
+    )
+}
+
+# Row i's position in its joint fit's condition axis, as a further argument
+# to its view (.fmrAggregateView()'s rowArgs).
+# @noRd
+.fmrJointIndexArgs <- function(i, x) {
+    list(jointIndex = .fmrJointIndexAt(x, i))
+}
+
+# sharingPatterns() as a DataFrame: one row per pattern of each credible set
+# of each joint fit. The rows of a joint fit hold one key into the fits
+# dictionary, so each fit is read and summarised once, not per condition.
+# @noRd
+.fmrSharingPatternsTable <- function(
+    x,
+    coverage,
+    patternCoverage,
+    maxConditions
+) {
+    keys <- as.character(mcols(x, use.names = FALSE)$susieFit)
+    held <- which(!is.na(keys))
+    groups <- unname(split(
+        held,
+        factor(keys[held], levels = unique(keys[held]))
+    ))
+    identity <- .spIdentityColumns(x)
+    fits <- map(
+        groups,
+        .spFitPatterns,
+        x = x,
+        identity = identity,
+        args = list(
+            coverage = coverage,
+            patternCoverage = patternCoverage,
+            maxConditions = maxConditions
+        )
+    )
+    .spWarnSkipped(map_chr(fits, "skipped"), maxConditions)
+    .spAssemble(fits, identity)
+}
+
+# Each row's identity columns (.fmrRowMetadata()) and the joint key columns
+# the collection carries, which name the axes its joint fits join.
+# @noRd
+.spIdentityColumns <- function(x) {
+    joint <- intersect(.JOINT_COLUMNS, .tupleColumnNames(x))
+    bind_cols(
+        .fmrRowMetadata(x),
+        as_tibble(
+            set_names(map(joint, .fmrMetadataCol, x = x, n = nrow(x)), joint),
+            .rows = nrow(x)
+        )
     )
 }
 

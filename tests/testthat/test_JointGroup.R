@@ -186,3 +186,42 @@ test_that("JointDispatchCell + pipeline markers validate at construction", {
     expect_s4_class(tw, "JointPipeline")
     expect_equal(fm@config$coverage, 0.95)
 })
+
+test_that("a summary-statistics group may hold one LD reference per study", {
+    ids <- sprintf("chr1:%d:A:G", c(100L, 200L))
+    ldm <- function(rho) {
+        LdMatrix(`dimnames<-`(matrix(c(1, rho, rho, 1), 2L), list(ids, ids)))
+    }
+    cond <- .jg_cond(context = c("c1", "c1"))
+    cond$study <- c("A", "B")
+    refs <- list(ldm(0.2), ldm(0.8))
+    Z <- matrix(c(1, 2, NA, 3), 2L, 2L, dimnames = list(ids, c("A", "B")))
+    sg <- new(
+        "SumStatsJointGroup",
+        conditions = cond,
+        Z = Z,
+        ldReference = refs,
+        N = c(100, 120)
+    )
+    expect_identical(pecotmr:::.jgLdRefAt(sg, 2L), refs[[2L]])
+    # A fit taking one LD matrix has none to take.
+    expect_error(
+        pecotmr:::.jgOneLdRef(sg, "mrmash"),
+        "mrmash: a joint fit uses one LD matrix"
+    )
+    kept <- .jgKeepConditions(sg, c(FALSE, TRUE))
+    expect_identical(pecotmr:::.jgLdRef(kept), refs[2L])
+    expect_error(
+        new(
+            "SumStatsJointGroup",
+            conditions = cond,
+            Z = Z,
+            ldReference = refs[1L],
+            N = c(100, 120)
+        ),
+        "one LD reference per condition"
+    )
+    one <- methods::initialize(sg, ldReference = refs[[1L]])
+    expect_identical(pecotmr:::.jgOneLdRef(one, "mrmash"), refs[[1L]])
+    expect_identical(pecotmr:::.jgLdRefAt(one, 2L), refs[[1L]])
+})

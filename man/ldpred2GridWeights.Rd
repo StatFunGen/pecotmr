@@ -7,14 +7,12 @@
 ldpred2GridWeights(
   stat,
   ldReference,
-  backend = NULL,
   p = exp(seq(log(1e-05), 0, length.out = 21)),
   h2 = NULL,
   sparse = c(FALSE, TRUE),
   nIter = 150,
   nBurnin = 50,
   shrinkCorr = 0.95,
-  allowJumpSign = TRUE,
   selection = c("heldOut", "ldQuadratic"),
   fitRetention = c("none", "slim", "full")
 )
@@ -31,11 +29,6 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 \code{\link{LdMatrix}}.}
 
-\item{backend}{\code{"bigsnpr"} or \code{"pecotmr"}. \code{NULL}
-(default) is pecotmr for a genotype reference and bigsnpr for an
-\code{\link{LdMatrix}}; pecotmr's sampler reads only a genotype
-reference.}
-
 \item{p}{The proportions of causal variants in the grid.}
 
 \item{h2}{The heritabilities in the grid: numbers, or one estimator,
@@ -50,12 +43,9 @@ falls below \code{p} to zero; both by default.}
 \item{nIter, nBurnin}{Each chain's iterations, burn-in included, and its
 burn-in.}
 
-\item{shrinkCorr}{The LD shrinkage \eqn{c}: both engines read
+\item{shrinkCorr}{The LD shrinkage \eqn{c}: the matrix bigsnpr reads is
 \eqn{cR + (1 - c)I}. Default 0.95, as for
 \code{\link{ldpred2AutoWeights}}; bigsnpr's grid itself has none.}
-
-\item{allowJumpSign}{As for \code{\link{ldpred2AutoWeights}}; bigsnpr's
-grid sampler takes only \code{TRUE}, the default.}
 
 \item{selection}{How the returned fit is chosen: \code{"heldOut"}
 (default) or \code{"ldQuadratic"}, as for
@@ -82,19 +72,16 @@ sampler at every combination of the proportion of causal variants
 the fits. Upstream picks it on a validation sample; here, as for the
 penalized summary-statistics methods, it is picked on held-out summary
 statistics by default (see Details of \code{\link{lassosumRssWeights}}). A
-grid point has diverged, and is not picked, once a kept draw's squared
-effects sum past twice the squared marginal effects; bigsnpr's own
-sampler tests every iteration, burn-in included.
+grid point has diverged, and is not picked, once a draw's squared effects
+sum past twice the squared marginal effects; bigsnpr tests every
+iteration, burn-in included.
 }
 \details{
-\code{backend = "bigsnpr"} runs bigsnpr's \code{snp_ldpred2_grid()} on the
-LD matrix, written to a temporary file for the call; \code{"pecotmr"} runs
-pecotmr's port of the same sampler on a genotype reference's factor of the
-LD. bigsnpr's grid sampler has no LD shrinkage of its own, so for it the
-matrix written is shrunk, \eqn{cR + (1 - c)I}, as the Bayesian alphabet's
-matrix engines are given theirs; it always allows a drawn effect to
-change sign, so it takes no \code{allowJumpSign}. pecotmr's sampler takes
-both, as LDpred2-auto's does. See \code{\link{ldpred2AutoWeights}} for the
+bigsnpr's \code{snp_ldpred2_grid()} runs on the LD matrix, written to a
+temporary file for the call. Its grid sampler has no LD shrinkage of its
+own, so the matrix written is shrunk, \eqn{cR + (1 - c)I}, as the
+Bayesian alphabet's engines are given theirs; it always lets a drawn
+effect change sign. See \code{\link{ldpred2AutoWeights}} for the
 temporary file, the foreach backend and the seeds.
 }
 \examples{

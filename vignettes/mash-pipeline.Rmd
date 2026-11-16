@@ -77,13 +77,20 @@ fit <- mashPipeline(
 ```
 
 ```{r mash-pipeline-show}
-length(fit$U)
-round(head(sort(fit$w, decreasing = TRUE), 5), 4)
+names(fit)
+contextPrior <- fit$context
+length(contextPrior$U)
+round(head(sort(contextPrior$w, decreasing = TRUE), 5), 4)
+contextPrior$conditions
 ```
 
-`fit$U` is the prior covariance list and `fit$w` the estimated mixture
-weights over it. A large weight on `null` is normal and healthy: most
-variants are not QTLs.
+`mashPipeline()` returns one prior per joint specification, named by its
+axes; without one it fits a single prior across the contexts, named
+`context`. Each holds the prior covariance list `U`, the estimated mixture
+weights `w` over it, the residual correlation they were fitted with
+(`residualCorrelation`, below), and the conditions the rows of `U` stand
+for. A large weight on `null` is normal and healthy: most variants are not
+QTLs.
 
 `alpha` must match the scale you are on: `alpha = 0` for effect sizes
 (BETA/SE), `alpha = 1` for Z-scores. `inputScale` controls which pair is
@@ -98,39 +105,50 @@ noise as shared signal. `residualCorrelationMethod` chooses the estimator:
 
 | Value | Estimator | Needs |
 |---|---|---|
-| `"identity"` (default) | no residual correlation | — |
 | `"simple"` | `mashr::estimate_null_correlation_simple()` | `null` |
+| `"identity"` | no residual correlation | — |
 | `"simpleSpecific"` | nearest PD correlation of `cov(nullZ)` | `null` |
 | `"corshrink"` | adaptive shrinkage of the null correlation | `null`, CorShrink |
 | `"mle"` | EM refinement against the prior | `random`, `priorCovariances` |
 
-The default is `"identity"` because it always works, **not** because it is
-the best choice. Multi-context QTL data is the overlapping-sample case par
-excellence — the same donors appear in every context — so the identity
-assumption is usually wrong. Prefer a data-driven estimate whenever you have
-a null set:
+Multi-context QTL data is the overlapping-sample case par excellence — the
+same donors appear in every context — so the default, `"simple"`, estimates
+`Vhat` from the null set, which it therefore requires. `"identity"` needs no
+null set, but its assumption of no residual correlation is usually wrong
+there. The fit above used the default; its `Vhat` is kept in the prior:
+
+```{r mash-vhat-kept}
+round(contextPrior$residualCorrelation, 3)
+```
 
 ```{r mash-vhat, results="hide"}
-fitSimple <- mashPipeline(
+fitIdentity <- mashPipeline(
     sumStatsList,
     alpha = 0,
-    residualCorrelationMethod = "simple",
-    prior = MashPriorParam(priorCovariances = fit$U)
+    residualCorrelationMethod = "identity",
+    prior = MashPriorParam(priorCovariances = contextPrior$U)
 )
 ```
 
 ```{r mash-vhat-show}
-round(head(sort(fitSimple$w, decreasing = TRUE), 5), 4)
+round(head(sort(fitIdentity$context$w, decreasing = TRUE), 5), 4)
 ```
 
-Passing `fit$U` back in holds the prior fixed, so `Vhat` is the only thing
-that differs from the fit above and the shift in the weights is attributable
-to it alone. Re-estimating the prior here would confound the comparison --
-and cost a second data-driven estimate for a prior you already have.
+Passing `contextPrior$U` back in holds the prior fixed, so `Vhat` is the
+only thing that differs from the fit above and the shift in the weights is
+attributable to it alone. Re-estimating the prior here would confound the
+comparison -- and cost a second data-driven estimate for a prior you already
+have.
 
-Supplying a `null` partition while leaving the default in place reports that
-the partition is going unused, since that combination is more often an
+Supplying a `null` partition while asking for `"identity"`, as here, reports
+that the partition is going unused, since that combination is more often an
 oversight than an intent.
+
+The prior's `residualCorrelation` travels with it into
+`twasWeightsPipeline()`: its mr.mash fits on summary statistics take it as
+their residual covariance, and on individual-level data can start from it
+with `MrmashOptions(vInitMethod = "mash")` (their own data's covariance is
+the default start).
 
 You can also skip estimation entirely and pass a `Vhat` computed elsewhere —
 useful when it was estimated on a larger reference and shipped as a static
@@ -139,6 +157,47 @@ artefact:
 ```{r mash-vhat-supplied, eval=FALSE}
 mashPipeline(sumStatsList, alpha = 0, residualCorrelation = myVhat)
 ```
+
+## Priors across studies, contexts and traits
+
+`jointSpecification` chooses what a prior's conditions are, in the
+vocabulary the TWAS and fine-mapping pipelines use: the combinations of the
+values of its axes. The axes it leaves out are pooled, each combination of
+their values a block of variants, in which a condition the block lacks is a
+missing cell. A list of specifications fits one prior for each:
+
+```{r mash-joint-spec, eval=FALSE}
+fits <- mashPipeline(
+    sumStatsList,
+    alpha = 0,
+    jointSpecification = list("context", c("study", "context"))
+)
+names(fits) # "context", "study+context"
+```
+
+With the study among the axes, each block's studies are joined by allele.
+Studies are taken to share no samples, so whichever
+`residualCorrelationMethod` is chosen, the residual correlation is estimated
+within each study and is zero between them. When some do share samples --
+GWAS of several traits from one biobank, say -- name them: `sampleOverlap =
+list(c("ukbHeight", "ukbBmi"))` estimates it across each group, and
+`sampleOverlap = TRUE` across every study.
+
+The studies' per-allele effects differ with allele frequency and phenotype
+scale, so for a specification with the study the default `inputScale =
+"auto"` puts them on a common footing: each variant's Z and N give its
+correlation with the phenotype, the per-SD effect (`inputScale =
+"standardized"`), fitted with `alpha = 0`. Without N it takes the z scale.
+
+To assemble the partitions genome-wide, pass the same `jointSpecification`
+to `mashInput()`. Besides its matrices it returns `sumStatsList`, the strong,
+random and null variants it picked as summary statistics, which go to
+`mashPipeline()` as they are.
+
+`MashPrior(fullFit = fits)` hands the priors to `twasWeightsPipeline()`,
+where each mr.mash group takes the one over its own joint specification's
+axes, on its own conditions. A prior fitted on the z scale (`alpha = 1`) is
+put on the per-SD scale mr.mash fits on by the conditions' sample sizes.
 
 ## The chain, step by step
 
@@ -232,6 +291,29 @@ The engine refines only the *data-driven* components. Canonical components
 are fixed structural hypotheses -- identity, singletons, equal effects -- and
 reach the prior unmodified, matching mashr's own workflow. `engine = "none"`
 uses the data-driven components as generated, without refinement.
+
+mashr's canonical set has an effect in one condition or in all of them. With
+three or more conditions, such as studies of several ancestries, add
+`"subsets"` for effects shared by some conditions but not others. For every
+subset of two or more conditions short of all of them, it adds equal effects
+within the subset and, by default, mashr's `simple_het` correlations (0.25,
+0.5, 0.75), with no effect outside it. These are fixed hypotheses too. Their
+number grows quickly: 12 matrices for three conditions, 40 for four.
+`CovSubsetsOptions(corr = )` sets the correlations:
+
+```{r mash-subsets, eval=FALSE}
+mashPriorCovariances(
+    sumStatsList,
+    alpha = 0,
+    vhat = vhat,
+    components = MashComponentParam(
+        canonical = list(),
+        subsets = CovSubsetsOptions(corr = c(1, 0.5)),
+        pca = list(),
+        flash = list()
+    )
+)
+```
 
 To bypass the covariance chain entirely and fit weights against a prior you
 already have:

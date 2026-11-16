@@ -11,7 +11,8 @@ mashModelFit(
   vhat = NULL,
   fitOn = c("random", "strong"),
   outputLevel = 4L,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
   mashDataArgs = MashDataOptions(),
   mashArgs = MashOptions(),
   setSeed = 999
@@ -38,7 +39,12 @@ carries, which is unwrapped to its \code{U}.}
 \item{outputLevel}{\code{mashr::mash()} \code{outputlevel} (default 4 -- the
 full model \code{\link{mashPosterior}} consumes).}
 
-\item{inputScale}{SumStats -> matrix conversion scale.}
+\item{inputScale}{SumStats -> matrix conversion scale (see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts). Match the prior's.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

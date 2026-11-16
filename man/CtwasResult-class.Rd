@@ -22,7 +22,17 @@ Unlike the QTL family, \code{trait} is not part of the key: a cTWAS
   \code{jointStudies} / \code{jointContexts} columns tag rows born from a
   multi-study or multi-context run and participate in the uniqueness key,
   exactly as in the \code{\linkS4class{TwasWeights}} and fine-mapping
-  families. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
+  families. The optional \code{jointTwasAxes} column, present when a run
+  modelled weights of a joint fit, is the kind of joint fit the run's
+  weights are (\code{"none"}, \code{"study"}, \code{"context"},
+  \code{"context+trait"} and so on; \code{NA} for a \code{"best"} run,
+  whose genes' weights can be of different kinds), and joins the key too,
+  so two runs of one method on weights of different kinds stay apart. A
+  gene's own fit can join members its neighbours' do not, so the members
+  are kept gene by gene: in such a run each gene's posteriors and susie
+  alphas carry \code{joint_twas_studies}, \code{joint_twas_contexts} and
+  \code{joint_twas_traits}, NA for a SNP or for weights of a fit of the
+  gene alone. \code{\link{ctwasPosteriors}} and \code{\link{susieAlpha}}
   stack every region back into one \code{GRanges}. The group priors are
   the run's one genome-wide estimate, fitted across all its regions, so a
   run's rows must carry the same priors: rows of one identity whose

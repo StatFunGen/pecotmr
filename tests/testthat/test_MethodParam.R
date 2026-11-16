@@ -461,14 +461,14 @@ test_that("a Param keeps its structure through the MultiStudy helpers", {
         qtlDatasetMethods = list(lasso = list())
     )
     expect_setequal(pecotmr:::.methodsParamTokens(p), c("mrmash", "lasso"))
-    stripped <- pecotmr:::.twasMsStripMrmash(p)
+    stripped <- pecotmr:::.twasMsDropMethods(p, "mrmash")
     expect_s4_class(stripped, "TwasWeightsMethodsParam")
     expect_setequal(pecotmr:::.methodsParamTokens(stripped), "lasso")
     # Stripping the only method leaves a Param that reports itself empty --
     # which is how the joint phase knows there is no per-method work left.
     only <- TwasWeightsMethodsParam(methods = list(mrmash = list()))
     expect_true(pecotmr:::.twasMethodsEmpty(
-        pecotmr:::.twasMsStripMrmash(only)
+        pecotmr:::.twasMsDropMethods(only, "mrmash")
     ))
 })
 
@@ -527,7 +527,7 @@ test_that("show renders a Param with nothing set", {
     expect_true(any(str_detect(out, fixed("(nothing set)"))))
     expect_true(any(str_detect(
         out,
-        fixed("unset: canonical, pca, flash, flashNonneg")
+        fixed("unset: canonical, subsets, pca, flash, flashNonneg")
     )))
 })
 

@@ -39,10 +39,15 @@ at once. \code{fineMappingPipeline()} sets it from
 \item{methodArgs}{Options forwarded to \code{mvsusieR::mvsusie}, built
 with \code{\link{MvsusieOptions}}. A bare list is refused: it cannot be
 checked against the engine, so a misspelled option would be silently
-ignored.}
+ignored. The fit runs with \code{verbose = FALSE} unless they set it.}
 }
 \value{
-The fit object returned by \code{mvsusieR::mvsusie}.
+The fit object returned by \code{mvsusieR::mvsusie}. A variant
+  with no data for a condition --- constant in the samples observing it,
+  as a variant a study lacks is in a design stacked across studies --- has
+  posterior mean 0 there: mvsusieR gives it its prior's prediction from
+  the other conditions, which as that condition's effect (or TWAS weight)
+  is on a scale the condition does not have.
 }
 \description{
 Wrapper around \code{mvsusieR::mvsusie} with the canonical argument set used
@@ -50,9 +55,6 @@ inside fine-mapping and TWAS-weight pipelines.
 }
 \examples{
 \donttest{
-# mvsusieR 0.3.0 calls susieR::block_coordinate_ascent unqualified, so
-# susieR must be attached until mvsusieR adds the NAMESPACE import.
-library(susieR)
 data(multiTraitData)
 X <- multiTraitData$X[, 1:60]
 Y <- multiTraitData$Y

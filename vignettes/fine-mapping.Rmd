@@ -26,9 +26,9 @@ following inputs:
 
 | Input class | What it represents | Methods supported |
 |---|---|---|
-| `QtlDataset` | Single-study individual-level data | susie, susieInf, susieAsh, mvsusie, fsusie |
-| `MultiStudyQtlDataset` | Multiple `QtlDataset` objects (optionally with an embedded `QtlSumStats`) | susie, susieInf, susieAsh, mvsusie, fsusie (individual-level only), ser (via an embedded `QtlSumStats`) |
-| `QtlSumStats` | QTL summary statistics annotated by `(study, context, trait)` | susie, susieInf, susieAsh, mvsusie, ser |
+| `QtlDataset` | Single-study individual-level data | susie, susieInf, susieAsh, mvsusie, mvsusieInf, mvsusieAsh, fsusie |
+| `MultiStudyQtlDataset` | Multiple `QtlDataset` objects (optionally with an embedded `QtlSumStats`) | susie, susieInf, susieAsh, mvsusie, mvsusieInf, mvsusieAsh, fsusie (individual-level only), ser (via an embedded `QtlSumStats`) |
+| `QtlSumStats` | QTL summary statistics annotated by `(study, context, trait)` | susie, susieInf, susieAsh, mvsusie, mvsusieInf, mvsusieAsh, ser |
 | `GwasSumStats` | GWAS summary statistics annotated by `study` | susie, susieInf, susieAsh, ser |
 
 Method arguments are the same across input classes; `fineMappingPipeline()`
@@ -212,9 +212,10 @@ fineMappingPipeline(
 
 ## Joint multi-context / multi-trait fits
 
-The joint methods (`mvsusie`, `fsusie`) fit across traits when the input
-has two or more, else across contexts. To choose the axes yourself, pass a
-`jointSpecification`: a character vector of axes, or
+The joint methods (`mvsusie`, `mvsusieInf`, `mvsusieAsh`, `fsusie`) fit
+across traits when
+the input has two or more, else across contexts. To choose the axes yourself,
+pass a `jointSpecification`: a character vector of axes, or
 `list(axes = , scope = )` to limit the fit to listed studies, contexts or
 traits:
 
@@ -232,8 +233,38 @@ fineMappingPipeline(
 
 The `jointSpecification` argument in `?fineMappingPipeline` gives the full
 grammar, including the `study` axis for summary statistics. On summary
-statistics a joint fit uses one LD matrix, so the rows it combines must share
-an LD reference; a group whose rows do not is an error.
+statistics a study's conditions are fitted against one LD matrix, so its
+rows must share an LD reference; a group whose rows do not is an error.
+Across studies, `mvsusie` fits each study against its own LD reference, over
+the union of the studies' variants: the studies are different samples, with
+no residual correlation between them, and a variant a study lacks carries no
+information there and has effect 0 in it. Each study's credible sets have
+their purity read on its own LD.
+
+`mvsusieInf` is `mvsusie` with unmappable (polygenic) effects, as
+`susieInf` is `susie` with them: they are integrated out of the fit, with
+a covariance across conditions estimated within each study and zero
+between studies, and its weights add them to the sparse effects. Its
+settings go through `MvsusieInfOptions()` and `MvsusieInfRssOptions()`.
+
+`mvsusieAsh` is `mvsusie` with unmappable effects fitted by adaptive
+shrinkage, as `susieAsh` is `susie` with them: mr.mash fits them to what the
+confident sparse effects leave, outside the LD neighborhoods of the signals
+the sparse effects are still resolving, and a slot prior weighs how many
+single effects are active. Their prior is the run's mr.mash prior when the
+run has one. Its settings go through `MvsusieAshOptions()` and
+`MvsusieAshRssOptions()`.
+
+Small studies, such as ancestry groups of a few dozen samples, have two
+settings of their own. With `unmappable_scale = "single"` (or `"shrink"`)
+in `MvsusieInfOptions()` or `MvsusieAshOptions()`, the size of the
+unmappable effects is learned over all the conditions instead of from each
+condition's own samples (or each condition's is shrunk toward that), their
+shape being the run's mash prior collapsed over its weights. With
+`MvsusieOptions(estimate_residual_method = "NIG")`, each condition's
+residual variance is integrated out of the single effects, as susieR's NIG
+prior does for one trait, which tempers the evidence of a small sample; it
+takes no unmappable effects.
 
 ## Reading the result
 
@@ -300,6 +331,8 @@ its own when you have matrices rather than a `QtlDataset`:
 | `susieInf` | `susieInfWeights()` | `susieInfRssWeights()` |
 | `susieAsh` | `susieAshWeights()` | `susieAshRssWeights()` |
 | `mvsusie` | `mvsusieWeights()` / `fitMvsusie()` | `mvsusieRssWeights()` / `fitMvsusieRss()` |
+| `mvsusieInf` | `mvsusieInfWeights()` | `mvsusieInfRssWeights()` |
+| `mvsusieAsh` | `mvsusieAshWeights()` | `mvsusieAshRssWeights()` |
 | `fsusie` | `fsusieWeights()` / `fitFsusie()` | — |
 
 The `*Weights()` functions return a weight vector, which is what makes a

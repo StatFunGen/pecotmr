@@ -341,3 +341,440 @@ test_that("sdpr runs on a factor that carries no LD at all", {
     expect_equal(fit$h2, 0)
     expect_true(all(is.finite(fit$betaEst)))
 })
+
+test_that("sdprWeights on one study ignores the settings across studies", {
+    set.seed(42)
+    p <- 10
+    stat <- list(
+        b = rnorm(p, sd = 0.1),
+        n = rep(100, p),
+        variantNames = .rrwIds(p)
+    )
+    fit <- function(...) {
+        sdprWeights(
+            stat,
+            .rrwLdMatrix(diag(p)),
+            methodArgs = SdprOptions(
+                iter = 50,
+                burn = 10,
+                thin = 2,
+                verbose = FALSE,
+                seed = 4L,
+                ...
+            )
+        )
+    }
+    expect_identical(fit(sharing = "all", rho = 0.5), fit())
+})
+
+# ---- SDPRX across studies ----
+
+# SDPR's chain across `studies` (.rrwTwoStudies()) on their LD matrices, with
+# the kinds of component and rho given.
+.sdprx_joint <- function(
+    studies,
+    kinds,
+    rho,
+    union = list(1:30, 1:30),
+    seed = 11L
+) {
+    sdprxCpp(
+        map(studies, "z"),
+        map(studies, "R"),
+        map_int(studies, "n"),
+        union,
+        30L,
+        kinds,
+        rho,
+        0.1,
+        1,
+        50L,
+        0.5,
+        0.5,
+        200L,
+        50L,
+        5L,
+        FALSE,
+        seed,
+        FALSE,
+        FALSE
+    )
+}
+
+test_that("SDPR across one study is SDPR, draw for draw", {
+    one <- .rrwTwoStudies()[1L]
+    joint <- .sdprx_joint(one, list(1L), NULL, list(1:30))
+    alone <- sdprCpp(
+        one[[1L]]$z,
+        list(one[[1L]]$R),
+        250L,
+        NULL,
+        NULL,
+        0.1,
+        1,
+        50L,
+        0.5,
+        0.5,
+        200L,
+        50L,
+        5L,
+        1L,
+        FALSE,
+        11L,
+        FALSE,
+        FALSE
+    )
+    expect_identical(as.numeric(joint$betaEst), alone$betaEst)
+    expect_identical(joint$h2, alone$h2)
+    # And off a factor of the LD, as sdprFactorCpp() draws, Rao-Blackwellized
+    # and tracked.
+    factor <- one[[1L]]$X * sqrt((250 - 1) / 250)
+    jointF <- sdprxFactorCpp(
+        list(one[[1L]]$z),
+        list(factor),
+        250L,
+        list(1:30),
+        30L,
+        list(1L),
+        NULL,
+        0.1,
+        1,
+        50L,
+        0.5,
+        0.5,
+        200L,
+        50L,
+        5L,
+        FALSE,
+        11L,
+        TRUE,
+        TRUE
+    )
+    aloneF <- sdprFactorCpp(
+        one[[1L]]$z,
+        factor,
+        250L,
+        NULL,
+        NULL,
+        0.1,
+        1,
+        50L,
+        0.5,
+        0.5,
+        200L,
+        50L,
+        5L,
+        1L,
+        FALSE,
+        11L,
+        TRUE,
+        TRUE
+    )
+    expect_identical(as.numeric(jointF$betaEst), aloneF$betaEst)
+    expect_identical(as.numeric(jointF$corrEst), aloneF$corrEst)
+})
+
+test_that("SDPR across studies sits over the union, rho given or learned", {
+    studies <- .rrwTwoStudies()
+    # The second study lacks the last variant.
+    studies[[2L]] <- list_modify(
+        studies[[2L]],
+        z = studies[[2L]]$z[-30L],
+        R = studies[[2L]]$R[-30L, -30L]
+    )
+    union <- list(1:30, 1:29)
+    kinds <- list(1L, 2L, 1:2)
+    rho <- matrix(c(1, 0.8, 0.8, 1), 2L)
+    given <- .sdprx_joint(studies, kinds, rho, union)
+    expect_equal(dim(given$betaEst), c(30L, 2L))
+    expect_equal(given$betaEst[30L, 2L], 0)
+    expect_length(given$h2, 2L)
+    expect_equal(given$rhoEst, rho)
+    expect_false(given$diverged)
+    learned <- .sdprx_joint(studies, kinds, NULL, union)
+    expect_true(learned$rhoEst[1L, 2L] >= 0 && learned$rhoEst[1L, 2L] <= 0.99)
+    expect_equal(diag(learned$rhoEst), c(1, 1))
+})
+
+test_that("components every study shares tie the studies' effects", {
+    shared <- .sdprx_joint(
+        .rrwTwoStudies(),
+        list(1:2),
+        matrix(c(1, 0.9, 0.9, 1), 2L)
+    )
+    expect_gt(cor(shared$betaEst[, 1L], shared$betaEst[, 2L]), 0.8)
+})
+
+test_that("the kinds of component follow `sharing`", {
+    kinds <- pecotmr:::.sdprKinds
+    expect_equal(kinds("eachOrAll", 1L), list(1L))
+    expect_equal(kinds("eachOrAll", 3L), list(1L, 2L, 3L, 1:3))
+    expect_equal(kinds("everySubset", 2L), kinds("eachOrAll", 2L))
+    expect_equal(
+        kinds("everySubset", 3L),
+        list(1L, 2L, 3L, 1:2, c(1L, 3L), 2:3, 1:3)
+    )
+    expect_equal(kinds("all", 3L), list(1:3))
+})
+
+test_that("SDPR across studies checks its kinds, rho and inputs", {
+    studies <- .rrwTwoStudies()
+    expect_error(
+        .sdprx_joint(studies, list(3L), NULL),
+        "Kind 1's studies must lie in 1..2"
+    )
+    expect_error(
+        .sdprx_joint(studies, list(1L, 1L), NULL),
+        "Kind 2 must name distinct studies"
+    )
+    expect_error(
+        .sdprx_joint(studies, list(1:2), matrix(c(1, 2, 2, 1), 2L)),
+        "positive-definite correlation matrix"
+    )
+    expect_error(
+        .sdprx_joint(studies, list(1:2), diag(3)),
+        "positive-definite correlation matrix"
+    )
+    expect_error(
+        .sdprx_joint(studies, list(1:2), NULL, list(1:30, 1:3)),
+        "Study 2 has 3 union indices but 30 effects"
+    )
+    expect_error(
+        .sdprx_joint(studies[1L], list(1L), NULL, list(1:30, 1:30)),
+        "There are 2 union indices for 1 studies"
+    )
+})
+
+test_that("SDPR weights across studies sit over the union of variants", {
+    inputs <- .rrwStudyInputs(.rrwTwoStudies())
+    run <- function(user) {
+        pecotmr:::.sdprCoupledWeights(
+            inputs$stats,
+            inputs$refs,
+            inputs$ids,
+            user,
+            "slim",
+            "test"
+        )
+    }
+    W <- run(list(
+        iter = 60L,
+        burn = 20L,
+        thin = 2L,
+        M = 20L,
+        verbose = FALSE,
+        seed = 3L,
+        nChains = 2L,
+        rho = 0.5
+    ))
+    expect_equal(dim(W), c(30L, 2L))
+    expect_equal(rownames(W), inputs$ids)
+    expect_equal(unname(W[30L, 2L]), 0)
+    fit <- attr(W, "fit")
+    expect_equal(fit$rhoEst, matrix(c(1, 0.5, 0.5, 1), 2L))
+    expect_length(fit$h2, 2L)
+    expect_equal(nrow(fit$chains), 2L)
+    expect_error(
+        run(list(perVariantSampleSize = rep(100, 30))),
+        "describe one study's variants"
+    )
+    expect_error(run(list(optLlk = 2)), "describe one study's variants")
+    expect_error(run(list(rho = 1)), "a single `rho` must lie in")
+    expect_error(run(list(rho = diag(3))), "a 2 x 2 positive-definite")
+    expect_error(run(list(sharing = "pairs")), "`sharing` must be one of")
+})
+
+test_that("SDPR skips an LD block holding no variant", {
+    one <- .rrwTwoStudies()[[1L]]
+    run <- function(LD) {
+        sdprCpp(
+            one$z,
+            LD,
+            250L,
+            NULL,
+            NULL,
+            0.1,
+            1,
+            20L,
+            0.5,
+            0.5,
+            60L,
+            20L,
+            2L,
+            1L,
+            FALSE,
+            6L,
+            FALSE,
+            TRUE
+        )
+    }
+    withEmpty <- run(list(one$R, matrix(0, 0L, 0L)))
+    expect_length(withEmpty$betaEst, 30L)
+    expect_true(all(is.finite(withEmpty$betaEst)))
+    expect_identical(withEmpty$betaEst, run(list(one$R))$betaEst)
+})
+
+test_that("SDPR's entry points refuse inputs that do not fit together", {
+    studies <- .rrwTwoStudies()
+    one <- studies[[1L]]
+    single <- function(LD = list(one$R), M = 20L, sizes = NULL, array = NULL) {
+        sdprCpp(
+            one$z,
+            LD,
+            250L,
+            sizes,
+            array,
+            0.1,
+            1,
+            M,
+            0.5,
+            0.5,
+            20L,
+            5L,
+            5L,
+            1L,
+            FALSE,
+            6L,
+            FALSE,
+            FALSE
+        )
+    }
+    expect_error(single(M = 3L), "'M' must be at least 4")
+    # Each input read per variant holds a value per effect, checked before
+    # any is read: LD blocks over fewer or more variants than there are
+    # effects, and sample sizes or arrays for some, are refused.
+    expect_error(
+        single(LD = list(one$R[1:20, 1:20])),
+        "The LD blocks hold 20 variants but there are 30 effects"
+    )
+    expect_error(
+        single(LD = list(one$R, one$R[1:10, 1:10])),
+        "The LD blocks hold 40 variants but there are 30 effects"
+    )
+    expect_error(
+        single(sizes = rep(250, 29L)),
+        "'perVariantSampleSize' holds 29 values but there are 30 effects"
+    )
+    expect_error(
+        single(array = rep(1L, 29L)),
+        "'array' holds 29 values but there are 30 effects"
+    )
+    across <- function(
+        bhat = map(studies, "z"),
+        ld = map(studies, "R"),
+        n = c(250L, 165L),
+        nUnion = 30L,
+        kinds = list(1L, 2L, 1:2)
+    ) {
+        sdprxCpp(
+            bhat,
+            ld,
+            n,
+            rep(list(1:30), length(bhat)),
+            nUnion,
+            kinds,
+            NULL,
+            0.1,
+            1,
+            20L,
+            0.5,
+            0.5,
+            20L,
+            5L,
+            5L,
+            FALSE,
+            7L,
+            FALSE,
+            FALSE
+        )
+    }
+    expect_error(
+        across(bhat = list(), ld = list(), n = integer(0), kinds = list()),
+        "SDPR runs on 1 to 64 studies, not 0"
+    )
+    # A union place no study fills
+    expect_error(across(nUnion = 31L), "Union variant 31 is in no study")
+    expect_error(across(kinds = list()), "at least one kind of component")
+    expect_error(across(kinds = list(3L)), "Kind 1's studies must lie in 1..2")
+    expect_error(
+        across(ld = list(one$R)),
+        "Each of the 2 studies needs one LD and one sample size"
+    )
+    expect_error(across(n = c(250L, 0L)), "sample size must be positive")
+    expect_error(
+        across(ld = list(one$R, studies[[2L]]$R[1:29, 1:29])),
+        "Study 2's LD is 29 x 29 but it has 30 effects"
+    )
+})
+
+test_that("SDPR clamps a component variance drawn infinite or zero", {
+    one <- .rrwTwoStudies()[[1L]]
+    run <- function(a0k, b0k) {
+        sdprCpp(
+            one$z,
+            list(one$R),
+            250L,
+            NULL,
+            NULL,
+            0.1,
+            1,
+            20L,
+            a0k,
+            b0k,
+            20L,
+            5L,
+            5L,
+            1L,
+            FALSE,
+            6L,
+            FALSE,
+            FALSE
+        )
+    }
+    # An empty component's variance is 1 over a gamma draw: a prior shape
+    # near 0 draws that as 0, and a prior rate near 0 overflows its scale.
+    # Each is held at a bound, said on the console, and the chain goes on.
+    infinite <- capture.output(fitInf <- run(1e-300, 0.5), type = "message")
+    expect_true(is_in("Cluster variance is infinite.", infinite))
+    expect_true(all(is.finite(fitInf$betaEst)))
+    zero <- capture.output(fitZero <- run(0.5, 5e-324), type = "message")
+    expect_true(is_in("Cluster variance is zero.", zero))
+    expect_true(all(is.finite(fitZero$betaEst)))
+})
+
+test_that("SDPR across three studies learns each pair a kind spans", {
+    # Three copies of one study: their effects agree, so the learned
+    # correlations run high and some grid values leave rho indefinite.
+    one <- .rrwTwoStudies()[[1L]]
+    studies <- rep(list(one), 3L)
+    run <- function(kinds) {
+        sdprxCpp(
+            map(studies, "z"),
+            map(studies, "R"),
+            rep(250L, 3L),
+            rep(list(1:30), 3L),
+            30L,
+            kinds,
+            NULL,
+            0.1,
+            1,
+            20L,
+            0.5,
+            0.5,
+            200L,
+            50L,
+            5L,
+            FALSE,
+            7L,
+            FALSE,
+            FALSE
+        )
+    }
+    every <- run(list(1L, 2L, 3L, 1:2, 1:3))
+    rho <- every$rhoEst[upper.tri(every$rhoEst)]
+    expect_true(all(rho >= 0 & rho <= 0.99))
+    # A pair no kind spans keeps its correlation at 0.
+    partial <- run(list(1L, 2L, 3L, 1:2))
+    expect_equal(partial$rhoEst[1L, 3L], 0)
+    expect_equal(partial$rhoEst[2L, 3L], 0)
+})

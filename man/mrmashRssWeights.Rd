@@ -21,21 +21,48 @@ mrmashRssWeights(
 \arguments{
 \item{stat}{A list with \code{z} (variants x conditions matrix),
 \code{n} (per-context numeric vector or scalar) and \code{variantNames}.
-May also include \code{Bhat}, \code{Shat} matrices.}
+May also include \code{Bhat}, \code{Shat} matrices, which with
+\code{covY} put the fit on their scale (without \code{covY} it is on
+the standardized scale of \code{z}: effects per standard deviation of
+the variant and of the condition), and
+\code{sampleGroups}, one label per column of \code{z} naming the
+samples it is measured on (such as its study): conditions with
+different labels are fitted as different samples even when they share
+an LD reference; and \code{h2}, one heritability per column of
+\code{z} (\code{NA} for none), which sets each condition's residual
+variance to \eqn{1 - h^2} of its variance, as SuSiE-RSS's residual
+variance, with the correlations of \code{covY} (a given \code{V}
+wins).}
 
 \item{ldReference}{The LD reference the statistics' variants are matched
 to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
-\code{\link{LdMatrix}}. \code{mr.mash.rss} takes an LD matrix, which is
-formed from the reference over these variants; it is not read when
-\code{mrmashRssFit} is supplied.}
+\code{\link{LdMatrix}}. \code{mr.mash.rss} is given the LD over these
+variants: a factor of it for a genotype panel or a
+\code{GenotypeMixture} (its \code{X}), so the variants x variants
+matrix is never formed, and the matrix of an \code{LdMatrix} (its
+\code{R}). It is not read when
+\code{mrmashRssFit} is supplied. Conditions measured on different
+samples, such as studies of different ancestries, take a list of one
+reference per column of \code{stat$z}, the same reference for the
+conditions of one study. Each reference's LD is then taken over the
+variants its conditions carry (a non-missing z-score in any of them)
+that it holds, a variant they lack carrying no information in them,
+as factors when every reference has one and as matrices otherwise;
+the conditions on different references, or with different
+\code{stat$sampleGroups}, are fitted as different samples, with a
+residual covariance \code{V} and \code{covY} of zero between them, and
+the conditions of one sample share the median of their sample sizes.}
 
 \item{mrmashRssFit}{Optional pre-fitted \code{mr.mash.rss} object; skips
 fitting when supplied.}
 
 \item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
 raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
-alongside the canonical mixture.}
+alongside the canonical mixture. It may also carry
+\code{residualCorrelation}, the residual correlation of the mash prior
+\code{U} comes from (conditions x conditions), the default \code{V} and
+\code{covY}.}
 
 \item{canonicalPriorMatrices}{Logical. When TRUE (default), include the
 standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
@@ -47,11 +74,21 @@ canonical / data-driven construction.}
 \item{w0}{Optional prior mixture weights; defaults to \code{computeW0(Bhat,
 length(S0))}.}
 
-\item{V}{Optional residual covariance matrix (K x K). When NULL, defaults to
-the identity matrix of size K.}
+\item{V}{Optional residual covariance matrix (K x K). When NULL, the
+residual variances \code{stat$h2} implies, or without it
+\code{mr.mash.rss}'s default, \code{covY} (its correlations on the
+standardized scale).}
 
-\item{covY}{Optional response covariance matrix (K x K). When NULL, defaults
-to the identity matrix of size K.}
+\item{covY}{Optional response covariance matrix (K x K). When NULL, the
+residual correlation of the mash prior, \code{dataDrivenPriorMatrices$
+residualCorrelation} (\code{\link{mashPipeline}}), zero between
+conditions on different references, which are fitted as different
+samples; without one, \code{mr.mash.rss} estimates it from the
+z-scores of the variants near-null (\eqn{|z| < 2}) in every condition
+on one reference, over the variants their reference holds, by mashr's
+\code{estimate_null_correlation_simple()} (fewer than
+\eqn{\max(2K_g, 20)} such variants, for the \eqn{K_g} conditions on a
+reference, give the identity there, with a warning).}
 
 \item{fitRetention}{How much of the mr.mash fit is kept as the
 \code{"fit"} attribute of the returned weights. \code{"none"} (default)

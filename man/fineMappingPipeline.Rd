@@ -113,8 +113,9 @@ spanning more than 20 Mb, as a whole chromosome does, draws a warning.}
 \itemize{
   \item A character vector of method tokens, e.g.
         \code{c("susie", "susieInf", "mvsusie")} (any subset of
-        \code{c("susie", "susieInf", "susieAsh", "mvsusie", "fsusie")},
-        subject to per-class compatibility).
+        \code{c("susie", "susieInf", "susieAsh", "mvsusie",
+        "mvsusieInf", "mvsusieAsh", "fsusie")}, subject to
+        per-class compatibility).
   \item A \code{\link{FineMappingMethodsParam}} record keyed by method
         token, where each value is a list of per-method kwargs to
         splice into the underlying fitter, e.g.
@@ -177,7 +178,8 @@ genotypes into one joint fit. Ignored for a single-range / cis
 (\code{traitId} + \code{cisWindow}) request.}
 
 \item{jointSpecification}{Optional joint-fit specification saying which
-axes \code{mvsusie} / \code{fsusie} fit across. When NULL (the default)
+axes the joint methods (\code{mvsusie}, \code{mvsusieInf},
+\code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the default)
 they fit across traits if the input has two or more, else across
 contexts. Otherwise give a character vector of axes (one spec) or a list
 of specs. A spec is a character vector drawn from \code{"study"},
@@ -187,9 +189,30 @@ of specs. A spec is a character vector drawn from \code{"study"},
 listed values, each of which must exist in \code{data}. A list-form
 spec always goes inside the outer list, even on its own. Other methods
 run per (study, context, trait) as usual. The \code{"study"} axis needs
-summary statistics: it is rejected on a \code{QtlDataset}, and on a
-\code{MultiStudyQtlDataset} only the summary-statistics studies take
-part.}
+more than one study, so it is rejected on a \code{QtlDataset}. On a
+\code{MultiStudyQtlDataset}, the summary-statistics studies are fitted
+with one another, and so are the individual-level ones: on the study
+axis alone, one \code{mvsusie} fit per (context, trait) that two or more
+of them carry, for instance the same gene measured in several
+ancestries; with a composed spec including \code{"study"}, one fit per
+value of the axes it leaves out (each trait for \code{c("study",
+"context")}), over every (study, context, trait) the studies carry.
+Their samples must be disjoint. The fit stacks them, each study's
+conditions observed on its own samples only (a study's conditions on the
+samples it observes for all of them), over the union of the studies'
+variants, which are matched by allele; a variant a study lacks carries no
+evidence for it, and has effect 0 there. Each study keeps its own
+residualization, genotype filters and scaling, and its rows report its
+own samples' allele frequencies and credible-set purity.
+Summary-statistics studies are fitted alike, each on its own LD
+reference and sample size, its rows' credible-set purity read on its own
+LD. While the residualizer scales X and
+Y (\code{ResidualizationParam(scaleResiduals = TRUE)}, the default),
+every joint \code{mvsusie} fit runs with \code{standardize = FALSE}, so
+its prior describes per-SD effects and a component shared across studies
+means effects equal per SD whatever the studies' sizes;
+\code{MvsusieOptions(standardize = TRUE)} restores mvsusieR's own
+scaling. \code{fsusie} has no cross-study fit.}
 
 \item{initializeWithSusieInf}{Logical. When \code{susieInf} is in
 \code{methods} alongside \code{susie} and/or \code{susieAsh}, whether the
@@ -303,8 +326,11 @@ reproducible fits; the global RNG state is restored on return. Default
 \item{mrmashPrior}{Optional \code{\link{TwasWeights}} from a previous
 mr.mash \code{\link{twasWeightsPipeline}} run, mined for the mvSuSiE
 data-driven prior: the retained \code{mrmash} fits supply the prior
-mixture, and their cross-validation payload supplies honest per-fold
-priors. \code{NULL} uses the canonical prior instead.}
+mixture and the residual covariance mvSuSiE starts from (on summary
+statistics, where it is held fixed, also Y's covariance,
+\code{varY}), and their cross-validation payload supplies honest
+per-fold priors. \code{NULL} uses the canonical prior instead, and
+mvSuSiE's own residual covariance.}
 
 \item{dataDrivenPriorWeightsCutoff}{Numeric or \code{NULL}. Cutoff below
 which data-driven prior weights are zeroed; \code{NULL} disables the
@@ -334,24 +360,28 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
 
 \item{susieRssParam}{Summary-statistics solver settings for
 \code{QtlSumStats} / \code{GwasSumStats} input, built with
-\code{\link{SusieRssParam}}: \itemize{
+\code{\link{SusieRssParam}}. The joint mvSuSiE fits
+(\code{mvsusieR::mvsusie_rss}) take them too, for each condition's LD
+reference: \itemize{
   \item \code{serFallback} (default \code{FALSE}) --- after each
-    multi-effect SuSiE-RSS fit, read susieR's finite-sample R
-    diagnostics and, when
+    multi-effect fit, read its finite-sample R diagnostics and, when
     \code{fit$R_finite_diagnostics$R_reliability_flag} is \code{TRUE},
     report the single-effect (\code{ser_model}) result for that region
-    instead.
+    instead. That is the fit the mismatch correction starts from, so
+    the fallback needs \code{rMismatch}.
   \item \code{keepFullFit} (default \code{"fallback"}) --- which
     pre-fallback multi-effect fits to retain: only the regions that fell
     back, \code{"all"}, or \code{"none"}. Meaningful only with
     \code{serFallback}. The retained fit and the decision are read via
     \code{susieFit(res)$multiEffectFit},
     \code{$R_reliability_flag} and \code{$serFallbackUsed}.
-  \item \code{rFinite} --- finite-sample size for susieR's
-    \code{R_finite} correction. \code{NULL} (default) uses susieR's
-    own, except when a finite/EB mode is active (\code{serFallback} or
-    \code{rMismatch != "none"}), where it falls back to the LD panel's
-    \code{nSamples(ldReference)}.
+  \item \code{rFinite} --- finite-sample size for the \code{R_finite}
+    correction. \code{NULL} (default) leaves the correction off,
+    except when a finite/EB mode is active (\code{serFallback} or
+    \code{rMismatch != "none"}), where it falls back to each LD
+    reference's \code{nSamples(ldReference)}: a
+    \code{GenotypeMixture}'s pooled over its weights, or with
+    \code{estimateMixtureWeights} each panel's.
   \item \code{rMismatch} (default \code{"none"}) --- LD-mismatch
     correction forwarded as \code{R_mismatch}: also \code{"eb"} or
     \code{"eb_mix"}.
@@ -360,6 +390,11 @@ and GWAS methods, built with \code{\link{PanelFilterParam}}. See
     \code{\link{SusieRssControlOptions}}. This was a bare named list,
     which meant a misspelled option was dropped silently; the
     constructor checks the names against that function's live formals.
+  \item \code{estimateMixtureWeights} (default \code{FALSE}) --- for a
+    \code{GenotypeMixture} LD reference, the fits estimate its panels'
+    weights instead of using its own (for each group of conditions
+    from the same samples, in the joint fits). The credible sets'
+    purity reads the reference with the estimated weights.
 }}
 
 \item{h2}{For \code{QtlSumStats} input (and a
@@ -376,10 +411,13 @@ share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
 its row's estimate, and must hold exactly one row for each. A value is
 used floored at 0.001 and capped at 0.99, and a trait with no estimate
 keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
-chained from \code{susieInf} or not; \code{susieInf} re-estimates its
-residual variance every sweep, and \code{ser} and \code{mvsusie} take
-none from it. A \code{residual_variance} set through \code{methods}
-wins.}
+chained from \code{susieInf} or not, and the joint mvSuSiE fits, whose
+residual variances it sets condition by condition, with the
+correlations of the residual covariance of the run's mr.mash fit, or
+without one those \code{mvsusie_rss} estimates from the z-scores.
+\code{susieInf} re-estimates its residual variance every sweep, as
+\code{mvsusieInf} does from that start; \code{ser} takes none from it.
+A \code{residual_variance} set through \code{methods} wins.}
 }
 \value{
 A \code{QtlFineMappingResult} keyed by \code{(study, context,
@@ -435,6 +473,24 @@ S4-dispatched per-region fine-mapping entry point that
           \code{mvsusieR::mvsusie_rss} on sumstat input (requires
           multi-context within a single (study, trait) group).
           Errors on \code{GwasSumStats} input.}
+    \item{\code{mvsusieInf}}{\code{unmappable_effects = "inf"} variant
+          of \code{mvsusie}, set by \code{\link{MvsusieInfOptions}}:
+          the polygenic effects are integrated out, with a covariance
+          across conditions that is estimated, zero between studies by
+          default. A study's conditions must be observed on the same
+          samples, as the pipeline fits them; \code{\link{fitMvsusie}}
+          refuses missing phenotypes within a study.}
+    \item{\code{mvsusieAsh}}{\code{unmappable_effects = "ash"} variant
+          of \code{mvsusie}, set by \code{\link{MvsusieAshOptions}}: as
+          susieAsh, the unmappable effects are fitted by mr.mash to the
+          residuals of the confident sparse effects, outside the LD
+          neighborhoods of the signals still being resolved, with a
+          Beta-Binomial slot prior on the single effects. Their prior
+          is the one \code{MvsusieAshOptions(unmappable_prior = )}
+          gives, else the run's mr.mash prior (the data-driven
+          matrices of its mr.mash fit and the canonical ones, over its
+          grid) when the run has one, else mvsusieR's. The same
+          observation rule as \code{mvsusieInf} applies.}
     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
           per context. Individual-level only; errors on any
           SumStats input.}
@@ -470,6 +526,11 @@ S4-dispatched per-region fine-mapping entry point that
   existing fine-mapping result skips re-fitting any \code{(study,
   context, trait, method)} tuple that already has a matching row; cached
   entries are merged with the newly-fit entries in the returned collection.
+  A row matches only when it comes from a fit like the one to be made: a
+  tuple fitted alone by a row of no joint group, a joint group's
+  conditions only all together and by rows of that same group (their
+  \code{jointStudies} / \code{jointContexts} / \code{jointTraits}), so a
+  fit of the tuple in another group is refit rather than borrowed.
 }
 
 \section{Intentional behaviours dropped from the pre-stub pipelines}{

@@ -19,15 +19,18 @@ VariantPruningParam(
 
 \item{csMinCor}{Numeric. Variants in a 95\% credible set whose purity
 (\code{min_abs_corr}) is at least this are must-keep. Default
-\code{0.8}. Requires a \code{fineMappingResult}; ignored without one.}
+\code{0.8}. Applies to a fine-mapping method's weights, read off the
+fit they came from (\code{ctwasPipeline}'s \code{fineMappingResult});
+ignored for other weights.}
 
 \item{pipRescue}{Numeric. Variants with PIP above this are must-keep.
-Default \code{0} (no PIP rescue). Requires a \code{fineMappingResult}.}
+Default \code{0} (no PIP rescue). Applies as \code{csMinCor} does.}
 
 \item{maxVariants}{Numeric. Cap on the per-gene variant count. Above it,
 all must-keep variants are retained and the remaining slots filled by
-descending PIP (when available) or descending \code{|weight|}. Default
-\code{Inf} (no cap).}
+descending PIP for a fine-mapping method's weights, read off their own
+fit, and by descending \code{|weight|} for every other method's, as
+cTWAS's own \code{top_n_snps} does. Default \code{Inf} (no cap).}
 }
 \value{
 A \code{VariantPruningParam} object, a \code{\link{MethodParam}}.

@@ -11,7 +11,9 @@ mashResidualCorrelation(
   priorCovariances = NULL,
   nSubset = 6000L,
   maxIter = 6L,
-  inputScale = c("auto", "beta", "z"),
+  inputScale = c("auto", "beta", "z", "standardized"),
+  jointSpecification = NULL,
+  sampleOverlap = FALSE,
   mashDataArgs = MashDataOptions(),
   setSeed = 999
 )
@@ -43,7 +45,27 @@ correlation (needs the \pkg{CorShrink} package); \code{"mle"} =
 EM iterations).}
 
 \item{inputScale}{SumStats -> matrix conversion scale (\code{"auto"} /
-\code{"beta"} / \code{"z"}).}
+\code{"beta"} / \code{"z"} / \code{"standardized"}; see
+\code{\link{mashPipeline}}).}
+
+\item{jointSpecification}{One joint spec, as in \code{\link{mashPipeline}}:
+which axes make the conditions (\code{NULL}, the default, for a
+\code{QtlSumStats}' contexts). With the study among its axes, the
+studies share no samples unless \code{sampleOverlap} says they do:
+\eqn{\hat V} is estimated within each study, by \code{method}, over the
+variants that study carries (for \code{"mle"}, against the prior's
+covariances on its conditions), and is zero between studies. A study of
+one condition gets 1, or, when \code{"simple"} or \code{"mle"} is asked
+for covariances (\code{est_cor = FALSE}), the variance of its null z.}
+
+\item{sampleOverlap}{Which studies may share samples, read with the study
+among the joint spec's axes. \code{FALSE} (the default): none, so
+\eqn{\hat V} is zero between studies. \code{TRUE}: any of them, so it is
+estimated across every condition. A list of character vectors, each
+naming studies that share samples -- GWAS of several traits from one
+biobank, say: it is estimated within each group, and each study no group
+names, and is zero between them. A group spanning studies is estimated
+over the variants every one of its studies carries.}
 
 \item{mashDataArgs}{Extra arguments for
 \code{mashr::mash_set_data()}, built with

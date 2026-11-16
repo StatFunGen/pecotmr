@@ -9,7 +9,6 @@ assembleCtwasInputs(
   twasWeights,
   twasZ = NULL,
   fineMappingResult = NULL,
-  fineMappingMethod = NULL,
   weightSelectionParam = WeightSelectionParam(),
   variantPruningParam = VariantPruningParam()
 )
@@ -40,34 +39,41 @@ variants, so its weights are not renormalized over the variants kept.}
 \item{twasZ}{Optional \code{GRanges} of TWAS Z-scores (output of
 \code{\link{causalInferencePipeline}}). When supplied, each weighted
 gene's Z -- the TWAS row of its \code{(qtlStudy, context, trait,
-method)} for the GWAS study of \code{gwasSumStats} -- is used as the
-\code{z_gene} input to \code{ctwas_sumstats} so it is not recomputed.
-Every weighted gene needs exactly one, so \code{twasZ} must hold the
+method)} and joint group (\code{jointStudies}, \code{jointContexts},
+\code{jointTraits}) for the GWAS study of \code{gwasSumStats} -- is used
+as the \code{z_gene} input to \code{ctwas_sumstats} so it is not
+recomputed. A gene whose weights the pipeline then changes -- dropping
+variants the GWAS LD panel lacks (renormalizing a SuSiE fit's weights
+over the rest), or through \code{variantPruningParam} -- gets its Z
+recomputed from the weights cTWAS models instead, with a message naming
+it, since \code{twasZ} scored the weights before they changed. Every
+other weighted gene needs exactly one, so \code{twasZ} must hold the
 method each gene is run with: chosen with the same
 \code{weightSelectionParam}, or a superset such as \code{methods =
 "all"}. Rows for other genes, methods or GWAS studies, and MR rows, are
 ignored.}
 
-\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the genes'
-own fine-mapping, whose per-variant PIP and credible-set membership the
-CS / PIP rescue filters (\code{csMinCor} and \code{minPipCutoff}) read.
-Each gene is looked up by its weights' \code{(study, context, trait)} in
-the fits of \code{fineMappingMethod}; a gene with no fit there gets no
-rescue. When \code{NULL} (default) the smart filters are no-ops; only the
-magnitude filter (\code{twasWeightCutoff}) and the per-gene cap
-(\code{maxNumVariants}, ordered by \code{|weight|}) apply.}
-
-\item{fineMappingMethod}{Character (length 1): the method of
-\code{fineMappingResult} whose fits the rescues read, e.g.
-\code{"susie"}. Required with a \code{fineMappingResult}, since the
-weights' own method -- an \code{"ensemble"} or \code{"lasso"} weight --
-names no fine-mapping fit. Default \code{NULL}.}
+\item{fineMappingResult}{Optional \code{QtlFineMappingResult}: the fits a
+fine-mapping method's weights came from (\code{susie}, \code{mvsusie}
+and the like, read off them by \code{\link{twasWeightsPipeline}}). Each
+such weight reads the row of its own method, \code{(study, context,
+trait)} and joint group (\code{jointStudies}, \code{jointContexts},
+\code{jointTraits}). Its fit renormalizes the weights over the variants
+kept, and its per-variant PIPs and credible sets order the variants under
+the per-gene cap (\code{variantPruningParam}'s \code{csMinCor},
+\code{pipRescue} and \code{maxVariants}). Every other method's weights,
+and a fine-mapping weight with no row here, are capped by
+\code{|weight|}: another model's PIPs say nothing about which of a
+regression's variants carry its prediction. A \code{QtlFineMappingResult}
+passed as \code{twasWeights} is its own fit. When \code{NULL} (default)
+only the magnitude filter and the cap by \code{|weight|} apply.}
 
 \item{weightSelectionParam}{Which method's weights each gene is modelled
 with, built with \code{\link{WeightSelectionParam}}, as in
 \code{\link{ctwasPipeline}}. These are one cTWAS run's inputs, so the
-choice must make one run: \code{"best"}, or a single method;
-\code{ctwasPipeline} runs one per method for several.}
+choice must make one run: \code{"best"}, or a single method of one kind
+of joint fit; \code{ctwasPipeline} runs one per method and kind for
+several.}
 
 \item{variantPruningParam}{Which variants survive into each gene's weight
 matrix, built with \code{\link{VariantPruningParam}}:
