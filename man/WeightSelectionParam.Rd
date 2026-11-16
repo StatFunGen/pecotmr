@@ -48,11 +48,14 @@ the metric fails it, unless no method of its gene has the r-squared.}
 
 \item{metric}{Character. Which \code{cvResult} metric is the r-squared
 used for the cutoff and for ranking; typically \code{"rsq"} or
-\code{"adj_rsq"}. Default \code{"rsq"}.}
+\code{"adj_rsq"}. Default \code{"rsq"}. Weights whose CV records
+metrics but not this one are refused when the choice reads it (a cutoff
+above 0, or \code{methods = "best"}), rather than kept unfiltered.}
 
 \item{pvalMetric}{Character vector of candidate \code{cvResult} metric
 names for the p-value gate; the first one present in a tuple's metrics
-is used. Default \code{c("adj_rsq_pval", "pval")}.}
+is used. Default \code{c("adj_rsq_pval", "pval")}. Under a finite
+\code{pvalCutoff}, weights whose CV records none of them are refused.}
 }
 \value{
 A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.

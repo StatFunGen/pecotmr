@@ -832,7 +832,8 @@ causalInferencePipeline <- function(
             .weightCvValue,
             which = weightSelectionParam$pvalMetric
         ),
-        zero = map_lgl(parts, .weightsAllZero)
+        zero = map_lgl(parts, .weightsAllZero),
+        cvNames = map(parts, .weightCvNames)
     )
 }
 
@@ -864,16 +865,29 @@ causalInferencePipeline <- function(
     .fmrRowParts(source, .cipFmrRowIndex(source, .cipCellTuple(cells, i)))
 }
 
-# The first of the CV metrics `which` that payload `part` records, NA when it
-# records none. A cvResult holds its metrics as a named vector or a one-row
+# The CV metrics payload `part` records, as a named vector (NULL when none or
+# unreadable). A cvResult holds its metrics as a named vector or a one-row
 # matrix; one without a `metrics` entry is read as the metrics themselves.
 # @noRd
 #' @importFrom rlang try_fetch
-.weightCvValue <- function(part, which) {
+.weightCvMetrics <- function(part) {
     cv <- try_fetch(cvResult(part), error = function(cnd) NULL)
-    metrics <- .cvMetricsVector(
+    .cvMetricsVector(
         if (is.list(cv) && !is.null(cv[["metrics"]])) cv[["metrics"]] else cv
     )
+}
+
+# The names of the CV metrics payload `part` records; empty when none.
+# @noRd
+.weightCvNames <- function(part) {
+    as.character(names(.weightCvMetrics(part)))
+}
+
+# The first of the CV metrics `which` that payload `part` records, NA when it
+# records none.
+# @noRd
+.weightCvValue <- function(part, which) {
+    metrics <- .weightCvMetrics(part)
     hit <- intersect(which, names(metrics))
     if (length(hit) == 0L) {
         return(NA_real_)
@@ -909,6 +923,8 @@ causalInferencePipeline <- function(
 # do not hold is an error, as a misspelling would otherwise score nothing.
 # @noRd
 .selectWeightCells <- function(cells, weightSelectionParam, caller) {
+    .assertCvMetricsRecorded(cells, weightSelectionParam, caller)
+    cells$cvNames <- NULL
     methods <- weightSelectionParam$methods
     kept <- .cellsOfKinds(cells, weightSelectionParam$jointAxes, caller)
     eligible <- .cellsByGene(
@@ -944,6 +960,46 @@ causalInferencePipeline <- function(
         "{caller}: WeightSelectionParam(jointAxes = ) names ",
         "{str_flatten(jointAxes, ', ')}, which the weights do not hold ",
         "(they hold {str_flatten(unique(kinds), ', ')})."
+    ))
+}
+
+# Weight sets that record CV metrics must record the ones the choice reads:
+# `metric` (to gate and rank by) and, under a p-value cutoff, `pvalMetric`.
+# Otherwise every such set would read as having no r-squared and keep every
+# method, so the cutoffs would silently do nothing. Weight sets with no CV
+# metrics at all (summary-statistic weights) are left to .cellsPassingIn().
+# @noRd
+.assertCvMetricsRecorded <- function(cells, weightSelectionParam, caller) {
+    recorded <- cells$cvNames
+    if (is.null(recorded)) {
+        return(invisible(NULL))
+    }
+    hasCv <- lengths(recorded) > 0L
+    lacks <- function(which) {
+        hasCv & !map_lgl(recorded, function(n) any(which %in% n))
+    }
+    noMetric <- lacks(weightSelectionParam$metric)
+    noPval <- if (is.finite(weightSelectionParam$pvalCutoff)) {
+        lacks(weightSelectionParam$pvalMetric)
+    } else {
+        rep(FALSE, length(recorded))
+    }
+    bad <- noMetric | noPval
+    if (!any(bad)) {
+        return(invisible(NULL))
+    }
+    quoted <- function(x) str_flatten(sprintf('"%s"', x), ", ")
+    named <- c(
+        if (any(noMetric)) glue("metric = {quoted(weightSelectionParam$metric)}"),
+        if (any(noPval)) {
+            glue("pvalMetric = {quoted(weightSelectionParam$pvalMetric)}")
+        }
+    )
+    abort(glue(
+        "{caller}: WeightSelectionParam({str_flatten(named, ', ')}) names no ",
+        "CV metric that {sum(bad)} of {length(recorded)} weight sets record ",
+        "(they record {quoted(sort(unique(unlist(recorded[bad]))))}); choose ",
+        "metrics the weights record, so the CV cutoffs and ranking apply."
     ))
 }
 
@@ -2095,10 +2151,13 @@ setValidity("WeightSelectionParam", function(object) {
 #'   the metric fails it, unless no method of its gene has the r-squared.
 #' @param metric Character. Which \code{cvResult} metric is the r-squared
 #'   used for the cutoff and for ranking; typically \code{"rsq"} or
-#'   \code{"adj_rsq"}. Default \code{"rsq"}.
+#'   \code{"adj_rsq"}. Default \code{"rsq"}. Weights whose CV records
+#'   metrics but not this one are refused when the choice reads it (a cutoff
+#'   above 0, or \code{methods = "best"}), rather than kept unfiltered.
 #' @param pvalMetric Character vector of candidate \code{cvResult} metric
 #'   names for the p-value gate; the first one present in a tuple's metrics
-#'   is used. Default \code{c("adj_rsq_pval", "pval")}.
+#'   is used. Default \code{c("adj_rsq_pval", "pval")}. Under a finite
+#'   \code{pvalCutoff}, weights whose CV records none of them are refused.
 #' @return A \code{WeightSelectionParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' WeightSelectionParam(cutoff = 0.01, metric = "adj_rsq")

@@ -759,6 +759,59 @@ test_that("the cutoffs bound every choice; a gene with no CV keeps all", {
     expect_equal(nrow(keep(twss)), 2L)
 })
 
+test_that("CV selection refuses a metric the weights do not record", {
+    # Weights whose CV records adj_rsq / adj_rsq_pval but no rsq / pval, as
+    # some released FunGen-xQTL weight sets do.
+    mk <- function(metrics) {
+        TwasWeightsRow(
+            variantIds = sprintf("chr1:%d:A:G", 100L * (1:3)),
+            weights = rep(0.1, 3),
+            cvResult = list(metrics = metrics)
+        )
+    }
+    tw <- TwasWeights(
+        studyName = rep("S", 2),
+        context = rep("c1", 2),
+        trait = rep("G", 2),
+        method = c("susie", "lasso"),
+        entry = list(
+            mk(c(adj_rsq = 0.3, adj_rsq_pval = 0.01)),
+            mk(c(adj_rsq = 0.001, adj_rsq_pval = 0.5))
+        )
+    )
+    keep <- function(...) {
+        choice <- WeightSelectionParam(...)
+        pecotmr:::.selectWeightCells(
+            pecotmr:::.weightCells(tw, choice),
+            choice,
+            "f()"
+        )
+    }
+    # The default metric "rsq" is not recorded: refused, not kept unfiltered.
+    expect_error(
+        keep(methods = "all", cutoff = 0.01),
+        'metric = "rsq".*"adj_rsq"'
+    )
+    expect_error(keep(), 'metric = "rsq"')
+    # Naming a recorded metric applies the cutoff: lasso (0.001) is out.
+    expect_equal(
+        keep(methods = "all", cutoff = 0.01, metric = "adj_rsq")$method,
+        "susie"
+    )
+    expect_equal(keep(metric = "adj_rsq")$method, "susie")
+    # A p-value metric the weights do not record, under a p-value cutoff.
+    expect_error(
+        keep(metric = "adj_rsq", pvalCutoff = 0.05, pvalMetric = "pval"),
+        'pvalMetric = "pval"'
+    )
+    expect_equal(
+        keep(metric = "adj_rsq", pvalCutoff = 0.05)$method,
+        "susie"
+    )
+    # Neither a cutoff nor a ranking reads the metrics: nothing to check.
+    expect_equal(nrow(keep(methods = "all")), 2L)
+})
+
 test_that("best passes over a method whose weights are all zero", {
     cells <- tibble(
         study = "S",
