@@ -3446,14 +3446,18 @@ twasWeightsCv <- function(
 # Multivariate fit: one call producing the full variants x features matrix.
 # @noRd
 .twasFitMultivariate <- function(fnName, args, ctx) {
-    # A joint fit uses only samples observed in every context. With few such
-    # samples (and per-context covariates regressed out) no column of X may vary,
-    # and the multivariate methods then fail deep inside with an index error.
+    # twasWeightsPipeline's joint fits keep, in each study, only the samples
+    # observed in all of its contexts. With few of them, once covariates are
+    # regressed out, no variant may vary, and the multivariate methods then
+    # fail deep inside with an index error.
     if (ncol(ctx$Xfiltered) == 0L) {
         abort(glue(
             "{fnName}: no variant varies across the {nrow(ctx$X)} sample(s) ",
-            "shared by all {ncol(ctx$Y)} context(s), so a joint fit cannot be ",
-            "run. Use fewer contexts or contexts with more overlapping samples."
+            "of this joint fit of {ncol(ctx$Y)} condition(s), so it cannot ",
+            "be run. twasWeightsPipeline() keeps, in each study, only the ",
+            "samples observed in all of its contexts: fitting fewer contexts ",
+            "together, or contexts measured on more of the same samples, ",
+            "keeps more."
         ))
     }
     call <- .twasWeightCallArgs(

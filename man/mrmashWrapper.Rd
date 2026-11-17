@@ -42,7 +42,9 @@ mr.mash, or \code{NULL} for the individual-data variant.}
 (\code{U}), and optionally the residual correlation of the mash prior
 they come from (\code{residualCorrelation}, conditions x conditions),
 which \code{MrmashOptions(vInitMethod = "mash")} starts the residual
-covariance from. Default is NULL.}
+covariance from. Matrices named by condition are taken on the columns
+of \code{Y} by name, so a prior learned on more conditions can be used
+(see \code{\link{buildMrmashPriorMatrices}}). Default is NULL.}
 
 \item{prior}{Prior-covariance construction options, built with
 \code{\link{MrmashPriorParam}}.}

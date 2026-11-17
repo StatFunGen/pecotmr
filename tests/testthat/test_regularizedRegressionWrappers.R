@@ -3194,48 +3194,148 @@ test_that(".rssResidualVariances gives 1 - h2 of each condition's variance", {
     expect_null(.rssResidualVariances(NULL))
 })
 
-# ---- data-driven mr.mash prior aligned to the contexts present in the data ----
+# ---------------------------------------------------------------------------
+# Data-driven mr.mash priors on the data's conditions
+# ---------------------------------------------------------------------------
 
+# A data-driven prior over four conditions, c1-c4, named by them, with a
+# residual correlation.
 .alignTestPrior <- function() {
     ctx <- c("c1", "c2", "c3", "c4")
     m1 <- matrix(1:16, 4, 4, dimnames = list(ctx, ctx))
     m2 <- diag(4) * 2
     dimnames(m2) <- list(ctx, ctx)
-    list(U = list(a = m1, b = m2), w = c(0.5, 0.5))
+    list(
+        U = list(a = m1, b = m2),
+        residualCorrelation = m1 / 16,
+        w = c(0.5, 0.5)
+    )
 }
 
-test_that(".mrmashAlignPriorToContexts subsets and reorders named prior matrices", {
+# A prior over .rrwMulti()'s conditions, ctx1-ctx3, and a fourth, in another
+# order. Its residual correlations differ, so a mix-up of the conditions
+# would show.
+.alignWiderPrior <- function() {
+    ids <- c("ctx4", "ctx3", "ctx1", "ctx2")
+    # Correlations 0.1, ..., 0.6 below the diagonal, column by column.
+    lower <- replace(matrix(0, 4L, 4L), lower.tri(diag(4L)), (1:6) / 10)
+    list(
+        U = list(shared = `dimnames<-`(matrix(1, 4L, 4L), list(ids, ids))),
+        residualCorrelation = `dimnames<-`(
+            lower + t(lower) + diag(4L),
+            list(ids, ids)
+        )
+    )
+}
+
+test_that("a named mr.mash prior is taken on the data's conditions by name", {
     prior <- .alignTestPrior()
-    out <- pecotmr:::.mrmashAlignPriorToContexts(prior, c("c3", "c1"), 2)
-    expect_equal(dim(out$U$a), c(2L, 2L))
-    expect_equal(rownames(out$U$a), c("c3", "c1"))
-    expect_equal(out$U$a, prior$U$a[c("c3", "c1"), c("c3", "c1")])
+    on <- c("c3", "c1")
+    out <- pecotmr:::.mrmashAlignPriorToContexts(prior, on, 2)
+    expect_equal(out$U$a, prior$U$a[on, on])
+    expect_equal(out$U$b, prior$U$b[on, on])
+    expect_equal(out$residualCorrelation, prior$residualCorrelation[on, on])
     expect_equal(out$w, prior$w)
+    # One condition is still a matrix.
+    one <- pecotmr:::.mrmashAlignPriorToContexts(prior, "c2", 1)
+    expect_equal(one$U$a, prior$U$a["c2", "c2", drop = FALSE])
 })
 
-test_that(".mrmashAlignPriorToContexts errors on contexts missing from the prior", {
+test_that("a mr.mash prior lacking one of the data's conditions is refused", {
     expect_error(
-        pecotmr:::.mrmashAlignPriorToContexts(.alignTestPrior(), c("c1", "zz"), 2),
-        "lack context"
+        pecotmr:::.mrmashAlignPriorToContexts(
+            .alignTestPrior(),
+            c("c1", "zz"),
+            2
+        ),
+        "Condition(s) zz not found",
+        fixed = TRUE
     )
 })
 
-test_that(".mrmashAlignPriorToContexts requires unnamed matrices to be K x K", {
+test_that("a mr.mash prior not named on both sides must be K x K", {
     prior <- list(U = list(diag(3)))
-    expect_equal(pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 3)$U[[1]], diag(3))
-    expect_error(pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 2), "3 x 3")
+    expect_equal(
+        pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 3)$U[[1]],
+        diag(3)
+    )
+    expect_error(
+        pecotmr:::.mrmashAlignPriorToContexts(prior, NULL, 2),
+        "is 3 x 3 .*: name its rows and columns by condition"
+    )
+    # A named prior on data whose conditions are unnamed asks for their
+    # names, and is used as it is when it already has their number.
+    expect_error(
+        pecotmr:::.mrmashAlignPriorToContexts(.alignTestPrior(), NULL, 2),
+        "name the data's conditions"
+    )
+    expect_equal(
+        pecotmr:::.mrmashAlignPriorToContexts(.alignTestPrior(), NULL, 4),
+        .alignTestPrior()
+    )
 })
 
-test_that("buildMrmashPriorMatrices accepts a prior learned on more contexts", {
+test_that("a mr.mash prior with no U or residual correlation is refused", {
+    # A bare list of matrices, as multiTraitData's priors once were: nothing
+    # would read it, leaving the canonical prior alone without a word.
+    bare <- list(XtX = diag(2), PCA_1 = diag(2))
+    expect_error(
+        pecotmr:::.mrmashAlignPriorToContexts(bare, c("c1", "c2"), 2),
+        "list of covariance matrices goes under `U`",
+        fixed = TRUE
+    )
+})
+
+test_that("buildMrmashPriorMatrices takes a prior over more conditions", {
     skip_if_not_installed("mr.mashr")
     set.seed(1)
     ctx <- c("c2", "c4")
     Bhat <- matrix(rnorm(20), 10, 2, dimnames = list(NULL, ctx))
     Shat <- matrix(1, 10, 2, dimnames = list(NULL, ctx))
     res <- buildMrmashPriorMatrices(
-        Bhat, Shat,
+        Bhat,
+        Shat,
         dataDrivenPriorMatrices = .alignTestPrior(),
         canonicalPriorMatrices = FALSE
     )
-    expect_true(all(vapply(res$S0, function(m) identical(dim(m), c(2L, 2L)), logical(1))))
+    expect_equal(unique(map(res$S0, dim)), list(c(2L, 2L)))
+})
+
+test_that("mrmashWrapper takes a wider prior on Y's conditions by name", {
+    skip_if_not_installed("mr.mashr")
+    skip_if_not_installed("glmnet")
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    prior <- .alignWiderPrior()
+    # With the update off, the V mr.mash fits with is the start: the prior's
+    # residual correlation on Y's conditions, scaled by their SDs.
+    fit <- suppressMessages(mrmashWrapper(
+        m$X,
+        m$Y,
+        dataDrivenPriorMatrices = prior,
+        prior = MrmashPriorParam(canonicalPriorMatrices = TRUE),
+        updateV = FALSE,
+        methodArgs = MrmashOptions(vInitMethod = "mash", max_iter = 20)
+    ))
+    R <- unname(prior$residualCorrelation[colnames(m$Y), colnames(m$Y)])
+    expect_equal(unname(fit$V), R * tcrossprod(apply(m$Y, 2, sd)))
+})
+
+test_that("mrmashRssWeights takes a wider prior on the z-scores' conditions", {
+    .skipIfMrmashCannotFitStudies()
+    m <- .rrwMulti(n = 60, p = 6, K = 3)
+    prior <- .alignWiderPrior()
+    w <- mrmashRssWeights(
+        m$stat,
+        m$ldReference,
+        dataDrivenPriorMatrices = prior,
+        fitRetention = "slim",
+        methodArgs = MrmashRssOptions(verbose = FALSE)
+    )
+    # mr.mash.rss starts V from covY, the prior's residual correlation on the
+    # z-scores' conditions, and does not update it.
+    on <- colnames(m$stat$z)
+    expect_equal(
+        unname(attr(w, "fit")$V),
+        unname(prior$residualCorrelation[on, on])
+    )
 })

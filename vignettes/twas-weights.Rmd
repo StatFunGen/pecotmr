@@ -430,7 +430,10 @@ The mr.mash methods need prior covariance matrices, built by
 `buildMrmashPriorMatrices()`. Pass `dataDrivenPriorMatrices` to add
 data-driven components alongside the canonical mixture --- `computeCovDiag()`
 gives the per-condition diagonal, and `mashr::cov_flash()` returns a list of
-FLASH-derived components in the shape that argument expects.
+FLASH-derived components in the shape that argument expects. Matrices named
+by condition are matched to the data's conditions by name, so a prior learned
+on more conditions, such as a mash fit across cohorts, can be used for a
+trait measured in only some of them.
 
 ## Cross-validation, ensembling and prediction
 

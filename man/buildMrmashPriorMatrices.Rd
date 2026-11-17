@@ -25,7 +25,11 @@ buildMrmashPriorMatrices(
 \item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
 raw covariance matrices) computed e.g. by
 \code{\link{computeCovDiag}}, or by \code{mashr::cov_flash}, which
-returns such a list directly.}
+returns such a list directly. Matrices whose rows and columns are named
+by condition are taken on the conditions of \code{Bhat}'s columns, by
+name, so a prior learned on more conditions can be used; each must hold
+all of them. Unnamed matrices, and any when \code{Bhat}'s columns are
+unnamed, must be K x K, in \code{Bhat}'s column order.}
 
 \item{canonicalPriorMatrices}{Logical. When TRUE (default for RSS), include
 the standard canonical mixture from

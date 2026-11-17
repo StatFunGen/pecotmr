@@ -4588,7 +4588,8 @@ qtlSumStatsFromBetaMatrix <- function(
     !all(mat == 0)
 }
 
-# Subset one U matrix to the kept conditions (erroring if any is absent).
+# Subset one U matrix to the kept conditions (erroring if any is absent),
+# still a matrix when one is kept.
 # @noRd
 .mashSubsetMatrix <- function(mat, conditionsToKeep) {
     missingConditions <- setdiff(conditionsToKeep, colnames(mat))
@@ -4599,7 +4600,7 @@ qtlSumStatsFromBetaMatrix <- function(
         )
         abort(msg)
     }
-    mat[conditionsToKeep, conditionsToKeep]
+    mat[conditionsToKeep, conditionsToKeep, drop = FALSE]
 }
 
 # Merge partition `d` of two mash data lists: a column-aligned row-bind (the two

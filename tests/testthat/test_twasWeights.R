@@ -776,6 +776,49 @@ test_that("learnTwasWeights: mr.mash rows beyond X's variants are dropped", {
     )
 })
 
+test_that("learnTwasWeights: a multivariate fit gives a constant variant 0", {
+    # The method fits the variants that vary; a constant one takes weight 0
+    # instead of failing to match the fit's rows.
+    d <- makeData(n = 20, p = 4, add_zero_var_col = TRUE)
+    Y <- cbind(d$Y, outcome_2 = rnorm(20))
+    local_mocked_bindings(
+        mrmashWeights = function(X, Y, ...) {
+            matrix(
+                1,
+                nrow = ncol(X),
+                ncol = ncol(Y),
+                dimnames = list(colnames(X), colnames(Y))
+            )
+        }
+    )
+    w <- .weightsByMethod(
+        learnTwasWeights(
+            d$X,
+            Y,
+            weightMethods = list(mrmashWeights = list())
+        ),
+        "mrmashWeights"
+    )
+    expect_equal(rownames(w), colnames(d$X))
+    expect_equal(unname(w), matrix(c(1, 1, 1, 1, 0), 5L, 2L))
+})
+
+test_that("learnTwasWeights: a joint fit with no varying variant says why", {
+    d <- makeData(n = 20, p = 3)
+    X <- matrix(7, 20L, 3L, dimnames = dimnames(d$X))
+    Y <- cbind(d$Y, outcome_2 = rnorm(20))
+    local_mocked_bindings(
+        mrmashWeights = function(X, Y, ...) {
+            matrix(0, nrow = ncol(X), ncol = ncol(Y))
+        }
+    )
+    expect_error(
+        learnTwasWeights(X, Y, weightMethods = list(mrmashWeights = list())),
+        "no variant varies across the 20 sample(s)",
+        fixed = TRUE
+    )
+})
+
 # ===========================================================================
 # Tests migrated from test_twas.R (twasWeightsCv, learnTwasWeights, twasPredict)
 # ===========================================================================

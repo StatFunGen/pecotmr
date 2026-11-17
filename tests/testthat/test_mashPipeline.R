@@ -2449,6 +2449,19 @@ test_that("filterMixtureComponents handles NULL weights gracefully", {
     expect_true("comp1" %in% names(result$U))
 })
 
+test_that("filterMixtureComponents keeps one condition as 1 x 1 matrices", {
+    U <- list(
+        comp1 = matrix(
+            c(1, 0, 0, 2),
+            2,
+            2,
+            dimnames = list(c("A", "B"), c("A", "B"))
+        )
+    )
+    result <- filterMixtureComponents("B", U, w = c(comp1 = 1))
+    expect_equal(result$U$comp1, matrix(2, 1, 1, dimnames = list("B", "B")))
+})
+
 test_that("mergeMashData combines two datasets with identical columns", {
     d1 <- list(
         random = data.frame(

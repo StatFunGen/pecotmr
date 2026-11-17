@@ -58,11 +58,13 @@ the conditions of one sample share the median of their sample sizes.}
 fitting when supplied.}
 
 \item{dataDrivenPriorMatrices}{Optional list with element \code{U} (list of
-raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
+raw covariance matrices). Passed to \code{mr.mashr::expand_covs()}
 alongside the canonical mixture. It may also carry
 \code{residualCorrelation}, the residual correlation of the mash prior
 \code{U} comes from (conditions x conditions), the default \code{V} and
-\code{covY}.}
+\code{covY}. Matrices named by condition are taken on the columns of
+\code{stat$z} by name, so a prior learned on more conditions can be
+used (see \code{\link{buildMrmashPriorMatrices}}).}
 
 \item{canonicalPriorMatrices}{Logical. When TRUE (default), include the
 standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
@@ -132,7 +134,9 @@ data-driven covariance components alongside the canonical mixture.
 data(eqtlRegionExample)
 data(multiTraitData)
 X <- eqtlRegionExample$X[, 1:30]
-cond <- c("brain", "blood", "muscle")
+# Three of the seven conditions the prior is over: it is taken on them by
+# name.
+cond <- colnames(multiTraitData$Y)[1:3]
 zmat <- matrix(rnorm(30 * 3), 30, 3,
   dimnames = list(colnames(X), cond))
 stat <- list(z = zmat, n = nrow(X), variantNames = colnames(X))
