@@ -793,6 +793,9 @@ test_that("CV selection refuses a metric the weights do not record", {
         'metric = "rsq".*"adj_rsq"'
     )
     expect_error(keep(), 'metric = "rsq"')
+    # A p-value gate alone reads it too: a gene with no r-squared keeps all
+    # its methods, so the gate would not apply.
+    expect_error(keep(methods = "all", pvalCutoff = 0.05), 'metric = "rsq"')
     # Naming a recorded metric applies the cutoff: lasso (0.001) is out.
     expect_equal(
         keep(methods = "all", cutoff = 0.01, metric = "adj_rsq")$method,
@@ -808,8 +811,21 @@ test_that("CV selection refuses a metric the weights do not record", {
         keep(metric = "adj_rsq", pvalCutoff = 0.05)$method,
         "susie"
     )
-    # Neither a cutoff nor a ranking reads the metrics: nothing to check.
-    expect_equal(nrow(keep(methods = "all")), 2L)
+    # Several candidates are named as the vector they are.
+    expect_error(
+        keep(pvalCutoff = 0.05, pvalMetric = c("pval", "p")),
+        'WeightSelectionParam(metric = "rsq", pvalMetric = c("pval", "p"))',
+        fixed = TRUE
+    )
+    # Neither a cutoff nor a ranking reads the metrics: nothing to check, and
+    # nothing to warn about.
+    expect_equal(nrow(expect_no_warning(keep(methods = "all"))), 2L)
+    # The exported selection refuses and keeps alike.
+    expect_error(
+        selectWeights(tw, WeightSelectionParam()),
+        '^selectWeights: WeightSelectionParam\\(metric = "rsq"\\)'
+    )
+    expect_no_warning(selectWeights(tw, WeightSelectionParam(methods = "all")))
 })
 
 test_that("best passes over a method whose weights are all zero", {
@@ -875,6 +891,31 @@ test_that("jointAxes keeps the weight sets of the kinds it names", {
         pick(methods = "susie", jointAxes = "study"),
         "names susie, which the weights do not hold \\(they hold lasso\\)"
     )
+})
+
+test_that("the CV metric check reads only the kinds jointAxes keeps", {
+    # The joint fit's CV records adj_rsq alone; each gene's own fits record
+    # rsq too.
+    cells <- tibble(
+        study = "S",
+        context = "c1",
+        trait = "G",
+        method = c("lasso", "lasso", "susie"),
+        rsq = c(NA, 0.5, 0.3),
+        pval = 0.01,
+        zero = FALSE,
+        jointStudies = c("S;T", NA, NA),
+        cvNames = list("adj_rsq", c("rsq", "adj_rsq"), c("rsq", "adj_rsq"))
+    )
+    pick <- function(...) {
+        pecotmr:::.selectWeightCells(cells, WeightSelectionParam(...), "f()")
+    }
+    # Leaving the joint fit out leaves its CV out of the check.
+    alone <- pick(jointAxes = "none")
+    expect_equal(alone$method, "lasso")
+    expect_false("cvNames" %in% names(alone))
+    expect_error(pick(), "1 of 3 weight sets record")
+    expect_error(pick(jointAxes = "study"), "1 of 1 weight sets record")
 })
 
 test_that("WeightSelectionParam takes kinds of joint fit as jointAxes", {
@@ -1993,11 +2034,16 @@ test_that("an absent GWAS column fills NA rather than dropping rows", {
     expect_equal(pecotmr:::.cipGwasCol(c(9, 8, 7), c(1L, 3L)), c(9, 7))
 })
 
+# Payload `part`'s CV metric `which`, read as .weightCells() reads it.
+.cip_cvValue <- function(part, which) {
+    pecotmr:::.cvMetricValue(pecotmr:::.weightCvMetrics(part), which)
+}
+
 test_that("a tuple with no CV record scores NA", {
     # NA, not 0: no cross-validation was run, which is different from a fit
     # that cross-validated badly.
     noCv <- TwasWeightsRow(variantIds = "chr1:100:A:G", weights = 0.1)
-    expect_true(is.na(pecotmr:::.weightCvValue(noCv, "rsq")))
+    expect_true(is.na(.cip_cvValue(noCv, "rsq")))
 })
 
 test_that("V is aligned to the weight names, and refuses to guess", {
@@ -2351,16 +2397,16 @@ test_that(".cipRunMr gates on the gene's TWAS p-values, if it has any", {
     pecotmr:::.twrCellParts(.cip_cvWeights(cv), 1L, "susie")
 }
 
-test_that(".weightCvValue reads metrics wrapped or bare, NA when absent", {
+test_that("CV metrics are read wrapped or bare, NA when absent", {
     # A bare metrics list (no $metrics wrapper) is read directly.
     bare <- .cip_cvPart(list(rsq = 0.42, pval = 0.01))
-    expect_equal(pecotmr:::.weightCvValue(bare, "rsq"), 0.42)
-    expect_true(is.na(pecotmr:::.weightCvValue(bare, "zzz")))
+    expect_equal(.cip_cvValue(bare, "rsq"), 0.42)
+    expect_true(is.na(.cip_cvValue(bare, "zzz")))
     wrapped <- .cip_cvPart(list(metrics = c(rsq = 0.3, pval = 0.02)))
-    expect_equal(pecotmr:::.weightCvValue(wrapped, "pval"), 0.02)
+    expect_equal(.cip_cvValue(wrapped, "pval"), 0.02)
     # The first candidate the record holds is the one read.
     expect_equal(
-        pecotmr:::.weightCvValue(wrapped, c("adj_rsq_pval", "pval")),
+        .cip_cvValue(wrapped, c("adj_rsq_pval", "pval")),
         0.02
     )
     # A one-row metrics matrix, as a fine-mapping CV keeps it.
@@ -2371,16 +2417,16 @@ test_that(".weightCvValue reads metrics wrapped or bare, NA when absent", {
             dimnames = list(NULL, c("rsq", "pval"))
         )
     ))
-    expect_equal(pecotmr:::.weightCvValue(asMatrix, "rsq"), 0.3)
+    expect_equal(.cip_cvValue(asMatrix, "rsq"), 0.3)
 })
 
-test_that(".weightCvValue returns NA when the CV result cannot be read", {
-    expect_true(is.na(pecotmr:::.weightCvValue(.cip_cvPart(NULL), "rsq")))
+test_that("a CV metric is NA when the CV result cannot be read", {
+    expect_true(is.na(.cip_cvValue(.cip_cvPart(NULL), "rsq")))
     local_mocked_bindings(
         cvResult = function(...) stop("unreadable"),
         .package = "pecotmr"
     )
-    expect_true(is.na(pecotmr:::.weightCvValue(.cip_cvPart(NULL), "rsq")))
+    expect_true(is.na(.cip_cvValue(.cip_cvPart(NULL), "rsq")))
 })
 
 test_that("CV selection warns once about narrowed weights; scoring does not", {

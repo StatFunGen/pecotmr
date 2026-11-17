@@ -110,8 +110,11 @@ gene, from the cross-validation metrics the weights carry, through
 
 `cutoff` (CV r-squared) and `pvalCutoff` (CV p-value) bound every choice.
 A gene whose methods carry no CV metric keeps them all, there being nothing
-to rank them by. The choice reads the weights alone, never a GWAS study, so
-`ctwasPipeline()` makes the same one from the same settings.
+to rank them by. Weights whose CV records other metrics but not `metric`
+(`"rsq"` by default), or under a `pvalCutoff` none of `pvalMetric`, are
+refused rather than kept unfiltered: name metrics they record, such as
+`metric = "adj_rsq"`. The choice reads the weights alone, never a GWAS
+study, so `ctwasPipeline()` makes the same one from the same settings.
 
 ```{r ci-methods, eval=FALSE}
 causalInferencePipeline(
