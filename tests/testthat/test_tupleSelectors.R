@@ -845,6 +845,7 @@ test_that("LdMatrix views are stored as the one covering them, in any order", {
 })
 
 test_that("binding stores an LdMatrix another part's covers as that one", {
+    skip_if_not_installed("PlinkMatrix")
     ids <- sprintf("chr1:%d:A:G", 100L * (1:6))
     r <- 0.3^abs(outer(1:6, 1:6, "-"))
     wide <- LdMatrix(`dimnames<-`(r, list(ids, ids)))
@@ -874,6 +875,7 @@ test_that("binding stores an LdMatrix another part's covers as that one", {
 })
 
 test_that("binding stores a mixture another part's covers as that one", {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     halves <- list(a = panel[, 1:40], b = panel[, 41:100])
     mix <- GenotypeMixture(halves, mixtureWeights = c(0.5, 0.5))

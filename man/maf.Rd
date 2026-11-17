@@ -38,5 +38,7 @@ Extract the minor-allele-frequency vector from one entry of
 }
 \examples{
 data(qtlDatasetExample)
-maf(qtlDatasetExample)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    maf(qtlDatasetExample)
+}
 }

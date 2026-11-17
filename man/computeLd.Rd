@@ -68,8 +68,10 @@ Correlation between variants, from either a dosage matrix
 \examples{
 data(qtlSumStatsExample)
 panel <- ldReference(qtlSumStatsExample)[[1L]]
-R <- computeLd(panel, snpIdx = 1:5)
-dim(R)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    R <- computeLd(panel, snpIdx = 1:5)
+    dim(R)
+}
 # A dosage matrix already in memory is correlated directly.
 X <- matrix(rbinom(200, 2, 0.3), nrow = 50, ncol = 4)
 dim(computeLd(X))

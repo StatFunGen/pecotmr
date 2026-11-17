@@ -4069,6 +4069,7 @@ test_that(".csGenotypesForFit finds a fit's ids however a panel names them", {
 })
 
 test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
     vids <- rownames(ldReference(ss)[[1L]])
@@ -4093,6 +4094,7 @@ test_that("computeCsCorrelation (SumStats) matches get_cs_correlation", {
 test_that("computeCsCorrelation reads a panel's factor or an LdMatrix alike", {
     # A genotype reference gives its factor and an LdMatrix its matrix; the
     # same LD gives the same between-CS correlation.
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     panel <- ldReference(gss)[[1L]]
@@ -4146,6 +4148,7 @@ test_that("computeCsCorrelation reads a panel's factor or an LdMatrix alike", {
 test_that("computeCsCorrelation reads an fSuSiE fit's sets, from LD", {
     # fSuSiE keeps its credible sets in $cs, not $sets$cs; reading only the
     # latter made every fSuSiE fit look set-less, so this came back NULL.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
     vids <- rownames(ldReference(ss)[[1L]])
@@ -4160,6 +4163,7 @@ test_that("computeCsCorrelation reads an fSuSiE fit's sets, from LD", {
 test_that("computeCsCorrelation reads an fSuSiE fit's sets, from genotypes", {
     # The genotype route hands the sets to fsusieR::cal_cor_cs() itself, a
     # branch the count bug above kept from ever running.
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("fsusieR")
     data(qtlDatasetExample)
     geno <- genotypes(qtlDatasetExample)
@@ -4207,6 +4211,7 @@ test_that("computeCsCorrelation errors when a fit variant is off-panel", {
 })
 
 test_that("computeCsCorrelation resolves on the paired fixture", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlFineMappingPairedExample)
     data(qtlSumStatsExample)
     fe <- fineMappingResult(qtlFineMappingPairedExample)
@@ -4218,6 +4223,7 @@ test_that("computeCsCorrelation resolves on the paired fixture", {
 })
 
 test_that("computeCsCorrelation (QtlDataset) matches the sumstat path", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlFineMappingPairedExample)
     data(qtlDatasetExample)
     data(qtlSumStatsExample)
@@ -4413,6 +4419,7 @@ test_that("extractCsInfo extracts single CS correctly", {
 })
 
 test_that("extractCsInfo builds correlation columns from the ldSource", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
     vids <- rownames(ldReference(ss)[[1L]])
@@ -4490,6 +4497,7 @@ test_that("extractCsInfo names a narrowed row's sets by the fit's variants", {
 })
 
 test_that("computeCsCorrelation of a narrowed row warns, on the fit's sets", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsExample)
     ss <- qtlSumStatsExample
     vids <- rownames(ldReference(ss)[[1L]])

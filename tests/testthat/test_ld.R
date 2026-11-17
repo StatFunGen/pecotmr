@@ -1952,6 +1952,7 @@ test_that(".panelVariantFilter is a no-op at its defaults", {
 })
 
 test_that(".panelVariantFilter drops panel-rare variants", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     ids <- rownames(panel)
@@ -1973,6 +1974,7 @@ test_that(".panelVariantFilter drops panel-rare variants", {
 })
 
 test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     ids <- rownames(panel)
@@ -2001,6 +2003,7 @@ test_that(".panelVariantFilter treats MAC as a MAF equivalent", {
 })
 
 test_that(".panelVariantFilter drops high-missingness variants", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     ids <- rownames(panel)
@@ -2021,6 +2024,7 @@ test_that(".panelVariantFilter passes through ids absent from the panel", {
     # Whether a missing variant is an error or is dropped belongs to
     # .ldFromRef's `onMissing`; deciding it here too would let the two
     # disagree about the same variant.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     ids <- rownames(panel)[1:3]
@@ -2255,6 +2259,7 @@ test_that("panel identity uses the allele-repaired ids for comparison", {
     # `.ldRefMatchIds()` repairs an id whose allele fields are tags rather
     # than DNA, filling them from the panel's A1/A2 mcols; that repaired form
     # is what every comparison against sumstats or weights uses.
+    skip_if_not_installed("PlinkMatrix")
     repaired <- pecotmr:::.repairVariantIds(
         c("chr1:100:R:V", "chr1:200:R:V"),
         A2 = c("A", "C"),
@@ -2284,6 +2289,7 @@ test_that("panel identity uses the allele-repaired ids for comparison", {
 test_that("an rsID panel is matched by position and alleles", {
     # Keyed by its labels, it matched no harmonized id, so every LD lookup
     # against it came back empty.
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )[1:20, ]
@@ -2847,6 +2853,7 @@ test_that("ldPruneByCorrelation forwards methodArgs to SNPRelate", {
 
 # A panel of real genotypes, and the LdMatrix holding exactly its LD.
 .ldrefPair <- function(nSamples = 100L) {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(file.path(geno_test_data_dir, "test_variants.bed"))
     ld <- LdMatrix(
         unname(computeLd(panel)),
@@ -3285,6 +3292,7 @@ test_that("a panel held in memory serves as an LD reference", {
     # Any RSE with a dosage assay and SNP / A1 / A2 rowRanges is a panel: it
     # reads through no handle and records no file, and every LD route reads
     # it as it reads the same genotypes from disk.
+    skip_if_not_installed("PlinkMatrix")
     disk <- readGenotypes(test_path("test_data", "test_variants.bed"))[1:20, ]
     mem <- SummarizedExperiment::SummarizedExperiment(
         assays = list(

@@ -39,7 +39,9 @@ Residualize the genotype matrix against the per-context
 }
 \examples{
 data(qtlDatasetExample)
-resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
-dim(resid)
-round(resid[1:5, 1:3], 3)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
+    print(dim(resid))
+    round(resid[1:5, 1:3], 3)
+}
 }

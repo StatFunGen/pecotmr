@@ -616,5 +616,11 @@ deliberately not ported here:
 
 \examples{
 data(qtlDatasetExample)
-fineMappingPipeline(qtlDatasetExample, methods = "susie", cisWindow = 1e6)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    fineMappingPipeline(
+        qtlDatasetExample,
+        methods = "susie",
+        cisWindow = 1e6
+    )
+}
 }

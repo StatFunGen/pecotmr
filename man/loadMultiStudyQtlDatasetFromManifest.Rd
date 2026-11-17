@@ -46,5 +46,7 @@ d <- system.file("extdata", "qtl_mini", package = "pecotmr")
 manifest <- data.frame(study = c("s1", "s2"), context = "brain",
   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
   genotypePath = file.path(d, "example.chr22"))
-loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
+}
 }

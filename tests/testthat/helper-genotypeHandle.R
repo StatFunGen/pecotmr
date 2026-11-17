@@ -18,6 +18,7 @@ readGenotypeHandle <- function(path, format = NULL, ...) {
 }
 
 .sk_panel <- function() {
+    skip_if_not_installed("PlinkMatrix")
     readGenotypes(
         test_path("test_data", "test_variants"),
         format = "plink1"

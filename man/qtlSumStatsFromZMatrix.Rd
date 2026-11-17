@@ -64,10 +64,27 @@ Assemble a per-condition \code{\link{QtlSumStats}} from a
   result clears the mash QC gate.
 }
 \examples{
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-z <- matrix(rnorm(6), 2, 3, dimnames = list(
-  c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-qtlSumStatsFromZMatrix(z = z, studyName = "s1", ldReference = panel,
-  context = colnames(z), trait = "g1", genome = "hg38", n = 100)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    z <- matrix(
+        rnorm(6),
+        2,
+        3,
+        dimnames = list(
+            c("chr22:1:A:G", "chr22:2:A:G"),
+            c("brain", "blood", "muscle")
+        )
+    )
+    qtlSumStatsFromZMatrix(
+        z = z,
+        studyName = "s1",
+        ldReference = panel,
+        context = colnames(z),
+        trait = "g1",
+        genome = "hg38",
+        n = 100
+    )
+}
 }

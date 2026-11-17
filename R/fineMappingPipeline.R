@@ -474,7 +474,13 @@
 #'   the inputs name; inputs naming different builds are refused.
 #' @examples
 #' data(qtlDatasetExample)
-#' fineMappingPipeline(qtlDatasetExample, methods = "susie", cisWindow = 1e6)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     fineMappingPipeline(
+#'         qtlDatasetExample,
+#'         methods = "susie",
+#'         cisWindow = 1e6
+#'     )
+#' }
 #' @export
 setGeneric("fineMappingPipeline", function(data, ...) {
     # Checked here rather than in an ANY method: the accepted classes are

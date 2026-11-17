@@ -106,11 +106,26 @@ minimum \code{SNP}, \code{A1}, \code{A2}, \code{Z}, \code{N}; optionally
 \code{MAF}, \code{INFO}, \code{BETA}, \code{SE}, \code{P}).
 }
 \examples{
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100 * 1:3, width = 1))
-S4Vectors::mcols(gr) <- S4Vectors::DataFrame(SNP = paste0("rs", 1:3),
-  A1 = "A", A2 = "G", Z = rnorm(3), N = 100L)
-GwasSumStats(studyName = "t1", entry = list(gr), genome = "hg38",
-  ldReference = panel)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(100 * 1:3, width = 1)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = paste0("rs", 1:3),
+        A1 = "A",
+        A2 = "G",
+        Z = rnorm(3),
+        N = 100L
+    )
+    GwasSumStats(
+        studyName = "t1",
+        entry = list(gr),
+        genome = "hg38",
+        ldReference = panel
+    )
+}
 }

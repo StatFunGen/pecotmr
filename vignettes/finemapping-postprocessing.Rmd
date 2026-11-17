@@ -17,6 +17,7 @@ knitr::opts_chunk$set(
     fig.width = 7,
     fig.height = 4.5
 )
+hasPlinkMatrix <- requireNamespace("PlinkMatrix", quietly = TRUE)
 ```
 
 ## Overview
@@ -190,7 +191,15 @@ flattens its *variants*, not its per-row metadata.
 with each other. It is computed on demand rather than stored, because it
 needs LD — and the LD lives with the data, not with the fit:
 
-```{r cs-corr}
+```{r cs-corr-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
+cat(
+    "**Note:** the `PlinkMatrix` package is not installed, so the next",
+    "chunk, which reads the bundled example genotypes, is shown but not",
+    "run."
+)
+```
+
+```{r cs-corr, eval = hasPlinkMatrix}
 computeCsCorrelation(qtlFineMappingPairedExample, qtlDatasetExample)
 ```
 

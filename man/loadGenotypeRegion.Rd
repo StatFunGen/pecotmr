@@ -59,8 +59,12 @@ dosages are automatically rescaled using the stored U_MIN/U_MAX values.
 \examples{
 stem <- sub("[.]bed$", "",
   system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-geno <- loadGenotypeRegion(genotype = stem,
-  which = GenomicRanges::GRanges("chr22:1-100000000"))
-dim(geno)
-geno[1:5, 1:4]
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    geno <- loadGenotypeRegion(
+        genotype = stem,
+        which = GenomicRanges::GRanges("chr22:1-100000000")
+    )
+    print(dim(geno))
+    geno[1:5, 1:4]
+}
 }

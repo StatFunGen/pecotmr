@@ -57,22 +57,30 @@ A \code{QtlDataset} holds data only. Which variants and samples
   contexts.
 }
 \examples{
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-rng <- GenomicRanges::GRanges(
-  "chr22", IRanges::IRanges(14600000L, width = 1000L)
-)
-names(rng) <- "ENSG1"
-se <- SummarizedExperiment::SummarizedExperiment(
-  assays = list(expression = matrix(
-    rnorm(ncol(panel)), 1,
-    dimnames = list("ENSG1", colnames(panel))
-  )),
-  rowRanges = rng
-)
-QtlDataset(
-    studyName = "s1", genotypes = panel, phenotypes = list(brain = se),
-    dataType = "expression"
-)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    rng <- GenomicRanges::GRanges(
+        "chr22",
+        IRanges::IRanges(14600000L, width = 1000L)
+    )
+    names(rng) <- "ENSG1"
+    se <- SummarizedExperiment::SummarizedExperiment(
+        assays = list(
+            expression = matrix(
+                rnorm(ncol(panel)),
+                1,
+                dimnames = list("ENSG1", colnames(panel))
+            )
+        ),
+        rowRanges = rng
+    )
+    QtlDataset(
+        studyName = "s1",
+        genotypes = panel,
+        phenotypes = list(brain = se),
+        dataType = "expression"
+    )
+}
 }

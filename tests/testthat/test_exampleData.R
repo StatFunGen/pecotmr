@@ -151,6 +151,7 @@ test_that("the bundled LD references support a block jackknife", {
 })
 
 test_that("every estimateH2 method runs on the bundled LD references", {
+    skip_if_not_installed("PlinkMatrix")
     data(ldEigenExample)
     data(ldScoreExample)
     gr <- as(ldScoreExample, "GRanges")

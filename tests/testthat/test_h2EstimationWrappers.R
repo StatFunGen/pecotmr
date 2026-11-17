@@ -3382,6 +3382,7 @@ test_that(".cisH2FastHer is NA where its likelihood is undefined", {
 }
 
 test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     fits <- map(
         c("lava", "hdlL", "fastHer"),
@@ -3433,6 +3434,7 @@ test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
 })
 
 test_that("estimateH2 reads the reference overlap, per row, for LAVA alone", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     two <- c(x, `$<-`(x, "trait", "ENSG_other"))
     lava <- estimateH2(x, referenceOverlap = 1)
@@ -3476,6 +3478,7 @@ test_that("estimateH2 reads the reference overlap, per row, for LAVA alone", {
 })
 
 test_that("estimateH2 warns when LAVA assumes no overlap, small reference", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     two <- c(x, `$<-`(x, "trait", "ENSG_other"))
     expect_warning(estimateH2(two), "2 of 2 gene\\(s\\) has at most twice")
@@ -3490,6 +3493,7 @@ test_that("estimateH2 warns when LAVA assumes no overlap, small reference", {
 })
 
 test_that("estimateH2 analyses a row over its cis window", {
+    skip_if_not_installed("PlinkMatrix")
     tp <- GenomicRanges::GRanges(
         "chr22",
         IRanges::IRanges(15200000L, width = 1L)
@@ -3523,6 +3527,7 @@ test_that("estimateH2 analyses a row over its cis window", {
 
 test_that("estimateH2 marks the genes FastHer's likelihood cannot fit", {
     # Twenty study samples against a 165-sample reference.
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example(N = 20L)
     out <- expect_warning(
         estimateH2(x, method = "fastHer"),
@@ -3532,6 +3537,7 @@ test_that("estimateH2 marks the genes FastHer's likelihood cannot fit", {
 })
 
 test_that("estimateH2 refuses what a cis estimate cannot be made from", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     expect_error(
         estimateH2(.cisH2Example(qcOptions = list())),
@@ -3577,6 +3583,7 @@ test_that("estimateH2 refuses what a cis estimate cannot be made from", {
 
 # ---- estimateH2 on a QtlDataset; h2 for the methods that start from it ----
 test_that("estimateH2 gives each QtlDataset trait its in-sample cis estimate", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     fit <- estimateH2(qtlDatasetExample, cisWindow = 1e6)
     expect_s4_class(fit, "H2Estimate")
@@ -3689,6 +3696,7 @@ test_that("a supplied or estimated heritability is settled for the methods", {
 })
 
 test_that("an H2Estimate gives a run each selected trait's value, once each", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     est <- estimateH2(x, referenceOverlap = 1)
     tuples <- tibble::tibble(

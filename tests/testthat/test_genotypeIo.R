@@ -11,6 +11,7 @@ test_that("readPvar reads real pvar file", {
 })
 
 test_that("Test loadGenotypeRegion", {
+    skip_if_not_installed("PlinkMatrix")
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype"
     )
@@ -25,6 +26,7 @@ test_that("Test loadGenotypeRegion", {
 })
 
 test_that("Test loadGenotypeRegion no indels", {
+    skip_if_not_installed("PlinkMatrix")
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype",
         keepIndel = FALSE
@@ -56,6 +58,7 @@ test_that("Test loadGenotypeRegion no indels", {
 })
 
 test_that("Test loadGenotypeRegion with region", {
+    skip_if_not_installed("PlinkMatrix")
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype",
         which = GenomicRanges::GRanges("chr22:20689453-20845958")
@@ -79,6 +82,7 @@ test_that("Test loadGenotypeRegion with region", {
 })
 
 test_that("Test loadGenotypeRegion with region and no indels", {
+    skip_if_not_installed("PlinkMatrix")
     res <- loadGenotypeRegion(
         "test_data/protocol_example.genotype",
         which = GenomicRanges::GRanges("chr22:20689453-20845958"),
@@ -247,6 +251,7 @@ test_that("readStochasticMeta returns NULL for nonexistent file", {
 # --- loadGenotypeRegion stochastic inversion test ---
 
 test_that("loadGenotypeRegion applies stochastic inversion with a sidecar", {
+    skip_if_not_installed("PlinkMatrix")
     td <- test_path("test_data")
     metaPath <- file.path(td, "test_harmonize_regions.stochastic_meta.tsv")
     smeta <- pecotmr:::readStochasticMeta(metaPath)
@@ -1854,6 +1859,7 @@ test_that("covariate colData aligns to the panel's samples", {
 })
 
 test_that("a panel with no covariates gets an empty colData", {
+    skip_if_not_installed("PlinkMatrix")
     prefix <- sub(
         "\\.bed$",
         "",
@@ -2791,6 +2797,7 @@ test_that("a set's shards hold the same samples, one chromosome each", {
 # The saved panels are built by helper-savedObjects.R.
 
 test_that(".updatePanel reads a saved PLINK1 panel again through its backend", {
+    skip_if_not_installed("PlinkMatrix")
     stem <- test_path("test_data", "test_variants")
     fresh <- readGenotypes(stem, format = "plink1")
     saved <- .savedHandlePanel(fresh, stem, "plink1")
@@ -2837,6 +2844,7 @@ test_that(".updatePanel gives a saved stochastic sketch its real n and AF", {
 })
 
 test_that(".updatePanel reads a saved per-chromosome panel again", {
+    skip_if_not_installed("PlinkMatrix")
     files <- c(
         chr21 = test_path("test_data", "test_variants.bed"),
         chr22 = test_path("test_data", "test_variants_chr22.bed")
@@ -2855,6 +2863,7 @@ test_that(".updatePanel reads a saved per-chromosome panel again", {
 })
 
 test_that(".updatePanel takes a saved bare handle as the panel over it", {
+    skip_if_not_installed("PlinkMatrix")
     stem <- test_path("test_data", "test_variants")
     fresh <- readGenotypes(stem, format = "plink1")
     handle <- .ldRefHandle(.savedHandlePanel(fresh, stem, "plink1"))
@@ -2864,6 +2873,7 @@ test_that(".updatePanel takes a saved bare handle as the panel over it", {
 })
 
 test_that(".updatePanel leaves a current panel, or no panel, as it is", {
+    skip_if_not_installed("PlinkMatrix")
     expect_null(.updatePanel(NULL))
     stem <- test_path("test_data", "test_variants")
     plink1 <- readGenotypes(stem, format = "plink1")
@@ -2907,6 +2917,7 @@ test_that(".updatePanel drops the copies of labels a saved panel kept", {
 })
 
 test_that(".updatePanel drops the row names of a VCF, GDS or PLINK1 seed", {
+    skip_if_not_installed("PlinkMatrix")
     stem <- test_path("test_data", "test_variants")
     plink1 <- readGenotypes(stem, format = "plink1")
     slim <- .updatePanel(.savedLabelledPanel(plink1))
@@ -2918,6 +2929,7 @@ test_that(".updatePanel drops the row names of a VCF, GDS or PLINK1 seed", {
 })
 
 test_that(".updatePanel refuses a saved panel it cannot read again", {
+    skip_if_not_installed("PlinkMatrix")
     stem <- test_path("test_data", "test_variants")
     fresh <- readGenotypes(stem, format = "plink1")
     gone <- .savedHandlePanel(fresh, file.path(tempdir(), "nowhere"), "plink1")

@@ -1248,11 +1248,13 @@ test_that("colocboostPipeline(MultiStudy): a study with no bundle is skipped", {
 }
 
 test_that("colocboost sumstat bundle filters nothing by default", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     expect_equal(.cbf_n(ss), sum(lengths(ss)))
 })
 
 test_that("colocboost sumstat bundle drops panel-rare variants", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     full <- .cbf_n(ss)
     loose <- .cbf_n(ss, mafCutoff = 0.05)
@@ -1262,6 +1264,7 @@ test_that("colocboost sumstat bundle drops panel-rare variants", {
 })
 
 test_that("colocboost RSS cutoffs match .panelVariantFilter", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     ids <- normalizeVariantId(
         .sumStatsDf(
@@ -1286,6 +1289,7 @@ test_that("colocboost RSS cutoffs match .panelVariantFilter", {
 })
 
 test_that("colocboost RSS treats MAC as a MAF equivalent", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     nSamp <- ncol(ldReference(ss)[[1L]])
     expect_equal(
@@ -1295,6 +1299,7 @@ test_that("colocboost RSS treats MAC as a MAF equivalent", {
 })
 
 test_that("colocboost RSS honours a missingness cutoff", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     expect_lt(.cbf_n(ss, imissCutoff = 0), sum(lengths(ss)))
     expect_equal(.cbf_n(ss, imissCutoff = 1), sum(lengths(ss)))
@@ -1304,6 +1309,7 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
     # The row filter indexes df by the FULL-length variant id vector, so the
     # filtered set has to be passed to the LD build separately rather than by
     # shrinking that vector.
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     df <- .sumStatsDf(
         ss,
@@ -1333,6 +1339,7 @@ test_that(".cbSumstatPair keeps sumstat rows aligned to the LD matrix", {
 test_that("colocboost reads a panel's factor and its LdMatrix alike", {
     # A genotype reference reaches colocboost as X_ref, a factor of its LD;
     # an LdMatrix as LD. The same LD gives the same colocalization.
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("colocboost")
     data(qtlSumStatsMulticontextExample)
     ss <- suppressMessages(summaryStatsQc(qtlSumStatsMulticontextExample))
@@ -1358,6 +1365,7 @@ test_that("colocboost reads a panel's factor and its LdMatrix alike", {
 })
 
 test_that(".cbSumstatPair returns NULL when a cutoff removes everything", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .cbf_ss
     df <- .sumStatsDf(
         ss,
@@ -1785,6 +1793,7 @@ test_that("colocboostPipeline forwards residualizationParam to both sides", {
     # twasWeightsPipeline(). Both SIDES matter here: colocboost consumes X and
     # Y together, so a bundle that reached only the genotypes would
     # residualize the two against different covariate sets.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     origG <- pecotmr:::.qtlResidualizedGenotypes
     origP <- pecotmr:::.qtlResidualizedPhenotypes

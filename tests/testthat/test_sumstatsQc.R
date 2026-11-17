@@ -1527,6 +1527,7 @@ test_that("raiss rejects neither ldMatrix nor genotypes", {
 test_that("raiss imputes from a genotype panel through the SVD route", {
     # The panel's dosages are standardized here and the p x p matrix is never
     # formed: the fit is the SVD route's on the same standardized dosages.
+    skip_if_not_installed("PlinkMatrix")
     set.seed(11)
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))[1:30, ]
     ref_panel <- pecotmr:::.refVariantsFromLdRef(panel)
@@ -6077,6 +6078,7 @@ test_that(".subsetLdRefToIds keeps exactly the entries' variants", {
 test_that("QC keeps the variants of an rsID-labelled panel it matched", {
     # The panel was keyed by its labels, which a harmonized id never equals,
     # so QC kept every variant and emptied the panel.
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(
         system.file("extdata", "toy_ref.bed", package = "pecotmr")
     )[1:50, ]
@@ -6437,6 +6439,7 @@ test_that(".qcRaissTargetMask drops a target whose MAF is undefined", {
 })
 
 test_that("summaryStatsQc raissParam cutoffs bound what RAISS imputes", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     variants <- unlist(gss)
@@ -6989,6 +6992,7 @@ test_that(".sumstatsCleaningResolve fills defaults an empty bundle omits", {
 
 
 test_that("summaryStatsQc gives one result from an LdMatrix and its panel", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     panel <- ldReference(gss)[[1L]]
@@ -7035,6 +7039,7 @@ test_that("DENTIST needs an LdMatrix's size; SLALOM does not", {
 })
 
 test_that("RAISS imputation in QC runs on an LdMatrix reference", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     panel <- ldReference(gss)[[1L]]
@@ -7067,6 +7072,7 @@ test_that("RAISS imputation in QC runs on an LdMatrix reference", {
 test_that("summaryStatsQc QCs each row against its own LD reference", {
     # One row on the panel, another on the same LD as a matrix: each is
     # harmonized against its own and keeps it, cut to its own variants.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsMulticontextExample)
     mc <- qtlSumStatsMulticontextExample
     panel <- ldReference(mc)[[1L]]
@@ -7196,6 +7202,7 @@ test_that(".qcRaissClampBounds narrows only the clamp's chromosome", {
 })
 
 test_that("RAISS with a flank imputes each variant of a split study once", {
+    skip_if_not_installed("PlinkMatrix")
     x <- .qcb_thinBlocked()
     out <- suppressWarnings(suppressMessages(summaryStatsQc(
         x,

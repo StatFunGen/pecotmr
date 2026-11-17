@@ -2221,6 +2221,7 @@ test_that("updateObject drops the slots a QtlDataset no longer has", {
 })
 
 test_that("updateObject renames study and reads saved genotypes again", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample)
     current <- .qtlGenotypeSe(qtlDatasetExample)
     # Saved by a version that named the slot `study` and read PLINK1 files
@@ -2824,6 +2825,7 @@ test_that("genotypeHandle returns the handle, genotypes a dosage block", {
     # dosages through the filter stack, genotypeHandle() hands back the
     # GenotypeHandle the dataset was built on -- none for a panel that reads
     # through its own seed, as the example's PLINK1 panel does.
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("pgenlibr")
     h <- GenotypeHandle(
         plink2Prefix = file.path(test_data_dir, "test_variants")
@@ -3070,6 +3072,7 @@ test_that("longForm(genotype = TRUE) reads the dosages in", {
     # MultiAssayExperiment reshapes a delayed assay to zero rows and then
     # errors, so including genotypes means materializing them -- which needs
     # a handle with real data behind it, not the synthetic one.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     qd <- qtlDatasetExample
     lf <- MultiAssayExperiment::longForm(qd, genotype = TRUE)
@@ -3083,6 +3086,7 @@ test_that("longForm(genotype = TRUE) reads the dosages in", {
 
 test_that("longForm leaves the dataset's assay delayed", {
     # Realizing is local to the reshape; the object must not be mutated.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     qd <- qtlDatasetExample
     invisible(MultiAssayExperiment::longForm(qd, genotype = TRUE))
@@ -3389,6 +3393,7 @@ test_that("a QtlDataset reads genotypes held in memory as from a file", {
     # The genotype experiment is read through its own rows and assay, not a
     # handle, so a panel from any backend -- here one held in memory -- gives
     # the same blocks as the file it was read from.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     disk <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
     mem <- SummarizedExperiment::SummarizedExperiment(

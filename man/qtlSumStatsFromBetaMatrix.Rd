@@ -60,14 +60,31 @@ Assemble a per-condition \code{\link{QtlSumStats}} from an
   \code{\link{qtlSumStatsFromZMatrix}}.
 }
 \examples{
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr"))
-bhat <- matrix(rnorm(6), 2, 3, dimnames = list(
-  c("chr22:1:A:G", "chr22:2:A:G"), c("brain", "blood", "muscle")))
-shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
-qtlSumStatsFromBetaMatrix(bhat = bhat, shat = shat, studyName = "s1",
-  ldReference = panel, context = colnames(bhat), trait = "g1",
-    genome = "hg38", n = 100)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    bhat <- matrix(
+        rnorm(6),
+        2,
+        3,
+        dimnames = list(
+            c("chr22:1:A:G", "chr22:2:A:G"),
+            c("brain", "blood", "muscle")
+        )
+    )
+    shat <- matrix(0.1, 2, 3, dimnames = dimnames(bhat))
+    qtlSumStatsFromBetaMatrix(
+        bhat = bhat,
+        shat = shat,
+        studyName = "s1",
+        ldReference = panel,
+        context = colnames(bhat),
+        trait = "g1",
+        genome = "hg38",
+        n = 100
+    )
+}
 }
 \seealso{
 \code{\link{qtlSumStatsFromZMatrix}}, \code{\link{mashModelFit}}

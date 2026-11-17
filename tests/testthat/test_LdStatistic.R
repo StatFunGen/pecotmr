@@ -240,6 +240,7 @@ test_that("an AF column becomes a folded MAF column; none leaves it off", {
 })
 
 test_that("a genotype panel is cut into LD blocks at ldBlocks", {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     pos <- GenomicRanges::start(SummarizedExperiment::rowRanges(panel))
     cut <- pos[[200L]]

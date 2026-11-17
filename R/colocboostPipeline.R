@@ -227,7 +227,9 @@ NULL
 #' @rdname colocboostPipeline
 #' @examples
 #' data(qtlDatasetExample)
-#' colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
+#' }
 #' @export
 setGeneric("colocboostPipeline", function(qtlData, gwasSumStats = NULL, ...) {
     .cbAssertInputClass(qtlData)

@@ -309,5 +309,7 @@ for either side; colocboost has its own variable-selection algorithm.
 
 \examples{
 data(qtlDatasetExample)
-colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    colocboostPipeline(qtlDatasetExample, xqtlColoc = TRUE)
+}
 }

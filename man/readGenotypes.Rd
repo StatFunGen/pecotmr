@@ -122,18 +122,21 @@ Read genotype data (VCF, plink1, plink2, GDS or BGEN) as a
   block out of an LD-meta table. Exactly one source may be given.
 }
 \examples{
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-dim(panel)
-head(rownames(panel))
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    print(dim(panel))
+    print(head(rownames(panel)))
 
-# The same panel named by its PLINK1 stem rather than by a file.
-stem <- sub("\\\\.bed$", "", system.file(
-  "extdata", "toy_ref.bed",
-  package = "pecotmr"
-))
-dim(readGenotypes(plink1Prefix = stem))
+    # The same panel named by its PLINK1 stem rather than by a file.
+    stem <- sub(
+        "\\\\.bed$",
+        "",
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    dim(readGenotypes(plink1Prefix = stem))
+}
 }
 \seealso{
 \code{\link{computeLd}}

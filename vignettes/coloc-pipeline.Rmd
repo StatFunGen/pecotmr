@@ -10,12 +10,22 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
+hasPlinkMatrix <- requireNamespace("PlinkMatrix", quietly = TRUE)
 knitr::opts_chunk$set(
     echo = TRUE,
     message = FALSE,
     warning = FALSE,
     fig.width = 7,
-    fig.height = 4.5
+    fig.height = 4.5,
+    eval = hasPlinkMatrix
+)
+```
+
+```{r plinkmatrix-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
+cat(
+    "**Note:** the `PlinkMatrix` package is not installed, so the code below",
+    "is shown but not run: it reads the bundled example genotypes, which are",
+    "PLINK1 files. Install it with `BiocManager::install(\"PlinkMatrix\")`."
 )
 ```
 
