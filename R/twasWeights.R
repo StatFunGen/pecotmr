@@ -3446,6 +3446,20 @@ twasWeightsCv <- function(
 # Multivariate fit: one call producing the full variants x features matrix.
 # @noRd
 .twasFitMultivariate <- function(fnName, args, ctx) {
+    # twasWeightsPipeline's joint fits keep, in each study, only the samples
+    # observed in all of its contexts. With few of them, once covariates are
+    # regressed out, no variant may vary, and the multivariate methods then
+    # fail deep inside with an index error.
+    if (ncol(ctx$Xfiltered) == 0L) {
+        abort(glue(
+            "{fnName}: no variant varies across the {nrow(ctx$X)} sample(s) ",
+            "of this joint fit of {ncol(ctx$Y)} condition(s), so it cannot ",
+            "be run. twasWeightsPipeline() keeps, in each study, only the ",
+            "samples observed in all of its contexts: fitting fewer contexts ",
+            "together, or contexts measured on more of the same samples, ",
+            "keeps more."
+        ))
+    }
     call <- .twasWeightCallArgs(
         fnName,
         list(X = ctx$Xfiltered, Y = ctx$Y),
@@ -3461,10 +3475,13 @@ twasWeightsCv <- function(
     } else {
         NULL
     }
-    weightsMatrix <- if (nrow(fitted) == length(ctx$validColumns)) {
+    # validColumns is a logical flag over every column of X; the fit was made on
+    # Xfiltered, i.e. only the TRUE columns, so compare against that count and
+    # select by the retained column names when a method reports more rows.
+    weightsMatrix <- if (nrow(fitted) == ncol(ctx$Xfiltered)) {
         fitted
     } else {
-        fitted[names(ctx$validColumns), , drop = FALSE]
+        fitted[colnames(ctx$Xfiltered), , drop = FALSE]
     }
     list(weights = weightsMatrix, methodFit = methodFit)
 }

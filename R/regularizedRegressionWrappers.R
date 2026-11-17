@@ -1035,11 +1035,13 @@ mrmashWeights <- function(
 #' @param mrmashRssFit Optional pre-fitted \code{mr.mash.rss} object; skips
 #'   fitting when supplied.
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
-#'   raw covariance matrices). Passed directly to \code{mr.mashr::expand_covs()}
+#'   raw covariance matrices). Passed to \code{mr.mashr::expand_covs()}
 #'   alongside the canonical mixture. It may also carry
 #'   \code{residualCorrelation}, the residual correlation of the mash prior
 #'   \code{U} comes from (conditions x conditions), the default \code{V} and
-#'   \code{covY}.
+#'   \code{covY}. Matrices named by condition are taken on the columns of
+#'   \code{stat$z} by name, so a prior learned on more conditions can be
+#'   used (see \code{\link{buildMrmashPriorMatrices}}).
 #' @param canonicalPriorMatrices Logical. When TRUE (default), include the
 #'   standard canonical mixture from \code{mr.mashr::compute_canonical_covs()}.
 #'   When FALSE, \code{dataDrivenPriorMatrices} must be supplied.
@@ -1080,7 +1082,9 @@ mrmashWeights <- function(
 #' data(eqtlRegionExample)
 #' data(multiTraitData)
 #' X <- eqtlRegionExample$X[, 1:30]
-#' cond <- c("brain", "blood", "muscle")
+#' # Three of the seven conditions the prior is over: it is taken on them by
+#' # name.
+#' cond <- colnames(multiTraitData$Y)[1:3]
 #' zmat <- matrix(rnorm(30 * 3), 30, 3,
 #'   dimnames = list(colnames(X), cond))
 #' stat <- list(z = zmat, n = nrow(X), variantNames = colnames(X))
@@ -1189,7 +1193,9 @@ mrmashRssWeights <- function(
     ))
 }
 
-# Fit mr.mash.rss, defaulting the prior / w0 / V / covY when not supplied.
+# Fit mr.mash.rss, defaulting the prior / w0 / V / covY when not supplied,
+# with the data-driven prior taken on the statistics' conditions
+# (.mrmashAlignPriorToContexts()).
 # @noRd
 .mrmashRssComputeFit <- function(
     stat,
@@ -1203,12 +1209,17 @@ mrmashRssWeights <- function(
     dots
 ) {
     ss <- .mrmashRssStats(.rssCarriedStat(stat, LD))
-    residual <- .mrmashRssResidual(stat, LD, dataDrivenPriorMatrices, V, covY)
+    mashPrior <- .mrmashAlignPriorToContexts(
+        dataDrivenPriorMatrices,
+        colnames(ss$Z),
+        ss$K
+    )
+    residual <- .mrmashRssResidual(stat, LD, mashPrior, V, covY)
     # The grid is in units of the residual standard deviations V starts from:
     # covY's on the original scale when V is not given, else 1 (a correlation)
     prior <- .mrmashRssDefaults(
         ss,
-        dataDrivenPriorMatrices,
+        mashPrior,
         canonicalPriorMatrices,
         S0,
         w0,
@@ -9271,7 +9282,9 @@ sparsevbWeights <- function(
 # Everything mrmashWrapper needs in hand before the fit: the package and
 # bundle checks, the resolved coefficient-initialisation method, the
 # summary statistics the prior grid is built from (computed here when the
-# caller did not supply them), and the prior covariance matrices.
+# caller did not supply them), the prior covariance matrices, and the mash
+# prior's residual correlation, the prior taken on Y's conditions
+# (.mrmashAlignPriorToContexts()).
 # @noRd
 .mrmashWrapperSetup <- function(
     X,
@@ -9298,6 +9311,11 @@ sparsevbWeights <- function(
     if (is.null(sumstats)) {
         sumstats <- .mrmashComputeSumstats(X, Y, standardize, threads)
     }
+    mashPrior <- .mrmashAlignPriorToContexts(
+        dataDrivenPriorMatrices,
+        colnames(Y),
+        ncol(Y)
+    )
     # The grid is in units of the residual standard deviations `gridSd`
     # when the prior is relative to them (.mrmashGridSd())
     list(
@@ -9308,9 +9326,10 @@ sparsevbWeights <- function(
             Bhat = t(t(sumstats$Bhat) / gridSd),
             Shat = t(t(sumstats$Shat) / gridSd),
             K = ncol(Y),
-            dataDrivenPriorMatrices = dataDrivenPriorMatrices,
+            dataDrivenPriorMatrices = mashPrior,
             !!!priorOpts
-        )
+        ),
+        residualCorrelation = mashPrior$residualCorrelation
     )
 }
 
@@ -9331,7 +9350,9 @@ sparsevbWeights <- function(
 #'   (\code{U}), and optionally the residual correlation of the mash prior
 #'   they come from (\code{residualCorrelation}, conditions x conditions),
 #'   which \code{MrmashOptions(vInitMethod = "mash")} starts the residual
-#'   covariance from. Default is NULL.
+#'   covariance from. Matrices named by condition are taken on the columns
+#'   of \code{Y} by name, so a prior learned on more conditions can be used
+#'   (see \code{\link{buildMrmashPriorMatrices}}). Default is NULL.
 #' @param prior Prior-covariance construction options, built with
 #'   \code{\link{MrmashPriorParam}}.
 #' @param bInitMethod The method for initializing the coefficient matrix.
@@ -9440,7 +9461,7 @@ mrmashWrapper <- function(
         updateVMethod,
         as.list(methodArgs)$vEigenFloor %||% 1e-3,
         as.list(methodArgs)$vInitMethod,
-        dataDrivenPriorMatrices$residualCorrelation
+        setup$residualCorrelation
     )
     fitMrmash <- .mrmashFit(
         setup$priorBuilt$S0,
@@ -10163,7 +10184,11 @@ MrmashPriorParam <- function(
 #' @param dataDrivenPriorMatrices Optional list with element \code{U} (list of
 #'   raw covariance matrices) computed e.g. by
 #'   \code{\link{computeCovDiag}}, or by \code{mashr::cov_flash}, which
-#'   returns such a list directly.
+#'   returns such a list directly. Matrices whose rows and columns are named
+#'   by condition are taken on the conditions of \code{Bhat}'s columns, by
+#'   name, so a prior learned on more conditions can be used; each must hold
+#'   all of them. Unnamed matrices, and any when \code{Bhat}'s columns are
+#'   unnamed, must be K x K, in \code{Bhat}'s column order.
 #' @param canonicalPriorMatrices Logical. When TRUE (default for RSS), include
 #'   the standard canonical mixture from
 #'   \code{mr.mashr::compute_canonical_covs()}. When FALSE,
@@ -10223,7 +10248,7 @@ buildMrmashPriorMatrices <- function(
     }
     S0_raw <- .mrmashRawPriorCovs(
         K,
-        dataDrivenPriorMatrices,
+        .mrmashAlignPriorToContexts(dataDrivenPriorMatrices, colnames(Bhat), K),
         canonicalPriorMatrices,
         canonicalCovs
     )
@@ -10235,6 +10260,65 @@ buildMrmashPriorMatrices <- function(
         !!!user
     )
     list(S0 = S0, priorGrid = priorGrid)
+}
+
+# A data-driven prior (`prior`, as dataDrivenPriorMatrices: its covariances
+# `U`, and its residual correlation when it carries one) on the data's
+# conditions `contexts` (NULL when they are unnamed), of which there are K.
+# A matrix named by condition is taken on them by name (.mashSubsetMatrix()),
+# so a prior learned on more conditions, such as a mash fit across cohorts,
+# serves a trait observed in only some of them; an unnamed one must already
+# be K x K, in the data's order. A prior with neither, such as a bare list
+# of matrices, is refused: nothing would read it.
+# @noRd
+.mrmashAlignPriorToContexts <- function(prior, contexts, K) {
+    if (is.null(prior)) {
+        return(NULL)
+    }
+    U <- prior$U
+    residual <- prior$residualCorrelation
+    if (is.null(U) && is.null(residual)) {
+        abort(glue(
+            "dataDrivenPriorMatrices carries neither covariance matrices ",
+            "(`U`) nor a residual correlation (`residualCorrelation`); a ",
+            "list of covariance matrices goes under `U`: list(U = matrices)."
+        ))
+    }
+    list_assign(
+        prior,
+        !!!compact(list(
+            U = if (!is.null(U)) {
+                map(U, .mrmashAlignPriorMatrix, contexts = contexts, K = K)
+            },
+            residualCorrelation = if (!is.null(residual)) {
+                .mrmashAlignPriorMatrix(residual, contexts, K)
+            }
+        ))
+    )
+}
+
+# One matrix of a data-driven prior on the data's conditions
+# (.mrmashAlignPriorToContexts()): by name when both name them, else as it
+# is, which must then be K x K.
+# @noRd
+.mrmashAlignPriorMatrix <- function(m, contexts, K) {
+    mat <- as.matrix(m)
+    named <- !is.null(rownames(mat)) && !is.null(colnames(mat))
+    if (named && !is.null(contexts)) {
+        return(.mashSubsetMatrix(mat, contexts))
+    }
+    if (nrow(mat) != K || ncol(mat) != K) {
+        fix <- if (named) {
+            "name the data's conditions (the columns of Y, Bhat or stat$z)"
+        } else {
+            "name its rows and columns by condition"
+        }
+        abort(glue(
+            "A data-driven prior matrix is {nrow(mat)} x {ncol(mat)} but the ",
+            "data hold {K} condition(s): {fix} to match them by name."
+        ))
+    }
+    mat
 }
 
 # The unexpanded prior covariances: the canonical set (when requested) plus

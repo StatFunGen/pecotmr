@@ -16,35 +16,25 @@
       total number of individuals and r is the total number of conditions
       (tissue/cell-types).}
 
-  \item{priorMatrices}{A list of data-driven covariance matrices.}
+  \item{priorMatrices}{The data-driven prior in the shape mr.mash takes
+      it (\code{dataDrivenPriorMatrices}): a list whose element \code{U}
+      holds 14 covariance matrices over the conditions of \code{Y}, named
+      by them.}
 
-  \item{prior_grid}{A vector of scaling factors to be used in fitting
-        mr.mash model.}
-
-  \item{priorMatricesCv}{A list of list containing data-driven covariance
-        matrices for 5-fold cross validation.}
-
-  \item{prior_grid_cv}{A list of vectors of scaling factors for 5-fold
-        cross validation via sample partition.}
+  \item{priorMatricesCv}{A list of 5 such priors, one per fold of a 5-fold
+      cross validation.}
 
   \item{gwasSumStats}{A data frame for GWAS summary statistics.}
-
-  \item{sumstat}{Summary statistics of Bhat and Sbhat from univariate
-        regression for a gene.}
-
-   \item{sumstat_cv}{A list of 5 fold cross-validation summary statistics
-   based
-        on sample partition for a gene.}
 }
 }
 \description{
 Simulated data of a gene with multi-conditions
 (cell-type/tissues)
 gene expression level matrix(Y) and genotype matrix(X) from 400 individuals,
-plus mixure prior matrices, prior grid, as well as summary statistics from
-univariate regression and GWAS summary statistics that is ready for use for
-TWAS analysis. Genotype matrix is centered and scaled, expression matrix is
-normalized.
+plus data-driven mr.mash prior matrices, for the full data and for each
+fold of a 5-fold cross validation, and GWAS summary statistics, ready for
+use for TWAS analysis. Genotype matrix is centered and scaled, expression
+matrix is normalized.
 }
 \examples{
 data(multiTraitData)
