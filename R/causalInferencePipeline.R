@@ -126,10 +126,17 @@ NULL
 #' @examples
 #' data(qtlDatasetExample)
 #' data(gwasSumStatsS4Example)
-#' tw <- twasWeightsPipeline(qtlDatasetExample,
-#'   methods = "lasso", cisWindow = 1e6)
-#' causalInferencePipeline(
-#'   gwasSumStats = gwasSumStatsS4Example, twasWeights = tw)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     tw <- twasWeightsPipeline(
+#'         qtlDatasetExample,
+#'         methods = "lasso",
+#'         cisWindow = 1e6
+#'     )
+#'     causalInferencePipeline(
+#'         gwasSumStats = gwasSumStatsS4Example,
+#'         twasWeights = tw
+#'     )
+#' }
 #' @export
 causalInferencePipeline <- function(
     gwasSumStats,

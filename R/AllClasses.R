@@ -864,7 +864,9 @@ setMethod(
 #' @rdname maf
 #' @examples
 #' data(qtlDatasetExample)
-#' maf(qtlDatasetExample)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     maf(qtlDatasetExample)
+#' }
 #' @export
 setMethod(
     "maf",

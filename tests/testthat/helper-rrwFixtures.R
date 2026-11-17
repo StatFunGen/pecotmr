@@ -98,6 +98,7 @@
 # A genotype panel's first `p` variants, the LD matrix it gives, and
 # statistics with two strong effects, for the RSS weights that read either.
 .rrwPanelStat <- function(p = 40) {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     ids <- names(SummarizedExperiment::rowRanges(panel))[seq_len(p)]
     R <- pecotmr:::.ldFromRef(panel, ids, "test")

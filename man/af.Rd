@@ -50,7 +50,9 @@ Extract the directional effect-allele (A1) frequency vector
 }
 \examples{
 data(qtlDatasetExample)
-af(qtlDatasetExample)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    af(qtlDatasetExample)
+}
 data(qtlSumStatsExample)
 af(qtlSumStatsExample)
 }

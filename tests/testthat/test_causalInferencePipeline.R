@@ -1514,6 +1514,7 @@ test_that(".cipComputeMrCsAware matches across a chr-prefix difference", {
 })
 
 test_that(".cipComputeTwasZ gives a Z from a panel's factor or an LdMatrix", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     panel <- ldReference(gwasSumStatsS4Example)[[1L]]
     ids <- names(SummarizedExperiment::rowRanges(panel))[c(3, 8, 15, 21, 30)]

@@ -229,27 +229,37 @@ setClass(
 #'   \code{NULL}.
 #' @return A \code{MultiStudyQtlDataset} object.
 #' @examples
-#' panel <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' rng <- GenomicRanges::GRanges(
-#'   "chr22", IRanges::IRanges(14600000L, width = 1000L)
-#' )
-#' names(rng) <- "ENSG1"
-#' se <- SummarizedExperiment::SummarizedExperiment(
-#'   assays = list(expression = matrix(
-#'     rnorm(ncol(panel)), 1,
-#'     dimnames = list("ENSG1", colnames(panel))
-#'   )),
-#'   rowRanges = rng
-#' )
-#' qd1 <- QtlDataset(
-#'   studyName = "s1", genotypes = panel, phenotypes = list(brain = se)
-#' )
-#' qd2 <- QtlDataset(
-#'   studyName = "s2", genotypes = panel, phenotypes = list(brain = se)
-#' )
-#' MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     panel <- readGenotypes(
+#'         system.file("extdata", "toy_ref.bed", package = "pecotmr")
+#'     )
+#'     rng <- GenomicRanges::GRanges(
+#'         "chr22",
+#'         IRanges::IRanges(14600000L, width = 1000L)
+#'     )
+#'     names(rng) <- "ENSG1"
+#'     se <- SummarizedExperiment::SummarizedExperiment(
+#'         assays = list(
+#'             expression = matrix(
+#'                 rnorm(ncol(panel)),
+#'                 1,
+#'                 dimnames = list("ENSG1", colnames(panel))
+#'             )
+#'         ),
+#'         rowRanges = rng
+#'     )
+#'     qd1 <- QtlDataset(
+#'         studyName = "s1",
+#'         genotypes = panel,
+#'         phenotypes = list(brain = se)
+#'     )
+#'     qd2 <- QtlDataset(
+#'         studyName = "s2",
+#'         genotypes = panel,
+#'         phenotypes = list(brain = se)
+#'     )
+#'     MultiStudyQtlDataset(qtlDatasets = list(s1 = qd1, s2 = qd2))
+#' }
 #' @importFrom checkmate assertList
 #' @export
 MultiStudyQtlDataset <- function(qtlDatasets, sumStats = NULL) {

@@ -4399,6 +4399,7 @@ delayedAssign(
     jointSpecification = "study",
     ...
 ) {
+    skip_if_not_installed("PlinkMatrix")
     suppressMessages(twasWeightsPipeline(
         .fm_disjointStudies(),
         methods = methods,
@@ -4557,6 +4558,7 @@ test_that("weights across studies sit beside each study's own", {
 })
 
 test_that("the fine-mapping lookups read the fits of the group they name", {
+    skip_if_not_installed("PlinkMatrix")
     fm <- .tp_xsFm
     tr <- as.character(fm$trait)[[1L]]
     # A tuple's own fits by default; a joint group's members in any order.
@@ -4607,6 +4609,7 @@ test_that("a cross-validation-only run keeps the scores, not the weights", {
 })
 
 test_that("weights across studies are cross-validated on the fit's folds", {
+    skip_if_not_installed("PlinkMatrix")
     cv <- cvResult(.tp_xsFmRow(.tp_xsFm, "study1", "mvsusie"))
     W <- matrix(1, 2L, 1L, dimnames = list(c("v1", "v2"), "study1"))
     folds <- list(crossValidationParam = list(folds = 3))
@@ -4632,6 +4635,7 @@ test_that("weights across studies are cross-validated on the fit's folds", {
 })
 
 test_that("a fit across studies over two ranges is read range by range", {
+    skip_if_not_installed("PlinkMatrix")
     msd <- .fm_disjointStudies()
     # Two ranges that both overlap the trait, so each fits it.
     tp <- SummarizedExperiment::rowRanges(
@@ -4684,6 +4688,7 @@ test_that("fits across studies are read only for the study axis", {
 })
 
 test_that("a fit across other studies than the run's group stops the run", {
+    skip_if_not_installed("PlinkMatrix")
     wider <- .tp_xsFm
     S4Vectors::mcols(wider)$jointStudies <- ifelse(
         is.na(wider$jointStudies),
@@ -4697,6 +4702,7 @@ test_that("a fit across other studies than the run's group stops the run", {
 })
 
 test_that("a study-axis spec fits lasso across the studies and in each", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("glmnet")
     run <- function(studyCoupling) {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
@@ -4806,6 +4812,7 @@ test_that("bayesC on BGLR also fits each context group jointly", {
 })
 
 test_that("bayesN on BGLR fits the individual-level studies jointly", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("BGLR")
     tw <- .tp_bglrRun(
         .fm_disjointStudies(),
@@ -4872,6 +4879,7 @@ test_that("a collection's joint fits read its backend choices", {
 })
 
 test_that("the ensemble across studies stacks each study's own fits", {
+    skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("glmnet")
     run <- function(studyCoupling, transferScale = "perSd") {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
@@ -4985,6 +4993,7 @@ test_that("mr.mash across studies takes the prior over its spec's axes", {
     # The study+context prior's rows run study2 first, and it was fitted on
     # the z scale (alpha = 1), so the group takes them reordered and divided
     # by sqrt(n_k n_l); the context prior is over other axes and is passed by.
+    skip_if_not_installed("PlinkMatrix")
     rows <- tibble(
         study = c("study2", "study2", "study1", "study1"),
         context = c("brain", "liver", "brain", "liver"),
@@ -5415,6 +5424,7 @@ test_that(".ensembleAccumulateWeights skips a dim-mismatched member", {
 .twrssfQcd <- .twrssf_qcd()
 
 test_that("twasWeightsPipeline RSS: no cutoff keeps all, cutoffs match panel", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .twrssfQcd
     full <- .twrssf_n(ss)
     # Nothing is filtered by default.
@@ -5451,6 +5461,7 @@ test_that("twasWeightsPipeline(QtlSumStats) fits PRS-CS and SDPR", {
     # Unmocked: both read the entry's z. They used to read a `b` this path
     # never supplies, so every entry failed with a warning. A short chain is
     # enough to show each method produces its row.
+    skip_if_not_installed("PlinkMatrix")
     ss <- .twrssfQcd
     res <- suppressMessages(twasWeightsPipeline(
         ss,
@@ -5469,6 +5480,7 @@ test_that("twasWeightsPipeline(QtlSumStats) fits PRS-CS and SDPR", {
 })
 
 test_that("twasWeightsPipeline RSS treats MAC as a MAF equivalent", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .twrssfQcd
     nSamp <- ncol(ldReference(ss)[[1L]])
     expect_equal(
@@ -5478,12 +5490,14 @@ test_that("twasWeightsPipeline RSS treats MAC as a MAF equivalent", {
 })
 
 test_that("twasWeightsPipeline RSS honours a missingness cutoff", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .twrssfQcd
     expect_lt(.twrssf_n(ss, imissCutoff = 0), sum(lengths(ss)))
     expect_equal(.twrssf_n(ss, imissCutoff = 1), sum(lengths(ss)))
 })
 
 test_that(".twasQssUnivariateFitCtx keeps z, ids and LD reference aligned", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .twrssfQcd
     sketch <- ldReference(ss)[[1L]]
     args <- list(ss, ss$study[[1L]], ss$context[[1L]], ss$trait[[1L]], sketch)

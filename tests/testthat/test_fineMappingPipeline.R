@@ -1643,6 +1643,7 @@ test_that("fineMappingPipeline(QtlDataset): CV folds attach a cvResult", {
 test_that("a CV run keeps each fold's weights on the row's own variants", {
     # Unmocked, so the fold weights are the ones the fold fits gave and the
     # row's variants are the ones the folds were fit over.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     res <- suppressMessages(fineMappingPipeline(
         qtlDatasetExample,
@@ -2595,6 +2596,7 @@ test_that("multi-study fine-mapping aggregates its QtlDatasets' results", {
 })
 
 test_that("a study-axis spec fits the individual-level studies jointly", {
+    skip_if_not_installed("PlinkMatrix")
     msd <- .fm_disjointStudies()
     run <- function(data, methods, jointSpecification = NULL) {
         suppressMessages(fineMappingPipeline(
@@ -2680,6 +2682,7 @@ test_that("a study-axis spec refuses studies sharing samples", {
 test_that("a composed spec with the study stacks the studies' contexts", {
     # One mvsusie fit over each study's brain and liver, the studies stacked
     # with each one's conditions on its own samples.
+    skip_if_not_installed("PlinkMatrix")
     res <- suppressWarnings(suppressMessages(fineMappingPipeline(
         .fm_disjointTwoContextStudies(),
         methods = FineMappingMethodsParam(
@@ -5230,6 +5233,7 @@ test_that("usePCA skips a PC block the SER screens out", {
 }
 
 test_that("fineMappingPipeline(QtlSumStats) filters nothing by default", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .rssf_ss
     expect_equal(.rssf_n(ss), sum(lengths(ss)))
 })
@@ -5239,6 +5243,7 @@ test_that("fineMappingPipeline RSS MAF cutoffs match .panelVariantFilter", {
     # no more (which would mean something else is filtering) and no fewer
     # (which would mean the cutoff silently did nothing) -- so panel-rare
     # variants go, and a tighter cutoff drops more.
+    skip_if_not_installed("PlinkMatrix")
     ss <- .rssf_ss
     ids <- variantIds(ss)
     kept <- sum(lengths(ss))
@@ -5256,6 +5261,7 @@ test_that("fineMappingPipeline RSS MAF cutoffs match .panelVariantFilter", {
 })
 
 test_that("fineMappingPipeline RSS treats MAC as a MAF equivalent", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .rssf_ss
     nSamp <- ncol(ldReference(ss)[[1L]])
     expect_equal(
@@ -5265,12 +5271,14 @@ test_that("fineMappingPipeline RSS treats MAC as a MAF equivalent", {
 })
 
 test_that("fineMappingPipeline RSS honours a missingness cutoff", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .rssf_ss
     expect_lt(.rssf_n(ss, imissCutoff = 0), sum(lengths(ss)))
     expect_equal(.rssf_n(ss, imissCutoff = 1), sum(lengths(ss)))
 })
 
 test_that(".fmExtractZn keeps z, ids and n aligned after filtering", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .rssf_ss
     entry <- pecotmr:::.collectionEntry(ss, 1L)
     sketch <- ldReference(ss)[[1L]]
@@ -6067,6 +6075,7 @@ test_that("a GWAS row carries its block name and window into its fit", {
 }
 
 test_that("fineMappingPipeline(QtlDataset) records what the dataset says", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     typed <- QtlDataset(
         studyName = studyName(qtlDatasetExample),
@@ -6092,6 +6101,7 @@ test_that("fineMappingPipeline(QtlDataset) records what the dataset says", {
 })
 
 test_that("fineMappingPipeline(MultiStudyQtlDataset) reads each study's", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     typed <- QtlDataset(
         studyName = "gtex",
@@ -6116,6 +6126,7 @@ test_that("fineMappingPipeline(MultiStudyQtlDataset) reads each study's", {
 })
 
 test_that("fineMappingPipeline(QtlDataset) omits dataType when none recorded", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     res <- suppressMessages(fineMappingPipeline(
         qtlDatasetExample,
@@ -6132,6 +6143,7 @@ test_that("fineMappingPipeline(QtlDataset) omits dataType when none recorded", {
 })
 
 test_that("fineMappingPipeline(QtlSumStats) records sumstat / standardized", {
+    skip_if_not_installed("PlinkMatrix")
     res <- suppressWarnings(suppressMessages(fineMappingPipeline(
         `$<-`(.rssf_ss, "dataType", rep("splicing", length(.rssf_ss))),
         methods = "susie"
@@ -6189,6 +6201,7 @@ test_that("individual-level genotypes reach the fitter standardized", {
     # The single preparation point for every individual-level fit in the
     # package: fine-mapping's per-tuple and joint paths, the TWAS joint
     # engine, and the top-PC construction all come through it.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     X <- pecotmr:::.fmResidGeno(
         qtlDatasetExample,
@@ -6208,6 +6221,7 @@ test_that("the genotype scale comes from the accessor, not the pipeline", {
     # pipelines add no mechanism of their own -- they only RECORD what the
     # residualizer resolved, so a wrong record and a wrong scale cannot come
     # apart.
+    skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
     recorded <- function(..., dataset = qtlDatasetExample) {
         res <- suppressMessages(fineMappingPipeline(
@@ -6240,6 +6254,7 @@ test_that("the pipelines add no second standardization mechanism", {
 test_that("the hatch does not reach a summary-statistics fit", {
     # There are no genotypes to scale, and the RSS likelihood is in
     # standardized units whatever anyone asks, so the flag stays TRUE.
+    skip_if_not_installed("PlinkMatrix")
     res <- suppressWarnings(suppressMessages(
         fineMappingPipeline(
             .rssf_ss,
@@ -6378,6 +6393,7 @@ test_that("MultiStudyQtlDataset: cross-study joint fits get their settings", {
 test_that("fine-mapping with an LdMatrix reference matches its panel", {
     # Every step reads LD through the reference dispatch, so a matrix holding
     # the panel's LD gives the panel's fit.
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     withLd <- .fmp_withLdMatrix(gss)
@@ -6390,6 +6406,7 @@ test_that("fine-mapping with an LdMatrix reference matches its panel", {
 })
 
 test_that("an RSS block reads a genotype reference's factor, not its LD", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     panel <- ldReference(gss)[[1L]]
@@ -6417,6 +6434,7 @@ test_that("an RSS block reads a genotype reference's factor, not its LD", {
 })
 
 test_that("fine-mapping runs on a GenotypeMixture reference", {
+    skip_if_not_installed("PlinkMatrix")
     data(gwasSumStatsS4Example)
     gss <- gwasSumStatsS4Example
     panel <- ldReference(gss)[[1L]]
@@ -6511,6 +6529,7 @@ test_that("a mixture's rFinite is pooled, or per panel when estimated", {
 })
 
 test_that("an RSS block that estimates mixture weights reads the panels", {
+    skip_if_not_installed("PlinkMatrix")
     fx <- .fmp_halvesMixture()
     ids <- fx$ids[1:25]
     given <- .fmRssLd(fx$mix, ids, "susie", FALSE)
@@ -7048,6 +7067,7 @@ test_that("fineMappingPipeline(QtlSumStats) gives SuSiE-RSS 1 - h2", {
 })
 
 test_that("a real SuSiE-RSS fit holds the residual variance h2 sets", {
+    skip_if_not_installed("PlinkMatrix")
     est <- estimateH2(.rssf_ss, referenceOverlap = 1)
     S4Vectors::mcols(est)$h2 <- 0.3
     res <- suppressMessages(suppressWarnings(fineMappingPipeline(

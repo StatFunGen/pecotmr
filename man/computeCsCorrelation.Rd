@@ -40,5 +40,7 @@ Compute the between-credible-set correlation matrix for a
 data(qtlFineMappingPairedExample)
 data(qtlSumStatsExample)
 fe <- fineMappingResult(qtlFineMappingPairedExample)
-computeCsCorrelation(fe, qtlSumStatsExample)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    computeCsCorrelation(fe, qtlSumStatsExample)
+}
 }

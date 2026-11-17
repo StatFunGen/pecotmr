@@ -2774,6 +2774,7 @@ test_that(".buildJointSumstatZMatrix filters nothing by default", {
 })
 
 test_that(".buildJointSumstatZMatrix drops panel-rare variants", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .bjzSs
     full <- .bjz_build(ss)
     tight <- .bjz_build(ss, mafCutoff = 0.2)
@@ -2785,6 +2786,7 @@ test_that(".buildJointSumstatZMatrix drops panel-rare variants", {
 })
 
 test_that(".buildJointSumstatZMatrix agrees with .panelVariantFilter", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .bjzSs
     ids <- .bjz_build(ss)$variantIds
     for (cut in c(0.05, 0.2)) {
@@ -2804,6 +2806,7 @@ test_that(".buildJointSumstatZMatrix keeps Z aligned to its ids", {
     # Each context's own frame is narrowed to the filtered set before the
     # shared-SNP-order check; otherwise that check fires on a length mismatch
     # the filter itself created.
+    skip_if_not_installed("PlinkMatrix")
     ss <- .bjzSs
     full <- .bjz_build(ss)
     tight <- .bjz_build(ss, mafCutoff = 0.2)
@@ -2814,6 +2817,7 @@ test_that(".buildJointSumstatZMatrix keeps Z aligned to its ids", {
 })
 
 test_that(".buildJointSumstatZMatrix honours a missingness cutoff", {
+    skip_if_not_installed("PlinkMatrix")
     ss <- .bjzSs
     expect_lt(
         length(.bjz_build(ss, imissCutoff = 0)$variantIds),

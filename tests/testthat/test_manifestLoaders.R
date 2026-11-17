@@ -14,10 +14,12 @@
     )
 }
 
-# Read once and shared: the panel is a value, and some forty tests take one.
-.toyLdRefPanel <- readGenotypes(plink1Prefix = .toyRefPrefix())
+# Read once, on first use, and shared: the panel is a value, and some forty
+# tests take one. Reading it needs PlinkMatrix, so they skip without it.
+delayedAssign(".toyLdRefPanel", readGenotypes(plink1Prefix = .toyRefPrefix()))
 
 .toyLdRef <- function() {
+    skip_if_not_installed("PlinkMatrix")
     .toyLdRefPanel
 }
 
@@ -126,6 +128,7 @@ test_that(".reconcileScalar resolves arg/column and flags conflicts", {
 # ---------------------------------------------------------------------------
 
 test_that(".readGenotypePath reads a PLINK1 prefix as a panel", {
+    skip_if_not_installed("PlinkMatrix")
     panel <- pecotmr:::.readGenotypePath(.toyRefPrefix())
     expect_s4_class(panel, "RangedSummarizedExperiment")
     expect_equal(pecotmr:::.ldRefFormat(panel), "plink1")
@@ -864,6 +867,7 @@ test_that("a manifest's BED-style ranges are read in UCSC style", {
 })
 
 test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     bed <- .writePhenoBed(file.path(tmp, "ctxA.bed"))
     manifest <- data.frame(
@@ -881,6 +885,7 @@ test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
 })
 
 test_that("a QtlDataset manifest records each context's molecular type", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     manifest <- data.frame(
         context = c("ctxA", "ctxB", "ctxC"),
@@ -941,6 +946,7 @@ test_that("loadQtlDatasetFromManifest accepts study/genotypes as arguments", {
 # ---------------------------------------------------------------------------
 
 test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     bedA <- .writePhenoBed(file.path(tmp, "a.bed"))
     bedB <- .writePhenoBed(file.path(tmp, "b.bed"))
@@ -958,6 +964,7 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
 })
 
 test_that("a multi-study manifest types each study's contexts", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     manifest <- data.frame(
         study = c("study1", "study2"),
@@ -976,6 +983,7 @@ test_that("a multi-study manifest types each study's contexts", {
 })
 
 test_that("loadMultiStudyQtlDatasetFromManifest attaches a summary study", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     bedA <- .writePhenoBed(file.path(tmp, "a.bed"))
     qdMan <- data.frame(
@@ -1058,6 +1066,7 @@ test_that(".reconcileScalar returns NULL for an optional unset scalar", {
 # ===========================================================================
 
 test_that(".readGenotypePath dispatches by extension", {
+    skip_if_not_installed("PlinkMatrix")
     expect_error(pecotmr:::.readGenotypePath("x.vcf.gz")) # vcf branch
     expect_error(pecotmr:::.readGenotypePath("x.pgen")) # plink2 branch
     expect_error(
@@ -1076,6 +1085,7 @@ test_that(".readGenotypePath reads a VCF as a panel", {
 })
 
 test_that(".resolveLdRef accepts a genoMeta vector or path, rejects junk", {
+    skip_if_not_installed("PlinkMatrix")
     sharded <- pecotmr:::.resolveLdRef(c("22" = .toyRefPrefix()))
     expect_s4_class(sharded, "RangedSummarizedExperiment")
     expect_true("chr22" %in% names(pecotmr:::.ldRefChromPaths(sharded)))
@@ -1092,6 +1102,7 @@ test_that(".resolveLdRef takes the panel readGenotypes returns", {
     # loaders have to accept its return value wherever they accepted a
     # handle -- as it stands, since a panel need not read through a handle,
     # and one the caller narrowed stays narrowed.
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
     expect_identical(pecotmr:::.resolveLdRef(panel), panel)
     narrowed <- panel[1:5, 1:10]
@@ -1099,6 +1110,7 @@ test_that(".resolveLdRef takes the panel readGenotypes returns", {
 })
 
 test_that(".materializeLdRef and .resolveGenotypes take a panel too", {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(plink1Prefix = .toyRefPrefix())
     expect_identical(pecotmr:::.materializeLdRef(panel, "22"), panel)
     expect_identical(
@@ -1153,6 +1165,7 @@ test_that("loadGwasSumStatsFromManifest reads only the needed shards", {
 })
 
 test_that("ldReference resolves from ldReferencePath; conflicts error", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     ssPath <- .writeSumstatsTsv(.toyGwasDf(5), file.path(tmp, "s.tsv"))
     manifest <- data.frame(
@@ -1316,6 +1329,7 @@ test_that("loadQtlSumStatsFromManifest attaches varY and honours region", {
 }
 
 test_that("loadQtlDatasetFromManifest attaches context/genotype covariates", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "ctx.bed"), samples)
@@ -1336,6 +1350,7 @@ test_that("loadQtlDatasetFromManifest attaches context/genotype covariates", {
 })
 
 test_that("loadQtlDatasetFromManifest reads transposed (QTLtools) covariates", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "ctx.bed"), samples)
@@ -1358,6 +1373,7 @@ test_that("loadQtlDatasetFromManifest reads transposed (QTLtools) covariates", {
 })
 
 test_that("loadQtlDatasetFromManifest accepts a prefix and matrix covariates", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "ctx.bed"), samples)
@@ -1856,6 +1872,7 @@ test_that("covariate file with no shared samples errors", {
 })
 
 test_that("genotypeCovariates accepts a path string", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "c.bed"), samples)
@@ -1916,6 +1933,7 @@ test_that("QtlSumStats manifest resolves a per-row columnMapping", {
 })
 
 test_that("QtlDataset builder errors on conflicting per-context/study paths", {
+    skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
     samples <- paste0("S", 1:6)
     bed <- .writePhenoBed(file.path(tmp, "c.bed"), samples)

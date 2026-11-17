@@ -1712,7 +1712,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   naming different builds are refused.
 #' @examples
 #' data(qtlDatasetExample)
-#' twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     twasWeightsPipeline(
+#'         qtlDatasetExample,
+#'         methods = "lasso",
+#'         cisWindow = 1e6
+#'     )
+#' }
 #' @importFrom purrr imap map map_chr map_int map_lgl compact list_flatten
 #'   set_names
 #' @export

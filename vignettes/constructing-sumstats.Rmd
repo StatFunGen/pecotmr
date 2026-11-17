@@ -10,14 +10,24 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
+hasPlinkMatrix <- requireNamespace("PlinkMatrix", quietly = TRUE)
 knitr::opts_chunk$set(
     echo = TRUE,
     message = FALSE,
     warning = FALSE,
     fig.width = 7,
-    fig.height = 4.5
+    fig.height = 4.5,
+    eval = hasPlinkMatrix
 )
 hasVA <- requireNamespace("VariantAnnotation", quietly = TRUE)
+```
+
+```{r plinkmatrix-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
+cat(
+    "**Note:** the `PlinkMatrix` package is not installed, so the code below",
+    "is shown but not run: it reads the bundled example genotypes, which are",
+    "PLINK1 files. Install it with `BiocManager::install(\"PlinkMatrix\")`."
+)
 ```
 
 ## Overview
@@ -342,7 +352,7 @@ with bgzip and indexed with tabix. **BCF is not supported** — convert to a
 bgzipped VCF first. Support for reading VCFs requires the `VariantAnnotation`
 package.
 
-```{r gwas-vcf, eval = requireNamespace("VariantAnnotation", quietly = TRUE)}
+```{r gwas-vcf, eval = hasVA && hasPlinkMatrix}
 vcfLines <- c(
     "##fileformat=VCFv4.2",
     '##FORMAT=<ID=ES,Number=A,Type=Float,Description="effect size">',

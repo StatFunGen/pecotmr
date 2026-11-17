@@ -3,6 +3,7 @@
 
 # Two "cohorts": the two halves of one real genotype panel's samples.
 .gmPanels <- function() {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     list(a = panel[, 1:40], b = panel[, 41:100], full = panel)
 }

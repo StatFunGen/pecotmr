@@ -1096,6 +1096,7 @@ test_that("updateObject marks every row of an old LD-free collection LD-free", {
 })
 
 test_that("updateObject reads a collection's saved PLINK1 reference again", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlSumStatsMulticontextExample)
     mc <- qtlSumStatsMulticontextExample
     current <- ldReference(mc)[[1L]]
@@ -1115,6 +1116,7 @@ test_that("updateObject reads a collection's saved PLINK1 reference again", {
 })
 
 test_that("updateObject keeps a reference it cannot read again, then retries", {
+    skip_if_not_installed("PlinkMatrix")
     data(qtlFineMappingExample)
     files <- str_c(
         test_path("test_data", "test_variants"),

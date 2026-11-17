@@ -233,21 +233,26 @@ S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
   A2 = S4Vectors::mcols(ldScoreExample)$A2,
   Z = rnorm(length(ldScoreExample)),
   N = 100000L)
-panel <- readGenotypes(
-  system.file("extdata", "toy_ref.bed", package = "pecotmr")
-)
-ss <- GwasSumStats(studyName = "trait1", entry = list(gr),
-  genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
-  ldReference = panel)
-estimateH2(ss, ldScoreExample, method = "sldsc")
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    panel <- readGenotypes(
+        system.file("extdata", "toy_ref.bed", package = "pecotmr")
+    )
+    ss <- GwasSumStats(
+        studyName = "trait1",
+        entry = list(gr),
+        genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
+        ldReference = panel
+    )
+    print(estimateH2(ss, ldScoreExample, method = "sldsc"))
 
-# Per-trait cis heritability, each row against its own LD reference.
-data(qtlSumStatsExample)
-estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+    # Per-trait cis heritability, each row against its own LD reference.
+    data(qtlSumStatsExample)
+    print(estimateH2(qtlSumStatsExample, referenceOverlap = 1))
 
-# From individual-level data, on each trait's own genotypes.
-data(qtlDatasetExample)
-estimateH2(qtlDatasetExample, cisWindow = 1e6)
+    # From individual-level data, on each trait's own genotypes.
+    data(qtlDatasetExample)
+    estimateH2(qtlDatasetExample, cisWindow = 1e6)
+}
 }
 \references{
 Werme J, van der Sluis S, Posthuma D, de Leeuw CA (2022). An

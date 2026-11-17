@@ -1736,7 +1736,9 @@ NULL
 #' manifest <- data.frame(context = "brain",
 #'   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
 #'   study = "s1", genotypePath = file.path(d, "example.chr22"))
-#' loadQtlDatasetFromManifest(manifest = manifest, studyName = "s1")
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     loadQtlDatasetFromManifest(manifest = manifest, studyName = "s1")
+#' }
 #' @importFrom stringr str_ends
 #' @importFrom checkmate assertString assertFlag
 #' @export
@@ -2422,7 +2424,9 @@ loadQtlSumStatsFromManifest <- function(
 #' manifest <- data.frame(study = c("s1", "s2"), context = "brain",
 #'   phenotypePath = file.path(d, "example_geneexpr.bed.gz"),
 #'   genotypePath = file.path(d, "example.chr22"))
-#' loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     loadMultiStudyQtlDatasetFromManifest(qtlDatasetsManifest = manifest)
+#' }
 #' @importFrom checkmate assertFlag assertNumber
 #' @export
 loadMultiStudyQtlDatasetFromManifest <- function(

@@ -17,6 +17,16 @@ knitr::opts_chunk$set(
     fig.width = 7,
     fig.height = 4.5
 )
+hasPlinkMatrix <- requireNamespace("PlinkMatrix", quietly = TRUE)
+hasQgg <- requireNamespace("qgg", quietly = TRUE)
+```
+
+```{r plinkmatrix-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
+cat(
+    "**Note:** the `PlinkMatrix` package is not installed, so the code that",
+    "reads the bundled example genotypes is shown but not run. Install it",
+    "with `BiocManager::install(\"PlinkMatrix\")`."
+)
 ```
 
 ## Overview
@@ -100,6 +110,9 @@ S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
     Z = z,
     N = as.integer(nGwas)
 )
+```
+
+```{r gwas-sumstats, eval = hasPlinkMatrix}
 gwas <- GwasSumStats(
     studyName = "trait1",
     entry = list(gr),
@@ -112,7 +125,7 @@ gwas <- GwasSumStats(
 
 ## Estimating heritability
 
-```{r estimate}
+```{r estimate, eval = hasPlinkMatrix}
 methods <- c("sldsc", "gldsc", "lder", "hdl")
 estimates <- lapply(methods, function(m) {
     ref <- if (m %in% c("sldsc", "gldsc")) ldScoreExample else ldEigenExample
@@ -213,7 +226,7 @@ Passing an `AnnotationMatrix` partitions heritability across annotations.
 The annotation rows must line up with the reference, exactly as the summary
 statistics do.
 
-```{r annotate}
+```{r annotate, eval = hasPlinkMatrix}
 # An illustrative annotation over the first half of the reference, simulated
 # to carry three times the per-variant heritability of the rest.
 inA <- seq_len(M) <= M / 2
@@ -250,7 +263,7 @@ annot <- AnnotationMatrix(
 )
 ```
 
-```{r enrichment}
+```{r enrichment, eval = hasPlinkMatrix}
 strat <- estimateH2(
     gwasStrat,
     ldScoreExample,
@@ -410,7 +423,7 @@ object and need the other's input.
 `readSldscTrait()` produces, so an in-package estimate can be meta-analysed
 alongside polyfun runs:
 
-```{r bridge}
+```{r bridge, eval = hasPlinkMatrix}
 names(h2EstimateToSldscTrait(strat))
 ```
 
@@ -427,7 +440,7 @@ reports what its authors report, and `NA` where they report nothing:
 | `"hdlL"` | HDL-L (Li 2025): likelihood with an intercept | h2, p, intercept |
 | `"fastHer"` | FastHer (Svishcheva 2025): maximum likelihood | h2, SE, scale |
 
-```{r cis-h2}
+```{r cis-h2, eval = hasPlinkMatrix}
 data(qtlSumStatsExample)
 cis <- estimateH2(qtlSumStatsExample, referenceOverlap = 1)
 cis
@@ -469,12 +482,12 @@ genotypes' components. `"greml"` adds GREML, the restricted maximum likelihood
 of the genetic and residual variances on the window's relationship matrix
 (`qgg::greml`), as FUSION estimates a gene's.
 
-```{r cis-h2-individual}
+```{r cis-h2-individual, eval = hasPlinkMatrix}
 data(qtlDatasetExample)
 estimateH2(qtlDatasetExample, cisWindow = 1e6)
 ```
 
-```{r cis-h2-greml, eval = requireNamespace("qgg", quietly = TRUE)}
+```{r cis-h2-greml, eval = hasQgg && hasPlinkMatrix}
 estimateH2(qtlDatasetExample, method = "greml", cisWindow = 1e6)
 ```
 

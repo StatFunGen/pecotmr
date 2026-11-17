@@ -177,21 +177,26 @@ NULL
 #'   A2 = S4Vectors::mcols(ldScoreExample)$A2,
 #'   Z = rnorm(length(ldScoreExample)),
 #'   N = 100000L)
-#' panel <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' ss <- GwasSumStats(studyName = "trait1", entry = list(gr),
-#'   genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
-#'   ldReference = panel)
-#' estimateH2(ss, ldScoreExample, method = "sldsc")
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     panel <- readGenotypes(
+#'         system.file("extdata", "toy_ref.bed", package = "pecotmr")
+#'     )
+#'     ss <- GwasSumStats(
+#'         studyName = "trait1",
+#'         entry = list(gr),
+#'         genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
+#'         ldReference = panel
+#'     )
+#'     print(estimateH2(ss, ldScoreExample, method = "sldsc"))
 #'
-#' # Per-trait cis heritability, each row against its own LD reference.
-#' data(qtlSumStatsExample)
-#' estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+#'     # Per-trait cis heritability, each row against its own LD reference.
+#'     data(qtlSumStatsExample)
+#'     print(estimateH2(qtlSumStatsExample, referenceOverlap = 1))
 #'
-#' # From individual-level data, on each trait's own genotypes.
-#' data(qtlDatasetExample)
-#' estimateH2(qtlDatasetExample, cisWindow = 1e6)
+#'     # From individual-level data, on each trait's own genotypes.
+#'     data(qtlDatasetExample)
+#'     estimateH2(qtlDatasetExample, cisWindow = 1e6)
+#' }
 #' @export
 setGeneric(
     "estimateH2",
@@ -313,18 +318,21 @@ setGeneric("computeLdScores", function(ldRef, annotations = NULL, ...) {
 #' @return A \code{RangedSummarizedExperiment} of variants x samples.
 #' @seealso \code{\link{computeLd}}
 #' @examples
-#' panel <- readGenotypes(
-#'   system.file("extdata", "toy_ref.bed", package = "pecotmr")
-#' )
-#' dim(panel)
-#' head(rownames(panel))
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     panel <- readGenotypes(
+#'         system.file("extdata", "toy_ref.bed", package = "pecotmr")
+#'     )
+#'     print(dim(panel))
+#'     print(head(rownames(panel)))
 #'
-#' # The same panel named by its PLINK1 stem rather than by a file.
-#' stem <- sub("\\.bed$", "", system.file(
-#'   "extdata", "toy_ref.bed",
-#'   package = "pecotmr"
-#' ))
-#' dim(readGenotypes(plink1Prefix = stem))
+#'     # The same panel named by its PLINK1 stem rather than by a file.
+#'     stem <- sub(
+#'         "\\.bed$",
+#'         "",
+#'         system.file("extdata", "toy_ref.bed", package = "pecotmr")
+#'     )
+#'     dim(readGenotypes(plink1Prefix = stem))
+#' }
 #' @export
 setGeneric("readGenotypes", function(path, format = NULL, ...) {
     standardGeneric("readGenotypes")
@@ -603,7 +611,9 @@ setGeneric("sampleSize<-", function(x, ..., value) {
 #'   IDs), or an empty vector when no variants are selected.
 #' @examples
 #' data(qtlDatasetExample)
-#' af(qtlDatasetExample)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     af(qtlDatasetExample)
+#' }
 #' @export
 setGeneric("af", function(x, ...) standardGeneric("af"))
 
@@ -912,9 +922,11 @@ setGeneric("ldMatrix", function(x) standardGeneric("ldMatrix"))
 #' @return A numeric matrix, a list of matrices, or \code{NULL}.
 #' @examples
 #' data(qtlDatasetExample)
-#' geno <- genotypes(qtlDatasetExample)
-#' dim(geno)
-#' geno[1:5, 1:3]
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     geno <- genotypes(qtlDatasetExample)
+#'     print(dim(geno))
+#'     geno[1:5, 1:3]
+#' }
 #' @export
 setGeneric("genotypes", function(x, ...) standardGeneric("genotypes"))
 
@@ -1110,7 +1122,9 @@ setGeneric("susieFit", function(x, ...) standardGeneric("susieFit"))
 #' data(qtlFineMappingPairedExample)
 #' data(qtlSumStatsExample)
 #' fe <- fineMappingResult(qtlFineMappingPairedExample)
-#' computeCsCorrelation(fe, qtlSumStatsExample)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     computeCsCorrelation(fe, qtlSumStatsExample)
+#' }
 #' @export
 setGeneric("computeCsCorrelation", function(x, ldSource, ...) {
     # The accepted `ldSource` classes are known, so this is a validity check
@@ -1825,9 +1839,11 @@ setGeneric("traitPosition", function(x, ...) {
 #' @return A numeric matrix (samples x variants).
 #' @examples
 #' data(qtlDatasetExample)
-#' resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
-#' dim(resid)
-#' round(resid[1:5, 1:3], 3)
+#' if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+#'     resid <- residualizedGenotypes(qtlDatasetExample, context = "brain")
+#'     print(dim(resid))
+#'     round(resid[1:5, 1:3], 3)
+#' }
 #' @export
 setGeneric("residualizedGenotypes", function(x, ...) {
     standardGeneric("residualizedGenotypes")

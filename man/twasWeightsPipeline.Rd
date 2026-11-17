@@ -558,5 +558,11 @@ same shared partition.
 
 \examples{
 data(qtlDatasetExample)
-twasWeightsPipeline(qtlDatasetExample, methods = "lasso", cisWindow = 1e6)
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    twasWeightsPipeline(
+        qtlDatasetExample,
+        methods = "lasso",
+        cisWindow = 1e6
+    )
+}
 }

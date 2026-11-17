@@ -10,15 +10,25 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
+hasPlinkMatrix <- requireNamespace("PlinkMatrix", quietly = TRUE)
 knitr::opts_chunk$set(
     echo = TRUE,
     message = FALSE,
     warning = FALSE,
     fig.width = 7,
-    fig.height = 4.5
+    fig.height = 4.5,
+    eval = hasPlinkMatrix
 )
 hasRelatednessQc <- requireNamespace("plinkQC", quietly = TRUE) &&
     requireNamespace("igraph", quietly = TRUE)
+```
+
+```{r plinkmatrix-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
+cat(
+    "**Note:** the `PlinkMatrix` package is not installed, so the code below",
+    "is shown but not run: it reads the bundled example genotypes, which are",
+    "PLINK1 files. Install it with `BiocManager::install(\"PlinkMatrix\")`."
+)
 ```
 
 ## Overview
@@ -291,7 +301,7 @@ dataset is built — the pipelines do not model it.
 `filterRelatedness()` takes a kinship table — one row per pair, the shape
 PLINK's `--genome` or KING emits — and returns the individuals to **drop**:
 
-```{r relatedness, eval = hasRelatednessQc}
+```{r relatedness, eval = hasRelatednessQc && hasPlinkMatrix}
 relatedness <- data.frame(
     IID1 = c(samples[1], samples[3], samples[5]),
     IID2 = c(samples[2], samples[4], samples[6]),

@@ -27,7 +27,9 @@ Extract a genotype matrix from an object that carries genotype
 }
 \examples{
 data(qtlDatasetExample)
-geno <- genotypes(qtlDatasetExample)
-dim(geno)
-geno[1:5, 1:3]
+if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
+    geno <- genotypes(qtlDatasetExample)
+    print(dim(geno))
+    geno[1:5, 1:3]
+}
 }

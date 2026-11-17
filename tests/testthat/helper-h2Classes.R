@@ -85,6 +85,7 @@ makeTestLdMatrixBlocks <- function(
 # block has more variants than the panel has samples, so its LD has 40 zero
 # eigenvalues that the SVD of the panel's factor does not list.
 .h2PanelFixture <- function() {
+    skip_if_not_installed("PlinkMatrix")
     panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
     gr <- SummarizedExperiment::rowRanges(panel)
     pos <- GenomicRanges::start(gr)
