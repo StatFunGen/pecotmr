@@ -40,6 +40,26 @@ context("h2_estimate_wrappers")
     }))
 }
 
+# The fixture's LD blocks recording the A1 frequencies `af` (one per
+# variant, in block order) as their AF.
+.h2PanelLdWithAf <- function(fx, af) {
+    sizes <- map_int(fx$ld, function(x) nrow(ldMatrix(x)))
+    map2(fx$ld, split(af, rep(seq_along(sizes), sizes)), function(x, f) {
+        variants <- as(x, "GRanges")
+        LdMatrix(
+            unname(ldMatrix(x)),
+            variants = S4Vectors::`mcols<-`(
+                variants,
+                value = S4Vectors::DataFrame(
+                    S4Vectors::mcols(variants),
+                    AF = f
+                )
+            ),
+            nSamples = ncol(fx$panel)
+        )
+    })
+}
+
 makeTestEigenRef <- function(nSnps = 20, nBlocks = 2) {
     snps_per_block <- nSnps / nBlocks
     blocks_gr <- GenomicRanges::GRanges(
@@ -163,35 +183,53 @@ makeTestAnnotations <- function(nSnps = 20) {
 }
 
 # ===========================================================================
-# .validateMethodRef (internal)
+# The LD statistic each setting reads (internal)
 # ===========================================================================
 
-test_that(".validateMethodRef errors when lder or hdl is given an LdScore", {
+test_that("the eigen statistic's settings refuse an LdScore", {
     score_ref <- makeTestScoreRef()
     for (method in c("lder", "hdl")) {
         expect_error(
-            pecotmr:::.validateMethodRef(method, score_ref),
-            "requires an LdEigen",
+            pecotmr:::.h2AssertSettingsRef(
+                .h2GenomeWideSettings(method, FALSE, FALSE),
+                score_ref,
+                "estimateH2"
+            ),
+            "estimateH2: the eigen statistic requires an LdEigen",
             info = method
         )
     }
 })
 
-test_that(".validateMethodRef errors when method='gldsc' but ref is LdEigen", {
+test_that("the variants' settings refuse an LdEigen", {
     eigen_ref <- makeTestEigenRef()
-    expect_error(
-        pecotmr:::.validateMethodRef("gldsc", eigen_ref),
-        "requires an LdScore"
-    )
+    for (method in c("gldsc", "sldsc")) {
+        expect_error(
+            pecotmr:::.h2AssertSettingsRef(
+                .h2GenomeWideSettings(method, FALSE, FALSE),
+                eigen_ref,
+                "estimateH2"
+            ),
+            "the variant statistic requires an LdScore object, got LdEigen",
+            info = method
+        )
+    }
 })
 
-test_that(".validateMethodRef returns TRUE for valid combinations", {
+test_that("each setting accepts the LD statistic it reads", {
     eigen_ref <- makeTestEigenRef()
     score_ref <- makeTestScoreRef()
-
-    expect_true(pecotmr:::.validateMethodRef("lder", eigen_ref))
-    expect_true(pecotmr:::.validateMethodRef("hdl", eigen_ref))
-    expect_true(pecotmr:::.validateMethodRef("gldsc", score_ref))
+    ok <- function(method, ref) {
+        pecotmr:::.h2AssertSettingsRef(
+            .h2GenomeWideSettings(method, FALSE, FALSE),
+            ref,
+            "estimateH2"
+        )
+    }
+    expect_true(ok("lder", eigen_ref))
+    expect_true(ok("hdl", eigen_ref))
+    expect_true(ok("gldsc", score_ref))
+    expect_true(ok("sldsc", score_ref))
 })
 
 # ===========================================================================
@@ -361,29 +399,28 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
             baselineMat = NULL,
             candMat = NULL
         )
-        pecotmr:::.hdlDesign(data, length(ref), NULL)
+        pecotmr:::.hdlDesign(
+            data,
+            length(ref),
+            NULL,
+            .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures
+        )
     }
     lazyDesign <- hdlDesign(lazyEigen)
     storedDesign <- hdlDesign(storedEigen)
     expect_equal(length(lazyDesign$lam), length(storedDesign$lam))
+    proc <- .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures
+    ll <- function(design, par) {
+        pecotmr:::.h2VarianceObjective(
+            par,
+            pecotmr:::.hdlScoringData(design, n, 100, proc),
+            FALSE
+        )$value
+    }
     for (par in list(c(0.3, 1), c(0.5, 1.2))) {
         expect_equal(
-            pecotmr:::.hdlNll(
-                par,
-                n,
-                100,
-                lazyDesign$lam,
-                lazyDesign$bstar,
-                lazyDesign$ldAnnotScaled
-            ),
-            pecotmr:::.hdlNll(
-                par,
-                n,
-                100,
-                storedDesign$lam,
-                storedDesign$bstar,
-                storedDesign$ldAnnotScaled
-            ),
+            ll(lazyDesign, par),
+            ll(storedDesign, par),
             tolerance = 1e-10
         )
     }
@@ -510,7 +547,8 @@ test_that("h2EstimateToSldscTrait makes a 1-row dummy for NULL jackknife", {
 makeTestSumstatsForRef <- function(
     ref,
     traitName = "test",
-    varY = NA_real_
+    varY = NA_real_,
+    ...
 ) {
     n_snps <- length(ref)
     set.seed(123)
@@ -532,7 +570,8 @@ makeTestSumstatsForRef <- function(
         entry = list(.dfToGwasGr(df)),
         genome = "hg19",
         ldReference = makeTestGwasGenotypeHandle(),
-        varY = varY
+        varY = varY,
+        ...
     )
 }
 
@@ -549,14 +588,26 @@ test_that("estimateH2 returns an H2Estimate for lder, gldsc and hdl", {
     )
     for (method in names(refs)) {
         ss <- makeTestSumstatsForRef(refs[[method]])
-        result <- estimateH2(ss, refs[[method]], method = method)
+        result <- estimateH2(
+            ss,
+            refs[[method]],
+            param = .h2MethodSettings(method, NULL, refs[[method]])
+        )
 
         expect_true(is(result, "H2Estimate"), info = method)
         expect_true(is.numeric(heritabilityEstimate(result)), info = method)
         expect_true(is.numeric(heritabilityEstimateSe(result)), info = method)
         expect_true(is.numeric(heritabilityIntercept(result)), info = method)
         expect_true(is.numeric(heritabilityInterceptSe(result)), info = method)
-        expect_equal(methodNames(result), method, info = method)
+        expect_identical(
+            h2EstimateParam(result),
+            .h2GenomeWideSettings(
+                method,
+                FALSE,
+                identical(method, "lder") && inSample(refs[[method]])
+            ),
+            info = method
+        )
         expect_equal(nSnps(result), nSnps(ss), info = method)
         expect_equal(studyName(result), "test", info = method)
         expect_identical(traitNames(result), character(0), info = method)
@@ -566,7 +617,7 @@ test_that("estimateH2 returns an H2Estimate for lder, gldsc and hdl", {
 test_that("a genome-wide estimate is one row for the study", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
-    res <- estimateH2(ss, ref, method = "lder")
+    res <- estimateH2(ss, ref)
     expect_identical(length(res), 1L)
     # It covers the whole reference, so its element holds no ranges; the row
     # takes the reference's genome.
@@ -577,7 +628,7 @@ test_that("a genome-wide estimate is one row for the study", {
     )
     expect_equal(
         heritabilityEstimate(res),
-        lderUnivariate(z(ss), 50000, ref)$h2
+        hdlUnivariate(z(ss), 50000, ref)$h2
     )
 })
 
@@ -611,7 +662,7 @@ test_that("estimateH2 rejects a sumstats with a different variant count", {
         ldReference = makeTestGwasGenotypeHandle()
     )
     expect_error(
-        estimateH2(short, ref, method = "lder"),
+        estimateH2(short, ref),
         "carries 10 variant\\(s\\) but the LD reference carries 20"
     )
 })
@@ -627,7 +678,7 @@ test_that("estimateH2 rejects a sumstats at different coordinates", {
         )
     )
     expect_error(
-        estimateH2(shifted, ref, method = "lder"),
+        estimateH2(shifted, ref),
         "disagree at 20 of 20 position"
     )
 })
@@ -643,22 +694,22 @@ test_that("estimateH2 refuses sumstats with the right variants out of order", {
         )
     )
     expect_error(
-        estimateH2(reordered, ref, method = "lder"),
+        estimateH2(reordered, ref),
         "same variants in the same order"
     )
 })
 
-test_that("estimateH2 rejects annotations that do not cover the reference", {
+test_that("estimateStratifiedH2 rejects annotations short of the reference", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     annot <- makeTestAnnotations(nSnps = 10)
     expect_error(
-        estimateH2(ss, ref, method = "lder", annotations = annot),
-        "`annotations` carries 10 variant\\(s\\)"
+        estimateStratifiedH2(ss, ref, annot),
+        "estimateStratifiedH2: `annotations` carries 10 variant\\(s\\)"
     )
 })
 
-test_that("estimateH2 refuses annotations elsewhere or in another order", {
+test_that("estimateStratifiedH2 refuses annotations elsewhere or reordered", {
     ref <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(ref)
     annot <- makeTestAnnotations()
@@ -676,20 +727,18 @@ test_that("estimateH2 refuses annotations elsewhere or in another order", {
         )
     }
     expect_error(
-        estimateH2(
+        estimateStratifiedH2(
             ss,
             ref,
-            method = "lder",
-            annotations = relocate(GenomicRanges::start(ref) + 1L)
+            relocate(GenomicRanges::start(ref) + 1L)
         ),
         "`annotations` and the LD reference disagree at 20 of 20 position"
     )
     expect_error(
-        estimateH2(
+        estimateStratifiedH2(
             ss,
             ref,
-            method = "lder",
-            annotations = relocate(rev(GenomicRanges::start(ref)))
+            relocate(rev(GenomicRanges::start(ref)))
         ),
         "`annotations` and the LD reference disagree"
     )
@@ -704,7 +753,7 @@ test_that("estimateH2 rejects a genome build mismatch", {
         genome = "hg38",
         ldReference = makeTestGwasGenotypeHandle()
     )
-    expect_error(estimateH2(hg38, ref, method = "lder"), "build mismatch")
+    expect_error(estimateH2(hg38, ref), "build mismatch")
 })
 
 test_that("estimateH2 accepts an LD reference that records no genome build", {
@@ -713,7 +762,205 @@ test_that("estimateH2 accepts an LD reference that records no genome build", {
     # An LD reference often records no build, so one built from it
     # names none. An unknown build must not read as a mismatch.
     GenomeInfoDb::genome(ref) <- NA_character_
-    expect_s4_class(estimateH2(ss, ref, method = "lder"), "H2Estimate")
+    expect_s4_class(estimateH2(ss, ref), "H2Estimate")
+})
+
+# ===========================================================================
+# estimateStratifiedH2: each genome-wide fit from its settings
+# ===========================================================================
+
+test_that("estimateStratifiedH2 defaults to stratified HDL's settings", {
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations()
+    res <- suppressWarnings(estimateStratifiedH2(ss, ref, annot))
+    expect_identical(
+        h2EstimateParam(res),
+        .h2GenomeWideSettings("hdl", TRUE, inSample(ref))
+    )
+    expect_s3_class(stratifiedHeritabilityEnrichment(res), "data.frame")
+    # An empty list carries no settings, as everywhere a Param is taken.
+    expect_identical(
+        suppressWarnings(estimateStratifiedH2(ss, ref, annot, param = list())),
+        res
+    )
+})
+
+test_that("estimateStratifiedH2 runs the fit its settings choose", {
+    eigenRef <- makeTestEigenRef()
+    scoreRef <- makeTestScoreRef(with_ld_matrices = TRUE)
+    annot <- makeTestAnnotations()
+    fits <- list(
+        lder = lderUnivariate,
+        hdl = hdlUnivariate,
+        gldsc = gldscUnivariate,
+        sldsc = sldscUnivariate
+    )
+    for (method in names(fits)) {
+        ref <- if (method %in% c("lder", "hdl")) eigenRef else scoreRef
+        ss <- makeTestSumstatsForRef(ref)
+        settings <- .h2MethodSettings(method, annot, ref)
+        res <- suppressWarnings(
+            estimateStratifiedH2(ss, ref, annot, param = settings)
+        )
+        direct <- suppressWarnings(fits[[method]](
+            z(ss),
+            median(sampleSize(ss)),
+            ref,
+            annot,
+            param = settings
+        ))
+        expect_identical(h2EstimateParam(res), settings, info = method)
+        expect_identical(heritabilityEstimate(res), direct$h2, info = method)
+        expect_identical(
+            heritabilityEstimateSe(res),
+            direct$h2Se,
+            info = method
+        )
+    }
+})
+
+test_that("a setting that is not the published one reaches the fit", {
+    ref <- makeTestScoreRef(with_ld_matrices = TRUE)
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations()
+    sldsc <- .h2MethodSettings("sldsc", annot, ref)
+    plain <- initialize(
+        sldsc,
+        procedures = initialize(sldsc@procedures, ldRedundancy = FALSE)
+    )
+    h2 <- function(param) {
+        heritabilityEstimate(suppressWarnings(
+            estimateStratifiedH2(ss, ref, annot, param = param)
+        ))
+    }
+    expect_false(isTRUE(all.equal(h2(plain), h2(sldsc))))
+})
+
+test_that("estimateStratifiedH2 refuses settings no genome-wide fit takes", {
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    annot <- makeTestAnnotations()
+    lder <- .h2GenomeWideSettings("lder", TRUE, FALSE)
+    hdl <- .h2GenomeWideSettings("hdl", TRUE, FALSE)
+    sldsc <- .h2GenomeWideSettings("sldsc", TRUE, FALSE)
+    refused <- function(param, pattern) {
+        expect_error(
+            estimateStratifiedH2(ss, ref, annot, param = param),
+            pattern
+        )
+    }
+    # LAVA's moments are a local setting.
+    refused(
+        .h2LocalSettings("lava"),
+        "estimateStratifiedH2: a genome-wide estimate fits the variant"
+    )
+    refused(
+        initialize(hdl, noise = "tied"),
+        "fits a free or floored noise term"
+    )
+    refused(
+        initialize(lder, inference = "information"),
+        "reports the jackknife over the reference's LD blocks"
+    )
+    refused(
+        initialize(sldsc, referenceNoise = "none"),
+        "variant regression reads referenceNoise = \"unbiasedR2\""
+    )
+    refused(
+        initialize(lder, truncation = H2TruncationParam()),
+        "keeps every direction its LdEigen holds"
+    )
+    # A least number of directions, which a block's fit would not read.
+    refused(
+        initialize(
+            lder,
+            truncation = H2TruncationParam(fraction = 1, minimum = 3)
+        ),
+        "keeps every direction its LdEigen holds"
+    )
+    refused(
+        initialize(
+            lder,
+            truncation = H2TruncationParam(fraction = 1, maxPerSample = 0.75)
+        ),
+        "maxPerSample = NULL"
+    )
+    refused(
+        initialize(
+            lder,
+            procedures = initialize(lder@procedures, jackknifeBlocks = 10)
+        ),
+        "leave `jackknifeBlocks` unset"
+    )
+    refused(
+        initialize(
+            hdl,
+            procedures = initialize(
+                hdl@procedures,
+                mustBeatNull = TRUE
+            )
+        ),
+        "does not take mustBeatNull: set it to FALSE"
+    )
+})
+
+test_that("estimateStratifiedH2 checks its reference and arguments", {
+    eigenRef <- makeTestEigenRef()
+    scoreRef <- makeTestScoreRef(with_ld_matrices = TRUE)
+    annot <- makeTestAnnotations()
+    # LDER's settings, the default, read an LdEigen.
+    expect_error(
+        estimateStratifiedH2(makeTestSumstatsForRef(scoreRef), scoreRef, annot),
+        "the eigen statistic requires an LdEigen object, got LdScore"
+    )
+    ss <- makeTestSumstatsForRef(eigenRef)
+    expect_error(
+        estimateStratifiedH2(ss, eigenRef, annot, param = list(noise = "free")),
+        "must be built with H2EstimateParam\\(\\)"
+    )
+    expect_error(estimateStratifiedH2(ss, eigenRef, NULL), "annotations")
+})
+
+test_that("estimateH2 no longer takes annotations, a method or its options", {
+    ref <- makeTestEigenRef()
+    ss <- makeTestSumstatsForRef(ref)
+    expect_error(
+        estimateH2(ss, ref, annotations = makeTestAnnotations()),
+        "unused argument"
+    )
+    expect_error(estimateH2(ss, ref, method = "lder"), "unused argument")
+    expect_error(
+        estimateH2(ss, ref, estimatorArgs = list(nIter = 2)),
+        "unused argument"
+    )
+    expect_error(
+        estimateH2(ss, ref, param = list(criterion = "moments")),
+        "must be built with H2EstimateParam\\(\\)"
+    )
+})
+
+test_that("estimateH2 fits the settings it is given and records them", {
+    ref <- makeTestScoreRef(with_ld_matrices = TRUE)
+    ss <- makeTestSumstatsForRef(ref)
+    sldsc <- .h2GenomeWideSettings("sldsc", FALSE, FALSE)
+    settings <- methods::initialize(
+        sldsc,
+        procedures = methods::initialize(sldsc@procedures, iterations = 5)
+    )
+    res <- estimateH2(ss, ref, param = settings)
+    expect_identical(h2EstimateParam(res), settings)
+    expect_identical(
+        heritabilityEstimate(res),
+        sldscUnivariate(z(ss), median(sampleSize(ss)), ref, param = settings)$h2
+    )
+    # Without settings, HDL's.
+    eigenRef <- makeTestEigenRef()
+    byDefault <- estimateH2(makeTestSumstatsForRef(eigenRef), eigenRef)
+    expect_identical(
+        h2EstimateParam(byDefault),
+        .h2GenomeWideSettings("hdl", FALSE, inSample(eigenRef))
+    )
 })
 
 # ===========================================================================
@@ -731,12 +978,19 @@ test_that("unstratified S-LDSC runs without the per-block LD matrices", {
     noMat <- makeTestScoreRef(with_ld_matrices = FALSE)
     ss <- makeTestSumstatsForRef(noMat)
     expect_error(
-        estimateH2(ss, noMat, method = "gldsc"),
+        estimateH2(ss, noMat, param = .h2MethodSettings("gldsc", NULL, noMat)),
         "g-LDSC needs each LD block's LD"
     )
-    res <- estimateH2(ss, noMat, method = "sldsc")
+    res <- estimateH2(
+        ss,
+        noMat,
+        param = .h2MethodSettings("sldsc", NULL, noMat)
+    )
     expect_s4_class(res, "H2Estimate")
-    expect_equal(methodNames(res), "sldsc")
+    expect_identical(
+        h2EstimateParam(res),
+        .h2GenomeWideSettings("sldsc", FALSE, FALSE)
+    )
     expect_true(is.finite(heritabilityEstimate(res)))
 })
 
@@ -745,7 +999,12 @@ test_that("stratified S-LDSC needs the per-block LD matrices", {
     ss <- makeTestSumstatsForRef(noMat)
     annot <- makeTestAnnotations(nSnps = length(noMat))
     expect_error(
-        estimateH2(ss, noMat, method = "sldsc", annotations = annot),
+        estimateStratifiedH2(
+            ss,
+            noMat,
+            annot,
+            param = .h2MethodSettings("sldsc", annot, noMat)
+        ),
         "stratified S-LDSC needs each LD block's LD"
     )
 })
@@ -754,7 +1013,12 @@ test_that("S-LDSC reports an enrichment table when stratified", {
     ref <- makeTestScoreRef(with_ld_matrices = TRUE)
     ss <- makeTestSumstatsForRef(ref)
     annot <- makeTestAnnotations(nSnps = length(ref))
-    res <- estimateH2(ss, ref, method = "sldsc", annotations = annot)
+    res <- estimateStratifiedH2(
+        ss,
+        ref,
+        annot,
+        param = .h2MethodSettings("sldsc", annot, ref)
+    )
 
     enr <- stratifiedHeritabilityEnrichment(res)
     expect_s3_class(enr, "data.frame")
@@ -779,7 +1043,11 @@ test_that("S-LDSC requires an LdScore, not an LdEigen", {
     eigenRef <- makeTestEigenRef()
     ss <- makeTestSumstatsForRef(eigenRef)
     expect_error(
-        estimateH2(ss, eigenRef, method = "sldsc"),
+        estimateH2(
+            ss,
+            eigenRef,
+            param = .h2MethodSettings("sldsc", NULL, eigenRef)
+        ),
         "requires an LdScore"
     )
 })
@@ -870,21 +1138,24 @@ test_that("a rank-deficient LD block really does yield negative eigenvalues", {
 test_that("estimateH2 survives negative eigenvalues from rank-deficient LD", {
     ref <- .rankDeficientEigenRef()
     ss <- makeTestSumstatsForRef(ref)
-    res <- estimateH2(ss, ref, method = "lder")
+    res <- estimateH2(ss, ref)
     expect_s4_class(res, "H2Estimate")
     expect_false(is.na(heritabilityEstimate(res)))
 })
 
-test_that(".lderWeights never returns a negative weight", {
+test_that("the eigen regression's weights are never negative", {
     lam <- c(2, 1, 0.5, 0, -1e-15, -3e-15)
-    w <- pecotmr:::.lderWeights(
-        lam,
-        matrix(1, length(lam), 1),
-        slopes = 0.1,
-        N = 1e5,
-        M = 1000,
-        rough = FALSE
+    # The in-sample (linear) taper, min(1, lambda), is the one a negative
+    # eigenvalue would turn negative.
+    param <- .h2GenomeWideSettings("lder", FALSE, TRUE)
+    rows <- pecotmr:::.lderRows(
+        list(list(x = rep(1, 6), lam = lam, ldAnnot = matrix(1, 6, 1))),
+        NULL,
+        1e5,
+        1000,
+        param
     )
+    w <- pecotmr:::.h2RegressionWeights(param@procedures, rows, c(0.1, 1))
     expect_false(any(is.na(w)))
     expect_true(all(w >= 0))
     # sqrt() of these is what IRWLS forms the design from.
@@ -905,11 +1176,25 @@ test_that("estimateH2 runs on references built by buildLdEigen/buildLdScore", {
     scoreRef <- buildLdScore(ld, genome = "hg19")
     ss <- makeTestSumstatsForRef(eigenRef)
 
-    expect_s4_class(estimateH2(ss, eigenRef, method = "lder"), "H2Estimate")
+    expect_s4_class(estimateH2(ss, eigenRef), "H2Estimate")
     suppressWarnings(
-        expect_s4_class(estimateH2(ss, eigenRef, method = "hdl"), "H2Estimate")
+        expect_s4_class(
+            estimateH2(
+                ss,
+                eigenRef,
+                param = .h2MethodSettings("hdl", NULL, eigenRef)
+            ),
+            "H2Estimate"
+        )
     )
-    expect_s4_class(estimateH2(ss, scoreRef, method = "gldsc"), "H2Estimate")
+    expect_s4_class(
+        estimateH2(
+            ss,
+            scoreRef,
+            param = .h2MethodSettings("gldsc", NULL, scoreRef)
+        ),
+        "H2Estimate"
+    )
 })
 
 test_that("estimateH2 rejects a single-block LD reference", {
@@ -919,11 +1204,15 @@ test_that("estimateH2 rejects a single-block LD reference", {
     eigenRef <- buildLdEigen(ld, genome = "hg19")
     ss <- makeTestSumstatsForRef(eigenRef)
     expect_error(
-        estimateH2(ss, eigenRef, method = "lder"),
+        estimateH2(ss, eigenRef),
         "delete-one-block jackknife"
     )
     expect_error(
-        estimateH2(ss, buildLdScore(ld, genome = "hg19"), method = "gldsc"),
+        estimateH2(
+            ss,
+            buildLdScore(ld, genome = "hg19"),
+            param = .h2GenomeWideSettings("gldsc", FALSE, FALSE)
+        ),
         "at least two are required"
     )
 })
@@ -933,7 +1222,11 @@ test_that("buildLdScore(keepLdMatrices = FALSE) is rejected by g-LDSC", {
     scoreRef <- buildLdScore(ld, genome = "hg19", keepLdMatrices = FALSE)
     ss <- makeTestSumstatsForRef(scoreRef)
     expect_error(
-        estimateH2(ss, scoreRef, method = "gldsc"),
+        estimateH2(
+            ss,
+            scoreRef,
+            param = .h2MethodSettings("gldsc", NULL, scoreRef)
+        ),
         "g-LDSC needs each LD block's LD"
     )
 })
@@ -948,21 +1241,116 @@ test_that("estimateH2 accepts a chr-prefix difference between the two sides", {
         as.character(GenomicRanges::seqnames(sumStats(ss)))[[1]],
         "chr1"
     )
-    expect_s4_class(estimateH2(ss, ref, method = "lder"), "H2Estimate")
+    expect_s4_class(estimateH2(ss, ref), "H2Estimate")
 })
 
-test_that("estimateH2 with a varY correction runs without error", {
-    eigen_ref <- makeTestEigenRef()
-    ss <- makeTestSumstatsForRef(
-        eigen_ref,
-        traitName = "cc_trait",
-        varY = 4.0
+test_that("a study's recorded varY leaves its genome-wide h2 as it is", {
+    eigenRef <- makeTestEigenRef()
+    plain <- estimateH2(makeTestSumstatsForRef(eigenRef), eigenRef)
+    withVarY <- makeTestSumstatsForRef(eigenRef, varY = 4)
+    expect_equal(varY(withVarY), 4)
+    expect_identical(
+        heritabilityEstimate(estimateH2(withVarY, eigenRef)),
+        heritabilityEstimate(plain)
     )
-    expect_equal(varY(ss), 4.0)
+    # A study that records no prevalence has no liability-scale estimate.
+    expect_true(is.na(S4Vectors::mcols(plain)$h2_liability))
+})
 
-    result <- estimateH2(ss, eigen_ref, method = "lder")
-    expect_s4_class(result, "H2Estimate")
-    expect_true(is.numeric(heritabilityEstimate(result)))
+test_that("a case/control study's prevalence gives h2 on the liability scale", {
+    eigenRef <- makeTestEigenRef()
+    # Lee et al. (2011) equation 23, as ldsc's h2_obs_to_liab() and LAVA's
+    # h2.latent read it: K^2 (1 - K)^2 / (P (1 - P) phi(t)^2).
+    lee <- function(K, P) {
+        K^2 * (1 - K)^2 / (P * (1 - P) * dnorm(qnorm(1 - K))^2)
+    }
+    # 10,000 cases of the 50,000 samples N counts: P = 0.2.
+    ss <- makeTestSumstatsForRef(
+        eigenRef,
+        nCase = 10000,
+        nControl = 40000,
+        prevalence = 0.01
+    )
+    expect_equal(pecotmr:::.h2LiabilityFactor(ss, "test"), lee(0.01, 0.2))
+    # Where the QC set N to the effective sample size, that size counts a
+    # balanced study's samples: summaryStatsQc()'s record, one audit per row,
+    # which qcInfo() reads as nSource.
+    qcd <- `$<-`(
+        ss,
+        "qcAudit",
+        S4Vectors::SimpleList(list(list(nSource = "effective")))
+    )
+    expect_identical(qcInfo(qcd)$nSource, "effective")
+    expect_equal(pecotmr:::.h2LiabilityFactor(qcd, "test"), lee(0.01, 0.5))
+    # Per-variant counts give the share where the study records them so.
+    gr <- sumStats(ss, studyName = "test")
+    S4Vectors::mcols(gr)$N_CASE <- rep(5000, length(gr))
+    S4Vectors::mcols(gr)$N_CONTROL <- rep(45000, length(gr))
+    perVariant <- GwasSumStats(
+        studyName = "test",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = makeTestGwasGenotypeHandle(),
+        prevalence = 0.01
+    )
+    expect_equal(
+        pecotmr:::.h2LiabilityFactor(perVariant, "test"),
+        lee(0.01, 0.1)
+    )
+    expect_true(is.na(pecotmr:::.h2LiabilityFactor(
+        makeTestSumstatsForRef(eigenRef),
+        "test"
+    )))
+    # The estimate holds its heritability and standard error times the
+    # factor; the fit here gives a known one.
+    local_mocked_bindings(
+        .h2GenomeWideFit = function(...) {
+            list(h2 = 0.3, h2Se = 0.05, intercept = 1.02, interceptSe = 0.01)
+        }
+    )
+    est <- S4Vectors::mcols(estimateH2(ss, eigenRef))
+    expect_equal(est$h2, 0.3)
+    expect_equal(est$h2_liability, 0.3 * lee(0.01, 0.2))
+    expect_equal(est$h2_liability_se, 0.05 * lee(0.01, 0.2))
+    expect_true(is.na(est$h2_liability_lower) && is.na(est$h2_liability_upper))
+    eff <- S4Vectors::mcols(estimateH2(qcd, eigenRef))
+    expect_equal(eff$h2_liability, 0.3 * lee(0.01, 0.5))
+})
+
+test_that("a study's rows that disagree on its N's source are refused", {
+    eigenRef <- makeTestEigenRef()
+    # The study in two rows, one per LD block.
+    ss <- makeTestSumstatsForRef(
+        eigenRef,
+        nCase = 10000,
+        nControl = 40000,
+        prevalence = 0.01,
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(1, 1001), width = 999)
+        )
+    )
+    expect_identical(nrow(ss), 2L)
+    mixed <- `$<-`(
+        ss,
+        "qcAudit",
+        S4Vectors::SimpleList(
+            list(nSource = "effective"),
+            list(nSource = "total")
+        )
+    )
+    expect_error(
+        pecotmr:::.h2StudyNSource(mixed, "test"),
+        "disagree on how the QC set N"
+    )
+    expect_identical(pecotmr:::.h2StudyNSource(ss, "test"), NA_character_)
+    # Rows disagreeing on a per-study value leave it no one value either.
+    twoK <- ss
+    S4Vectors::mcols(twoK)$prevalence <- c(0.01, 0.02)
+    expect_error(
+        pecotmr:::.h2StudyValue(twoK, "prevalence", "test"),
+        "disagree on prevalence"
+    )
 })
 
 # ===========================================================================
@@ -1417,6 +1805,15 @@ makeCoverageAnnot <- function(
     AnnotationMatrix(mat, snp_gr, meta, genome = "hg19")
 }
 
+test_that(".h2Stratified reads the width of the baseline design", {
+    expect_false(.h2Stratified(NULL))
+    # An all-ones baseline alone is the unstratified design.
+    expect_false(.h2Stratified(makeCoverageAnnot(100, "ones", nCand = 0L)))
+    expect_false(.h2Stratified(makeCoverageAnnot(100, "ones", nCand = 2L)))
+    # One annotation that does not span the genome gets a base column too.
+    expect_true(.h2Stratified(makeCoverageAnnot(100, "spatial", nCand = 0L)))
+})
+
 # The four estimators, each with the reference it reads and the baseline
 # its annotations take. An all-ones baseline makes the LDER and HDL
 # eigenvalue-score column the eigenvalue itself; for g-LDSC and S-LDSC it
@@ -1743,7 +2140,8 @@ test_that("lderUnivariate recovers a known h2 (deterministic, seed = 1)", {
 #
 # A candidate's score is calibrated by the spread of its LD blocks' scores, so
 # under the null its z is close to N(0, 1) whatever the regression weights
-# get wrong. Both LD-score estimators are checked through estimateH2().
+# get wrong. Both LD-score estimators are checked through
+# estimateStratifiedH2().
 # ===========================================================================
 
 # A half-on/half-off baseline annotation plus the candidate `cand`.
@@ -1801,11 +2199,12 @@ test_that("lderUnivariate recovers a known h2 (deterministic, seed = 1)", {
         vapply(
             methods,
             function(m) {
-                scoreStats(suppressWarnings(estimateH2(
+                ref <- .h2MethodRef(d, m)
+                scoreStats(suppressWarnings(estimateStratifiedH2(
                     ss,
-                    .h2MethodRef(d, m),
-                    method = m,
-                    annotations = annot
+                    ref,
+                    annot,
+                    param = .h2MethodSettings(m, annot, ref)
                 )))[[1L]]$z
             },
             numeric(1)
@@ -1856,16 +2255,29 @@ test_that("candidate score z detects an enriched candidate", {
     )
 }
 
+# Each method's fit, stratified by `annotations`, or unstratified by
+# estimateH2() where they are NULL.
 .h2FitAll <- function(d, ss, annotations) {
     lapply(
         set_names(c("lder", "hdl", "gldsc", "sldsc")),
         function(m) {
-            suppressWarnings(estimateH2(
-                ss,
-                .h2MethodRef(d, m),
-                method = m,
-                annotations = annotations
-            ))
+            ref <- .h2MethodRef(d, m)
+            suppressWarnings(
+                if (is.null(annotations)) {
+                    estimateH2(
+                        ss,
+                        ref,
+                        param = .h2MethodSettings(m, NULL, ref)
+                    )
+                } else {
+                    estimateStratifiedH2(
+                        ss,
+                        ref,
+                        annotations,
+                        param = .h2MethodSettings(m, annotations, ref)
+                    )
+                }
+            )
         }
     )
 }
@@ -1942,11 +2354,12 @@ test_that("HDL can estimate a depleted annotation", {
     half <- as.integer(seq_len(d$M) <= d$M / 2)
     set.seed(4)
     ss <- .h2ScoreSumstats(d, d$simZ(ifelse(half == 1L, 0.1, 0.6) / d$M))
-    fit <- suppressWarnings(estimateH2(
+    annot <- .h2BaselineOf(d, cbind(half = half))
+    fit <- suppressWarnings(estimateStratifiedH2(
         ss,
         d$eigenRef,
-        method = "hdl",
-        annotations = .h2BaselineOf(d, cbind(half = half))
+        annot,
+        param = .h2MethodSettings("hdl", annot, d$eigenRef)
     ))
     part <- stratifiedHeritabilityEnrichment(fit)
     expect_lt(part$tau, 0)
@@ -2040,6 +2453,22 @@ test_that(".hdlFitBasis centers only columns whose zero is out of reach", {
     expect_equal(shifted$share, c(1, 0))
     expect_equal(shifted$lower, c(0, -2))
     expect_equal(shifted$upper, c(1, 2))
+    # The procedures' h2 bounds scale them: a heritability within them, an
+    # excess within their span, a centered column's within twice it.
+    capped <- pecotmr:::.hdlFitBasis(
+        cbind(base = 1, x = x + 3),
+        NULL,
+        c(0, 0.5)
+    )
+    expect_equal(capped$lower, c(0, -1))
+    expect_equal(capped$upper, c(0.5, 1))
+    excess <- pecotmr:::.hdlFitBasis(
+        cbind(base = 1, bin = bin),
+        NULL,
+        c(0, 0.5)
+    )
+    expect_equal(excess$lower, c(0, -0.5))
+    expect_equal(excess$upper, c(0.5, 0.5))
     expect_equal(
         as.vector(shifted$transform %*% c(0.5, 0.2)),
         c(0.5 - 3 * 0.2, 0.2)
@@ -2066,11 +2495,12 @@ test_that(".hdlFitBasis centers only columns whose zero is out of reach", {
 test_that("HDL reads a continuous annotation whatever its zero", {
     f <- .h2ContinuousFixture()
     fit <- function(col) {
-        suppressWarnings(estimateH2(
+        annot <- .h2BaselineOf(f$d, cbind(x = col))
+        suppressWarnings(estimateStratifiedH2(
             f$ss,
             f$d$eigenRef,
-            method = "hdl",
-            annotations = .h2BaselineOf(f$d, cbind(x = col))
+            annot,
+            param = .h2MethodSettings("hdl", annot, f$d$eigenRef)
         ))
     }
     codings <- list(
@@ -2147,11 +2577,12 @@ test_that("sHDL's score test reads a candidate whatever its zero", {
         )
     }
     z <- function(col) {
-        fit <- suppressWarnings(estimateH2(
+        annot <- candidate(col)
+        fit <- suppressWarnings(estimateStratifiedH2(
             f$ss,
             f$d$eigenRef,
-            method = "hdl",
-            annotations = candidate(col)
+            annot,
+            param = .h2MethodSettings("hdl", annot, f$d$eigenRef)
         ))
         scoreStats(fit)[[1L]]$z
     }
@@ -2191,11 +2622,11 @@ test_that("S-LDSC's candidate score test needs the reference's LD", {
         genome = "hg19"
     )
     expect_error(
-        estimateH2(
+        estimateStratifiedH2(
             .h2ScoreSumstats(d, stats::rnorm(d$M)),
             ref,
-            method = "sldsc",
-            annotations = annot
+            annot,
+            param = .h2MethodSettings("sldsc", annot, ref)
         ),
         "candidate-annotation score test needs each LD block's LD"
     )
@@ -2442,6 +2873,22 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
     )
 }
 
+# S-LDSC's fit through the regression every variant regression fits, from
+# its LD scores `scores` (the stored base score `baseScore` the weights
+# divide by) and the design `A`.
+.sldscRowsFit <- function(chi2, scores, baseScore, n, A, param) {
+    rows <- pecotmr:::.sldscRows(
+        chi2,
+        scores,
+        A,
+        baseScore,
+        n,
+        param,
+        list(seq_along(chi2))
+    )
+    pecotmr:::.h2Regression(param, rows)
+}
+
 test_that("univariate S-LDSC reproduces the original ldsc to 1e-5", {
     ref <- .h2ParityRef()$score
     M <- length(ref)
@@ -2473,13 +2920,13 @@ test_that("univariate S-LDSC reproduces the original ldsc to 1e-5", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        fit <- pecotmr:::.sldscFit(
+        fit <- .sldscRowsFit(
             z^2,
             scores,
             baseScore,
             g$n,
             matrix(1, M, 1),
-            2L
+            .h2GenomeWideSettings("sldsc", FALSE, FALSE)
         )
         expect_equal(fit$h2, g$h2Hat, tolerance = 1e-5)
         expect_equal(fit$intercept, g$int, tolerance = 1e-5)
@@ -2518,39 +2965,177 @@ test_that("partitioned S-LDSC reproduces the original ldsc to 1e-5", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        fit <- pecotmr:::.sldscFit(z^2, scores, scores[, 1], g$n, A, 2L)
+        fit <- .sldscRowsFit(
+            z^2,
+            scores,
+            scores[, 1],
+            g$n,
+            A,
+            .h2GenomeWideSettings("sldsc", TRUE, FALSE)
+        )
         expect_equal(fit$h2, g$h2Hat, tolerance = 1e-5)
         expect_equal(fit$intercept, g$int, tolerance = 1e-5)
     }
 })
 
-test_that("the two S-LDSC routes differ, as the original ldsc's do", {
-    # Univariate takes the two-step estimator; partitioned takes the
-    # chi2-filtered single-pass `old_weights` route. The original ldsc refuses
-    # to run two-step on a partitioned design at all, so these must not
-    # converge to one shared code path.
+test_that("S-LDSC's two sets of settings differ, as the original ldsc's do", {
+    # Unstratified, S-LDSC's settings take the two-step estimator;
+    # stratified, the chi2-filtered single-pass `old_weights` route. The
+    # original ldsc refuses to run two-step on a partitioned design at all,
+    # so these must not converge to one shared code path.
     ref <- .h2ParityRef()$score
     M <- length(ref)
     z <- .h2ParityZ(0.4, 10000, 42)
     scores <- matrix(as.vector(mcols(ref)$ldScores[, 1]), ncol = 1)
-    uni <- pecotmr:::.sldscFit(
+    uni <- .sldscRowsFit(
         z^2,
         scores,
         scores[, 1],
         10000,
         matrix(1, M, 1),
-        2L
+        .h2GenomeWideSettings("sldsc", FALSE, FALSE)
     )
     inA <- as.integer(seq_len(M) <= M / 2)
-    part <- pecotmr:::.sldscFit(
+    part <- .sldscRowsFit(
         z^2,
         pecotmr:::.sldscScoreMatrix(ref, cbind(base = 1, annotA = inA)),
         scores[, 1],
         10000,
         cbind(base = 1, annotA = inA),
-        2L
+        .h2GenomeWideSettings("sldsc", TRUE, FALSE)
     )
     expect_false(isTRUE(all.equal(uni$intercept, part$intercept)))
+})
+
+test_that("S-LDSC's regression settings each reach its fit", {
+    dat <- simulateH2Data(n_gwas = 2000, h2_true = 0.1)
+    base <- .h2GenomeWideSettings("sldsc", FALSE, FALSE)
+    with <- function(...) {
+        initialize(base, procedures = initialize(base@procedures, ...))
+    }
+    h2 <- function(param) {
+        sldscUnivariate(dat$z, dat$n, dat$ld_score_ref, param = param)$h2
+    }
+    published <- h2(base)
+    expect_false(isTRUE(all.equal(h2(with(ldRedundancy = FALSE)), published)))
+    expect_false(isTRUE(all.equal(
+        h2(with(fitWeightIntercept = FALSE)),
+        published
+    )))
+    # Updated to convergence the first weights barely matter; with no
+    # updates they are the weights.
+    expect_equal(
+        h2(with(iterations = NULL, initialWeights = "flat")),
+        h2(with(iterations = NULL)),
+        tolerance = 1e-6
+    )
+    expect_false(isTRUE(all.equal(
+        h2(with(iterations = 0, initialWeights = "flat")),
+        h2(with(iterations = 0))
+    )))
+})
+
+test_that("floored noise holds S-LDSC's intercept at the floor", {
+    dat <- simulateH2Data(n_gwas = 2000, h2_true = 0.1)
+    # Deflated statistics: the free intercept falls below 1.
+    z <- dat$z * 0.8
+    for (stratified in c(FALSE, TRUE)) {
+        free <- .h2GenomeWideSettings("sldsc", stratified, FALSE)
+        floored <- initialize(
+            free,
+            noise = "floored",
+            procedures = initialize(free@procedures, interceptFloor = 1)
+        )
+        annot <- if (stratified) {
+            makeCoverageAnnot(dat$n_snps, "spatial", nCand = 0L)
+        }
+        fit <- function(param) {
+            sldscUnivariate(z, dat$n, dat$ld_score_ref, annot, param = param)
+        }
+        expect_lt(fit(free)$intercept, 1)
+        expect_equal(fit(floored)$intercept, 1)
+    }
+})
+
+test_that("S-LDSC's two stages take LDER's threshold when none is set", {
+    dat <- simulateH2Data()
+    scores <- matrix(as.vector(mcols(dat$ld_score_ref)$ldScores[, 1]))
+    param <- .h2GenomeWideSettings("sldsc", FALSE, FALSE)
+    m <- dat$n_snps
+    n <- 2000
+    threshold <- function(chi2) {
+        rows <- pecotmr:::.sldscRows(
+            chi2,
+            scores,
+            matrix(1, m, 1),
+            scores[, 1],
+            n,
+            param,
+            list(seq_len(m))
+        )
+        pecotmr:::.h2LderThreshold(param, rows)
+    }
+    # Chi-squares the model fits exactly, so the free fit's intercept is the
+    # one they are built with. No inflation: LDER's rule on the variants.
+    expect_equal(
+        threshold(1 + 0.05 * scores[, 1]),
+        3.5 * sqrt(m / n) + 2.5
+    )
+    # An intercept of 2, past 1.05: the top 5 / m of the chi-squares.
+    inflated <- 2 + 0.05 * scores[, 1]
+    expect_equal(threshold(inflated), stats::quantile(inflated, 1 - 5 / m))
+})
+
+test_that("LDER counts a truncated LdEigen's variants, not its directions", {
+    # Holding the leading directions that carry 99% of each block's LD keeps
+    # about half of the parity reference's directions. The heritability is
+    # per variant, so LDER's M is the variant count, as HDL's is; counting
+    # the directions read it at about half. It still reads somewhat lower
+    # (about 10% here), its intercept losing the near-null directions it
+    # rests on.
+    ld <- readRDS(test_path("test_data", "h2ParityLd.rds"))
+    info <- ld$snpInfo
+    gr <- GenomicRanges::GRanges(
+        paste0("chr", info$CHR),
+        IRanges::IRanges(info$BP, width = 1L)
+    )
+    names(gr) <- info$SNP
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(A1 = info$A1, A2 = info$A2)
+    blocks <- map(ld$blocks, function(b) {
+        R <- diag(length(b$snpIdx))
+        R[upper.tri(R)] <- b$upper
+        R[lower.tri(R)] <- t(R)[lower.tri(R)]
+        LdMatrix(R, variants = gr[b$snpIdx], nSamples = 20000L)
+    })
+    z <- .h2ParityZ(0.4, 1e5, 2)
+    full <- buildLdEigen(blocks)
+    truncated <- buildLdEigen(blocks, eigenvalueTruncation = 0.99)
+    kept <- sum(map_int(eigenList(truncated), function(e) length(e$values)))
+    expect_lt(kept, 0.6 * length(truncated))
+    expect_gt(
+        pecotmr:::lderUnivariate(z, 1e5, truncated)$h2 /
+            pecotmr:::lderUnivariate(z, 1e5, full)$h2,
+        0.85
+    )
+})
+
+test_that("LDER's threshold leaves the caller's settings unchanged", {
+    # Its rough fit takes the linear taper on a copy: `slot<-` called as a
+    # function would change the caller's record in place, and the LDER fit
+    # after it would weigh with the wrong taper.
+    dat <- simulateH2Data()
+    blockStats <- .lderAllBlockStats(dat$eigen_ref, dat$z, NULL, NULL)
+    param <- .h2GenomeWideSettings("lder", FALSE, FALSE)
+    rows <- pecotmr:::.lderRows(
+        blockStats,
+        NULL,
+        dat$n,
+        length(dat$eigen_ref),
+        param
+    )
+    pecotmr:::.h2LderThreshold(param, rows)
+    expect_identical(param@procedures@eigenvalueTaper, "logistic")
+    expect_equal(rows$taper, pecotmr:::.h2Taper("logistic", pmax(rows$lam, 0)))
 })
 
 
@@ -2621,17 +3206,85 @@ test_that("HDL recovers a known h2 given an adequate reference", {
 #     returns a value rather than NA.
 # =============================================================================
 
-test_that("HDL reproduces the original HDL", {
+test_that("HDL reproduces the original HDL's model at its maximum", {
+    # The original HDL's L-BFGS-B (optim()'s defaults, one start) stops short
+    # of its likelihood's maximum, which every likelihood here reaches by
+    # Fisher scoring: the estimates lie within 2e-4 of the original's, at a
+    # likelihood no lower than that at the original's estimate (its intercept
+    # refitted). Each maximum is confirmed by Nelder-Mead (relative
+    # tolerance 1e-16), at the same log-likelihood to 10 digits; the floor
+    # puts kinks in the likelihood, on which a fit can stall short of it.
+    # The second's lies on one, along which the log-likelihood is within its
+    # rounding of the maximum over about 1e-5 of h2, so that estimate is
+    # pinned to 2e-5, the others to 1e-6.
     reference <- list(
-        list(h2 = 0.4, n = 1e5, seed = 2, nRef = 20000L, want = 0.405111844),
-        list(h2 = 0.3, n = 1e4, seed = 5, nRef = 20000L, want = 0.286758612),
-        list(h2 = 0.6, n = 5e4, seed = 9, nRef = 50000L, want = 0.646809004)
+        list(
+            h2 = 0.4,
+            n = 1e5,
+            seed = 2,
+            nRef = 20000L,
+            want = 0.405108188,
+            within = 1e-6,
+            original = 0.405111844
+        ),
+        list(
+            h2 = 0.3,
+            n = 1e4,
+            seed = 5,
+            nRef = 20000L,
+            want = 0.286726683,
+            within = 2e-5,
+            original = 0.286758612
+        ),
+        list(
+            h2 = 0.6,
+            n = 5e4,
+            seed = 9,
+            nRef = 50000L,
+            want = 0.646853841,
+            within = 1e-6,
+            original = 0.646809004
+        )
     )
+    proc <- .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures
     for (g in reference) {
         ref <- .h2ParityRef(nSamples = g$nRef)$eigen
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        est <- suppressWarnings(pecotmr:::hdlUnivariate(z, g$n, ref)$h2)
-        expect_equal(est, g$want, tolerance = 1e-6)
+        fit <- suppressWarnings(pecotmr:::hdlUnivariate(z, g$n, ref))
+        expect_equal(fit$h2, g$want, tolerance = g$within)
+        expect_equal(fit$h2, g$original, tolerance = 2e-4)
+        blocks <- map(
+            pecotmr:::.ldEigenBlocks(ref),
+            pecotmr:::.hdlBlockData,
+            eigenRef = ref,
+            z = z,
+            n = g$n,
+            baselineMat = NULL,
+            candMat = NULL
+        )
+        data <- pecotmr:::.hdlScoringData(
+            pecotmr:::.hdlDesign(blocks, length(ref), NULL, proc),
+            g$n,
+            g$nRef,
+            proc
+        )
+        at <- function(theta) {
+            pecotmr:::.h2VarianceObjective(theta, data, FALSE)$value
+        }
+        original <- pecotmr:::.h2ScoringBest(pecotmr:::.h2Scoring(
+            pecotmr:::.h2FixedObjective,
+            list(
+                objective = pecotmr:::.h2VarianceObjective,
+                inner = data,
+                full = c(g$original, 1),
+                free = 2L
+            ),
+            list(1),
+            0,
+            10,
+            100
+        ))
+        expect_gte(at(c(fit$h2, fit$intercept)), original$value - 1e-8)
     }
 })
 
@@ -2640,7 +3293,10 @@ test_that("the HDL variance floor matches the original's exp(-10)", {
     # exp(-10). On a real reference the floor is active for a large share of
     # the eigen-directions, and the bstar^2/lamh2 term it feeds dominates the
     # likelihood -- a different floor silently moves the optimum.
-    expect_equal(formals(pecotmr:::.hdlNll)$lim, quote(exp(-10)))
+    expect_equal(
+        .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures@varianceFloor,
+        exp(-10)
+    )
 })
 
 test_that("LDER reproduces the original LDER", {
@@ -2749,20 +3405,15 @@ test_that("the chi2 filter is abandoned when too few variants survive it", {
     # The original ldsc drops chi2 >= 30, but with fewer than 4 survivors the
     # regression has nothing to fit, so the filter is dropped rather than
     # returning an estimate from 3 points.
-    A <- matrix(1, 6L, 1L)
-    sc <- matrix(1, 6L, 1L)
-    out <- pecotmr:::.sldscFitUnivariate(
+    out <- .sldscRowsFit(
         rep(100, 6L),
-        sc,
+        cbind(seq_len(6L)),
         rep(1, 6L),
         1000,
-        A,
-        2L
+        matrix(1, 6L, 1L),
+        .h2GenomeWideSettings("sldsc", FALSE, FALSE)
     )
-    expect_setequal(
-        names(out),
-        c("tau", "h2", "intercept", "coef")
-    )
+    expect_length(out$kept$y, 6L)
     expect_false(is.na(out$h2))
 })
 
@@ -2797,19 +3448,15 @@ test_that("the partitioned chi2 filter is abandoned when too few survive", {
     # Stratified S-LDSC needs more surviving variants than annotations + 2;
     # below that the filter is dropped rather than solving an underdetermined
     # system.
-    A <- matrix(1, 6L, 1L)
-    sc <- matrix(1, 6L, 2L)
-    out <- pecotmr:::.sldscFitPartitioned(
+    out <- .sldscRowsFit(
         rep(1e6, 6L),
-        sc,
+        cbind(seq_len(6L), rev(seq_len(6L))),
         rep(1, 6L),
         1000,
-        A
+        matrix(1, 6L, 2L),
+        .h2GenomeWideSettings("sldsc", TRUE, FALSE)
     )
-    expect_setequal(
-        names(out),
-        c("tau", "h2", "intercept", "coef")
-    )
+    expect_length(out$kept$y, 6L)
 })
 
 # ---------------------------------------------------------------------------
@@ -2857,22 +3504,30 @@ test_that(".h2BaselineMat is NULL when no annotation is baseline tier", {
     expect_null(pecotmr:::.h2BaselineMat(NULL))
 })
 
-test_that(".lderGetRes(twostage = FALSE) returns the free-intercept fit", {
+test_that("LDER in one stage with free noise returns the free fit", {
     set.seed(4)
     m <- 60L
-    res <- pecotmr:::.lderGetRes(
-        x = rnorm(m),
-        lam = abs(rnorm(m, 3, 0.5)),
-        ldAnnot = matrix(1, nrow = m, ncol = 1L),
-        N = 1000,
-        M = 5000,
-        M_a = 5000,
-        rough = FALSE,
-        twostage = FALSE
+    lder <- .h2GenomeWideSettings("lder", FALSE, TRUE)
+    param <- initialize(
+        lder,
+        noise = "free",
+        procedures = initialize(lder@procedures, twoStage = FALSE)
     )
+    rows <- pecotmr:::.lderRows(
+        list(list(
+            x = rnorm(m),
+            lam = abs(rnorm(m, 3, 0.5)),
+            ldAnnot = matrix(1, nrow = m, ncol = 1L)
+        )),
+        NULL,
+        1000,
+        5000,
+        param
+    )
+    res <- pecotmr:::.h2Regression(param, rows)
     # One pass, no chi2 outlier filtering, intercept left free.
-    expect_setequal(names(res), c("h2", "h2a", "tau", "a"))
-    expect_true(is.finite(res$a))
+    expect_length(res$kept$y, m)
+    expect_true(is.finite(res$intercept))
 })
 
 test_that(".sldscBlockIndex errors when no block covers a variant", {
@@ -2908,26 +3563,6 @@ test_that(".sldscBlockIndex errors when no block covers a variant", {
     covering <- mk(GenomicRanges::GRanges("chr22", IRanges::IRanges(1, 10000)))
     idx <- pecotmr:::.sldscBlockIndex(covering)
     expect_equal(unname(lengths(idx)), n)
-})
-
-test_that(".sldscIrwls derives its own starting weights when none are given", {
-    set.seed(3)
-    nv <- 40L
-    scores <- matrix(abs(rnorm(nv * 2L, 5, 1)), nrow = nv)
-    y <- 1 + rowSums(scores) * 1e-4 * 500 + rnorm(nv, sd = 0.05)
-    fit <- pecotmr:::.sldscIrwls(
-        y = y,
-        scores = scores,
-        baseScore = rowSums(scores),
-        n = 500,
-        M = 1000,
-        nIter = 2L,
-        freeIntercept = FALSE,
-        intercept = 1,
-        w0 = NULL
-    )
-    expect_setequal(names(fit), c("coef", "intercept", "w"))
-    expect_true(all(is.finite(fit$coef)))
 })
 
 test_that("RmaOptions refuses the estimates and the estimator choice", {
@@ -3000,12 +3635,12 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
         )
     )
     expect_equal(nrow(split), 2L)
-    est <- estimateH2(split, ref, method = "lder")
+    est <- estimateH2(split, ref)
     # One estimate, one row, for the study.
     expect_identical(length(est), 1L)
     expect_equal(
         heritabilityEstimate(est),
-        heritabilityEstimate(estimateH2(ss, ref, method = "lder"))
+        heritabilityEstimate(estimateH2(ss, ref))
     )
     # Two studies still need one named.
     two <- GwasSumStats(
@@ -3015,12 +3650,12 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
         ldReference = makeTestGwasGenotypeHandle()
     )
     expect_error(
-        estimateH2(two, ref, method = "lder"),
+        estimateH2(two, ref),
         "`studyName` is required when the GwasSumStats has 2 studies"
     )
 })
 
-# ---- HDL-L: one locus's heritability with its own intercept ----------------
+# ---- HDL-L's settings: one locus's heritability with its own intercept -----
 
 # Real genotypes from eqtlRegionExample: the LD from 150 of its 415 people and
 # statistics simulated on the other 265, over 300 variants.
@@ -3048,26 +3683,43 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
     )
 }
 
-test_that(".hdlLocusFit reproduces HDL.L()'s per-locus heritability", {
+# The engine's fit under `settings` of the correlations `r` from a study of
+# `n`, against `ld`.
+.localFit <- function(settings, r, n, ld) {
+    pecotmr:::.h2LocalFit(
+        settings,
+        pecotmr:::.corToZ(r, n),
+        rep(n, length(r)),
+        ld
+    )
+}
+
+test_that("HDL-L's settings reproduce HDL.L()'s per-locus heritability", {
     # Pinned reference values from HDL.L()'s own statements (the HDL
     # repository's HDL/R/HDL.L.R: its log-likelihoods, LD score regression
     # start, eigen cut and optimization loops) run on these three loci.
     want <- c(0.0563749163361593, 0.1002563602000716, 0.1277057381167920)
     h2 <- c(0.05, 0.1, 0.2)
+    hdl <- .h2LocalSettings("hdlL")
     for (i in 1:3) {
         fx <- .hdlLocusFixture(i + 1L, h2[[i]])
         expect_equal(
-            pecotmr:::.hdlLocusFit(fx$corInput, list(R = fx$R), fx$n, 150L)$h2,
+            .localFit(
+                hdl,
+                fx$corInput,
+                fx$n,
+                list(R = fx$R, nSamples = 150L)
+            )$h2,
             want[[i]],
             tolerance = 1e-6
         )
         # The factor's eigenpairs come from its SVD, equal to rounding.
         expect_equal(
-            pecotmr:::.hdlLocusFit(
+            .localFit(
+                hdl,
                 fx$corInput,
-                list(ldFactor = fx$ldFactor),
                 fx$n,
-                150L
+                list(ldFactor = fx$ldFactor, nSamples = 150L)
             )$h2,
             want[[i]],
             tolerance = 1e-6
@@ -3075,41 +3727,75 @@ test_that(".hdlLocusFit reproduces HDL.L()'s per-locus heritability", {
     }
 })
 
-test_that(".hdlLocusFit reports HDL.L()'s p-value and intercept", {
+test_that("HDL-L's settings report HDL.L()'s p-value, halved, and intercept", {
     # Pinned reference values from the same HDL.L() statements on the same
     # loci: its likelihood-ratio p-value against the intercept-only null,
-    # and the fitted intercept.
+    # and the fitted intercept. The settings refer the ratio to the boundary
+    # mixture, halving HDL.L()'s p.
     wantP <- c(5.50193943944049e-03, 1.17185324412135e-04, 7.62771871683717e-05)
     wantIntercept <- c(0.781751722851809, 1.413136925604808, 1.165862452737627)
     h2 <- c(0.05, 0.1, 0.2)
+    hdl <- .h2LocalSettings("hdlL")
+    full <- hdl
+    full@procedures@halfBoundaryP <- FALSE
     for (i in 1:3) {
         fx <- .hdlLocusFixture(i + 1L, h2[[i]])
-        fit <- pecotmr:::.hdlLocusFit(fx$corInput, list(R = fx$R), fx$n, 150L)
-        expect_equal(fit$p, wantP[[i]], tolerance = 1e-6)
+        ld <- list(R = fx$R, nSamples = 150L)
+        fit <- .localFit(hdl, fx$corInput, fx$n, ld)
+        expect_equal(fit$p, wantP[[i]] / 2, tolerance = 1e-6)
         expect_equal(fit$intercept, wantIntercept[[i]], tolerance = 1e-6)
+        expect_equal(.localFit(full, fx$corInput, fx$n, ld)$p, wantP[[i]])
     }
 })
 
-test_that(".hdlLocusFit answers NA without signal, starts a flat locus at 0", {
+test_that("HDL-L's settings give NA without signal, start a flat locus at 0", {
     fx <- .hdlLocusFixture(2L, 0.05)
+    hdl <- .h2LocalSettings("hdlL")
     # No fit beats the intercept-only null when every effect is zero.
     expect_true(is.na(
-        pecotmr:::.hdlLocusFit(numeric(300), list(R = fx$R), fx$n, 150L)$h2
+        .localFit(hdl, numeric(300), fx$n, list(R = fx$R, nSamples = 150L))$h2
     ))
-    # One variant: every LD score is the same, so the regression has no
-    # slope to start h2 from.
-    expect_equal(pecotmr:::.hdlLocusLdscH2(0.1, list(R = matrix(1)), 100), 0)
+    # One direction: the eigen regression's start cannot tell h2 from the
+    # intercept, and holds what it cannot fit at 0.
+    start <- pecotmr:::.h2VarianceRegressionStart(
+        list(G = cbind(1, 1), b2 = 0.01, offset = 0, floor = 1e-18),
+        c(0, 0),
+        c(1, 20)
+    )
+    expect_true(all(is.finite(start)) && any(start == 0))
     # A monomorphic variant leaves the trace short of the variant count, so
     # no eigenvalue reaches 99% of it and every one is kept.
-    expect_length(
-        pecotmr:::.hdlLocusEigen(list(R = diag(c(1, 1, 0))))$values,
+    kept <- pecotmr:::.h2Truncate(
+        pecotmr:::.h2Eigen(list(R = diag(c(1, 1, 0)))),
+        hdl$truncation,
+        100,
         3L
+    )
+    expect_length(kept$values, 3L)
+})
+
+test_that("a free intercept absorbs the reference term into the noise", {
+    # The reference's -h2 lam / nRef is proportional to lam, as the noise
+    # term is, so with the intercept free only the intercept moves: by h2 n /
+    # nRef, the variance the reference term takes away.
+    fx <- .hdlLocusFixture(3L, 0.1)
+    hdl <- .h2LocalSettings("hdlL")
+    noRef <- hdl
+    noRef@referenceNoise <- "none"
+    ld <- list(R = fx$R, nSamples = 150L)
+    a <- .localFit(hdl, fx$corInput, fx$n, ld)
+    b <- .localFit(noRef, fx$corInput, fx$n, ld)
+    expect_equal(a$h2, b$h2, tolerance = 1e-6)
+    expect_equal(
+        a$intercept - b$intercept,
+        a$h2 * fx$n / 150,
+        tolerance = 1e-4
     )
 })
 
-# ---- per-gene cis heritability: LAVA and FastHer ----
+# ---- the moments (LAVA's settings) and the null space (FastHer's) ----
 
-test_that(".cisH2Lava follows the reference's distance from the study's LD", {
+test_that("the moments follow the reference's distance from the study's LD", {
     fx <- .hdlLocusFixture(3L, 0.1)
     z <- fx$corInput * sqrt(fx$n)
     e <- eigen(fx$R, symmetric = TRUE)
@@ -3119,6 +3805,7 @@ test_that(".cisH2Lava follows the reference's distance from the study's LD", {
     delta <- crossprod(e$vectors[, seq_len(K)], r) / sqrt(lam[seq_len(K)])
     dtd <- sum(delta^2)
     m <- K / (fx$n - 1)
+    lava <- .h2LocalSettings("lava")
     # A reference of N holding a share rho of the study's samples, phi being
     # 1 + (1 - 2 rho) n / N. Half the study's samples give 1 at any N.
     cases <- list(
@@ -3129,7 +3816,8 @@ test_that(".cisH2Lava follows the reference's distance from the study's LD", {
         list(N = fx$n, rho = 0.25, phi = 1.5)
     )
     for (case in cases) {
-        fit <- pecotmr:::.cisH2Lava(
+        fit <- pecotmr:::.h2LocalFit(
+            lava,
             z,
             rep(fx$n, length(z)),
             list(
@@ -3151,7 +3839,8 @@ test_that(".cisH2Lava follows the reference's distance from the study's LD", {
     # No overlap is the default, and what it assumes is flagged only while the
     # reference is small enough for that to matter.
     bare <- function(N) {
-        pecotmr:::.cisH2Lava(
+        pecotmr:::.h2LocalFit(
+            lava,
             z,
             rep(fx$n, length(z)),
             list(ldFactor = fx$ldFactor, nSamples = N)
@@ -3160,6 +3849,20 @@ test_that(".cisH2Lava follows the reference's distance from the study's LD", {
     expect_equal(bare(fx$n)$h2, (dtd - m) / (1 + m), tolerance = 1e-8)
     expect_true(bare(2L * fx$n)$smallReference)
     expect_false(bare(2L * fx$n + 1L)$smallReference)
+    # Without the overlap factor the reference has no noise of its own: phi
+    # is 1, and the estimate delta'delta - m.
+    noFactor <- lava
+    noFactor@referenceNoise <- "none"
+    expect_equal(
+        pecotmr:::.h2LocalFit(
+            noFactor,
+            z,
+            rep(fx$n, length(z)),
+            list(ldFactor = fx$ldFactor, nSamples = fx$n)
+        )$h2,
+        dtd - m,
+        tolerance = 1e-8
+    )
 })
 
 test_that("LAVA's test has no Beta to fit at a very small n", {
@@ -3167,7 +3870,7 @@ test_that("LAVA's test has no Beta to fit at a very small n", {
     expect_true(is.finite(pecotmr:::.lavaP(0.5, 0.8, 1, 100)))
 })
 
-test_that("LAVA holds on real genotypes where delta'delta passes 1", {
+test_that("the moments hold on real genotypes where delta'delta passes 1", {
     # A panel of 3000 from one population, on real genotypes, with K / n near
     # 0.6: the noise then fills most of delta'delta and the signal the rest.
     data(eqtlRegionExample, envir = environment())
@@ -3187,21 +3890,21 @@ test_that("LAVA holds on real genotypes where delta'delta passes 1", {
         R = cor(win[sample.int(nrow(win), 3000L, replace = TRUE), ]),
         nSamples = 3000L
     )
-    fit <- pecotmr:::.lavaFit(r, n, ld)
-    dec <- pecotmr:::.cisH2Eigen(ld)
+    fit <- .localFit(.h2LocalSettings("lava"), r, n, ld)
+    e <- eigen(ld$R, symmetric = TRUE)
     top <- seq_len(fit$nComponents)
-    dtd <- sum(
-        (crossprod(dec$vectors[, top], r) / sqrt(dec$values[top]))^2
-    )
+    dtd <- sum((crossprod(e$vectors[, top], r) / sqrt(e$values[top]))^2)
     expect_gt(dtd, 1)
     expect_lt(abs(fit$h2 - 0.5), 0.2)
     expect_lt(fit$p, 0.05)
 })
 
-test_that(".cisH2Lava is NA with too few LD components or samples", {
+test_that("the moments are NA with too few LD components or samples", {
+    lava <- .h2LocalSettings("lava")
     # Two copies of one variant hold all the variance in one component.
     x <- c(1, -1, 2, 0, -2, 1, -1, 0)
-    fit <- pecotmr:::.cisH2Lava(
+    fit <- pecotmr:::.h2LocalFit(
+        lava,
         c(2, 2),
         c(100, 100),
         list(ldFactor = cbind(x, x), nSamples = 8L)
@@ -3210,7 +3913,8 @@ test_that(".cisH2Lava is NA with too few LD components or samples", {
     expect_equal(fit$nComponents, 1L)
     # Two components leave no degrees of freedom in a study of 3.
     ldFactor <- cbind(c(1, 1, -1, -1), c(1, -1, 1, -1))
-    fit <- pecotmr:::.cisH2Lava(
+    fit <- pecotmr:::.h2LocalFit(
+        lava,
         c(1, 1),
         c(3, 3),
         list(ldFactor = ldFactor, nSamples = 4L)
@@ -3219,10 +3923,10 @@ test_that(".cisH2Lava is NA with too few LD components or samples", {
     expect_equal(fit$nComponents, 2L)
 })
 
-test_that(".cisH2FastHer is the individual-level maximum likelihood", {
-    # Standardized so that X'X = n R, X'y = n r and y'y = n, the
-    # summary-statistics likelihood is that of y ~ N(0, d (h2 X X' / m +
-    # (1 - h2) I)) itself, r being the correlation behind each t statistic.
+# Standardized so that X'X = n R, X'y = n r and y'y = n, the
+# summary-statistics likelihood is that of y ~ N(0, d (h2 X X' / m + (1 - h2)
+# I)) itself, r being the correlation behind each t statistic.
+.nullSpaceFixture <- function() {
     set.seed(9)
     n <- 300
     m <- 8
@@ -3230,14 +3934,19 @@ test_that(".cisH2FastHer is the individual-level maximum likelihood", {
     X <- scale(X) * sqrt(n / (n - 1))
     y <- as.vector(X %*% rnorm(m, sd = 0.15)) + rnorm(n)
     y <- (y - mean(y)) / sqrt(mean((y - mean(y))^2))
-    r <- as.vector(crossprod(X, y)) / n
-    fit <- pecotmr:::.cisH2FastHer(
-        r * sqrt((n - 2) / (1 - r^2)),
-        rep(n, m),
-        list(R = crossprod(X) / n)
+    list(X = X, y = y, n = n, m = m, r = as.vector(crossprod(X, y)) / n)
+}
+
+test_that("FastHer's settings are the individual-level maximum likelihood", {
+    fx <- .nullSpaceFixture()
+    fit <- .localFit(
+        .h2LocalSettings("fastHer"),
+        fx$r,
+        fx$n,
+        list(R = crossprod(fx$X) / fx$n)
     )
-    e <- eigen(tcrossprod(X) / m, symmetric = TRUE)
-    yt <- as.vector(crossprod(e$vectors, y))
+    e <- eigen(tcrossprod(fx$X) / fx$m, symmetric = TRUE)
+    yt <- as.vector(crossprod(e$vectors, fx$y))
     nll <- function(par) {
         v <- par[[2L]] * (par[[1L]] * pmax(e$values, 0) + 1 - par[[1L]])
         sum(log(v) + yt^2 / v) / 2
@@ -3252,8 +3961,17 @@ test_that(".cisH2FastHer is the individual-level maximum likelihood", {
     )
     expect_equal(fit$h2, opt$par[[1L]], tolerance = 1e-5)
     expect_equal(fit$scale, opt$par[[2L]], tolerance = 1e-5)
-    expect_equal(fit$nComponents, m)
+    expect_equal(fit$nComponents, fx$m)
     expect_gt(fit$h2Se, 0)
+    # Held at d = 1 the scale is not fitted, and the test is the ratio.
+    held <- .h2LocalSettings("fastHer")
+    held@procedures@profileScale <- FALSE
+    held@inference <- "lrt"
+    fixed <- .localFit(held, fx$r, fx$n, list(R = crossprod(fx$X) / fx$n))
+    nllFixed <- function(h2) nll(c(h2, 1))
+    want <- optimize(nllFixed, c(0, 1 - 1e-9), tol = 1e-10)$minimum
+    expect_equal(fixed$h2, want, tolerance = 1e-6)
+    expect_true(is.na(fixed$scale) && is.finite(fixed$p))
 })
 
 # A strong QTL on real genotypes, with its LD estimated in the same samples:
@@ -3279,39 +3997,41 @@ test_that(".cisH2FastHer is the individual-level maximum likelihood", {
     )
 }
 
-test_that(".cisH2HdlL reads a t statistic exactly and halves the boundary p", {
+test_that("every setting reads a t statistic as its exact correlation", {
     fx <- .cisH2StrongQtl(11L)
-    nVariant <- rep(fx$n, length(fx$z))
     ld <- list(R = fx$R, nSamples = fx$n)
-    fit <- pecotmr:::.cisH2HdlL(fx$z, nVariant, ld)
-    want <- pecotmr:::.hdlLocusFit(fx$r, ld, fx$n, fx$n)
-    expect_equal(fit$h2, want$h2)
-    expect_equal(fit$intercept, want$intercept)
-    expect_equal(fit$p, want$p / 2)
+    hdl <- .h2LocalSettings("hdlL")
+    fit <- pecotmr:::.h2LocalFit(hdl, fx$z, rep(fx$n, length(fx$z)), ld)
+    expect_equal(fit$h2, .localFit(hdl, fx$r, fx$n, ld)$h2)
+    # z / sqrt(n), as HDL.L() and FastHer read it, overstates r^2 by 1 / (1 -
+    # r^2): past 1 at this QTL's strongest variant.
+    expect_equal(pecotmr:::.zToCor(fx$z, fx$n), fx$r)
+    expect_gt(max(abs(fx$z)) / sqrt(fx$n), 1)
 })
 
-test_that("FastHer's likelihood is defined for a strong QTL on in-sample LD", {
+test_that("the null space's likelihood is defined for a strong QTL in-sample", {
     # Reading t / sqrt(n) as the correlation overstates r^2 by 1 / (1 - r^2),
     # which took the statistics' norm past the sample size.
     fx <- .cisH2StrongQtl(12L)
     nVariant <- rep(fx$n, length(fx$z))
-    ld <- list(R = fx$R)
+    fastHer <- .h2LocalSettings("fastHer")
     expect_gt(fx$n * max(fx$r^2) / (1 - max(fx$r^2)), 0.5 * fx$n)
-    fit <- pecotmr:::.cisH2FastHer(fx$z, nVariant, ld)
+    fit <- pecotmr:::.h2LocalFit(fastHer, fx$z, nVariant, list(R = fx$R))
     expect_true(is.finite(fit$h2))
-    expect_true(is.na(
-        pecotmr:::.cisH2FastHer(
-            fx$r * fx$n,
-            nVariant,
-            list(R = diag(length(fx$z)))
-        )$h2
-    ))
+    undefined <- pecotmr:::.h2LocalFit(
+        fastHer,
+        fx$r * fx$n,
+        nVariant,
+        list(R = diag(length(fx$z)))
+    )
+    expect_true(is.na(undefined$h2) && undefined$undefined)
 })
 
-test_that("LAVA on in-sample LD is the adjusted R^2 of OLS on the components", {
+test_that("the in-sample moments are the adjusted R^2 of OLS on components", {
     fx <- .cisH2StrongQtl(13L, h2 = 0.2)
     nVariant <- rep(fx$n, length(fx$z))
-    fit <- pecotmr:::.cisH2Lava(
+    fit <- pecotmr:::.h2LocalFit(
+        .h2LocalSettings("lava"),
         fx$z,
         nVariant,
         list(R = fx$R, nSamples = fx$n, referenceOverlap = 1)
@@ -3333,12 +4053,14 @@ test_that("LAVA on in-sample LD is the adjusted R^2 of OLS on the components", {
     )
 })
 
-test_that(".cisH2FastHer is NA where its likelihood is undefined", {
+test_that("the null space's likelihood is NA where it is undefined", {
     set.seed(10)
     ldFactor <- matrix(rnorm(60 * 30), 60, 30)
+    fastHer <- .h2LocalSettings("fastHer")
     # A reference of rank 30 for a study of 20.
     expect_true(is.na(
-        pecotmr:::.cisH2FastHer(
+        pecotmr:::.h2LocalFit(
+            fastHer,
             rnorm(30),
             rep(20, 30),
             list(ldFactor = ldFactor)
@@ -3346,7 +4068,8 @@ test_that(".cisH2FastHer is NA where its likelihood is undefined", {
     ))
     # Statistics larger than the sample size allows.
     expect_true(is.na(
-        pecotmr:::.cisH2FastHer(
+        pecotmr:::.h2LocalFit(
+            fastHer,
             rep(20, 30),
             rep(100, 30),
             list(ldFactor = ldFactor)
@@ -3354,7 +4077,295 @@ test_that(".cisH2FastHer is NA where its likelihood is undefined", {
     ))
 })
 
-# ---- estimateH2 on QTL summary statistics: one cis estimate per gene ----
+# ---- the local settings that follow the genome-wide estimators ----
+
+# The local eigen regression, the variant GLS and the variant regression, as
+# the documentation describes them.
+.localSettings <- function() {
+    list(
+        eigenRegression = H2EstimateParam(
+            criterion = "regression",
+            noise = "free",
+            crossNoise = "window",
+            referenceNoise = "none",
+            truncation = H2TruncationParam(
+                of = "variants",
+                maxPerSample = NULL,
+                minimum = 1
+            ),
+            sampleSize = "median",
+            inference = "information"
+        ),
+        variantGls = H2EstimateParam(
+            statistic = "variant",
+            criterion = "gls",
+            noise = "free",
+            crossNoise = "window",
+            referenceNoise = "none",
+            sampleSize = "median",
+            inference = "information"
+        ),
+        variantRegression = H2EstimateParam(
+            statistic = "variant",
+            criterion = "regression",
+            noise = "free",
+            crossNoise = "window",
+            referenceNoise = "unbiasedR2",
+            sampleSize = "median",
+            inference = "jackknife",
+            procedures = H2RegressionParam(
+                initialWeights = "moments",
+                ldRedundancy = TRUE,
+                iterations = 2,
+                jackknifeBlocks = 10
+            )
+        )
+    )
+}
+
+test_that("the eigen regression to convergence is the free-noise likelihood", {
+    # At convergence its weights are the inverse variances, so its normal
+    # equations are the likelihood's score: with the same directions and
+    # sample size, HDL-L's estimate, the reference term going to the noise.
+    for (seed in 2:4) {
+        fx <- .hdlLocusFixture(seed, 0.1)
+        ld <- list(R = fx$R, nSamples = 150L)
+        reg <- .localFit(
+            .localSettings()$eigenRegression,
+            fx$corInput,
+            fx$n,
+            ld
+        )
+        hdl <- .localFit(.h2LocalSettings("hdlL"), fx$corInput, fx$n, ld)
+        expect_equal(reg$h2, hdl$h2, tolerance = 1e-5, info = seed)
+        expect_true(is.finite(reg$h2Se) && reg$h2Se > 0)
+        expect_true(is.na(reg$p))
+    }
+})
+
+test_that("an eigen regression to convergence halves steps that cycle", {
+    # One causal variant on real LD (p >> n) whose signal sits on the top
+    # eigenvalues: plain weight updates cycle between 0.336, from flat weights,
+    # and -0.043, whose weights (h2 held at 0) are flat again. A fit to
+    # convergence halves a step that raises the deviance, and reaches the
+    # free-noise likelihood's estimate; a fixed count of updates, as the
+    # published procedures run, still takes each update whole.
+    data(eqtlRegionExample)
+    G <- eqtlRegionExample$X
+    set.seed(300001L)
+    idx <- sample.int(nrow(G), 300L, replace = TRUE)
+    af <- colMeans(G[idx, ]) / 2
+    Xs <- scale(G[idx, pmin(af, 1 - af) >= 0.05])
+    causal <- sample.int(ncol(Xs), sample(1:2, 1L))
+    g <- as.vector(Xs[, causal, drop = FALSE] %*% rnorm(length(causal)))
+    y <- scale(g * sqrt(0.1 / var(g)) + rnorm(300L) * sqrt(0.9))
+    r <- as.vector(cor(Xs, y))
+    ld <- list(ldFactor = Xs, nSamples = 300L, referenceOverlap = 1)
+    reg <- H2EstimateParam(
+        criterion = "regression",
+        noise = "free",
+        referenceNoise = "eigenTerm",
+        truncation = H2TruncationParam(
+            of = "eigenvalues",
+            maxPerSample = 0.75,
+            minimum = 2
+        ),
+        inference = "information"
+    )
+    capped <- function(k) {
+        updates <- H2RegressionParam(iterations = k)
+        .localFit(
+            methods::initialize(reg, procedures = updates),
+            r,
+            300L,
+            ld
+        )$h2
+    }
+    expect_gt(abs(capped(100) - capped(101)), 0.3)
+    expect_equal(
+        .localFit(reg, r, 300L, ld)$h2,
+        .localFit(.h2LocalSettings("hdlL"), r, 300L, ld)$h2,
+        tolerance = 1e-4
+    )
+})
+
+test_that("the local GLS and variant regression estimate a window", {
+    fx <- .hdlLocusFixture(4L, 0.2)
+    ld <- list(R = fx$R, nSamples = 150L)
+    settings <- .localSettings()
+    gls <- .localFit(settings$variantGls, fx$corInput, fx$n, ld)
+    expect_true(is.finite(gls$h2) && is.finite(gls$intercept))
+    expect_gt(gls$h2Se, 0)
+    reg <- .localFit(settings$variantRegression, fx$corInput, fx$n, ld)
+    expect_true(is.finite(reg$h2) && is.finite(reg$intercept))
+    expect_gt(reg$h2Se, 0)
+    # A jackknife needs blocks to leave out.
+    noBlocks <- settings$variantRegression
+    noBlocks@procedures@jackknifeBlocks <- NULL
+    expect_error(
+        .localFit(noBlocks, fx$corInput, fx$n, ld),
+        "needs `jackknifeBlocks`"
+    )
+})
+
+test_that("the regression's noise can be tied, floored or fitted in stages", {
+    fx <- .hdlLocusFixture(3L, 0.1)
+    ld <- list(R = fx$R, nSamples = 150L)
+    base <- .localSettings()$eigenRegression
+    free <- .localFit(base, fx$corInput, fx$n, ld)
+    tied <- base
+    tied@noise <- "tied"
+    tiedFit <- .localFit(tied, fx$corInput, fx$n, ld)
+    expect_true(is.finite(tiedFit$h2) && is.na(tiedFit$intercept))
+    # A floor above the free intercept holds it there.
+    floored <- base
+    floored@noise <- "floored"
+    floored@procedures@interceptFloor <- free$intercept + 0.5
+    flooredFit <- .localFit(floored, fx$corInput, fx$n, ld)
+    expect_equal(flooredFit$intercept, free$intercept + 0.5)
+    # Below it, the free fit stands.
+    floored@procedures@interceptFloor <- free$intercept - 0.5
+    expect_equal(.localFit(floored, fx$corInput, fx$n, ld)$h2, free$h2)
+    # Two stages hold the noise of a first fit below the threshold.
+    staged <- base
+    staged@procedures@twoStage <- TRUE
+    staged@procedures@chi2Threshold <- 1e6
+    expect_equal(
+        .localFit(staged, fx$corInput, fx$n, ld)$h2,
+        free$h2,
+        tolerance = 1e-6
+    )
+    # LDER's own threshold, and fixed weights, still give an estimate.
+    staged@procedures@chi2Threshold <- NULL
+    expect_true(is.finite(.localFit(staged, fx$corInput, fx$n, ld)$h2))
+    fixed <- base
+    fixed@procedures@weights <- "fixed"
+    expect_true(is.finite(.localFit(fixed, fx$corInput, fx$n, ld)$h2))
+    # A filter dropping every chi-square above 1 changes the fit.
+    filtered <- base
+    filtered@procedures@chi2Filter <- c(0, 1)
+    expect_false(isTRUE(all.equal(
+        .localFit(filtered, fx$corInput, fx$n, ld)$h2,
+        free$h2
+    )))
+})
+
+test_that("the weights read the intercept and start as the settings say", {
+    fx <- .hdlLocusFixture(3L, 0.1)
+    ld <- list(R = fx$R, nSamples = 150L)
+    eigen <- .localSettings()$eigenRegression
+    free <- .localFit(eigen, fx$corInput, fx$n, ld)
+    # Weights holding the intercept at 1, as LDER's do, move the estimate.
+    held <- eigen
+    held@procedures@fitWeightIntercept <- FALSE
+    expect_gt(abs(.localFit(held, fx$corInput, fx$n, ld)$h2 - free$h2), 1e-3)
+    # To convergence the first weights do not matter.
+    moments <- eigen
+    moments@procedures@initialWeights <- "moments"
+    expect_equal(
+        .localFit(moments, fx$corInput, fx$n, ld)$h2,
+        free$h2,
+        tolerance = 1e-6
+    )
+    # Without an update they are the fit's own.
+    variant <- .localSettings()$variantRegression
+    variant@inference <- "information"
+    variant@procedures@iterations <- 0
+    flat <- variant
+    flat@procedures@initialWeights <- "flat"
+    expect_gt(
+        abs(
+            .localFit(variant, fx$corInput, fx$n, ld)$h2 -
+                .localFit(flat, fx$corInput, fx$n, ld)$h2
+        ),
+        1e-3
+    )
+})
+
+test_that("the eigen statistic keeps the directions its truncation says", {
+    dec <- list(values = c(4, 3, 2, 1, 0), vectors = diag(5))
+    trunc <- function(..., M = 5L) {
+        pecotmr:::.h2Truncate(dec, H2TruncationParam(...), 100, M)$values
+    }
+    # A share of the positive eigenvalues' sum, of the variant count, every
+    # direction.
+    expect_identical(trunc(fraction = 0.6, of = "eigenvalues"), c(4, 3))
+    expect_identical(trunc(fraction = 0.6, of = "variants"), 4)
+    expect_identical(trunc(fraction = 1), c(4, 3, 2, 1, 0))
+    # A window of more variants than the directions reach keeps them all.
+    expect_identical(
+        trunc(fraction = 0.6, of = "variants", M = 20L),
+        c(4, 3, 2, 1, 0)
+    )
+    # A cap at a share of the sample size, never under the minimum.
+    expect_identical(
+        pecotmr:::.h2Truncate(
+            dec,
+            H2TruncationParam(
+                of = "eigenvalues",
+                maxPerSample = 0.01,
+                minimum = 2
+            ),
+            100,
+            5L
+        )$values,
+        c(4, 3)
+    )
+    # Ties with the last direction kept.
+    tied <- list(values = c(4, 2, 2, 1), vectors = diag(4))
+    expect_identical(
+        pecotmr:::.h2Truncate(
+            tied,
+            H2TruncationParam(
+                fraction = 0.6,
+                of = "eigenvalues",
+                keepTies = TRUE
+            ),
+            100,
+            4L
+        )$values,
+        c(4, 2, 2)
+    )
+})
+
+test_that("a local estimate refuses the settings it cannot be made under", {
+    refuse <- pecotmr:::.h2RefuseLocalSetting
+    expect_error(
+        refuse(
+            H2EstimateParam(
+                criterion = "regression",
+                noise = "supplied",
+                referenceNoise = "none",
+                inference = "information"
+            ),
+            FALSE,
+            "test"
+        ),
+        "supplied noise needs a value"
+    )
+    expect_error(
+        refuse(
+            H2EstimateParam(
+                criterion = "likelihood",
+                noise = "free",
+                referenceNoise = "eigenTerm",
+                inference = "jackknife"
+            ),
+            FALSE,
+            "test"
+        ),
+        "only the variant regression has blocks"
+    )
+    reml <- .h2LocalSettings("greml")
+    expect_error(refuse(reml, FALSE, "test"), "needs individual-level data")
+    expect_null(refuse(reml, TRUE, "test"))
+    expect_error(
+        pecotmr:::.h2LocalFit(reml, 1, 10, list()),
+        "needs individual-level data"
+    )
+})
+
+# ---- estimateLocalH2 on QTL summary statistics: one cis estimate per gene ----
 
 # qtlSumStatsExample rebuilt from its parts, with the entry's sample sizes,
 # the LD reference, the QC record or the trait position replaced.
@@ -3381,19 +4392,24 @@ test_that(".cisH2FastHer is NA where its likelihood is undefined", {
     )
 }
 
-test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
+test_that("estimateLocalH2 gives each QtlSumStats row its cis estimate", {
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
+    methods <- c("lava", "hdlL", "fastHer")
     fits <- map(
-        c("lava", "hdlL", "fastHer"),
-        function(m) estimateH2(x, method = m, referenceOverlap = 1)
+        methods,
+        function(m) {
+            estimateLocalH2(x, .h2LocalSettings(m), referenceOverlap = 1)
+        }
     )
-    for (fit in fits) {
+    for (i in seq_along(fits)) {
+        fit <- fits[[i]]
         expect_s4_class(fit, "H2Estimate")
         expect_identical(length(fit), 1L)
         expect_identical(as.character(fit$trait), "ENSG_example")
         expect_identical(nSnps(fit), 200L)
         expect_true(is.finite(heritabilityEstimate(fit)))
+        expect_identical(h2EstimateParam(fit), .h2LocalSettings(methods[[i]]))
         # The element is the window the estimate covers: the row's region.
         expect_identical(
             IRanges::ranges(fit[[1]]),
@@ -3402,9 +4418,8 @@ test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
         expect_identical(unname(GenomeInfoDb::genome(fit)), "hg19")
     }
     lava <- fits[[1L]]
-    # LAVA reports its estimate past K = 0.1 n (68 of 165 here) with its F
-    # test, and no standard error.
-    expect_identical(methodNames(lava), "lava")
+    # The moments report their estimate past K = 0.1 n (68 of 165 here) with
+    # their test, and no standard error.
     expect_gt(lava$n_components / 165, 0.1)
     expect_true(is.finite(lava$p_value) && is.na(lava$h2_se))
     hdl <- fits[[2L]]
@@ -3413,17 +4428,16 @@ test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
     fastHer <- fits[[3L]]
     expect_true(is.finite(fastHer$h2_se) && is.finite(fastHer$scale))
     expect_true(is.na(fastHer$p_value))
-    # The default is LAVA.
-    expect_identical(methodNames(estimateH2(x, referenceOverlap = 1)), "lava")
-    expect_identical(estimateH2(x, referenceOverlap = 1), lava)
+    # The default is HDL-L's settings.
+    expect_identical(estimateLocalH2(x, referenceOverlap = 1), hdl)
     # One estimate per selected row.
     two <- c(x, `$<-`(x, "trait", "ENSG_other"))
-    both <- estimateH2(two, referenceOverlap = 1)
+    both <- estimateLocalH2(two, referenceOverlap = 1)
     expect_identical(as.character(both$trait), c("ENSG_example", "ENSG_other"))
-    expect_equal(heritabilityEstimate(both), rep(heritabilityEstimate(lava), 2))
+    expect_equal(heritabilityEstimate(both), rep(heritabilityEstimate(hdl), 2))
     expect_identical(
         as.character(
-            estimateH2(
+            estimateLocalH2(
                 two,
                 traitId = "ENSG_other",
                 referenceOverlap = 1
@@ -3431,82 +4445,111 @@ test_that("estimateH2 gives each QtlSumStats row its cis estimate", {
         ),
         "ENSG_other"
     )
+    # Any setting that fits a window: the local ones too.
+    for (settings in .localSettings()) {
+        est <- estimateLocalH2(x, settings, referenceOverlap = 1)
+        expect_true(is.finite(heritabilityEstimate(est)))
+        expect_true(is.finite(heritabilityEstimateSe(est)))
+        expect_true(is.na(est$reference_overlap))
+    }
 })
 
-test_that("estimateH2 reads the reference overlap, per row, for LAVA alone", {
+test_that("estimateLocalH2 reads the overlap, per row, for the factor", {
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     two <- c(x, `$<-`(x, "trait", "ENSG_other"))
-    lava <- estimateH2(x, referenceOverlap = 1)
+    # LAVA's settings read it; the default's do not.
+    factor <- .h2LocalSettings("lava")
+    lava <- estimateLocalH2(x, factor, referenceOverlap = 1)
     own <- heritabilityEstimate(lava)
-    half <- heritabilityEstimate(estimateH2(x, referenceOverlap = 0.5))
+    half <- heritabilityEstimate(
+        estimateLocalH2(x, factor, referenceOverlap = 0.5)
+    )
     # This reference is as large as the study: it is the study's own samples at
     # 1 (phi 0), and half of them, with others, at 0.5 (phi 1).
     expect_equal(own, half / (1 - lava$n_components / (165 - 1)))
+    expect_identical(lava$reference_overlap, 1)
     # One per selected row.
     expect_equal(
-        heritabilityEstimate(estimateH2(two, referenceOverlap = c(1, 0.5))),
+        heritabilityEstimate(estimateLocalH2(
+            two,
+            factor,
+            referenceOverlap = c(1, 0.5)
+        )),
         c(own, half)
     )
     expect_equal(
         heritabilityEstimate(
-            estimateH2(two, traitId = "ENSG_other", referenceOverlap = 0.5)
+            estimateLocalH2(
+                two,
+                factor,
+                traitId = "ENSG_other",
+                referenceOverlap = 0.5
+            )
         ),
         half
     )
     expect_error(
-        estimateH2(two, referenceOverlap = c(1, 0.5, 0)),
+        estimateLocalH2(two, referenceOverlap = c(1, 0.5, 0)),
         "has 3 values for 2 selected"
     )
-    expect_error(estimateH2(x, referenceOverlap = 2), "referenceOverlap")
-    expect_error(estimateH2(x, referenceOverlap = NA_real_), "referenceOverlap")
+    expect_error(estimateLocalH2(x, referenceOverlap = 2), "referenceOverlap")
+    expect_error(
+        estimateLocalH2(x, referenceOverlap = NA_real_),
+        "referenceOverlap"
+    )
     # A reference cannot hold more of the study than it has samples.
     big <- .cisH2Example(N = rep(1000L, 200L))
     expect_error(
-        estimateH2(big, referenceOverlap = 1),
+        estimateLocalH2(big, factor, referenceOverlap = 1),
         "puts 1000 of the 1000 study samples in an LD reference of 165"
     )
-    # HDL-L and FastHer do not read it.
+    # HDL-L's and FastHer's settings do not read it.
     for (m in c("hdlL", "fastHer")) {
+        settings <- .h2LocalSettings(m)
         expect_equal(
-            heritabilityEstimate(estimateH2(x, method = m)),
+            heritabilityEstimate(estimateLocalH2(x, settings)),
             heritabilityEstimate(
-                estimateH2(x, method = m, referenceOverlap = 1)
+                estimateLocalH2(x, settings, referenceOverlap = 1)
             )
         )
     }
 })
 
-test_that("estimateH2 warns when LAVA assumes no overlap, small reference", {
+test_that("estimateLocalH2 warns when the factor assumes no overlap", {
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     two <- c(x, `$<-`(x, "trait", "ENSG_other"))
-    expect_warning(estimateH2(two), "2 of 2 gene\\(s\\) has at most twice")
-    expect_warning(estimateH2(x), "ENSG_example")
-    # Saying so, or a reference big enough, ends it; the other methods never had
-    # it.
-    expect_silent(estimateH2(x, referenceOverlap = 1))
-    expect_silent(estimateH2(x, referenceOverlap = 0.5))
-    expect_silent(estimateH2(x, method = "hdlL"))
+    factor <- .h2LocalSettings("lava")
+    expect_warning(
+        estimateLocalH2(two, factor),
+        "2 of 2 gene\\(s\\) has at most twice"
+    )
+    expect_warning(estimateLocalH2(x, factor), "ENSG_example")
+    # Saying so, or a reference big enough, ends it; the other settings, the
+    # default's included, never had it.
+    expect_silent(estimateLocalH2(x, factor, referenceOverlap = 1))
+    expect_silent(estimateLocalH2(x, factor, referenceOverlap = 0.5))
+    expect_silent(estimateLocalH2(x))
     smallStudy <- .cisH2Example(N = rep(80L, 200L))
-    expect_silent(estimateH2(smallStudy))
+    expect_silent(estimateLocalH2(smallStudy, factor))
 })
 
-test_that("estimateH2 analyses a row over its cis window", {
+test_that("estimateLocalH2 analyses a row over its cis window", {
     skip_if_not_installed("PlinkMatrix")
     tp <- GenomicRanges::GRanges(
         "chr22",
         IRanges::IRanges(15200000L, width = 1L)
     )
     x <- .cisH2Example(traitPos = tp)
-    fit <- estimateH2(x, cisWindow = 1e5, referenceOverlap = 1)
+    fit <- estimateLocalH2(x, cisWindow = 1e5, referenceOverlap = 1)
     expect_identical(
         IRanges::ranges(fit[[1]]),
         IRanges::IRanges(15100000L, 15300000L)
     )
     expect_lt(nSnps(fit), 200L)
     expect_error(
-        estimateH2(.cisH2Example(), cisWindow = 1e5),
+        estimateLocalH2(.cisH2Example(), cisWindow = 1e5),
         "trait position"
     )
     # A window between two variants holds none: NA, with a warning.
@@ -3517,7 +4560,7 @@ test_that("estimateH2 analyses a row over its cis window", {
         IRanges::IRanges(pos[[gap]] + diff(pos)[[gap]] %/% 2L, width = 1L)
     )
     empty <- expect_warning(
-        estimateH2(.cisH2Example(traitPos = between), cisWindow = 10),
+        estimateLocalH2(.cisH2Example(traitPos = between), cisWindow = 10),
         "1 of 1 gene\\(s\\) hold no variants in their window"
     )
     expect_identical(nSnps(empty), 0L)
@@ -3525,32 +4568,37 @@ test_that("estimateH2 analyses a row over its cis window", {
     expect_identical(IRanges::width(empty[[1]]), 21L)
 })
 
-test_that("estimateH2 marks the genes FastHer's likelihood cannot fit", {
+test_that("estimateLocalH2 marks the genes the null space cannot fit", {
     # Twenty study samples against a 165-sample reference.
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example(N = 20L)
     out <- expect_warning(
-        estimateH2(x, method = "fastHer"),
-        "FastHer's likelihood is undefined for 1 of 1 gene"
+        estimateLocalH2(x, .h2LocalSettings("fastHer")),
+        "the null space is undefined for 1 of 1 gene"
     )
     expect_true(is.na(heritabilityEstimate(out)))
 })
 
-test_that("estimateH2 refuses what a cis estimate cannot be made from", {
+test_that("estimateLocalH2 refuses what a cis estimate cannot be made from", {
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
     expect_error(
-        estimateH2(.cisH2Example(qcOptions = list())),
+        estimateLocalH2(.cisH2Example(qcOptions = list())),
         "has no QC record"
     )
     expect_error(
-        estimateH2(x, traitId = "ENSG_other"),
+        estimateLocalH2(x, traitId = "ENSG_other"),
         "no rows matched"
     )
-    # Any annotations are refused, before they are read.
+    expect_error(estimateLocalH2(x, CredibleSetParam()), "H2EstimateParam")
+    # An empty list carries no settings: the defaults.
+    expect_identical(
+        h2EstimateParam(estimateLocalH2(x, list(), referenceOverlap = 1)),
+        H2EstimateParam()
+    )
     expect_error(
-        estimateH2(x, annotations = list()),
-        "takes no `annotations`"
+        estimateLocalH2(x, .h2LocalSettings("greml")),
+        "needs individual-level data"
     )
     data(qtlSumStatsExample, envir = environment())
     gr <- qtlSumStatsExample[[1]]
@@ -3562,8 +4610,9 @@ test_that("estimateH2 refuses what a cis estimate cannot be made from", {
         genome = "hg19",
         qcOptions = list(qc = "ok")
     )
-    expect_error(estimateH2(noRef), "the row has no LD reference")
-    # LAVA and HDL-L read the reference's sample size; FastHer does not.
+    expect_error(estimateLocalH2(noRef), "the row has no LD reference")
+    # The overlap factor and the eigenvalue term read the reference's sample
+    # size; the null space does not.
     R <- pecotmr:::.ldFromRef(
         ldReference(qtlSumStatsExample)[[1]],
         gr$SNP,
@@ -3572,35 +4621,48 @@ test_that("estimateH2 refuses what a cis estimate cannot be made from", {
     unsized <- .cisH2Example(ref = LdMatrix(R))
     for (m in c("lava", "hdlL")) {
         expect_error(
-            estimateH2(unsized, method = m),
+            estimateLocalH2(unsized, .h2LocalSettings(m)),
             "reads the LD reference's sample size"
         )
     }
     expect_true(is.finite(
-        heritabilityEstimate(estimateH2(unsized, method = "fastHer"))
+        heritabilityEstimate(
+            estimateLocalH2(unsized, .h2LocalSettings("fastHer"))
+        )
     ))
 })
 
-# ---- estimateH2 on a QtlDataset; h2 for the methods that start from it ----
-test_that("estimateH2 gives each QtlDataset trait its in-sample cis estimate", {
+# ---- estimateLocalH2 on a QtlDataset; h2 for the methods starting from it
+test_that("estimateLocalH2 gives each QtlDataset trait an in-sample estimate", {
     skip_if_not_installed("PlinkMatrix")
     data(qtlDatasetExample, envir = environment())
-    fit <- estimateH2(qtlDatasetExample, cisWindow = 1e6)
+    fit <- estimateLocalH2(qtlDatasetExample, cisWindow = 1e6)
     expect_s4_class(fit, "H2Estimate")
     expect_identical(length(fit), 1L)
-    expect_identical(methodNames(fit), "lava")
+    expect_identical(h2EstimateParam(fit), H2EstimateParam())
     expect_identical(as.character(fit$study), "study1")
     expect_identical(as.character(fit$context), "brain")
     expect_identical(as.character(fit$trait), "ENSG_example")
     expect_true(is.finite(heritabilityEstimate(fit)))
-    # The genotypes are the study's own LD.
-    expect_identical(fit$reference_overlap, 1)
+    # The genotypes are the study's own LD, which the overlap factor records.
+    expect_identical(
+        estimateLocalH2(
+            qtlDatasetExample,
+            .h2LocalSettings("lava"),
+            cisWindow = 1e6
+        )$reference_overlap,
+        1
+    )
     # The element is the trait's analysis window.
     expect_gt(sum(IRanges::width(fit[[1]])), 0L)
     for (m in c("hdlL", "fastHer")) {
         expect_true(
             is.finite(heritabilityEstimate(
-                estimateH2(qtlDatasetExample, method = m, cisWindow = 1e6)
+                estimateLocalH2(
+                    qtlDatasetExample,
+                    .h2LocalSettings(m),
+                    cisWindow = 1e6
+                )
             )),
             info = m
         )
@@ -3609,8 +4671,10 @@ test_that("estimateH2 gives each QtlDataset trait its in-sample cis estimate", {
 
 test_that("an in-sample estimate reads a trait's genotypes as their own LD", {
     fx <- .cisH2StrongQtl(13L, h2 = 0.2)
-    fit <- pecotmr:::.h2IndividualFit("lava", fx$Xs, fx$y)
-    want <- pecotmr:::.cisH2Lava(
+    lava <- .h2LocalSettings("lava")
+    fit <- pecotmr:::.h2IndividualFitParam(lava, fx$Xs, fx$y)
+    want <- pecotmr:::.h2LocalFit(
+        .h2LocalSettings("lava"),
         fx$z,
         rep(fx$n, length(fx$z)),
         list(R = fx$R, nSamples = fx$n, referenceOverlap = 1)
@@ -3618,19 +4682,27 @@ test_that("an in-sample estimate reads a trait's genotypes as their own LD", {
     expect_equal(fit$h2, want$h2, tolerance = 1e-6)
     expect_identical(fit$nSnps, ncol(fx$Xs))
     # A constant column carries nothing and is left out.
-    constant <- pecotmr:::.h2IndividualFit("lava", cbind(fx$Xs, 1), fx$y)
+    constant <- pecotmr:::.h2IndividualFitParam(lava, cbind(fx$Xs, 1), fx$y)
     expect_equal(constant$h2, fit$h2)
     expect_identical(constant$nSnps, ncol(fx$Xs))
     # A window where nothing varies has no estimate.
-    none <- pecotmr:::.h2IndividualFit("lava", matrix(1, 20, 3), rnorm(20))
+    none <- pecotmr:::.h2IndividualFitParam(
+        lava,
+        matrix(1, 20, 3),
+        rnorm(20)
+    )
     expect_true(is.na(none$h2))
     expect_identical(none$nSnps, 0L)
 })
 
-test_that("GREML is qgg's REML on the window's relationship matrix", {
+test_that("REML is qgg's on the window's relationship matrix", {
     skip_if_not_installed("qgg")
     fx <- .cisH2StrongQtl(13L, h2 = 0.4)
-    fit <- pecotmr:::.h2IndividualFit("greml", fx$Xs, fx$y)
+    fit <- pecotmr:::.h2IndividualFitParam(
+        .h2LocalSettings("greml"),
+        fx$Xs,
+        fx$y
+    )
     Xs <- scale(fx$Xs)
     theta <- as.numeric(
         qgg::greml(y = fx$y, GRM = list(tcrossprod(Xs) / ncol(Xs)))$theta
@@ -3638,79 +4710,173 @@ test_that("GREML is qgg's REML on the window's relationship matrix", {
     expect_equal(fit$h2, theta[[1L]] / sum(theta))
     expect_true(is.finite(fit$h2Se) && fit$h2Se > 0)
     expect_true(is.na(fit$p))
+    # GremlOptions() reach qgg::greml(), which cannot run a single iteration.
+    expect_error(pecotmr:::.h2IndividualFitParam(
+        H2EstimateParam(
+            statistic = "phenotype",
+            criterion = "reml",
+            referenceNoise = "none",
+            inference = "information",
+            procedures = GremlOptions(maxit = 1)
+        ),
+        fx$Xs,
+        fx$y
+    ))
 })
 
-test_that("estimateH2 on a QtlDataset refuses what it cannot estimate", {
+test_that("estimateLocalH2 on a QtlDataset refuses what it cannot estimate", {
     data(qtlDatasetExample, envir = environment())
-    expect_error(
-        estimateH2(qtlDatasetExample, annotations = list()),
-        "takes no `annotations`"
-    )
     two <- GenomicRanges::GRanges(c("chr22:1-1000", "chr22:5000-6000"))
     expect_error(
-        estimateH2(qtlDatasetExample, region = two),
+        estimateLocalH2(qtlDatasetExample, region = two),
         "estimate one region at a time"
     )
     expect_error(
-        estimateH2(qtlDatasetExample, method = "hdl"),
-        "must be one of"
-    )
-    # GREML needs genotypes.
-    expect_error(
-        estimateH2(.cisH2Example(), method = "greml"),
-        "must be one of"
+        estimateLocalH2(qtlDatasetExample, CredibleSetParam()),
+        "H2EstimateParam"
     )
     # No trait with samples in common with its genotypes leaves nothing.
     expect_error(
-        pecotmr:::.h2IndividualEstimate(list(), "lava", qtlDatasetExample),
+        pecotmr:::.h2IndividualEstimate(
+            list(),
+            H2EstimateParam(),
+            qtlDatasetExample
+        ),
         "no selected trait shares two or more samples"
     )
 })
 
 test_that("a supplied or estimated heritability is settled for the methods", {
-    fakeFit <- function(method, value) list(h2 = value)
-    resolve <- function(h2, value = 0.4) {
+    fakeFit <- function(settings, value) list(h2 = value)
+    resolve <- function(
+        h2Estimate = NULL,
+        h2EstimateParam = NULL,
+        value = 0.4
+    ) {
         pecotmr:::.h2Resolve(
-            h2,
-            c("lava", "greml"),
+            h2Estimate,
+            h2EstimateParam,
             "test",
             fakeFit,
-            list(value = value)
+            list(value = value),
+            individual = TRUE
         )
     }
-    expect_null(resolve(NULL))
+    lava <- .h2LocalSettings("lava")
+    expect_null(resolve())
     expect_identical(resolve(0.3), 0.3)
     # Floored and capped, keeping every engine's variances positive.
     expect_identical(resolve(0), 0.001)
     expect_identical(resolve(0.995), 0.99)
-    expect_identical(resolve("greml", 2), 0.99)
-    expect_identical(resolve("lava"), 0.4)
+    expect_identical(
+        resolve(h2EstimateParam = .h2LocalSettings("greml"), value = 2),
+        0.99
+    )
+    expect_identical(resolve(h2EstimateParam = lava), 0.4)
     expect_error(resolve(1), "must be below 1")
     expect_error(resolve(-0.1))
-    expect_error(resolve("LAVA"), "must be one of")
+    expect_error(resolve("lava"), "h2Estimate")
+    expect_error(
+        resolve(0.3, lava),
+        "give the heritability \\(`h2Estimate`\\) or the settings"
+    )
+    expect_error(
+        resolve(h2EstimateParam = list(criterion = "moments")),
+        "must be built with H2EstimateParam\\(\\)"
+    )
+    # A one-row H2Estimate gives its estimate.
+    one <- pecotmr:::.h2EstimateNew(
+        list(GenomicRanges::GRanges("chr1:1-10")),
+        list(
+            study = "s",
+            context = "c",
+            trait = "t",
+            h2 = 0.2,
+            h2_se = NA_real_,
+            h2_lower = NA_real_,
+            h2_upper = NA_real_,
+            h2_liability = NA_real_,
+            h2_liability_se = NA_real_,
+            h2_liability_lower = NA_real_,
+            h2_liability_upper = NA_real_,
+            intercept = NA_real_,
+            intercept_se = NA_real_,
+            p_value = NA_real_,
+            n_snps = 10L,
+            n_components = NA_integer_,
+            scale = NA_real_,
+            reference_overlap = NA_real_
+        ),
+        pecotmr:::.h2NoObjects(1L),
+        GenomicRanges::GRanges(),
+        lava
+    )
+    expect_identical(resolve(one), 0.2)
+    two <- pecotmr:::.h2EstimateNew(
+        rep(list(GenomicRanges::GRanges("chr1:1-10")), 2L),
+        list(
+            study = c("s", "s"),
+            context = c("c", "c"),
+            trait = c("t1", "t2"),
+            h2 = c(0.2, 0.3),
+            h2_se = NA_real_,
+            h2_lower = NA_real_,
+            h2_upper = NA_real_,
+            h2_liability = NA_real_,
+            h2_liability_se = NA_real_,
+            h2_liability_lower = NA_real_,
+            h2_liability_upper = NA_real_,
+            intercept = NA_real_,
+            intercept_se = NA_real_,
+            p_value = NA_real_,
+            n_snps = 10L,
+            n_components = NA_integer_,
+            scale = NA_real_,
+            reference_overlap = NA_real_
+        ),
+        pecotmr:::.h2NoObjects(2L),
+        GenomicRanges::GRanges(),
+        lava
+    )
+    expect_error(resolve(two), "holds one row, not 2")
     # No estimate leaves the method its own default.
     expect_warning(
-        expect_null(resolve("lava", NA_real_)),
+        expect_null(resolve(h2EstimateParam = lava, value = NA_real_)),
         "no heritability estimate could be made"
+    )
+    # Summary statistics refuse the phenotype statistic.
+    expect_error(
+        pecotmr:::.h2Resolve(
+            NULL,
+            .h2LocalSettings("greml"),
+            "test",
+            fakeFit,
+            list(value = 0.4)
+        ),
+        "the phenotype statistic needs individual-level data"
     )
 })
 
 test_that("an H2Estimate gives a run each selected trait's value, once each", {
     skip_if_not_installed("PlinkMatrix")
     x <- .cisH2Example()
-    est <- estimateH2(x, referenceOverlap = 1)
+    est <- estimateLocalH2(x, referenceOverlap = 1)
     tuples <- tibble::tibble(
         study = "study1",
         context = "brain",
         trait = "ENSG_example"
     )
-    spec <- pecotmr:::.h2PipelineSpec(est, "lava", tuples, "test")
+    spec <- pecotmr:::.h2PipelineSpec(est, NULL, tuples, "test")
     key <- pecotmr:::.h2TupleKey("study1", "brain", "ENSG_example")
     expect_equal(unname(spec$values), heritabilityEstimate(est))
     expect_equal(
         pecotmr:::.h2ForTrait(spec, key, "test", NULL, list()),
         min(max(heritabilityEstimate(est), 0.001), 0.99)
     )
+    # Each trait reads its own row.
+    byTrait <- list(values = c(a = 0.2, b = 0.4))
+    expect_identical(pecotmr:::.h2ForTrait(byTrait, "a", "t", NULL), 0.2)
+    expect_identical(pecotmr:::.h2ForTrait(byTrait, "b", "t", NULL), 0.4)
     # A condition the run derives, such as a principal component, has no row
     # and keeps its default.
     expect_null(pecotmr:::.h2ForTrait(
@@ -3726,17 +4892,607 @@ test_that("an H2Estimate gives a run each selected trait's value, once each", {
         trait = "ENSG_other"
     )
     expect_error(
-        pecotmr:::.h2PipelineSpec(est, "lava", rbind(tuples, other), "test"),
-        "holds no row for 1 selected"
+        pecotmr:::.h2PipelineSpec(est, NULL, rbind(tuples, other), "test"),
+        "the `h2Estimate` H2Estimate holds no row for 1 selected"
     )
-    both <- c(est, estimateH2(x, method = "fastHer"))
+    # One trait's estimates under two settings cannot share an object.
     expect_error(
-        pecotmr:::.h2PipelineSpec(both, "lava", tuples, "test"),
-        "holds several rows"
+        c(est, estimateLocalH2(x, .h2LocalSettings("fastHer"))),
+        "fitted under different settings"
     )
+    fastHer <- .h2LocalSettings("fastHer")
     expect_identical(
-        pecotmr:::.h2PipelineSpec("fastHer", c("lava", "fastHer"), tuples, "t"),
-        list(method = "fastHer")
+        pecotmr:::.h2PipelineSpec(NULL, fastHer, tuples, "t"),
+        list(param = fastHer)
     )
-    expect_null(pecotmr:::.h2PipelineSpec(NULL, "lava", tuples, "test"))
+    # One number serves every trait.
+    one <- pecotmr:::.h2PipelineSpec(0.25, NULL, tuples, "t")
+    expect_identical(one, list(value = 0.25))
+    expect_identical(pecotmr:::.h2ForTrait(one, key, "t", NULL, list()), 0.25)
+    expect_null(pecotmr:::.h2PipelineSpec(NULL, NULL, tuples, "test"))
+    expect_error(
+        pecotmr:::.h2PipelineSpec(0.25, fastHer, tuples, "t"),
+        "not both"
+    )
+})
+
+# ===========================================================================
+# The frequency exponent (alpha)
+# ===========================================================================
+
+test_that("the frequency exponent's pseudo-eigenpairs keep the dense model", {
+    # Var(r) = h2 R W R / M + c R / n: rotated onto the pseudo-eigenpairs,
+    # every direction is independent, and their likelihood is the dense one's
+    # up to a constant.
+    fx <- .hdlLocusFixture(1L, 0.1)
+    M <- ncol(fx$R)
+    p <- seq(0.05, 0.5, length.out = M)
+    w <- pecotmr:::.h2FrequencyWeights(2 * p * (1 - p), 0)
+    expect_equal(mean(w), 1)
+    dec <- pecotmr:::.h2Truncate(
+        pecotmr:::.h2Eigen(list(R = fx$R)),
+        H2TruncationParam(),
+        fx$n,
+        M
+    )
+    pseudo <- pecotmr:::.h2Weighted(dec, w)
+    u <- as.vector(crossprod(dec$vectors, fx$corInput))
+    ut <- as.vector(crossprod(pseudo$vectors, fx$corInput))
+    lam <- dec$values
+    dense <- function(h, c) {
+        S <- h *
+            crossprod(dec$vectors * w, dec$vectors) *
+            tcrossprod(lam) /
+            M +
+            diag(c * lam / fx$n, length(lam))
+        -(as.numeric(determinant(S)$modulus) + sum(u * solve(S, u))) / 2
+    }
+    diagonal <- function(h, c) {
+        v <- h * pseudo$values^2 / M + c * pseudo$values / fx$n
+        -sum(log(v) + ut^2 / v) / 2
+    }
+    grid <- expand.grid(h = c(0.05, 0.2, 0.5), c = c(0.8, 1.2))
+    gap <- purrr::pmap_dbl(grid, dense) - purrr::pmap_dbl(grid, diagonal)
+    expect_equal(gap - gap[[1L]], rep(0, nrow(grid)), tolerance = 1e-8)
+    # Equal frequencies weigh every variant alike.
+    expect_equal(pecotmr:::.h2Weighted(dec, rep(1, M))$values, dec$values)
+})
+
+test_that("alpha weighs nothing where every frequency is alike", {
+    fx <- .hdlLocusFixture(1L, 0.1)
+    ld <- list(ldFactor = fx$ldFactor, nSamples = 150L, het = rep(0.42, 300))
+    settings <- c(
+        list(
+            lava = .h2LocalSettings("lava"),
+            hdlL = .h2LocalSettings("hdlL")
+        ),
+        .localSettings()
+    )
+    for (name in names(settings)) {
+        perSd <- .localFit(settings[[name]], fx$corInput, fx$n, ld)
+        alike <- .localFit(
+            methods::initialize(settings[[name]], alpha = 0),
+            fx$corInput,
+            fx$n,
+            ld
+        )
+        expect_equal(alike$h2, perSd$h2, tolerance = 1e-6, info = name)
+    }
+})
+
+test_that("alpha reads frequencies where they are recorded, or refuses", {
+    lava0 <- methods::initialize(.h2LocalSettings("lava"), alpha = 0)
+    # A bare genotype matrix, which may be residualized, records none.
+    fx <- .hdlLocusFixture(1L, 0.1)
+    expect_error(
+        pecotmr:::.h2IndividualFitParam(
+            lava0,
+            fx$ldFactor[1:20, 1:50],
+            rnorm(20)
+        ),
+        "genotype matrix alone"
+    )
+    # A genome-wide reference that records no frequencies, and carries no
+    # panel to read them from, is refused.
+    ref <- makeTestEigenRef()
+    expect_error(
+        estimateH2(
+            makeTestSumstatsForRef(ref),
+            ref,
+            param = methods::initialize(
+                .h2MethodSettings("lder", NULL, ref),
+                alpha = 0
+            )
+        ),
+        "records none"
+    )
+})
+
+test_that("a genome-wide block's pseudo-eigenpairs keep its weighted model", {
+    # Under the weights W a block's statistics have covariance
+    # h2 R W R / M + c R: on its pseudo-eigenvectors the two parts are
+    # diagonal, b^2 and b, and a direction's annotation scores on the
+    # loadings are its genetic variance per unit rate over b^2.
+    fx <- .h2PanelFixture()
+    R <- ldMatrix(fx$ld[[1L]])
+    p <- nrow(R)
+    e <- eigen(R, symmetric = TRUE)
+    set.seed(5)
+    af <- runif(p, 0.05, 0.5)
+    w <- pecotmr:::.h2FrequencyWeights(2 * af * (1 - af), 0)
+    block <- pecotmr:::.h2WeightedBlock(
+        list(
+            values = e$values,
+            vectors = e$vectors,
+            snpIdx = seq_len(p),
+            nNull = 0L
+        ),
+        w
+    )
+    V <- block$vectors
+    k <- length(block$values)
+    expect_equal(k + block$nNull, p)
+    expect_equal(crossprod(V, R %*% V), diag(block$values), tolerance = 1e-8)
+    expect_equal(
+        crossprod(V, R %*% (w * R) %*% V),
+        diag(block$values^2),
+        tolerance = 1e-8
+    )
+    a <- rbinom(p, 1, 0.3)
+    scores <- pecotmr:::.h2EigenAnnot(block, cbind(w * a, w))
+    expect_equal(
+        diag(crossprod(V, R %*% (w * a * R) %*% V)),
+        block$values^2 * scores[seq_len(k), 1L],
+        tolerance = 1e-8
+    )
+    # The weights' own column scores 1 along every direction.
+    expect_equal(scores[seq_len(k), 2L], rep(1, k), tolerance = 1e-8)
+})
+
+test_that("a genome-wide reference's frequencies come from its MAF or panel", {
+    fx <- .h2PanelFixture()
+    lazyEigen <- buildLdEigen(fx$panel, ldBlocks = fx$blocks, genome = "hg19")
+    p <- colMeans(
+        pecotmr:::.ldRefDosage(fx$panel, seq_len(300), meanImpute = TRUE)
+    ) /
+        2
+    het <- 2 * p * (1 - p)
+    # The panel records none, so its dosages are read, a block at a time.
+    expect_equal(pecotmr:::.h2RefHeterozygosity(lazyEigen), unname(het))
+    # Blocks with an AF column record its MAF, which gives the same.
+    stored <- buildLdScore(.h2PanelLdWithAf(fx, p), genome = "hg19")
+    expect_equal(S4Vectors::mcols(stored)[["MAF"]], unname(pmin(p, 1 - p)))
+    expect_equal(pecotmr:::.h2RefHeterozygosity(stored), unname(het))
+    expect_error(
+        pecotmr:::.h2RefHeterozygosity(buildLdEigen(fx$ld, genome = "hg19")),
+        "records none"
+    )
+})
+
+test_that("genome-wide alpha weighs nothing where every frequency is alike", {
+    fx <- .h2PanelFixture()
+    alike <- .h2PanelLdWithAf(fx, rep(0.3, 300))
+    storedEigen <- buildLdEigen(alike, genome = "hg19")
+    storedScore <- buildLdScore(alike, genome = "hg19")
+    annot <- .h2PanelAnnotations(storedScore)
+    n <- 2000
+    z <- .h2PanelZ(fx$ld, n, h2 = 0.5)
+    refs <- list(
+        lder = storedEigen,
+        hdl = storedEigen,
+        gldsc = storedScore,
+        sldsc = storedScore
+    )
+    fields <- c("h2", "h2Se", "intercept", "tau", "tauSe", "enrichment")
+    runs <- c(
+        map(names(refs), function(m) list(method = m, an = NULL)),
+        map(c("lder", "gldsc", "sldsc"), function(m) {
+            list(method = m, an = annot)
+        })
+    )
+    for (run in runs) {
+        perSd <- .h2GenomeWideSettings(
+            run$method,
+            .h2Stratified(run$an),
+            FALSE
+        )
+        fit <- function(param) {
+            suppressWarnings(pecotmr:::.h2GenomeWideFit(
+                param,
+                z,
+                n,
+                refs[[run$method]],
+                run$an
+            ))[fields]
+        }
+        expect_equal(
+            fit(methods::initialize(perSd, alpha = 0)),
+            fit(perSd),
+            tolerance = 1e-5,
+            label = run$method
+        )
+    }
+    # sHDL's single start stops on a failed line search in one jackknife fold
+    # of this small panel, wherever its likelihood's rounding takes it, so
+    # its likelihood is compared rather than its folds.
+    proc <- .h2GenomeWideSettings("hdl", TRUE, FALSE)@procedures
+    A <- pecotmr:::.h2DesignMat(annot)
+    w <- pecotmr:::.h2RefWeights(
+        methods::initialize(
+            .h2GenomeWideSettings("hdl", TRUE, FALSE),
+            alpha = 0
+        ),
+        storedEigen
+    )
+    hdlDesign <- function(weights) {
+        data <- map(
+            pecotmr:::.ldEigenBlocks(storedEigen),
+            pecotmr:::.hdlBlockData,
+            eigenRef = storedEigen,
+            z = z,
+            n = n,
+            baselineMat = pecotmr:::.h2WeightedDesign(A, weights),
+            candMat = NULL,
+            w = weights
+        )
+        pecotmr:::.hdlDesign(
+            data,
+            length(storedEigen),
+            pecotmr:::.hdlFitBasis(A, weights),
+            proc
+        )
+    }
+    perSdDesign <- hdlDesign(NULL)
+    alikeDesign <- hdlDesign(w)
+    nll <- function(design, par) {
+        pecotmr:::.h2VarianceObjective(
+            par,
+            pecotmr:::.hdlScoringData(design, n, ncol(fx$panel), proc),
+            FALSE
+        )$value
+    }
+    for (par in list(c(0.2, 0.1, 0.05, 1), c(0.4, 0, -0.1, 1.2))) {
+        expect_equal(nll(alikeDesign, par), nll(perSdDesign, par))
+    }
+})
+
+test_that("the stratified report reads heritability under the weights", {
+    # Each variant's variance is w_j (A tau)_j: an annotation's heritability
+    # is its variants' sum, A'WA tau, and its share of variants is unweighted.
+    set.seed(8)
+    M <- 200
+    A <- structure(
+        cbind(base = 1, a = rbinom(M, 1, 0.3), b = runif(M)),
+        userCols = 2:3
+    )
+    af <- runif(M, 0.05, 0.5)
+    w <- pecotmr:::.h2FrequencyWeights(2 * af * (1 - af), 0)
+    tau <- c(1e-3, 2e-3, 5e-4)
+    folds <- matrix(tau, 10, 3, byrow = TRUE) *
+        (1 + matrix(rnorm(30, sd = 0.05), 10, 3))
+    out <- pecotmr:::.h2StratifiedReport(A, tau, folds, w)$enrichment
+    d <- w * as.vector(A %*% tau)
+    expect_equal(
+        out$propH2,
+        c(sum(d * A[, "a"]), sum(d * A[, "b"])) / sum(d)
+    )
+    expect_equal(out$propSnps, unname(colSums(A[, 2:3]) / M))
+    expect_equal(out$enrichment, out$propH2 / out$propSnps)
+    # Weights of 1 are none.
+    expect_equal(
+        pecotmr:::.h2StratifiedReport(A, tau, folds, rep(1, M)),
+        pecotmr:::.h2StratifiedReport(A, tau, folds)
+    )
+})
+
+test_that("estimateH2 weighs a genome-wide reference's variants", {
+    fx <- .h2PanelFixture()
+    lazyEigen <- buildLdEigen(fx$panel, ldBlocks = fx$blocks, genome = "hg19")
+    hdl0 <- methods::initialize(
+        .h2GenomeWideSettings("hdl", FALSE, FALSE),
+        alpha = 0
+    )
+    est <- suppressWarnings(
+        estimateH2(makeTestSumstatsForRef(lazyEigen), lazyEigen, param = hdl0)
+    )
+    expect_identical(h2EstimateParam(est)@alpha, 0)
+    expect_true(is.finite(heritabilityEstimate(est)))
+    # S-LDSC's weighted LD scores need each block's LD.
+    scoresOnly <- buildLdScore(
+        .h2PanelLdWithAf(fx, rep(0.3, 300)),
+        genome = "hg19",
+        keepLdMatrices = FALSE
+    )
+    expect_error(
+        pecotmr:::sldscUnivariate(
+            rnorm(300),
+            2000,
+            scoresOnly,
+            param = methods::initialize(
+                .h2GenomeWideSettings("sldsc", FALSE, FALSE),
+                alpha = 0
+            )
+        ),
+        "weighted LD scores"
+    )
+})
+
+test_that("estimateLocalH2 weighs a panel's and a QtlDataset's variants", {
+    skip_if_not_installed("PlinkMatrix")
+    hdl0 <- methods::initialize(.h2LocalSettings("hdlL"), alpha = 0)
+    x <- .cisH2Example()
+    est <- estimateLocalH2(x, hdl0, referenceOverlap = 1)
+    expect_identical(h2EstimateParam(est)@alpha, 0)
+    expect_true(is.finite(heritabilityEstimate(est)))
+    expect_false(isTRUE(all.equal(
+        heritabilityEstimate(est),
+        heritabilityEstimate(estimateLocalH2(
+            x,
+            .h2LocalSettings("hdlL"),
+            referenceOverlap = 1
+        ))
+    )))
+    data(qtlDatasetExample, envir = environment())
+    individual <- estimateLocalH2(
+        qtlDatasetExample,
+        hdl0,
+        contexts = "brain",
+        cisWindow = 1e6
+    )
+    expect_true(all(is.finite(heritabilityEstimate(individual))))
+})
+
+test_that("the variant regression's information reads LD between variants", {
+    # Its sandwich's middle is the responses' covariance under the model over
+    # every pair of variants, 2 S o S with S = (n h2 / M) R R + c R. With flat
+    # weights h2's estimate is linear in the responses, so at the model's own
+    # S the sandwich is its variance, which draws from that model reproduce.
+    # A signal small enough that every draw's sqrt(n) r stays a correlation's.
+    fx <- .hdlLocusFixture(1L, 0.1)
+    M <- ncol(fx$R)
+    n <- 300
+    S <- n * 0.1 / M * fx$R %*% fx$R + fx$R
+    X <- cbind(n * rowSums(fx$R^2) / M, 1)
+    rows <- list(
+        X = X,
+        index = seq_len(M),
+        ldModel = list(ld = list(R = fx$R), w = NULL, n = n, M = M)
+    )
+    meat <- pecotmr:::.h2RegressionMeat(
+        rows,
+        list(design = list(X = X), w = rep(1, M), coef = c(0.1, 1))
+    )
+    a <- solve(crossprod(X), t(X))[1L, ]
+    variance <- sum(a * ((2 * S^2) %*% a))
+    bread <- solve(crossprod(X))
+    expect_equal((bread %*% meat %*% bread)[[1L, 1L]], variance)
+    e <- eigen(S, symmetric = TRUE)
+    root <- e$vectors %*% (sqrt(pmax(e$values, 0)) * t(e$vectors))
+    param <- H2EstimateParam(
+        statistic = "variant",
+        criterion = "regression",
+        noise = "free",
+        referenceNoise = "none",
+        inference = "information",
+        procedures = H2RegressionParam(weights = "fixed")
+    )
+    ld <- list(R = fx$R, nSamples = 150L)
+    set.seed(12)
+    h2 <- map_dbl(seq_len(400), function(i) {
+        z <- pecotmr:::.corToZ(as.vector(root %*% rnorm(M)) / sqrt(n), n)
+        pecotmr:::.h2LocalFit(param, z, rep(n, M), ld)$h2
+    })
+    expect_true(all(is.finite(h2)))
+    expect_equal(sd(h2), sqrt(variance), tolerance = 0.1)
+})
+
+test_that("HDL-L's interval inverts its likelihood ratio", {
+    # Each end of the interval lies where the profile log-likelihood, the
+    # intercept refitted, has fallen half the chi-square's 95% point below
+    # its value at the fit; settings without the likelihood-ratio test give
+    # none.
+    fx <- .hdlLocusFixture(2L, 0.1)
+    ld <- list(ldFactor = fx$ldFactor, nSamples = 150L)
+    hdl <- .h2LocalSettings("hdlL")
+    fit <- .localFit(hdl, fx$corInput, fx$n, ld)
+    expect_true(fit$h2Lower <= fit$h2 && fit$h2 <= fit$h2Upper)
+    M <- length(fx$corInput)
+    dec <- pecotmr:::.h2Basis(hdl, ld, fx$n, M)
+    r <- fx$corInput
+    data <- list(
+        lam = dec$values,
+        bstar = as.vector(crossprod(dec$vectors, r)),
+        n = fx$n,
+        nRef = 150L,
+        M = M,
+        floor = hdl@procedures@varianceFloor
+    )
+    profile <- function(h) {
+        pecotmr:::.hdlLocusProfile(h, data, hdl@procedures)
+    }
+    top <- profile(fit$h2)
+    for (end in c(fit$h2Lower, fit$h2Upper)) {
+        if (end > 0 && end < 1) {
+            expect_equal(
+                2 * (top - profile(end)),
+                qchisq(0.95, 1),
+                tolerance = 1e-4
+            )
+        }
+    }
+    regression <- .localSettings()$eigenRegression
+    none <- .localFit(regression, fx$corInput, fx$n, ld)
+    expect_true(is.na(none$h2Lower) && is.na(none$h2Upper))
+})
+
+test_that("estimateLocalH2's default reports HDL-L's interval", {
+    skip_if_not_installed("PlinkMatrix")
+    est <- estimateLocalH2(.cisH2Example())
+    md <- S4Vectors::mcols(est)
+    expect_true(is.finite(md$h2_lower) && is.finite(md$h2_upper))
+    expect_true(md$h2_lower <= md$h2 && md$h2 <= md$h2_upper)
+    lava <- estimateLocalH2(
+        .cisH2Example(),
+        .h2LocalSettings("lava"),
+        referenceOverlap = 1
+    )
+    expect_true(is.na(S4Vectors::mcols(lava)$h2_lower))
+})
+
+# ---- edge cases of the local and genome-wide fits ---------------------------
+
+test_that("tied noise without the null space fits the rotated correlations", {
+    fx <- .nullSpaceFixture()
+    R <- crossprod(fx$X) / fx$n
+    tied <- .h2LocalSettings("fastHer")
+    tied@procedures@nullSpace <- FALSE
+    fit <- .localFit(tied, fx$r, fx$n, list(R = R))
+    # The likelihood of b = Q'r, each direction's variance the scale times
+    # lambda / n + h2 (lambda^2 / m - lambda / n).
+    e <- eigen(R, symmetric = TRUE)
+    b <- as.vector(crossprod(e$vectors, fx$r))
+    lam <- e$values
+    nll <- function(par) {
+        v <- par[[2L]] *
+            (lam / fx$n + par[[1L]] * (lam^2 / fx$m - lam / fx$n))
+        sum(log(v) + b^2 / v) / 2
+    }
+    opt <- optim(
+        c(0.3, 1),
+        nll,
+        method = "L-BFGS-B",
+        lower = c(1e-9, 1e-6),
+        upper = c(1 - 1e-9, 10),
+        control = list(factr = 1e2, pgtol = 0)
+    )
+    # Over eight directions the likelihood is flat in h2 and the scale: the
+    # fit is its maximum, no lower than L-BFGS-B's, and Nelder-Mead started
+    # from it finds nothing higher.
+    at <- nll(c(fit$h2, fit$scale))
+    expect_lte(at, opt$value + 1e-10)
+    polish <- suppressWarnings(optim(
+        c(fit$h2, fit$scale),
+        nll,
+        control = list(reltol = 1e-14, maxit = 5000)
+    ))
+    expect_gte(polish$value, at - 1e-8)
+    expect_equal(fit$nComponents, fx$m)
+    # Held at a scale of 1, h2 alone.
+    held <- tied
+    held@procedures@profileScale <- FALSE
+    one <- .localFit(held, fx$r, fx$n, list(R = R))
+    nllOne <- function(h2) nll(c(h2, 1))
+    want <- optimize(nllOne, c(0, 1 - 1e-9), tol = 1e-10)$minimum
+    expect_equal(one$h2, want, tolerance = 1e-6)
+    expect_true(is.na(one$scale))
+})
+
+test_that("a tied fit that never converges has no estimate", {
+    fx <- .nullSpaceFixture()
+    R <- crossprod(fx$X) / fx$n
+    tied <- .h2LocalSettings("fastHer")
+    tied@procedures@nullSpace <- FALSE
+    local_mocked_bindings(.h2TiedScoring = function(...) list(best = NULL))
+    nullSpace <- .localFit(.h2LocalSettings("fastHer"), fx$r, fx$n, list(R = R))
+    plain <- .localFit(tied, fx$r, fx$n, list(R = R))
+    expect_true(is.na(nullSpace$h2) && is.na(plain$h2))
+    expect_equal(plain$nComponents, fx$m)
+})
+
+test_that("a window with too few directions or variants has no estimate", {
+    fx <- .nullSpaceFixture()
+    R <- crossprod(fx$X) / fx$n
+    few <- function(param) {
+        methods::initialize(
+            param,
+            truncation = methods::initialize(param@truncation, minimum = 100)
+        )
+    }
+    regression <- H2EstimateParam(
+        criterion = "regression",
+        noise = "free",
+        referenceNoise = "none",
+        truncation = H2TruncationParam(of = "eigenvalues", minimum = 2),
+        sampleSize = "mean",
+        inference = "information"
+    )
+    for (param in list(.h2LocalSettings("hdlL"), regression)) {
+        fit <- .localFit(few(param), fx$r, fx$n, list(R = R, nSamples = fx$n))
+        expect_true(is.na(fit$h2))
+        expect_equal(fit$nComponents, fx$m)
+    }
+    variants <- H2EstimateParam(
+        statistic = "variant",
+        criterion = "regression",
+        noise = "free",
+        referenceNoise = "none",
+        sampleSize = "median",
+        inference = "information"
+    )
+    two <- .localFit(variants, fx$r[1:2], fx$n, list(R = R[1:2, 1:2]))
+    expect_true(is.na(two$h2))
+    # HDL-L's interval is the likelihood ratio's, under its test alone.
+    hdl <- .h2LocalSettings("hdlL")
+    hdl@inference <- "information"
+    noTest <- .localFit(hdl, fx$r, fx$n, list(R = R, nSamples = fx$n))
+    expect_true(is.finite(noTest$h2))
+    expect_true(is.na(noTest$h2Lower) && is.na(noTest$h2Upper))
+})
+
+test_that("the fits' small helpers take each kind of input", {
+    # A step across a kink whose projection is undefined is not taken.
+    expect_null(pecotmr:::.h2ScoringAcross(
+        c(0, 0),
+        c(1, 2),
+        list(
+            at = list(score = c(0, 0), information = matrix(c(0, 1, 1, 0), 2L)),
+            there = list(score = c(1, 0))
+        ),
+        NULL,
+        NULL,
+        list(lower = c(-1, -1), upper = c(1, 1))
+    ))
+    # Settings without the eigenvalue term read no reference size.
+    hdl <- .h2GenomeWideSettings("hdl", FALSE, FALSE)
+    hdl@referenceNoise <- "none"
+    expect_identical(pecotmr:::.hdlPanelSize(hdl, NULL), Inf)
+    # g-LDSC's S from eigenpairs is the one from their matrix.
+    fx <- .nullSpaceFixture()
+    R <- crossprod(fx$X) / fx$n
+    e <- eigen(R, symmetric = TRUE)
+    d <- seq(0.5, 1.5, length.out = nrow(R))
+    expect_equal(
+        pecotmr:::.gldscS(list(vectors = e$vectors, values = e$values), d, 2),
+        pecotmr:::.gldscS(list(R = R), d, 2)
+    )
+    # REML's genotypes carry the frequency weights as column scales.
+    het <- c(0.1, 0.2, 0.3, 0.4, 0.42, 0.45, 0.48, 0.5)
+    alpha <- methods::initialize(.h2LocalSettings("greml"), alpha = 0)
+    w <- pecotmr:::.h2FrequencyWeights(het, 0)
+    expect_equal(
+        pecotmr:::.h2WeightedColumns(fx$X, alpha, list(het = het)),
+        sweep(fx$X, 2L, sqrt(w), `*`)
+    )
+})
+
+test_that("a genome-wide HDL fit with no converged start has no estimate", {
+    eigenRef <- makeTestEigenRef()
+    local_mocked_bindings(.h2ScoringBest = function(...) NULL)
+    est <- suppressWarnings(
+        estimateH2(makeTestSumstatsForRef(eigenRef), eigenRef)
+    )
+    expect_true(is.na(heritabilityEstimate(est)))
+})
+
+test_that("a panel that records its frequencies gives them to the weights", {
+    fx <- .h2PanelFixture()
+    lazyEigen <- buildLdEigen(fx$panel, ldBlocks = fx$blocks, genome = "hg19")
+    # The reference records no MAF, so its panel's frequencies are read where
+    # the panel records them (here 0.3 for every variant, which no dosages of
+    # it give), its dosages only where it does not.
+    local_mocked_bindings(.ldRefAf = function(x) rep(0.3, nrow(x)))
+    expect_equal(
+        pecotmr:::.h2RefHeterozygosity(lazyEigen),
+        rep(2 * 0.3 * 0.7, length(lazyEigen))
+    )
 })

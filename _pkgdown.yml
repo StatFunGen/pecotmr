@@ -113,8 +113,9 @@ reference:
       S4 class definitions. The `-class` topic documents the slots and
       validity constraints; the matching constructor topic (next
       section) documents the user-facing factory function. Virtual
-      classes have no constructor, and neither does `H2Estimate` --
-      `estimateH2()` builds it.
+      classes have no constructor, and neither do `H2Estimate` --
+      `estimateH2()`, `estimateStratifiedH2()` and `estimateLocalH2()`
+      build it -- or `RgEstimate`, which `estimateLocalRg()` builds.
     contents:
       - AnnotationMatrix-class
       - ColocBoostResult-class
@@ -127,6 +128,7 @@ reference:
       - GwasFineMappingResult-class
       - GwasSumStats-class
       - H2Estimate-class
+      - RgEstimate-class
       - GenotypeMixture-class
       - LdEigen-class
       - LdMatrix-class
@@ -211,6 +213,7 @@ reference:
       - fineMappingMethodOptions
       - GbjOptions
       - GbjOmniOptions
+      - GremlOptions
       - KrigingOptions
       - LdPruningOptions
       - MashCorEmOptions
@@ -244,6 +247,8 @@ reference:
       - GenotypeFilterParam
       - PhenotypeFilterParam
       - GwasFineMappingParam
+      - H2EstimateParam
+      - H2TruncationParam
       - MashComponentParam
       - MashPriorParam
       - MethodsSelectionParam-class
@@ -762,6 +767,10 @@ reference:
       kernel that powers \code{qtlEnrichmentPipeline}).
     contents:
       - estimateH2
+      - estimateStratifiedH2
+      - estimateLocalH2
+      - estimateLocalRg
+      - summarizeLocalRg
       - buildLdEigen
       - buildLdScore
       - computeLdScores

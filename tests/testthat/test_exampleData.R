@@ -173,7 +173,11 @@ test_that("every estimateH2 method runs on the bundled LD references", {
         ldReference = panel
     )
     for (method in c("sldsc", "gldsc")) {
-        res <- estimateH2(ss, ldScoreExample, method = method)
+        res <- estimateH2(
+            ss,
+            ldScoreExample,
+            param = .h2GenomeWideSettings(method, FALSE, FALSE)
+        )
         expect_s4_class(res, "H2Estimate")
         expect_true(is.finite(heritabilityEstimate(res)), info = method)
         expect_true(is.finite(heritabilityEstimateSe(res)), info = method)
@@ -181,7 +185,11 @@ test_that("every estimateH2 method runs on the bundled LD references", {
     }
     for (method in c("lder", "hdl")) {
         res <- suppressWarnings(
-            estimateH2(ss, ldEigenExample, method = method)
+            estimateH2(
+                ss,
+                ldEigenExample,
+                param = .h2MethodSettings(method, NULL, ldEigenExample)
+            )
         )
         expect_s4_class(res, "H2Estimate")
         expect_true(is.finite(heritabilityEstimate(res)), info = method)

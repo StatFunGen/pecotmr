@@ -11,11 +11,11 @@ test_that("an LDpred2 run stops once its effects outgrow the statistics", {
     ld <- .rrwLdMatrix(crossprod(ldFactor) / 39, nSamples = 40L)
     skip_if_not_installed("bigsnpr")
     expect_error(
-        ldpred2GridWeights(stat, ld, p = 1, h2 = 1, sparse = FALSE),
+        ldpred2GridWeights(stat, ld, p = 1, h2Grid = 1, sparse = FALSE),
         "every grid point diverged"
     )
     expect_error(
-        ldpred2AutoWeights(stat, ld, h2Init = 1, pInit = 1),
+        ldpred2AutoWeights(stat, ld, h2Estimate = 0.99, pInit = 1),
         "every chain diverged"
     )
 })
@@ -45,7 +45,7 @@ test_that("ldpred2AutoWeights reports its chains at each retention", {
     w <- ldpred2AutoWeights(
         d$stat,
         d$panel,
-        h2Init = 0.1,
+        h2Estimate = 0.1,
         pInit = c(0.01, 0.1, 0.2),
         fitRetention = "full"
     )
@@ -61,7 +61,7 @@ test_that("ldpred2AutoWeights reports its chains at each retention", {
     )
     set.seed(2)
     expect_null(attr(
-        ldpred2AutoWeights(d$stat, d$panel, h2Init = 0.1, pInit = 0.1),
+        ldpred2AutoWeights(d$stat, d$panel, h2Estimate = 0.1, pInit = 0.1),
         "fit"
     ))
 })
@@ -74,7 +74,7 @@ test_that("ldpred2GridWeights records its pick and its grid", {
         d$stat,
         d$panel,
         p = c(0.01, 0.1, 1),
-        h2 = c(0.1, 0.2),
+        h2Grid = c(0.1, 0.2),
         fitRetention = "full"
     )
     sel <- attr(w, "ldpred2_selection")
@@ -92,13 +92,13 @@ test_that("ldpred2GridWeights records its pick and its grid", {
         d$stat,
         d$panel,
         p = c(0.1, 1),
-        h2 = 0.2,
+        h2Grid = 0.2,
         selection = "ldQuadratic"
     ))
     expect_equal(unname(attr(q, "ldpred2_selection")[["mode"]]), "ldQuadratic")
 })
 
-test_that("LDpred2's heritability defaults to the window's LAVA estimate", {
+test_that("LDpred2's heritability defaults to the window's estimate", {
     skip_if_not_installed("bigsnpr")
     d <- .rrwPanelStatLd()
     gridH2 <- function() {
@@ -106,36 +106,42 @@ test_that("LDpred2's heritability defaults to the window's LAVA estimate", {
         w <- ldpred2GridWeights(d$stat, d$panel, p = 0.1, fitRetention = "slim")
         sort(unique(attr(w, "fit")$path$h2))
     }
-    local_mocked_bindings(.lavaFit = function(...) list(h2 = 0.2))
+    # The default settings, HDL-L's, fit the eigen likelihood.
+    local_mocked_bindings(.h2EigenLikelihood = function(...) list(h2 = 0.2))
     expect_equal(gridH2(), 0.2 * c(0.3, 0.7, 1, 1.4))
-    # Where LAVA gives no estimate, or a negative one, the grid scales
+    # Where they give no estimate, or a negative one, the grid scales
     # bigsnpr's floor.
     for (h2 in c(NA_real_, -0.05)) {
-        local_mocked_bindings(.lavaFit = function(...) list(h2 = h2))
+        local_mocked_bindings(.h2EigenLikelihood = function(...) list(h2 = h2))
         expect_equal(gridH2(), 1e-3 * c(0.3, 0.7, 1, 1.4))
     }
-    # LAVA reads the reference's sample size.
+    # Their eigenvalue term reads the reference's sample size.
     unsized <- LdMatrix(
         pecotmr:::.ldFromRef(d$panel, d$stat$variantNames, "test")
     )
     expect_error(
         ldpred2AutoWeights(d$stat, unsized),
-        "estimating the heritability by LAVA needs the LD reference's"
+        "estimating the heritability under these settings needs the LD"
     )
 })
 
 test_that("the LDpred2 weights check their settings", {
     d <- .rrwPanelStatLd()
     expect_error(
-        ldpred2AutoWeights(d$stat, d$panel, h2Init = 0.1, pInit = c(0, 0.1)),
+        ldpred2AutoWeights(
+            d$stat,
+            d$panel,
+            h2Estimate = 0.1,
+            pInit = c(0, 0.1)
+        ),
         "`pInit` must be above 0"
     )
     expect_error(
-        ldpred2AutoWeights(d$stat, d$panel, h2Init = 0.1, shrinkCorr = 0),
+        ldpred2AutoWeights(d$stat, d$panel, h2Estimate = 0.1, shrinkCorr = 0),
         "`shrinkCorr` must be above 0"
     )
     expect_error(
-        ldpred2GridWeights(d$stat, d$panel, h2 = 0.1, nIter = 50),
+        ldpred2GridWeights(d$stat, d$panel, h2Grid = 0.1, nIter = 50),
         "must exceed `nBurnin`"
     )
 })
@@ -167,25 +173,44 @@ test_that("bigsnpr's LD file lives only as long as the call", {
     d <- .rrwPanelStatLd()
     before <- list.files(tempdir(), pattern = "[.]sbk$")
     set.seed(5)
-    ldpred2GridWeights(d$stat, d$ldMatrix, p = c(0.1, 1), h2 = 0.2)
+    ldpred2GridWeights(d$stat, d$ldMatrix, p = c(0.1, 1), h2Grid = 0.2)
     expect_setequal(list.files(tempdir(), pattern = "[.]sbk$"), before)
 })
 
 test_that("LDpred2's heritability can come from any per-trait estimator", {
     d <- .rrwPanelStatLd()
     inp <- pecotmr:::.rssPerVariantInput(d$stat, d$panel, "test")
-    hdl <- pecotmr:::.cisH2HdlL(
+    hdl <- pecotmr:::.h2LocalFit(
+        .h2LocalSettings("hdlL"),
         pecotmr:::.corToZ(inp$bhat, inp$n),
         inp$n,
         inp$ld
     )$h2
     expect_equal(
-        pecotmr:::.ldpred2H2("hdlL", inp, "test"),
+        pecotmr:::.ldpred2H2(NULL, .h2LocalSettings("hdlL"), inp, "test"),
         if (is.na(hdl)) 1e-3 else max(hdl, 1e-3)
     )
+    # H2EstimateParam()'s settings are the default; the grid is a centre
+    # times its factors, at most 1.
     expect_equal(
-        pecotmr:::.ldpred2GridH2("lava", inp, "test"),
-        pecotmr:::.ldpred2GridH2(NULL, inp, "test")
+        pecotmr:::.ldpred2GridH2(NULL, NULL, H2EstimateParam(), inp, "test"),
+        pecotmr:::.ldpred2GridH2(NULL, NULL, NULL, inp, "test")
     )
-    expect_error(pecotmr:::.ldpred2H2("greml", inp, "test"), "must be one of")
+    expect_equal(
+        pecotmr:::.ldpred2GridH2(NULL, 0.8, NULL, inp, "test"),
+        c(0.24, 0.56, 0.8, 1)
+    )
+    expect_equal(pecotmr:::.ldpred2H2(0.3, NULL, inp, "test"), 0.3)
+    expect_error(
+        pecotmr:::.ldpred2H2(NULL, .h2LocalSettings("greml"), inp, "test"),
+        "the phenotype statistic needs individual-level data"
+    )
+    expect_error(
+        pecotmr:::.ldpred2H2(0.3, .h2LocalSettings("lava"), inp, "test"),
+        "not both"
+    )
+    expect_error(
+        pecotmr:::.ldpred2GridH2(0.2, 0.3, NULL, inp, "test"),
+        "give the grid \\(`h2Grid`\\) or its centre"
+    )
 })

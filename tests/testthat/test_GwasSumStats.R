@@ -977,3 +977,53 @@ test_that("GwasSumStats nCase and nControl are optional, absent by default", {
     expect_equal(g1$nCase, 500)
     expect_equal(g1$nControl, 1500)
 })
+
+test_that("GwasSumStats records a prevalence only with case/control counts", {
+    gr <- GenomicRanges::GRanges(
+        seqnames = "chr1",
+        ranges = IRanges::IRanges(
+            start = seq(100L, by = 100L, length.out = 5L),
+            width = 1L
+        )
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = sprintf("chr1:%d:A:G", 100L * (1:5)),
+        A1 = "A",
+        A2 = "G",
+        Z = rnorm(5),
+        N = rep(2000L, 5)
+    )
+    base <- list(
+        study = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .cbp_makeHandle()
+    )
+    expect_false(
+        "prevalence" %in%
+            colnames(S4Vectors::mcols(
+                exec(GwasSumStats, !!!base)
+            ))
+    )
+    counted <- c(base, list(nCase = 500, nControl = 1500))
+    g <- exec(GwasSumStats, !!!counted, prevalence = 0.01)
+    expect_equal(g$prevalence, 0.01)
+    # A quantitative trait records no counts to take a share of cases from.
+    expect_error(
+        exec(GwasSumStats, !!!base, prevalence = 0.01),
+        "without its case/control counts"
+    )
+    expect_error(
+        exec(GwasSumStats, !!!counted, prevalence = 1),
+        "strictly between 0 and 1"
+    )
+    # Per-variant counts are counts too.
+    S4Vectors::mcols(gr)$N_CASE <- rep(500L, 5)
+    S4Vectors::mcols(gr)$N_CONTROL <- rep(1500L, 5)
+    perVariant <- exec(
+        GwasSumStats,
+        !!!list_assign(base, entry = list(gr)),
+        prevalence = 0.01
+    )
+    expect_equal(perVariant$prevalence, 0.01)
+})

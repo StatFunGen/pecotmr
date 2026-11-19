@@ -7,7 +7,8 @@
 ldpred2AutoWeights(
   stat,
   ldReference,
-  h2Init = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   pInit = exp(seq(log(1e-04), log(0.2), length.out = 30)),
   nIter = 700,
   nBurnin = 500,
@@ -29,14 +30,17 @@ to by \code{stat$variantNames}: a genotype panel (see
 \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 \code{\link{LdMatrix}}.}
 
-\item{h2Init}{The starting heritability: a number, or the estimator to
-estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
-\code{"fastHer"}, as \code{\link{estimateH2}} does for QTL summary
+\item{h2Estimate, h2EstimateParam}{The starting heritability:
+\code{h2Estimate}, a number in [0, 1) or a one-row
+\code{\linkS4class{H2Estimate}}; or \code{h2EstimateParam}, the
+\code{\link{H2EstimateParam}} settings to estimate it under for the
+window, as \code{\link{estimateLocalH2}} does for QTL summary
 statistics, the reference taken to share no samples with the study.
-\code{NULL} (default) is \code{"lava"}. LAVA and HDL-L read the
-reference's sample size, so an \code{LdMatrix} must record
-\code{nSamples}. Floored at 0.001, which is also the start where the
-estimator gives no estimate.}
+Neither (the default) estimates it under the default settings, HDL-L's
+(\code{H2EstimateParam()}); both is an error. LAVA's and HDL-L's
+settings read the reference's sample size, so an \code{LdMatrix} must
+record \code{nSamples}. Floored at 0.001, which is also the start where
+no estimate can be made.}
 
 \item{pInit}{The starting proportions of causal variants, one chain each.}
 
@@ -101,8 +105,8 @@ if (requireNamespace("bigsnpr", quietly = TRUE)) {
   )
   ld <- LdMatrix(cor(X), nSamples = nrow(X))
   set.seed(1)
-  w <- ldpred2AutoWeights(stat, ld, h2Init = 0.1, pInit = c(0.01, 0.1),
-    fitRetention = "slim")
+  w <- ldpred2AutoWeights(stat, ld, h2Estimate = 0.1,
+    pInit = c(0.01, 0.1), fitRetention = "slim")
   attr(w, "fit")$chains
 }
 }

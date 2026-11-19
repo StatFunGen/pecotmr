@@ -68,6 +68,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrix
+    - r-matrixsampling
     - r-matrixstats
     - r-metafor
     - r-mr.ash.alpha
@@ -145,6 +146,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrix
+    - r-matrixsampling
     - r-matrixstats
     - r-metafor
     - r-mr.ash.alpha

@@ -383,27 +383,29 @@
 #'   matrices. The per-variant \code{topLoci} table is fully populated
 #'   either way --- its per-credible-set columns are governed by
 #'   \code{credibleSetParam}'s \code{perCsColumns}, not by this.
-#' @param h2 For \code{QtlSumStats} input (and a
+#' @param h2Estimate,h2EstimateParam For \code{QtlSumStats} input (and a
 #'   \code{MultiStudyQtlDataset}'s summary statistics), each trait's
 #'   heritability in its window, which sets the residual variance of its
 #'   SuSiE-RSS fits to \eqn{1 - h^2} on the z scale instead of 1.
 #'   \code{susie_rss} holds that variance fixed by default, and with a cis
-#'   heritability of 0.3 the true one is 0.7. \code{NULL} (the default)
-#'   leaves it at 1. An estimator estimates each trait's first, on the
-#'   variants and LD its fits read: \code{"lava"}, \code{"hdlL"} or
-#'   \code{"fastHer"} (see \code{\link{estimateH2}}), the reference taken to
-#'   share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
-#'   \code{estimateH2()} returns, gives each selected (study, context, trait)
-#'   its row's estimate, and must hold exactly one row for each. A value is
-#'   used floored at 0.001 and capped at 0.99, and a trait with no estimate
-#'   keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
-#'   chained from \code{susieInf} or not, and the joint mvSuSiE fits, whose
-#'   residual variances it sets condition by condition, with the
-#'   correlations of the residual covariance of the run's mr.mash fit, or
-#'   without one those \code{mvsusie_rss} estimates from the z-scores.
-#'   \code{susieInf} re-estimates its residual variance every sweep, as
-#'   \code{mvsusieInf} does from that start; \code{ser} takes none from it.
-#'   A \code{residual_variance} set through \code{methods} wins.
+#'   heritability of 0.3 the true one is 0.7. Neither (the default) leaves it
+#'   at 1; both is an error. \code{h2Estimate} is one number for every trait,
+#'   or an \code{\linkS4class{H2Estimate}}, as \code{estimateLocalH2()}
+#'   returns, which gives each selected (study, context, trait) its row's
+#'   estimate and must hold exactly one row for each.
+#'   \code{h2EstimateParam}, an \code{\link{H2EstimateParam}} of
+#'   summary-statistic settings, estimates each trait's first, on the
+#'   variants and LD its fits read (see \code{\link{estimateLocalH2}}), the
+#'   reference taken to share no samples with the study. A value is used
+#'   floored at 0.001 and capped at 0.99, and a trait with no estimate keeps
+#'   1, with a warning. It reaches \code{susie} and \code{susieAsh}, chained
+#'   from \code{susieInf} or not, and the joint mvSuSiE fits, whose residual
+#'   variances it sets condition by condition, with the correlations of the
+#'   residual covariance of the run's mr.mash fit, or without one those
+#'   \code{mvsusie_rss} estimates from the z-scores. \code{susieInf}
+#'   re-estimates its residual variance every sweep, as \code{mvsusieInf}
+#'   does from that start; \code{ser} takes none from it. A
+#'   \code{residual_variance} set through \code{methods} wins.
 #' @param susieRssParam Summary-statistics solver settings for
 #'   \code{QtlSumStats} / \code{GwasSumStats} input, built with
 #'   \code{\link{SusieRssParam}}. The joint mvSuSiE fits
@@ -1578,7 +1580,9 @@ setGeneric("fineMappingPipeline", function(data, ...) {
             z = zn$z,
             n = zn$nVar,
             ld = c(source, list(nSamples = .ldRefNoiseN(cfg$ldReference))),
-            label = rowLabel
+            label = rowLabel,
+            ldReference = cfg$ldReference,
+            ids = zn$variantIds
         )
     )
 }
@@ -3824,20 +3828,24 @@ setMethod(
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
         susieRssParam = cfg$susieRssParam,
-        h2 = cfg$h2,
+        # `[[` matches exactly, where `$` would take h2EstimateParam.
+        h2Estimate = cfg[["h2Estimate"]],
+        h2EstimateParam = cfg$h2EstimateParam,
         fitRetention = cfg$fitRetention,
         mrmashPrior = cfg$mrmashPrior,
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
     )
 }
 
-# A fine-mapping run's `h2` as an estimator: one that runs on summary
-# statistics, the only fits it reaches. Checked at entry, before any study
-# runs.
+# A fine-mapping run's heritability: one source, and settings that run on
+# summary statistics, the only fits it reaches. Checked at entry, before any
+# study runs.
 # @noRd
-.fmAssertH2Method <- function(h2) {
-    if (is.character(h2)) {
-        arg_match0(h2, .h2SumStatsMethods(), arg_nm = "h2")
+.fmAssertH2Settings <- function(h2Estimate, h2EstimateParam) {
+    label <- "fineMappingPipeline(MultiStudyQtlDataset)"
+    .h2AssertOneSource(h2Estimate, h2EstimateParam, label)
+    if (!is.null(h2EstimateParam)) {
+        .h2EstimateSettings(h2EstimateParam, FALSE, label)
     }
     invisible(NULL)
 }
@@ -3977,7 +3985,8 @@ setMethod(
     residualizationParam = ResidualizationParam(),
     signalScreenParam = SignalScreenParam(),
     susieRssParam = SusieRssParam(),
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     seed = NULL,
@@ -3989,7 +3998,7 @@ setMethod(
     # Resolved once here so a bad choice fails before any study runs; the
     # record carries the bundle itself, as each component resolves its own.
     .fmResolvePhenotypeFilter(phenotypeFilterParam)
-    .fmAssertH2Method(h2)
+    .fmAssertH2Settings(h2Estimate, h2EstimateParam)
     build <- .inputsBuild(
         list(data, region, fineMappingResult),
         "fineMappingPipeline(MultiStudyQtlDataset)"
@@ -4022,7 +4031,8 @@ setMethod(
         genotypeFilterParam = genotypeFilterParam,
         panelFilterParam = panelFilterParam,
         susieRssParam = susieRssParam,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         usePCA = usePCA,
         nPCs = nPCs,
         fitRetention = fitRetention,
@@ -4101,7 +4111,9 @@ setMethod(
         # For the joint fits on the summary-statistics component
         # (.fmMultiStudySumStats())
         susieRssParam = cfg$susieRssParam,
-        h2 = cfg$h2
+        # `[[` matches exactly, where `$` would take h2EstimateParam.
+        h2Estimate = cfg[["h2Estimate"]],
+        h2EstimateParam = cfg$h2EstimateParam
     )
 }
 
@@ -4656,39 +4668,35 @@ NULL
 # settled here, at entry (.fmQssH2Spec()), and its SusieRssParam.
 # @noRd
 .fmQssConfigs <- function(
-    data,
+    inputs,
     credibleSetParam,
     fineMappingResult,
     fitRetention,
     verbose,
     panelFilterParam,
-    contexts,
-    traitId,
     mrmashPrior,
     dataDrivenPriorWeightsCutoff,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     susieRssParam = SusieRssParam()
 ) {
     common <- .fmSsCommonCfg(
-        data = data,
+        data = inputs$data,
         credibleSetParam = credibleSetParam,
         fineMappingResult = fineMappingResult,
         fitRetention = fitRetention,
         verbose = verbose,
         panelFilterParam = panelFilterParam
     )
-    h2Spec <- .fmQssH2Spec(
-        h2,
-        list(data = data, contexts = contexts, traitId = traitId)
-    )
+    h2Spec <- .fmQssH2Spec(h2Estimate, h2EstimateParam, inputs)
     list(
         common = common,
         # The joint fits read the settled `h2` and the RSS settings too
         joint = c(
             .fmQssJointCfg(
                 common,
-                contexts = contexts,
-                traitId = traitId,
+                contexts = inputs$contexts,
+                traitId = inputs$traitId,
                 mrmashPrior = mrmashPrior,
                 dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
             ),
@@ -4740,21 +4748,21 @@ NULL
     fitRetention,
     susieRssParam,
     panelFilterParam,
-    h2 = NULL
+    h2Estimate = NULL,
+    h2EstimateParam = NULL
 ) {
     inputs <- .fmQssInputs(data, contexts, traitId, cisWindow)
     cfgs <- .fmQssConfigs(
-        data = inputs$data,
+        inputs = inputs,
         credibleSetParam = credibleSetParam,
         fineMappingResult = fineMappingResult,
         fitRetention = fitRetention,
         verbose = verbose,
         panelFilterParam = panelFilterParam,
-        contexts = inputs$contexts,
-        traitId = inputs$traitId,
         mrmashPrior = mrmashPrior,
         dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         susieRssParam = susieRssParam
     )
     rt <- .fmQssResolveTokens(
@@ -4775,20 +4783,20 @@ NULL
     .fmRecordProvenance(out, data, "sumstat", TRUE)
 }
 
-# A QtlSumStats run's `h2`, settled at entry against its selected rows
-# (.h2PipelineSpec()); an estimator that reads the LD reference's sample
-# size needs each row's reference to record one.
+# A QtlSumStats run's heritability, settled at entry against its selected
+# rows (.h2PipelineSpec()); settings that read the LD reference's sample size
+# need each row's reference to record one.
 # @noRd
-.fmQssH2Spec <- function(h2, inputs) {
-    if (is.null(h2)) {
+.fmQssH2Spec <- function(h2Estimate, h2EstimateParam, inputs) {
+    if (is.null(h2Estimate) && is.null(h2EstimateParam)) {
         return(NULL)
     }
     data <- inputs$data
     rows <- which(.sumStatsRowsSelected(data, inputs$contexts, inputs$traitId))
     label <- "fineMappingPipeline(QtlSumStats)"
     spec <- .h2PipelineSpec(
-        h2,
-        .h2SumStatsMethods(),
+        h2Estimate,
+        h2EstimateParam,
         .h2RowTuples(data, rows),
         label
     )
@@ -4796,7 +4804,7 @@ NULL
         rows,
         .h2AssertRowReference,
         data = data,
-        method = spec$method,
+        param = spec$param,
         label = label
     )
     spec
@@ -4900,7 +4908,8 @@ setMethod(
         verbose = 1,
         fitRetention = c("slim", "full"),
         susieRssParam = SusieRssParam(),
-        h2 = NULL,
+        h2Estimate = NULL,
+        h2EstimateParam = NULL,
         panelFilterParam = PanelFilterParam(),
         crossValidationParam = CrossValidationParam(),
         residualizationParam = ResidualizationParam()
@@ -4923,7 +4932,8 @@ setMethod(
             fitRetention = fitRetention,
             susieRssParam = susieRssParam,
             panelFilterParam = panelFilterParam,
-            h2 = h2
+            h2Estimate = h2Estimate,
+            h2EstimateParam = h2EstimateParam
         )
         .withGenome(res, build)
     }

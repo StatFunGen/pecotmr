@@ -89,6 +89,7 @@ Suggests:
     L0Learn,
     logging,
     mashr,
+    matrixsampling,
     mr.mashr,
     mvsusieR,
     ncvreg,
@@ -144,6 +145,9 @@ Collate:
     'CtwasResult.R'
     'GenotypeDosageSeed.R'
     'GwasFineMappingResult.R'
+    'MethodOptions.R'
+    'MethodParam.R'
+    'H2EstimateParam.R'
     'H2Estimate.R'
     'JointGroup.R'
     'LdBlocks.R'
@@ -151,12 +155,11 @@ Collate:
     'LdEigen.R'
     'LdScore.R'
     'MashPrior.R'
-    'MethodOptions.R'
-    'MethodParam.R'
     'qtlSumStats.R'
     'QtlDataset.R'
     'MultiStudyQtlDataset.R'
     'QtlFineMappingResult.R'
+    'RgEstimate.R'
     'SldscData.R'
     'causalInferencePipeline.R'
     'gwasSumStats.R'
@@ -191,6 +194,7 @@ Collate:
     'twasWeights.R'
     'resultWriters.R'
     'resultReaders.R'
+    'rgEstimation.R'
     'sldscPostprocessingPipeline.R'
     'sldscWrapper.R'
     'twasWeightsPipeline.R'

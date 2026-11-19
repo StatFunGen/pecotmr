@@ -270,12 +270,14 @@ test_that("only BGLR's bayesC and bayesN fit a matrix y", {
 test_that("a matrix y's heritability estimate is its conditions' mean", {
     skip_if_not_installed("BGLR")
     d <- .bglrConditions()
+    fastHer <- pecotmr:::.h2LocalSettings("fastHer")
     perCondition <- vapply(
         c("a", "b"),
         function(k) {
             seen <- !is.na(d$Y[, k])
             pecotmr:::.alphabetConditionH2(
-                "fastHer",
+                NULL,
+                fastHer,
                 d$X[seen, ],
                 d$Y[seen, k]
             )
@@ -283,14 +285,14 @@ test_that("a matrix y's heritability estimate is its conditions' mean", {
         numeric(1)
     )
     expect_equal(
-        pecotmr:::.alphabetIndividualH2("fastHer", d$X, d$Y),
+        pecotmr:::.alphabetIndividualH2(NULL, fastHer, d$X, d$Y),
         mean(perCondition)
     )
-    expect_equal(pecotmr:::.alphabetIndividualH2(0.3, d$X, d$Y), 0.3)
-    expect_null(pecotmr:::.alphabetIndividualH2(NULL, d$X, d$Y))
+    expect_equal(pecotmr:::.alphabetIndividualH2(0.3, NULL, d$X, d$Y), 0.3)
+    expect_null(pecotmr:::.alphabetIndividualH2(NULL, NULL, d$X, d$Y))
     # No condition giving an estimate leaves the engine its own default.
     local_mocked_bindings(.alphabetColumnH2 = function(...) NULL)
-    expect_null(pecotmr:::.alphabetIndividualH2("fastHer", d$X, d$Y))
+    expect_null(pecotmr:::.alphabetIndividualH2(NULL, fastHer, d$X, d$Y))
 })
 
 test_that("BglrOptions checks nothing where BGLR's arguments are unreadable", {

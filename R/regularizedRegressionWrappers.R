@@ -2691,20 +2691,22 @@ mrashWeights <- function(
 #'   non-null effects, where each engine's estimate of it starts; \code{NULL}
 #'   gives 0.2 for \code{bayesB} and 0.1 for \code{bayesC}. Refused for the
 #'   other methods.
-#' @param h2 The trait's heritability in the window, which sets every
-#'   engine's starting variances and the scales of its priors: \code{NULL}
-#'   (the default) keeps each engine's own, 0.5; a number in [0, 1); or the
-#'   estimator to estimate it with first, on \code{X} and \code{y}:
-#'   \code{"lava"}, \code{"hdlL"} or \code{"fastHer"} read in-sample, or
-#'   \code{"greml"} (see \code{\link{estimateH2}}). It is used floored at
-#'   0.001 and capped at 0.99, and an estimate that cannot be made leaves
-#'   the engine's default, with a warning. For a matrix \code{y} the
-#'   estimator runs on each column's observed samples and their mean is
-#'   used, as \code{Multitrait()} takes one. qgg reads it as \code{h2} and
-#'   BGLR as \code{R2}; hibayes, which fixes its own at 0.5, gets the
-#'   genetic and residual variances (\code{vg}, \code{ve}) its defaults
-#'   would give at \code{h2}. Setting that engine's spelling through
-#'   \code{methodArgs} as well is an error.
+#' @param h2Estimate,h2EstimateParam The trait's heritability in the window,
+#'   which sets every engine's starting variances and the scales of its
+#'   priors: \code{h2Estimate}, a number in [0, 1) or a one-row
+#'   \code{\linkS4class{H2Estimate}}; or \code{h2EstimateParam}, the
+#'   \code{\link{H2EstimateParam}} settings to estimate it under first, on
+#'   \code{X} and \code{y}, in-sample (as \code{\link{estimateLocalH2}}
+#'   estimates a \code{QtlDataset}'s traits). Neither (the default) keeps
+#'   each engine's own, 0.5; both is an error. It is used floored at 0.001
+#'   and capped at 0.99, and an estimate that cannot be made leaves the
+#'   engine's default, with a warning. For a matrix \code{y} the estimate is
+#'   made on each column's observed samples and their mean is used, as
+#'   \code{Multitrait()} takes one. qgg reads it as \code{h2} and BGLR as
+#'   \code{R2}; hibayes, which fixes its own at 0.5, gets the genetic and
+#'   residual variances (\code{vg}, \code{ve}) its defaults would give at
+#'   it. Setting that engine's spelling through \code{methodArgs} as well is
+#'   an error.
 #' @param nIter Integer. Total number of MCMC iterations, burn-in included,
 #'   on every engine. Default \code{5000}.
 #' @param nBurnin Integer. Number of burn-in iterations discarded; less than
@@ -2740,7 +2742,8 @@ bayesAlphabetWeights <- function(
     method,
     backend = NULL,
     pi = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -2752,11 +2755,7 @@ bayesAlphabetWeights <- function(
     backend <- .methodBackend(method, backend, "individual")
     .assertMcmcSchedule(nIter, nBurnin, thin)
     pi <- .alphabetPi(method, pi)
-    methodArgs <- .backendOptions(
-        methodArgs,
-        .alphabetBackends$individual[[method]][[backend]],
-        backend
-    )
+    methodArgs <- .alphabetOptions(methodArgs, "individual", method, backend)
     response <- .alphabetResponse(y, X, method, backend)
     keep <- .dropZeroVariance(X, "bayesAlphabetWeights")
     XKeep <- X[, keep, drop = FALSE]
@@ -2769,10 +2768,26 @@ bayesAlphabetWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         pi = pi,
-        h2 = .alphabetIndividualH2(h2, XKeep, response),
+        h2 = .alphabetIndividualH2(
+            h2Estimate,
+            h2EstimateParam,
+            XKeep,
+            response
+        ),
         methodArgs = methodArgs
     )
     .alphabetResult(fit, backend, fitRetention, keep, X, response)
+}
+
+# The engine options of a method on `path` ("individual" or "sumstat") and
+# its `backend`, checked against the engine (.backendOptions()).
+# @noRd
+.alphabetOptions <- function(methodArgs, path, method, backend) {
+    .backendOptions(
+        methodArgs,
+        .alphabetBackends[[path]][[method]][[backend]],
+        backend
+    )
 }
 
 # A fit's weights over every column of X (.weightsOnColumns()), with its
@@ -2845,18 +2860,19 @@ bayesAlphabetWeights <- function(
 }
 
 # The heritability an individual-level fit starts from (.h2Resolve()), an
-# estimate being made on the variants it fits. For several conditions an
-# estimator runs on each one's observed samples and the estimates' mean is
+# estimate being made on the variants it fits. For several conditions the
+# estimate is made on each one's observed samples and the estimates' mean is
 # used, NULL when none could be made.
 # @noRd
-.alphabetIndividualH2 <- function(h2, X, y) {
-    if (!is.matrix(y) || !is.character(h2)) {
-        return(.alphabetConditionH2(h2, X, y))
+.alphabetIndividualH2 <- function(h2Estimate, h2EstimateParam, X, y) {
+    .h2AssertOneSource(h2Estimate, h2EstimateParam, "bayesAlphabetWeights")
+    if (!is.matrix(y) || is.null(h2EstimateParam)) {
+        return(.alphabetConditionH2(h2Estimate, h2EstimateParam, X, y))
     }
     estimates <- compact(map(
         seq_len(ncol(y)),
         .alphabetColumnH2,
-        h2 = h2,
+        h2EstimateParam = h2EstimateParam,
         X = X,
         y = y
     ))
@@ -2865,20 +2881,26 @@ bayesAlphabetWeights <- function(
 
 # Column `k`'s heritability, on the samples it was measured on.
 # @noRd
-.alphabetColumnH2 <- function(k, h2, X, y) {
+.alphabetColumnH2 <- function(k, h2EstimateParam, X, y) {
     seen <- !is.na(y[, k])
-    .alphabetConditionH2(h2, X[seen, , drop = FALSE], y[seen, k])
+    .alphabetConditionH2(
+        NULL,
+        h2EstimateParam,
+        X[seen, , drop = FALSE],
+        y[seen, k]
+    )
 }
 
-# One phenotype's heritability (.h2Resolve()).
+# One phenotype's heritability (.h2Resolve()), estimated in-sample.
 # @noRd
-.alphabetConditionH2 <- function(h2, X, y) {
+.alphabetConditionH2 <- function(h2Estimate, h2EstimateParam, X, y) {
     .h2Resolve(
-        h2,
-        .h2IndividualMethods(),
+        h2Estimate,
+        h2EstimateParam,
         "bayesAlphabetWeights",
-        .h2IndividualFit,
-        list(X = X, y = y)
+        .h2IndividualFitParam,
+        list(X = X, y = y),
+        individual = TRUE
     )
 }
 
@@ -3178,7 +3200,8 @@ bayesAWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes"),
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3190,7 +3213,8 @@ bayesAWeights <- function(
         y,
         "bayesA",
         backend = arg_match(backend),
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3224,7 +3248,8 @@ bayesBWeights <- function(
     y,
     backend = c("bglr", "hibayes"),
     pi = 0.2,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3237,7 +3262,8 @@ bayesBWeights <- function(
         "bayesB",
         backend = arg_match(backend),
         pi = pi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3276,7 +3302,8 @@ bayesCWeights <- function(
     y,
     backend = c("qgg", "hibayes", "bglr"),
     pi = 0.1,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3289,7 +3316,8 @@ bayesCWeights <- function(
         "bayesC",
         backend = arg_match(backend),
         pi = pi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3323,7 +3351,8 @@ bayesLWeights <- function(
     X,
     y,
     backend = c("qgg", "bglr", "hibayes"),
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3335,7 +3364,8 @@ bayesLWeights <- function(
         y,
         "bayesL",
         backend = arg_match(backend),
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3371,7 +3401,8 @@ bayesNWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes", "bglr"),
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3383,7 +3414,8 @@ bayesNWeights <- function(
         y,
         "bayesN",
         backend = arg_match(backend),
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3415,7 +3447,8 @@ bayesRWeights <- function(
     X,
     y,
     backend = c("qgg", "hibayes"),
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3427,7 +3460,8 @@ bayesRWeights <- function(
         y,
         "bayesR",
         backend = arg_match(backend),
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -3485,18 +3519,20 @@ bayesRWeights <- function(
 #'   \code{"bayesC"}, \code{"bayesL"}, \code{"bayesN"} or \code{"bayesR"}.
 #' @param backend The engine, one the method has (see Description);
 #'   \code{NULL} picks the method's default.
-#' @param h2 The trait's heritability in the window, which sets every
-#'   engine's starting variances and the scales of its priors: \code{NULL}
-#'   (the default) keeps each engine's own, 0.5; a number in [0, 1); or the
-#'   estimator to estimate it with first, on \code{stat} and
-#'   \code{ldReference}: \code{"lava"}, \code{"hdlL"} or \code{"fastHer"}
-#'   (see \code{\link{estimateH2}}), taking the reference to share no
-#'   samples with the study. It is used floored at 0.001 and capped at 0.99,
+#' @param h2Estimate,h2EstimateParam The trait's heritability in the window,
+#'   which sets every engine's starting variances and the scales of its
+#'   priors: \code{h2Estimate}, a number in [0, 1) or a one-row
+#'   \code{\linkS4class{H2Estimate}}; or \code{h2EstimateParam}, the
+#'   \code{\link{H2EstimateParam}} settings to estimate it under first, on
+#'   \code{stat} and \code{ldReference} (as \code{\link{estimateLocalH2}}
+#'   estimates QTL summary statistics), taking the reference to share no
+#'   samples with the study. Neither (the default) keeps each engine's own,
+#'   0.5; both is an error. It is used floored at 0.001 and capped at 0.99,
 #'   and an estimate that cannot be made leaves the engine's default, with a
-#'   warning. qgg reads it as \code{h2}; hibayes, which fixes its own at
-#'   0.5, gets the genetic and residual variances (\code{vg}, \code{ve}) its
-#'   defaults would give at \code{h2}. Setting that engine's spelling
-#'   through \code{methodArgs} as well is an error.
+#'   warning. qgg reads it as \code{h2}; hibayes, which fixes its own at 0.5,
+#'   gets the genetic and residual variances (\code{vg}, \code{ve}) its
+#'   defaults would give at it. Setting that engine's spelling through
+#'   \code{methodArgs} as well is an error.
 #' @inheritParams bayesAlphabetWeights
 #' @param shrinkCorr The LD shrinkage \eqn{c}: both engines read
 #'   \eqn{cR + (1 - c)I}. Default 0.95, the LDpred2 vignette's. A reference
@@ -3560,7 +3596,8 @@ bayesAlphabetRssWeights <- function(
     method,
     backend = NULL,
     pi = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -3582,12 +3619,8 @@ bayesAlphabetRssWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         pi = .alphabetPi(prior, pi),
-        methodArgs = .backendOptions(
-            methodArgs,
-            .alphabetBackends$sumstat[[prior]][[engine]],
-            engine
-        ),
-        h2 = .alphabetRssH2(h2, stat, ldReference),
+        methodArgs = .alphabetOptions(methodArgs, "sumstat", prior, engine),
+        h2 = .alphabetRssH2(h2Estimate, h2EstimateParam, stat, ldReference),
         solverInput = .alphabetRssDense(stat, ldReference, lds, engine)
     )
     fit <- .mcmcChains(
@@ -3626,11 +3659,11 @@ bayesAlphabetRssWeights <- function(
 # The heritability a summary-statistics fit starts from (.h2Resolve()), an
 # estimate being made on its statistics and LD reference.
 # @noRd
-.alphabetRssH2 <- function(h2, stat, ldReference) {
+.alphabetRssH2 <- function(h2Estimate, h2EstimateParam, stat, ldReference) {
     label <- "bayesAlphabetRssWeights"
     .h2Resolve(
-        h2,
-        .h2SumStatsMethods(),
+        h2Estimate,
+        h2EstimateParam,
         label,
         .h2StatFit,
         list(stat = stat, ldReference = ldReference, label = label)
@@ -3994,7 +4027,8 @@ bayesARssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4009,7 +4043,8 @@ bayesARssWeights <- function(
         ldReference,
         "bayesA",
         backend = backend,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4042,7 +4077,8 @@ bayesBRssWeights <- function(
     stat,
     ldReference,
     pi = 0.2,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4057,7 +4093,8 @@ bayesBRssWeights <- function(
         ldReference,
         "bayesB",
         pi = pi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4093,7 +4130,8 @@ bayesCRssWeights <- function(
     ldReference,
     backend = NULL,
     pi = 0.1,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4109,7 +4147,8 @@ bayesCRssWeights <- function(
         "bayesC",
         backend = backend,
         pi = pi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4142,7 +4181,8 @@ bayesLRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4157,7 +4197,8 @@ bayesLRssWeights <- function(
         ldReference,
         "bayesL",
         backend = backend,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4191,7 +4232,8 @@ bayesNRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4206,7 +4248,8 @@ bayesNRssWeights <- function(
         ldReference,
         "bayesN",
         backend = backend,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4239,7 +4282,8 @@ bayesRRssWeights <- function(
     stat,
     ldReference,
     backend = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -4254,7 +4298,8 @@ bayesRRssWeights <- function(
         ldReference,
         "bayesR",
         backend = backend,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,
@@ -4306,14 +4351,17 @@ bayesRRssWeights <- function(
 #'   to by \code{stat$variantNames}: a genotype panel (see
 #'   \code{\link{readGenotypes}}), a \code{\link{GenotypeMixture}} or an
 #'   \code{\link{LdMatrix}}.
-#' @param h2Init The starting heritability: a number, or the estimator to
-#'   estimate it with for the window, \code{"lava"}, \code{"hdlL"} or
-#'   \code{"fastHer"}, as \code{\link{estimateH2}} does for QTL summary
+#' @param h2Estimate,h2EstimateParam The starting heritability:
+#'   \code{h2Estimate}, a number in [0, 1) or a one-row
+#'   \code{\linkS4class{H2Estimate}}; or \code{h2EstimateParam}, the
+#'   \code{\link{H2EstimateParam}} settings to estimate it under for the
+#'   window, as \code{\link{estimateLocalH2}} does for QTL summary
 #'   statistics, the reference taken to share no samples with the study.
-#'   \code{NULL} (default) is \code{"lava"}. LAVA and HDL-L read the
-#'   reference's sample size, so an \code{LdMatrix} must record
-#'   \code{nSamples}. Floored at 0.001, which is also the start where the
-#'   estimator gives no estimate.
+#'   Neither (the default) estimates it under the default settings, HDL-L's
+#'   (\code{H2EstimateParam()}); both is an error. LAVA's and HDL-L's
+#'   settings read the reference's sample size, so an \code{LdMatrix} must
+#'   record \code{nSamples}. Floored at 0.001, which is also the start where
+#'   no estimate can be made.
 #' @param pInit The starting proportions of causal variants, one chain each.
 #' @param nIter,nBurnin Each chain's iterations, burn-in included, and its
 #'   burn-in.
@@ -4345,15 +4393,16 @@ bayesRRssWeights <- function(
 #'   )
 #'   ld <- LdMatrix(cor(X), nSamples = nrow(X))
 #'   set.seed(1)
-#'   w <- ldpred2AutoWeights(stat, ld, h2Init = 0.1, pInit = c(0.01, 0.1),
-#'     fitRetention = "slim")
+#'   w <- ldpred2AutoWeights(stat, ld, h2Estimate = 0.1,
+#'     pInit = c(0.01, 0.1), fitRetention = "slim")
 #'   attr(w, "fit")$chains
 #' }
 #' @export
 ldpred2AutoWeights <- function(
     stat,
     ldReference,
-    h2Init = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     pInit = exp(seq(log(1e-4), log(0.2), length.out = 30)),
     nIter = 700,
     nBurnin = 500,
@@ -4371,7 +4420,7 @@ ldpred2AutoWeights <- function(
     inp <- .rssPerVariantInput(stat, ldReference, label)
     config <- list(
         pInit = pInit,
-        h2 = .ldpred2H2(h2Init, inp, label),
+        h2 = .ldpred2H2(h2Estimate, h2EstimateParam, inp, label),
         nIter = nIter,
         nBurnin = nBurnin,
         shrinkCorr = shrinkCorr,
@@ -4412,11 +4461,13 @@ ldpred2AutoWeights <- function(
 #'
 #' @inheritParams ldpred2AutoWeights
 #' @param p The proportions of causal variants in the grid.
-#' @param h2 The heritabilities in the grid: numbers, or one estimator,
-#'   whose estimate for the window (see \code{h2Init} of
-#'   \code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4 makes the
-#'   grid, as the LDpred2 vignette scales LD score regression's. \code{NULL}
-#'   (default) is \code{"lava"}.
+#' @param h2Grid The heritabilities in the grid; \code{NULL} (the default)
+#'   makes the grid a centre times 0.3, 0.7, 1 and 1.4, at most 1, as the
+#'   LDpred2 vignette scales LD score regression's estimate.
+#' @param h2Estimate,h2EstimateParam The grid's centre, as
+#'   \code{\link{ldpred2AutoWeights}} takes its start: a value, or the
+#'   settings to estimate it under for the window; neither estimates it under
+#'   the default settings, HDL-L's. Either with \code{h2Grid} is an error.
 #' @param sparse Whether each fit sets an effect whose inclusion probability
 #'   falls below \code{p} to zero; both by default.
 #' @param shrinkCorr The LD shrinkage \eqn{c}: the matrix bigsnpr reads is
@@ -4448,7 +4499,7 @@ ldpred2AutoWeights <- function(
 #'   )
 #'   ld <- LdMatrix(cor(X), nSamples = nrow(X))
 #'   set.seed(1)
-#'   w <- ldpred2GridWeights(stat, ld, p = c(0.01, 0.1, 1), h2 = 0.1)
+#'   w <- ldpred2GridWeights(stat, ld, p = c(0.01, 0.1, 1), h2Grid = 0.1)
 #'   attr(w, "ldpred2_selection")
 #' }
 #' @export
@@ -4456,7 +4507,9 @@ ldpred2GridWeights <- function(
     stat,
     ldReference,
     p = exp(seq(log(1e-5), 0, length.out = 21)),
-    h2 = NULL,
+    h2Grid = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     sparse = c(FALSE, TRUE),
     nIter = 150,
     nBurnin = 50,
@@ -4474,8 +4527,9 @@ ldpred2GridWeights <- function(
     if (identical(pick, "heldOut")) {
         .rssCheckHeldOutLd(inp$ld, label)
     }
+    h2 <- .ldpred2GridH2(h2Grid, h2Estimate, h2EstimateParam, inp, label)
     config <- list(
-        grid = .ldpred2Grid(p, .ldpred2GridH2(h2, inp, label), sparse),
+        grid = .ldpred2Grid(p, h2, sparse),
         nIter = nIter,
         nBurnin = nBurnin
     )
@@ -4523,47 +4577,53 @@ ldpred2GridWeights <- function(
 }
 
 # The heritability LDpred2-auto starts from: the caller's, floored at 0.001
-# as bigsnpr floors it, else the window's estimate by the estimator it names,
-# LAVA when NULL.
+# as bigsnpr floors it, else the window's estimate under the caller's
+# settings, the default ones (HDL-L's) when none are given.
 # @noRd
-.ldpred2H2 <- function(h2, inp, label) {
-    if (is.null(h2) || is.character(h2)) {
-        return(.ldpred2EstimateH2(h2 %||% "lava", inp, label))
+.ldpred2H2 <- function(h2Estimate, h2EstimateParam, inp, label) {
+    .h2AssertOneSource(h2Estimate, h2EstimateParam, label)
+    if (is.null(h2Estimate)) {
+        settings <- h2EstimateParam %||% H2EstimateParam()
+        return(.ldpred2EstimateH2(settings, inp, label))
     }
-    assertNumber(h2, lower = 0, upper = 1)
-    max(h2, 1e-3)
+    max(.h2SuppliedValue(h2Estimate, label), 1e-3)
 }
 
-# The heritabilities of the grid: the caller's, else the window's estimate by
-# the estimator it names (LAVA when NULL) times 0.3, 0.7, 1 and 1.4.
+# The heritabilities of the grid: the caller's, else a centre (.ldpred2H2())
+# times 0.3, 0.7, 1 and 1.4, at most 1.
 # @noRd
-.ldpred2GridH2 <- function(h2, inp, label) {
-    if (is.numeric(h2)) {
-        .ldpred2AssertProportions(h2, "h2")
-        return(h2)
+.ldpred2GridH2 <- function(h2Grid, h2Estimate, h2EstimateParam, inp, label) {
+    if (is.null(h2Grid)) {
+        centre <- .ldpred2H2(h2Estimate, h2EstimateParam, inp, label)
+        return(pmin(centre * c(0.3, 0.7, 1, 1.4), 1))
     }
-    .ldpred2EstimateH2(h2 %||% "lava", inp, label) * c(0.3, 0.7, 1, 1.4)
+    if (!is.null(h2Estimate) || !is.null(h2EstimateParam)) {
+        abort(glue(
+            "{label}: give the grid (`h2Grid`) or its centre (`h2Estimate` ",
+            "or `h2EstimateParam`), not both."
+        ))
+    }
+    .ldpred2AssertProportions(h2Grid, "h2Grid")
+    h2Grid
 }
 
-# The window's heritability by `method`, one of estimateH2()'s estimators for
-# QTL summary statistics (.cisH2Estimators), the reference taken to share no
-# samples with the study, and floored at bigsnpr's 0.001: the start too
-# where the estimator gives no estimate.
+# The window's heritability under the settings `param`, the reference taken
+# to share no samples with the study, and floored at bigsnpr's 0.001: the
+# start too where no estimate can be made.
 # @noRd
-.ldpred2EstimateH2 <- function(method, inp, label) {
-    estimator <- arg_match0(method, .h2SumStatsMethods(), arg_nm = "h2")
-    if (is_in(estimator, c("lava", "hdlL")) && is.na(inp$ld$nSamples)) {
+.ldpred2EstimateH2 <- function(param, inp, label) {
+    settings <- .h2EstimateSettings(param, FALSE, label)
+    if (.h2ReadsReferenceSize(settings) && is.na(inp$ld$nSamples)) {
         abort(c(
             glue(
-                "{label}: estimating the heritability by ",
-                "{.h2EstimatorNames[[estimator]]} needs the LD reference's ",
-                "sample size."
+                "{label}: estimating the heritability under these settings ",
+                "needs the LD reference's sample size."
             ),
             i = "Build the LdMatrix with `nSamples`, or give the heritability."
         ))
     }
-    h2 <- exec(
-        .cisH2Estimators[[estimator]],
+    h2 <- .h2LocalFit(
+        settings,
         z = .corToZ(inp$bhat, inp$n),
         nVariant = inp$n,
         ld = inp$ld
@@ -8898,7 +8958,7 @@ bglrWeights <- function(
     acrossStudies = FALSE,
     backend = "bglr",
     pi = NULL,
-    h2 = NULL,
+    h2Estimate = NULL,
     nIter = 5000,
     nBurnin = 1000,
     thin = 5,
@@ -8911,7 +8971,7 @@ bglrWeights <- function(
         method,
         backend = backend,
         pi = pi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
         nIter = nIter,
         nBurnin = nBurnin,
         thin = thin,

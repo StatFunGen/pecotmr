@@ -13,7 +13,8 @@ An \code{LdScore} object (extends \code{LdStatistic}) carrying
 An \code{LdScore} reference (per-variant LD scores, weights,
 and per-block LD matrices) for the LD-score-based heritability estimators
 (\code{\link{estimateH2}} with \code{method = "sldsc"} or
-\code{"gldsc"}). Built by \code{\link{buildLdScore}} over the first 14
+\code{"gldsc"}, and \code{\link{estimateStratifiedH2}} under the
+variants' settings). Built by \code{\link{buildLdScore}} over the first 14
 chr22 LD blocks of the de-identified \code{protocol_example} reference,
 from the same simulated 20,000-person panel as
 \code{\link{ldEigenExample}}, and describes the same variants.

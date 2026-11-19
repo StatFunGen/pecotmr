@@ -161,7 +161,11 @@ LdEigen <- function(
 #'   the reference's variants.
 #' @param eigenvalueTruncation Numeric in (0, 1]; the proportion of each
 #'   block's eigenvalue mass to retain. \code{1} (the default) keeps every
-#'   component; HDL conventionally uses \code{0.9}.
+#'   component; HDL conventionally uses \code{0.9}. The genome-wide fits read
+#'   the kept directions, each variant still counted: on a 1,300-variant
+#'   reference \code{0.99} kept about half of the directions, left HDL's
+#'   estimate as it was and read LDER's about 10\% lower, its intercept
+#'   losing the near-null directions it rests on.
 #' @return An \code{LdEigen} over every variant in the reference's blocks.
 #'   One built from a genotype panel keeps the panel and decomposes each
 #'   block when it is needed, rather than storing the decompositions.

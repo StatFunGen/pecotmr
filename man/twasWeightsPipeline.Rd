@@ -26,7 +26,8 @@ twasWeightsPipeline(data, ...)
   crossValidationParam = CrossValidationParam(),
   ensembleParam = EnsembleParam(),
   estimatePi = TRUE,
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
@@ -48,7 +49,8 @@ twasWeightsPipeline(data, ...)
   fineMappingResult = NULL,
   twasWeights = NULL,
   mashPrior = NULL,
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   fitRetention = c("slim", "none", "full"),
   verbose = 1L,
   panelFilterParam = PanelFilterParam(),
@@ -73,7 +75,8 @@ twasWeightsPipeline(data, ...)
   twasWeights = NULL,
   mashPrior = NULL,
   estimatePi = TRUE,
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   fitRetention = c("slim", "none", "full"),
@@ -302,26 +305,26 @@ ancestries; those rows carry \code{jointStudies}.}
 \item{estimatePi}{If TRUE, estimate spike-and-slab sparsity from mr.ash
 before BGLR / qgg spike-and-slab methods that consume it.}
 
-\item{h2}{The heritability given, trait by trait, to the methods that can
-start from one: the Bayesian alphabet (\code{bayesA} to \code{bayesR},
-as their \code{h2}) and, on summary statistics, LDpred2
-(\code{ldpred2Auto}'s \code{h2Init}, and the centre of
-\code{ldpred2Grid}'s grid) and the joint mr.mash fits, whose residual
-variances it sets to each condition's \eqn{1 - h^2}, as SuSiE-RSS's,
-with the correlations of their residual covariance (see
-\code{\link{mrmashRssWeights}}). \code{NULL} (the default) gives none, so
-each keeps its own default. An estimator estimates each trait's first,
-once, on the variants, samples and LD its methods fit: \code{"lava"},
-\code{"hdlL"} or \code{"fastHer"}, or on individual-level data
-\code{"greml"} too (see \code{\link{estimateH2}}). On summary statistics
-the reference is taken to share no samples with the study, and LDpred2
-runs the estimator itself. An \code{\linkS4class{H2Estimate}}, as
-\code{\link{estimateH2}} returns, gives each selected (study, context,
-trait) its row's estimate, and must hold exactly one row for each;
-LDpred2-grid's grid is then that value times 0.3, 0.7, 1 and 1.4, at
-most 1. A value is used floored at 0.001 and capped at 0.99, and a trait
-with no estimate keeps each method's default, with a warning. A method's
-own setting in \code{methods} wins.}
+\item{h2Estimate, h2EstimateParam}{The heritability given, trait by trait,
+to the methods that can start from one: the Bayesian alphabet
+(\code{bayesA} to \code{bayesR}) and, on summary statistics, LDpred2
+(\code{ldpred2Auto}'s start, and the centre of \code{ldpred2Grid}'s
+grid) and the joint mr.mash fits, whose residual variances it sets to
+each condition's \eqn{1 - h^2}, as SuSiE-RSS's, with the correlations of
+their residual covariance (see \code{\link{mrmashRssWeights}}). Neither
+(the default) gives none, so each keeps its own default; both is an
+error. \code{h2Estimate} is one number for every trait, or an
+\code{\linkS4class{H2Estimate}}, as \code{\link{estimateLocalH2}}
+returns, which gives each selected (study, context, trait) its row's
+estimate and must hold exactly one row for each.
+\code{h2EstimateParam}, an \code{\link{H2EstimateParam}}, estimates
+each trait's first, once, on the variants, samples and LD its methods
+fit (on a \code{QtlDataset} in-sample, its phenotype statistic, REML,
+included); on summary statistics the reference is taken to share no
+samples with the study, and LDpred2 estimates under the settings itself.
+A value is used floored at 0.001 and capped at 0.99, and a trait with no
+estimate keeps each method's default, with a warning. A method's own
+setting in \code{methods} wins.}
 
 \item{usePCA}{Logical (length 1). Individual-level data only: a
 \code{QtlDataset}, or the \code{QtlDataset} components of a

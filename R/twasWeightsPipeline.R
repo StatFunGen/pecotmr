@@ -1637,26 +1637,26 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   ancestries; those rows carry \code{jointStudies}.
 #' @param estimatePi If TRUE, estimate spike-and-slab sparsity from mr.ash
 #'   before BGLR / qgg spike-and-slab methods that consume it.
-#' @param h2 The heritability given, trait by trait, to the methods that can
-#'   start from one: the Bayesian alphabet (\code{bayesA} to \code{bayesR},
-#'   as their \code{h2}) and, on summary statistics, LDpred2
-#'   (\code{ldpred2Auto}'s \code{h2Init}, and the centre of
-#'   \code{ldpred2Grid}'s grid) and the joint mr.mash fits, whose residual
-#'   variances it sets to each condition's \eqn{1 - h^2}, as SuSiE-RSS's,
-#'   with the correlations of their residual covariance (see
-#'   \code{\link{mrmashRssWeights}}). \code{NULL} (the default) gives none, so
-#'   each keeps its own default. An estimator estimates each trait's first,
-#'   once, on the variants, samples and LD its methods fit: \code{"lava"},
-#'   \code{"hdlL"} or \code{"fastHer"}, or on individual-level data
-#'   \code{"greml"} too (see \code{\link{estimateH2}}). On summary statistics
-#'   the reference is taken to share no samples with the study, and LDpred2
-#'   runs the estimator itself. An \code{\linkS4class{H2Estimate}}, as
-#'   \code{\link{estimateH2}} returns, gives each selected (study, context,
-#'   trait) its row's estimate, and must hold exactly one row for each;
-#'   LDpred2-grid's grid is then that value times 0.3, 0.7, 1 and 1.4, at
-#'   most 1. A value is used floored at 0.001 and capped at 0.99, and a trait
-#'   with no estimate keeps each method's default, with a warning. A method's
-#'   own setting in \code{methods} wins.
+#' @param h2Estimate,h2EstimateParam The heritability given, trait by trait,
+#'   to the methods that can start from one: the Bayesian alphabet
+#'   (\code{bayesA} to \code{bayesR}) and, on summary statistics, LDpred2
+#'   (\code{ldpred2Auto}'s start, and the centre of \code{ldpred2Grid}'s
+#'   grid) and the joint mr.mash fits, whose residual variances it sets to
+#'   each condition's \eqn{1 - h^2}, as SuSiE-RSS's, with the correlations of
+#'   their residual covariance (see \code{\link{mrmashRssWeights}}). Neither
+#'   (the default) gives none, so each keeps its own default; both is an
+#'   error. \code{h2Estimate} is one number for every trait, or an
+#'   \code{\linkS4class{H2Estimate}}, as \code{\link{estimateLocalH2}}
+#'   returns, which gives each selected (study, context, trait) its row's
+#'   estimate and must hold exactly one row for each.
+#'   \code{h2EstimateParam}, an \code{\link{H2EstimateParam}}, estimates
+#'   each trait's first, once, on the variants, samples and LD its methods
+#'   fit (on a \code{QtlDataset} in-sample, its phenotype statistic, REML,
+#'   included); on summary statistics the reference is taken to share no
+#'   samples with the study, and LDpred2 estimates under the settings itself.
+#'   A value is used floored at 0.001 and capped at 0.99, and a trait with no
+#'   estimate keeps each method's default, with a warning. A method's own
+#'   setting in \code{methods} wins.
 #' @param residualizationParam Covariate residualization settings, built with
 #'   \code{\link{ResidualizationParam}} and forwarded to
 #'   \code{\link{residualizedPhenotypes}} /
@@ -1933,7 +1933,8 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     crossValidationParam = CrossValidationParam(),
     ensembleParam = EnsembleParam(),
     estimatePi = TRUE,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     fitRetention = c("slim", "none", "full"),
@@ -1979,7 +1980,14 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
         crossValidationParam = crossValidationParam,
         ensembleParam = ensembleParam,
         estimatePi = estimatePi,
-        h2 = .twasQdsH2Spec(h2, data, contexts, traitId, region),
+        h2 = .twasQdsH2Spec(
+            h2Estimate,
+            h2EstimateParam,
+            data,
+            contexts,
+            traitId,
+            region
+        ),
         fitRetention = fitRetention,
         retainX = retainX,
         residualizationParam = residualizationParam,
@@ -2714,7 +2722,8 @@ setMethod(
         fineMappingResult = NULL,
         twasWeights = NULL,
         mashPrior = NULL,
-        h2 = NULL,
+        h2Estimate = NULL,
+        h2EstimateParam = NULL,
         fitRetention = c("slim", "none", "full"),
         verbose = 1L,
         panelFilterParam = PanelFilterParam(),
@@ -2752,7 +2761,8 @@ setMethod(
             fitRetention = fitRetention,
             verbose = verbose,
             panelFilterParam = panelFilterParam,
-            h2 = h2,
+            h2Estimate = h2Estimate,
+            h2EstimateParam = h2EstimateParam,
             studyCoupling = studyCoupling,
             ensembleParam = ensembleParam
         )
@@ -2810,12 +2820,13 @@ setMethod(
     fitRetention,
     verbose,
     panelFilterParam,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     studyCoupling = NULL,
     ensembleParam = NULL
 ) {
     inputs <- .twasQssInputs(data, contexts, traitId, cisWindow)
-    h2Spec <- .twasQssH2Spec(h2, inputs)
+    h2Spec <- .twasQssH2Spec(h2Estimate, h2EstimateParam, inputs)
     # One record of the settings the joint phase, the shared dispatcher and
     # the per-tuple loop all need, so each names them once.
     jointCfg <- list(
@@ -3806,7 +3817,9 @@ setMethod(
         genotypeFilterParam = cfg$genotypeFilterParam,
         mashPrior = cfg$mashPrior,
         estimatePi = cfg$estimatePi,
-        h2 = cfg$h2,
+        # `[[` matches exactly, where `$` would take h2EstimateParam.
+        h2Estimate = cfg[["h2Estimate"]],
+        h2EstimateParam = cfg$h2EstimateParam,
         usePCA = cfg$usePCA,
         nPCs = cfg$nPCs,
         residualizationParam = cfg$residualizationParam
@@ -3845,7 +3858,9 @@ setMethod(
         fineMappingResult = cfg$fineMappingResult,
         twasWeights = cfg$twasWeights,
         mashPrior = cfg$mashPrior,
-        h2 = cfg$h2,
+        # `[[` matches exactly, where `$` would take h2EstimateParam.
+        h2Estimate = cfg[["h2Estimate"]],
+        h2EstimateParam = cfg$h2EstimateParam,
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
         ensembleParam = .ensembleWithinStudy(cfg$ensembleParam),
@@ -4027,7 +4042,8 @@ setMethod(
     twasWeights = NULL,
     mashPrior = NULL,
     estimatePi = TRUE,
-    h2 = NULL,
+    h2Estimate = NULL,
+    h2EstimateParam = NULL,
     usePCA = FALSE,
     nPCs = 10L,
     fitRetention = c("slim", "none", "full"),
@@ -4047,7 +4063,11 @@ setMethod(
     # here; a summary-statistic study is checked again by its own route.
     .twasWarnUnretainableDetail(fitRetention, methods, "QtlDataset")
     .twasCheckRetainX(retainX, fitRetention, methods)
-    .msAssertH2(h2, data, "twasWeightsPipeline(MultiStudyQtlDataset)")
+    .msAssertH2(
+        h2EstimateParam,
+        data,
+        "twasWeightsPipeline(MultiStudyQtlDataset)"
+    )
     # Resolved once here so a bad choice fails before any study runs; the
     # record carries the bundle itself, as each component resolves its own.
     .twasResolvePhenotypeFilter(phenotypeFilterParam)
@@ -4082,7 +4102,8 @@ setMethod(
         panelFilterParam = panelFilterParam,
         mashPrior = mashPrior,
         estimatePi = estimatePi,
-        h2 = h2,
+        h2Estimate = h2Estimate,
+        h2EstimateParam = h2EstimateParam,
         usePCA = usePCA,
         nPCs = nPCs,
         fitRetention = fitRetention,
@@ -4159,6 +4180,7 @@ setMethod(
             crossValidationParam = cfg$crossValidationParam,
             ensembleParam = cfg$ensembleParam,
             estimatePi = cfg$estimatePi,
+            h2 = .twasMsH2Spec(cfg, data),
             fitRetention = cfg$fitRetention,
             retainX = cfg$retainX,
             residualizationParam = cfg$residualizationParam,
@@ -4172,6 +4194,39 @@ setMethod(
         genotypeFilterParam = cfg$genotypeFilterParam,
         panelFilterParam = cfg$panelFilterParam,
         studyCoupling = cfg$studyCoupling
+    )
+}
+
+# The run's heritability for the collection's joint fits, settled at entry
+# (.h2PipelineSpec()) against every study's selected (study, context, trait)
+# as each study's own run settles its own (.twasQdsH2Spec()); settings
+# estimate each trait's in-sample.
+# @noRd
+.twasMsH2Spec <- function(cfg, data) {
+    studies <- keep(
+        as.list(data),
+        .studyHasSelectedTraits,
+        contexts = cfg$contexts,
+        traitId = cfg$traitId,
+        region = cfg$region
+    )
+    .h2PipelineSpec(
+        cfg[["h2Estimate"]],
+        cfg$h2EstimateParam,
+        list_rbind(map(studies, .twasMsStudyTuples, cfg = cfg)),
+        "twasWeightsPipeline(MultiStudyQtlDataset)",
+        individual = TRUE
+    )
+}
+
+# One study's selected (study, context, trait), its share of the selection.
+# @noRd
+.twasMsStudyTuples <- function(qd, cfg) {
+    .twasQdsTuples(
+        qd,
+        cfg$contexts,
+        .studyTraitIdArg(cfg$traitId, studyName(qd)),
+        cfg$region
     )
 }
 
@@ -4563,29 +4618,39 @@ setMethod(
 
 # ---- the heritability a run's methods start from ----------------------------
 
-# The argument each TWAS method that can start from a trait's heritability
-# takes it as.
+# The methods that can start from a trait's heritability: each takes it as a
+# value (`h2Estimate`), and LDpred2 also as the settings to estimate it under
+# on its own terms (`h2EstimateParam`).
 # @noRd
-.twasH2Args <- c(
-    bayesA = "h2",
-    bayesB = "h2",
-    bayesC = "h2",
-    bayesL = "h2",
-    bayesN = "h2",
-    bayesR = "h2",
-    ldpred2Auto = "h2Init",
-    ldpred2Grid = "h2"
+.twasH2Methods <- c(
+    "bayesA",
+    "bayesB",
+    "bayesC",
+    "bayesL",
+    "bayesN",
+    "bayesR",
+    "ldpred2Auto",
+    "ldpred2Grid"
 )
 
-# A QtlDataset run's `h2`, settled at entry (.h2PipelineSpec()) against the
-# (study, context, trait) it selects.
+# A QtlDataset run's heritability, settled at entry (.h2PipelineSpec())
+# against the (study, context, trait) it selects; settings estimate each
+# trait's in-sample.
 # @noRd
-.twasQdsH2Spec <- function(h2, data, contexts, traitId, region) {
+.twasQdsH2Spec <- function(
+    h2Estimate,
+    h2EstimateParam,
+    data,
+    contexts,
+    traitId,
+    region
+) {
     .h2PipelineSpec(
-        h2,
-        .h2IndividualMethods(),
+        h2Estimate,
+        h2EstimateParam,
         .twasQdsTuples(data, contexts, traitId, region),
-        "twasWeightsPipeline(QtlDataset)"
+        "twasWeightsPipeline(QtlDataset)",
+        individual = TRUE
     )
 }
 
@@ -4610,20 +4675,20 @@ setMethod(
     )
 }
 
-# A QtlSumStats run's `h2`, settled at entry against its selected rows; an
-# estimator that reads the LD reference's sample size needs each row's
+# A QtlSumStats run's heritability, settled at entry against its selected
+# rows; settings that read the LD reference's sample size need each row's
 # reference to record one.
 # @noRd
-.twasQssH2Spec <- function(h2, inputs) {
-    if (is.null(h2)) {
+.twasQssH2Spec <- function(h2Estimate, h2EstimateParam, inputs) {
+    if (is.null(h2Estimate) && is.null(h2EstimateParam)) {
         return(NULL)
     }
     data <- inputs$data
     rows <- which(.sumStatsRowsSelected(data, inputs$contexts, inputs$traitId))
     label <- "twasWeightsPipeline(QtlSumStats)"
     spec <- .h2PipelineSpec(
-        h2,
-        .h2SumStatsMethods(),
+        h2Estimate,
+        h2EstimateParam,
         .h2RowTuples(data, rows),
         label
     )
@@ -4631,14 +4696,15 @@ setMethod(
         rows,
         .h2AssertRowReference,
         data = data,
-        method = spec$method,
+        param = spec$param,
         label = label
     )
     spec
 }
 
-# What one QtlSumStats row's trait gets from the run's `h2` (.twasRowH2()),
-# an estimate being made on the row's statistics and LD reference.
+# What one QtlSumStats row's trait gets from the run's heritability
+# (.twasRowH2()), an estimate being made on the row's statistics and LD
+# reference.
 # @noRd
 .twasQssRowH2 <- function(spec, st, ctx, tr, rowCtx, tokens) {
     label <- glue(
@@ -4659,59 +4725,56 @@ setMethod(
     )
 }
 
-# What a trait's methods get from the run's `h2`: NULL when it sets none, or
-# when none of `tokens` starts from a heritability; else the estimator it
-# runs, and the trait's value (.h2ForTrait()), made only when a method among
-# `tokens` takes a number.
+# What a trait's methods get from the run's heritability: NULL when it sets
+# none, or when none of `tokens` starts from one; else its settings, for
+# LDpred2 to estimate under on its own terms, and the trait's value
+# (.h2ForTrait()), made only when a method among `tokens` takes a number.
 # @noRd
 .twasRowH2 <- function(spec, key, label, fit, fitArgs, tokens) {
-    if (is.null(spec) || !any(is_in(tokens, names(.twasH2Args)))) {
+    if (is.null(spec) || !any(is_in(tokens, .twasH2Methods))) {
         return(NULL)
     }
-    takesValue <- !is.null(spec$values) ||
+    takesValue <- is.null(spec$param) ||
         any(is_in(tokens, names(.alphabetBackends$individual)))
     list(
-        method = spec$method,
+        param = spec$param,
         value = if (takesValue) .h2ForTrait(spec, key, label, fit, fitArgs)
     )
 }
 
-# A method's arguments with its trait's heritability from the run's `h2`
+# A method's arguments with its trait's heritability from the run
 # (`rowH2`, .twasRowH2()), unless they set their own.
 # @noRd
 .twasWithH2 <- function(userArgs, tk, rowH2, path) {
-    argName <- .twasH2Args[tk]
-    if (is.null(rowH2) || is.na(argName)) {
+    if (is.null(rowH2) || !is_in(tk, .twasH2Methods)) {
         return(userArgs)
     }
-    value <- .twasH2Value(tk, rowH2)
-    if (is.null(value) || .twasSetsOwnH2(userArgs, tk, argName, path)) {
+    given <- .twasH2Given(tk, rowH2)
+    if (is.null(given) || .twasSetsOwnH2(userArgs, tk, path)) {
         return(userArgs)
     }
-    list_assign(userArgs, !!!set_names(list(value), argName))
+    list_assign(userArgs, !!!given)
 }
 
-# The value a method takes: for the alphabet, the trait's number; for
-# LDpred2, the estimator the run names, for LDpred2 to run on its own terms,
-# or else the number, LDpred2-grid's grid centred on it, at most 1.
+# The argument a method takes the run's heritability as: for LDpred2 the
+# run's settings, where it has them; otherwise the trait's value (LDpred2-grid
+# centring its grid on it); NULL without one.
 # @noRd
-.twasH2Value <- function(tk, rowH2) {
-    if (!is_in(tk, c("ldpred2Auto", "ldpred2Grid"))) {
-        return(rowH2$value)
+.twasH2Given <- function(tk, rowH2) {
+    ldpred2 <- is_in(tk, c("ldpred2Auto", "ldpred2Grid"))
+    if (ldpred2 && !is.null(rowH2$param)) {
+        return(list(h2EstimateParam = rowH2$param))
     }
-    if (!is.null(rowH2$method)) {
-        return(rowH2$method)
+    if (is.null(rowH2$value)) {
+        return(NULL)
     }
-    if (is.null(rowH2$value) || identical(tk, "ldpred2Auto")) {
-        return(rowH2$value)
-    }
-    pmin(rowH2$value * c(0.3, 0.7, 1, 1.4), 1)
+    list(h2Estimate = rowH2$value)
 }
 
-# Whether a method's own arguments set its heritability: the argument
-# itself, or for the alphabet its backend's spelling of it.
+# Whether a method's own arguments set its heritability: one of its own
+# arguments for it, or for the alphabet its backend's spelling of it.
 # @noRd
-.twasSetsOwnH2 <- function(userArgs, tk, argName, path) {
+.twasSetsOwnH2 <- function(userArgs, tk, path) {
     given <- c(
         names(userArgs),
         names(as.list(userArgs$methodArgs %||% list()))
@@ -4719,24 +4782,28 @@ setMethod(
     engineNames <- if (is_in(tk, names(.alphabetBackends[[path]]))) {
         .alphabetH2Names[[.methodBackend(tk, userArgs$backend, path)]]
     }
-    any(is_in(c(argName, engineNames), given))
+    own <- c("h2Estimate", "h2EstimateParam", "h2Grid", engineNames)
+    any(is_in(own, given))
 }
 
-# GREML needs a trait's genotypes, so a collection holding summary
-# statistics cannot run it on all of its studies.
+# REML reads a trait's genotypes and phenotype, so a collection holding
+# summary statistics cannot estimate under it on all of its studies.
 # @noRd
-.msAssertH2 <- function(h2, data, label) {
-    if (!identical(h2, "greml") || is.null(sumStats(data))) {
+.msAssertH2 <- function(h2EstimateParam, data, label) {
+    reml <- is(h2EstimateParam, "H2EstimateParam") &&
+        identical(h2EstimateParam@statistic, "phenotype")
+    if (!reml || is.null(sumStats(data))) {
         return(invisible(NULL))
     }
     abort(c(
         glue(
-            "{label}: `h2 = \"greml\"` needs individual-level data, and the ",
-            "collection holds summary statistics."
+            "{label}: the phenotype statistic (REML) needs individual-level ",
+            "data, and the collection holds summary statistics."
         ),
         i = str_c(
-            "Use \"lava\", \"hdlL\" or \"fastHer\", or estimate each study's ",
-            "with estimateH2() and pass them combined with c()."
+            "Use summary-statistic settings, or estimate every study's with ",
+            "estimateLocalH2() under one setting and pass them combined with ",
+            "c() as `h2Estimate`."
         )
     ))
 }

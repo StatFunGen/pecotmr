@@ -1275,6 +1275,7 @@ test_that("loadGwasSumStatsFromManifest attaches nCase/nControl/varY", {
         sumStatsPath = ssPath,
         nCase = 1200,
         nControl = 3400,
+        prevalence = 0.05,
         varY = 0.19,
         stringsAsFactors = FALSE
     )
@@ -1285,6 +1286,7 @@ test_that("loadGwasSumStatsFromManifest attaches nCase/nControl/varY", {
     )
     expect_equal(as.numeric(obj$nCase), 1200)
     expect_equal(as.numeric(obj$nControl), 3400)
+    expect_equal(as.numeric(obj$prevalence), 0.05)
     expect_equal(as.numeric(obj$varY), 0.19)
 })
 

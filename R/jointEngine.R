@@ -920,7 +920,9 @@ setMethod(
             z = stat$z[, r],
             n = rep(n, nrow(stat$z)),
             ld = c(source, list(nSamples = .ldRefNoiseN(ref))),
-            label = label
+            label = label,
+            ldReference = ref,
+            ids = .rssStatVariantIds(stat, label)
         )
     )
     h2 %||% NA_real_
@@ -4104,7 +4106,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
             "twasWeightsPipeline(QtlDataset): study='{cond$study}', ",
             "context='{cond$context}', trait='{cond$trait}'"
         ),
-        .h2IndividualFit,
+        .h2IndividualFitParam,
         list(X = .jgX(g), y = .jgY(g)[, 1L]),
         tokens
     )

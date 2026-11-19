@@ -32,24 +32,26 @@ cat(
 ## Overview
 
 `estimateH2()` estimates SNP heritability from GWAS summary statistics and
-an LD reference. Four estimators are available, differing in what they model
-and what they need:
+an LD reference, under the model settings an `H2EstimateParam` gives
+(`param`). Each published estimator is a setting of one model, differing in
+what it fits and what it needs (`?H2EstimateParam` lists every setting):
 
-| `method` | Approach | LD input |
+| Method | Statistic / criterion | LD input |
 |---|---|---|
-| `"sldsc"` | Stratified LD score regression (Finucane 2015) | `LdScore` |
-| `"gldsc"` | Generalized LDSC — GLS with full block LD (Xiong 2024) | `LdScore` + matrices |
-| `"lder"` | LD eigenvalue regression (Song 2022) | `LdEigen` |
-| `"hdl"` | High-definition likelihood (Ning 2020) | `LdEigen` |
+| S-LDSC (Finucane 2015) | variants / regression on LD scores | `LdScore` |
+| g-LDSC (Xiong 2024) | variants / GLS on full block LD | `LdScore` + matrices |
+| LDER (Song 2022) | eigen / regression | `LdEigen` |
+| HDL (Ning 2020), the default | eigen / likelihood | `LdEigen` |
 
-Supplying `annotations` makes any of them stratified, adding a
-per-annotation enrichment table. These estimators are genome-wide: each
-gives one estimate per study. Given QTL summary statistics instead,
-`estimateH2()` estimates each gene's heritability in its cis window. Either
-way the result is an `H2Estimate`, a collection with one row per estimate:
-its identity (`study`, `context`, `trait`, `method`) and values (`h2`,
-`h2_se`, ...) are columns, and a cis estimate's element is the window it
-covers.
+`estimateStratifiedH2()` fits any of them stratified by annotations, adding a
+per-annotation enrichment table. These estimators are genome-wide: each gives
+one estimate per study. Each gene's heritability in its cis window,
+from QTL summary statistics or individual-level QTL data, is
+`estimateLocalH2()`'s. Either way the result is an `H2Estimate`, a
+collection with one row per estimate: its identity (`study`, `context`,
+`trait`) and values (`h2`, `h2_se`, ...) are columns, a cis estimate's
+element is the window it covers, and `h2EstimateParam()` returns the
+settings of the model every estimate in it was fitted under.
 
 There is a second, separate track in the package: when stratified LDSC has
 already been run externally by [polyfun][pf], `sldscPostprocessingPipeline()`
@@ -76,9 +78,10 @@ drawn from it instead (`inst/scripts/build_h2_examples.R`).
 
 Every estimator reads the z-scores positionally, indexed by the LD
 reference's own variant order — nothing is matched on variant ID along the
-way. `estimateH2()` therefore checks up front that the summary statistics,
-the annotations and the reference describe the same variants, in the same
-order, on the same genome build, and refuses to run otherwise.
+way. `estimateH2()` and `estimateStratifiedH2()` therefore check up front
+that the summary statistics, the annotations and the reference describe the
+same variants, in the same order, on the same genome build, and refuse to run
+otherwise.
 
 The practical consequence: build the summary statistics *from* the reference
 rather than alongside it.
@@ -126,10 +129,69 @@ gwas <- GwasSumStats(
 ## Estimating heritability
 
 ```{r estimate, eval = hasPlinkMatrix}
-methods <- c("sldsc", "gldsc", "lder", "hdl")
+# Each method's settings, as ?H2EstimateParam lists them; HDL's are the
+# default (NULL).
+settings <- list(
+    sldsc = H2EstimateParam(
+        statistic = "variant",
+        criterion = "regression",
+        noise = "free",
+        crossNoise = "window",
+        referenceNoise = "unbiasedR2",
+        sampleSize = "median",
+        inference = "jackknife",
+        procedures = H2RegressionParam(
+            initialWeights = "moments",
+            ldRedundancy = TRUE,
+            iterations = 2,
+            twoStage = TRUE,
+            chi2Threshold = 30
+        )
+    ),
+    gldsc = H2EstimateParam(
+        statistic = "variant",
+        criterion = "gls",
+        noise = "free",
+        crossNoise = "window",
+        referenceNoise = "none",
+        sampleSize = "median",
+        inference = "jackknife"
+    ),
+    lder = NULL,
+    hdl = H2EstimateParam(
+        criterion = "likelihood",
+        noise = "free",
+        crossNoise = "window",
+        referenceNoise = "eigenTerm",
+        truncation = H2TruncationParam(
+            fraction = 1,
+            of = "variants",
+            maxPerSample = NULL,
+            minimum = 1
+        ),
+        sampleSize = "median",
+        inference = "jackknife",
+        procedures = H2LikelihoodParam(
+            interceptBounds = c(0, 10),
+            varianceFloor = exp(-10),
+            regressionStart = TRUE,
+            h2Starts = 0.1,
+            interceptStarts = 1,
+            mustBeatNull = FALSE,
+            halfBoundaryP = FALSE,
+            maxit = 1000
+        )
+    )
+)
+methods <- names(settings)
+refs <- list(
+    sldsc = ldScoreExample,
+    gldsc = ldScoreExample,
+    lder = ldEigenExample,
+    hdl = ldEigenExample
+)
 estimates <- lapply(methods, function(m) {
-    ref <- if (m %in% c("sldsc", "gldsc")) ldScoreExample else ldEigenExample
-    suppressWarnings(estimateH2(gwas, ref, method = m))
+    suppressWarnings(estimateH2(gwas, refs[[m]], param = settings[[m]]))
 })
 names(estimates) <- methods
 
@@ -141,15 +203,15 @@ data.frame(
 )
 ```
 
-The true value is `r h2True`. Three of the four land close to it; `sldsc`
+The true value is `r h2True`. Three of the four land close to it; S-LDSC
 comes in low, and that is worth understanding rather than tuning away.
 
-**`sldsc` is attenuated because the reference is small.** LD score
+**S-LDSC is attenuated because the reference is small.** LD score
 regression is a genome-scale method — real analyses regress over roughly a
 million variants. On 1300 the intercept is not identifiable: an unweighted
 OLS on this same data returns an intercept several times its true value of
-1, and the heritability absorbs the difference. `lder` is the least
-sensitive to reference size, which is why it is the default.
+1, and the heritability absorbs the difference. LDER is the least
+sensitive to reference size, which is why its settings are the default.
 
 All four are checked against their reference implementations — [ldsc][ldsc],
 [HDL][hdl], [LDER][lder] and [gldsc][gldsc] — on identical inputs: HDL agrees
@@ -170,7 +232,7 @@ and aborts. The clamp changes nothing wherever the original runs.
 [lder]: https://github.com/shuangsong0110/LDER
 [gldsc]: https://github.com/xzw20046/gldsc
 
-**`hdl` has a reference-size limit, and it tells you when it hits it.** It
+**HDL has a reference-size limit, and it tells you when it hits it.** It
 is the only one of the four that models reference-panel *noise* explicitly:
 its likelihood subtracts a term scaling as `1/nRef` from the modelled
 variance. Once the reference is small relative to the GWAS, that term
@@ -187,6 +249,27 @@ A standard error of zero, or an estimate pinned at a boundary, almost always
 means the reference is too small rather than that the trait has no
 heritability. The block jackknife needs at least two LD blocks and wants many
 more; `estimateH2()` refuses a single-block reference outright.
+
+Every fit above weighs each variant alike, the per-SD model. The frequency
+exponent `alpha` of `H2EstimateParam()` weighs each variant's effect variance
+by its heterozygosity in the reference, [2p(1 - p)]^(1 + alpha): 0 is the
+per-allele model and LDAK's -0.25 lies between. The reference supplies the
+frequencies: the `MAF` an `LdEigen` or `LdScore` records when built from
+`LdMatrix` blocks with an `AF` column, or else its genotype panel's. S-LDSC's
+weighted LD scores are formed from each block's LD, so a scores-only
+`LdScore` serves it only at the default.
+
+**A case/control study's heritability is on the observed scale.** Give its
+`GwasSumStats` the study's case and control counts (`nCase`, `nControl`)
+and the trait's population `prevalence`. The estimate's `h2_liability`
+columns then hold it on the liability scale too (Lee et al. 2011). The
+share of cases that conversion reads is one half where `summaryStatsQc()`
+has set N to the effective sample size, as it does by default for a study
+with counts. A quantitative trait records no counts and has no liability
+scale. Its `varY` does not enter the fit either, which reads z alone. A
+pair from `estimateLocalRg()` with such a GWAS side has that side's
+heritability and the genetic covariance on the liability scale too
+(`h2_2_liability`, `covariance_liability`); rg is the same on either scale.
 
 ## Building an LD reference
 
@@ -222,7 +305,12 @@ method runs on it while only one block's LD is in memory at a time.
 
 ## Stratified estimation and enrichment
 
-Passing an `AnnotationMatrix` partitions heritability across annotations.
+`estimateStratifiedH2()` partitions heritability across the annotations of
+an `AnnotationMatrix`. The model settings an `H2EstimateParam` gives choose
+the fit: the variants by regression (S-LDSC's) or by GLS (g-LDSC's), the
+eigen statistic by regression (LDER's) or by likelihood (HDL's, sHDL
+stratified, the default, slower than LDER's regression with many
+annotations); `?H2EstimateParam` lists the settings that reproduce each.
 The annotation rows must line up with the reference, exactly as the summary
 statistics do.
 
@@ -264,12 +352,18 @@ annot <- AnnotationMatrix(
 ```
 
 ```{r enrichment, eval = hasPlinkMatrix}
-strat <- estimateH2(
-    gwasStrat,
-    ldScoreExample,
-    method = "gldsc",
-    annotations = annot
+# g-LDSC's settings: the variants by GLS, a free intercept, the median
+# sample size and the jackknife over the reference's LD blocks.
+gldsc <- H2EstimateParam(
+    statistic = "variant",
+    criterion = "gls",
+    noise = "free",
+    crossNoise = "window",
+    referenceNoise = "none",
+    sampleSize = "median",
+    inference = "jackknife"
 )
+strat <- estimateStratifiedH2(gwasStrat, ldScoreExample, annot, param = gldsc)
 as.data.frame(stratifiedHeritabilityEnrichment(strat))[, c(
     "annotation",
     "tau",
@@ -429,66 +523,108 @@ names(h2EstimateToSldscTrait(strat))
 
 ## Per-gene cis heritability
 
-Given a `QtlSumStats`, `estimateH2()` estimates each trait's heritability
-in its cis window: one estimate per (study, context, trait) row, from the
-row's own statistics and LD reference, so it takes no `ldRef`. Each method
-reports what its authors report, and `NA` where they report nothing:
+Given a `QtlSumStats`, `estimateLocalH2()` estimates each trait's
+heritability in its cis window: one estimate per (study, context, trait) row,
+from the row's own statistics and LD reference. Every estimator it runs is a
+setting of one model: within the window, the statistics' covariance is the
+LD-weighted genetic covariance plus a noise term. An `H2EstimateParam` says
+which statistic is fitted, by which criterion, how the noise and the LD
+reference's own sampling noise enter, and how the uncertainty is reported.
+No setting is named after a method; these reproduce the published ones, LAVA
+(Werme 2022), HDL-L (Li 2025, the default), FastHer (Svishcheva 2025, with the
+null space and a profiled scale) and GREML:
 
-| `method` | Approach | Reports |
-|---|---|---|
-| `"lava"` | LAVA (Werme 2022): adjusted R^2 on LD components | h2, p |
-| `"hdlL"` | HDL-L (Li 2025): likelihood with an intercept | h2, p, intercept |
-| `"fastHer"` | FastHer (Svishcheva 2025): maximum likelihood | h2, SE, scale |
+| Method | Statistic / criterion | Noise / reference | Reports |
+|---|---|---|---|
+| LAVA | eigen / moments | tied / overlap factor | h2, p |
+| HDL-L | eigen / likelihood | free / eigenvalue term | h2, p, intercept |
+| FastHer | eigen / likelihood | tied / none | h2, SE, scale |
+| GREML (`QtlDataset`) | phenotype / REML | tied / none | h2, SE |
+
+The genome-wide estimators' criteria also fit one window: the eigen
+regression (LDER's model, to convergence), the variant GLS (gLDSC's) and the
+variant regression (S-LDSC's, as MESC fits it per gene), each with a standard
+error. `?H2EstimateParam` lists every field and the settings that do not
+belong together.
 
 ```{r cis-h2, eval = hasPlinkMatrix}
 data(qtlSumStatsExample)
-cis <- estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+cis <- estimateLocalH2(qtlSumStatsExample)
 cis
 cis[[1]]
-heritabilityIntercept(estimateH2(qtlSumStatsExample, method = "hdlL"))
+h2EstimateParam(cis)
+heritabilityIntercept(cis)
+# LAVA's settings, which read how much of the study the reference holds.
+lava <- H2EstimateParam(
+    criterion = "moments",
+    noise = "tied",
+    crossNoise = "supplied",
+    effects = "fixed",
+    referenceNoise = "overlapFactor",
+    truncation = H2TruncationParam(
+        of = "eigenvalues",
+        maxPerSample = 0.75,
+        minimum = 2
+    ),
+    sampleSize = "mean",
+    inference = "beta"
+)
+estimateLocalH2(qtlSumStatsExample, lava, referenceOverlap = 1)
 ```
 
 Each row's element is the window its estimate covers: the row's `region`,
 or with `cisWindow` the trait's position widened by that much on each side.
-Every method reads `z` as a t statistic and converts it exactly to the
-correlation, since \(z / \sqrt{n}\) overstates a strong QTL's. LAVA, the
-default, projects the statistics onto the LD components that hold 99% of the
-LD variance. Whether LD is the study's own is not a yes or no, and LAVA's
-noise term depends on how far the reference's LD lies from the study's:
-`referenceOverlap` is the share of the study's samples in the reference. It
-defaults to 0, and with a reference of thousands it hardly matters, so you
-rarely need it. Set it when the LD comes from the study's own samples or a
-small cohort holding them, as here, where it is 1; at 0 such an estimate comes
-out far too low, and a warning says so. Each LAVA estimate records the value it
-took in its `reference_overlap` column.
+Every setting reads `z` as a t statistic and converts it exactly to the
+correlation, since \(z / \sqrt{n}\) overstates a strong QTL's. The default,
+HDL-L's likelihood, fits the statistics rotated onto the LD components that
+cover 99% of the variant count, in the heritability and a free intercept.
+Whether LD is the study's own is not a yes or no, and the intercept absorbs the
+part of the reference's own noise that depends on how many of the study's
+samples it holds, so the default needs no `referenceOverlap`. LAVA's moments
+do: their noise term depends on how far the reference's LD lies from the
+study's, and `referenceOverlap` is the share of the study's samples in the
+reference. It defaults to 0, and with a reference of thousands it hardly
+matters. Set it when the LD comes from the study's own samples or a small
+cohort holding them, as here, where it is 1; at 0 such an estimate comes out
+far too low, and a warning says so. Each estimate under the overlap factor
+records the value it took in its `reference_overlap` column.
 LAVA itself withholds its estimate where the components outnumber a tenth of
 the sample size, which a cis window's usually do at QTL sample sizes;
-`estimateH2()` reports it at any size. LAVA and HDL-L read the reference's
-sample size, so an `LdMatrix` reference must record `nSamples`. FastHer's
-likelihood assumes in-sample LD (HEELS maximizes the same one): where the
-reference's rank or the statistics reach the study's sample size, as they can
-with LD from outside the study, its estimate is `NA`, with a warning. Its
-standard error assumes an infinitesimal architecture and is too small with few
-causal variants.
+`estimateLocalH2()` reports it at any size. The overlap factor and the
+eigenvalue term read the reference's sample size, so an `LdMatrix` reference
+must record `nSamples` for them. The likelihood with the null space, FastHer's,
+assumes in-sample LD (HEELS maximizes the same one): where the reference's rank
+or the statistics reach the study's sample size, as they can with LD from
+outside the study, its estimate is `NA`, with a warning. Its standard error
+assumes an infinitesimal architecture and is too small with few causal
+variants.
 
 ### From individual-level data
 
-Given a `QtlDataset`, `estimateH2()` estimates each trait's heritability on
-its own genotypes, over the window, samples, filters and residualized
-genotypes and phenotype that `twasWeightsPipeline()` fits it on. The three
-methods above read each variant's marginal statistic in-sample, the genotypes
-being their own LD, so LAVA's estimate is the adjusted R^2 of the trait on the
-genotypes' components. `"greml"` adds GREML, the restricted maximum likelihood
-of the genetic and residual variances on the window's relationship matrix
-(`qgg::greml`), as FUSION estimates a gene's.
+Given a `QtlDataset`, `estimateLocalH2()` estimates each trait's heritability
+on its own genotypes, over the window, samples, filters and residualized
+genotypes and phenotype that `twasWeightsPipeline()` fits it on. The
+summary-statistic settings read each variant's marginal statistic in-sample,
+the genotypes being their own LD, so LAVA's estimate is the adjusted R^2 of
+the trait on the genotypes' components. The phenotype statistic with REML is
+GREML, the restricted maximum likelihood of the genetic and residual variances
+on the window's relationship matrix (`qgg::greml`, with `GremlOptions()` for
+its arguments), as FUSION estimates a gene's.
 
 ```{r cis-h2-individual, eval = hasPlinkMatrix}
 data(qtlDatasetExample)
-estimateH2(qtlDatasetExample, cisWindow = 1e6)
+estimateLocalH2(qtlDatasetExample, cisWindow = 1e6)
 ```
 
 ```{r cis-h2-greml, eval = hasQgg && hasPlinkMatrix}
-estimateH2(qtlDatasetExample, method = "greml", cisWindow = 1e6)
+greml <- H2EstimateParam(
+    statistic = "phenotype",
+    criterion = "reml",
+    noise = "tied",
+    referenceNoise = "none",
+    inference = "information"
+)
+estimateLocalH2(qtlDatasetExample, greml, cisWindow = 1e6)
 ```
 
 ### Starting other methods from it
@@ -498,18 +634,128 @@ SuSiE-RSS fine-mapping can start from a trait's heritability. The alphabet's
 engines set their starting variances and the scales of their priors from a
 guess of 0.5, which a cis window's heritability is usually far below, and
 SuSiE-RSS holds its residual variance at 1 on z statistics, where the true one
-is 1 minus the heritability. Pass `h2` to `twasWeightsPipeline()` or
-`fineMappingPipeline()`: an estimator's name estimates each trait's first, on
-the variants and LD its methods fit, and the `H2Estimate` that `estimateH2()`
-returns gives each trait the value estimated earlier.
+is 1 minus the heritability. Give `twasWeightsPipeline()` or
+`fineMappingPipeline()` either `h2EstimateParam`, settings to estimate each
+trait's under first, on the variants and LD its methods fit, or
+`h2Estimate`: one number for every trait, or the `H2Estimate` that
+`estimateLocalH2()` returns, which gives each trait the value estimated
+earlier. The weight functions take the same two (LDpred2-grid takes its own
+grid as `h2Grid`).
 
 ```{r h2-first, eval=FALSE}
-twasWeightsPipeline(qtlDatasetExample, methods = "bayesR", h2 = "greml")
+twasWeightsPipeline(
+    qtlDatasetExample,
+    methods = "bayesR",
+    h2EstimateParam = greml
+)
 fineMappingPipeline(
     qtlSumStatsExample,
     methods = "susie",
-    h2 = estimateH2(qtlSumStatsExample, referenceOverlap = 1)
+    h2Estimate = estimateLocalH2(qtlSumStatsExample, referenceOverlap = 1)
 )
+```
+
+## Local genetic correlation
+
+`estimateLocalRg()` estimates the genetic covariance and correlation of
+pairs of conditions in each cis window: each gene's contexts by default
+(`jointSpecification` pairs along other axes), or each QTL condition with a
+GWAS in its window (`gwas`). Each pair is fitted in two steps, each
+condition's heritability and own noise as `estimateLocalH2()` fits them, then
+the covariance with those held, under the same settings. The two
+conditions' statistics also share noise through samples they share, which
+`crossNoise` sets: fitted in the window (`"window"`, the default with HDL-L's
+settings), supplied as `noiseCorrelation` (as `mashResidualCorrelation()`
+returns one), tied on a `QtlDataset` to the phenotypes' correlation on the
+donors both conditions have (`"tied"`), or none (`"zero"`). Per gene, local
+rg at QTL sample sizes is rarely powered on its own; the summaries across
+genes below are what it is mostly for.
+
+```{r local-rg, eval = hasPlinkMatrix}
+data(qtlSumStatsMulticontextExample)
+rg <- estimateLocalRg(qtlSumStatsMulticontextExample)
+rg
+rg$noise_correlation
+```
+
+Under the likelihood, `H2LikelihoodParam(jointFit = TRUE)` fits a gene's
+three or more contexts at once, so that their genetic correlation matrix is
+one. With `conditional = TRUE` each pair is then given the gene's other
+contexts, as LAVA's partial correlation and multiple regression read them:
+rg is the partial genetic correlation, and `r2_1` and `r2_2` the share of
+each context's genetic variance that the others explain.
+
+```{r local-rg-joint, eval = hasPlinkMatrix}
+joint <- H2EstimateParam(
+    criterion = "likelihood",
+    noise = "free",
+    crossNoise = "window",
+    referenceNoise = "eigenTerm",
+    truncation = H2TruncationParam(
+        of = "variants",
+        maxPerSample = NULL,
+        minimum = 1
+    ),
+    sampleSize = "median",
+    inference = "lrt",
+    procedures = H2LikelihoodParam(jointFit = TRUE)
+)
+given <- estimateLocalRg(
+    qtlSumStatsMulticontextExample,
+    param = joint,
+    conditional = TRUE
+)
+S4Vectors::mcols(given)[
+    c("context_1", "context_2", "rg", "p_value", "r2_1", "r2_2")
+]
+```
+
+Conditions whose statistics sit on different LD references -- QTL studies
+of different ancestries, each row of a `QtlSumStats` naming its own
+reference, the studies of a `MultiStudyQtlDataset` on their own genotypes, or
+a GWAS whose rows name its own panel -- are fitted each on its own
+reference: their genetic term is R1 G12 R2 / M on the per-SD scale, and the
+noise of whatever samples they share takes the average of the two LDs,
+(R1 + R2) / 2, as its shape. How many samples two studies share is rarely
+known, so every `crossNoise` applies as on one reference, and the default
+fits it in the window; for studies of different populations it should come
+out near none. Each setting has a two-reference form, and a group of three
+or more is fitted at once on all its conditions' statistics. Studies of
+different ancestries pair along the study axis:
+
+```{r local-rg-ancestry, eval = FALSE}
+estimateLocalRg(studies, jointSpecification = "study")
+```
+
+The estimate is of the correlation of per-SD effects, on the variants both
+references carry; per gene at QTL sample sizes it is imprecise, and its use
+is mostly across genes.
+
+Two fields of `H2EstimateParam()` say how the effects are read. `alpha`, the
+frequency exponent, weighs each variant's effect variance by its
+heterozygosity in the reference, [2p(1 - p)]^(1 + alpha): the default -1
+weighs every variant alike (per-SD effects), 0 is the per-allele model, and
+LDAK's -0.25 lies between. Across ancestries, `alpha = 0` estimates the
+correlation of per-allele effects; the reference must record its allele
+frequencies (an `LdMatrix`'s `AF`, a genotype panel, or a dataset's own
+genotypes). `effects` sets how the moments read a window: `"random"` (the
+default) draws the window's genetic components, as the likelihood and the
+regressions model them, and `"fixed"` is LAVA's reading, the components held
+fixed, as LAVA's settings take it.
+
+Across genes, `summarizeLocalRg()` gives each pair of contexts one
+correlation: the ratio of the summed covariances to the root of the product
+of the summed heritabilities (`"pooled"`, with a jackknife over genes), the
+mean of the genes' rg over those whose heritabilities exceed `minH2`
+(`"mean"`), and one rg for every gene from their summed likelihoods
+(`"shared"`, under the likelihood). The pooled ratio needs each gene's
+estimates unbounded, as the moments' and the regressions' are; the
+likelihood's bounds pull it low. Given a fitted mash model (`mashModel`), it
+reports mash's prior correlation of the two contexts beside them. The
+example holds one gene, so each summary is that gene's.
+
+```{r local-rg-summary, eval = hasPlinkMatrix}
+summarizeLocalRg(rg)
 ```
 
 ## Next steps

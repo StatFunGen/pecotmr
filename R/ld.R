@@ -1677,22 +1677,33 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
 # of A at once: one Gram matrix F diag(a) F' per column would cost m^2 p for
 # each. Instead R's rows are formed a stripe at a time, squared, and
 # multiplied by all of A, which costs p^2 (m + ncol(A)) and holds one stripe.
-# A stored matrix is used as it is.
+# A stored matrix is used as it is. With `other`, a second source over the
+# same variants, the product is (R o R2) A: the cross-population LD score
+# sum_k r_jk r2_jk where R2 is another population's LD.
 # @noRd
-.ldSquaredProduct <- function(ld, A) {
-    if (!is.null(ld$R)) {
-        return((ld$R^2) %*% A)
+.ldSquaredProduct <- function(ld, A, other = NULL) {
+    if (!is.null(ld$R) && (is.null(other) || !is.null(other$R))) {
+        return((ld$R * (other$R %||% ld$R)) %*% A)
     }
     p <- .ldSourceSize(ld)
     starts <- seq.int(1L, p, by = .ldStripeSize())
-    stripes <- map(starts, .ldSquaredProductStripe, ld = ld, A = A, p = p)
+    stripes <- map(
+        starts,
+        .ldSquaredProductStripe,
+        ld = ld,
+        A = A,
+        p = p,
+        other = other
+    )
     exec(rbind, !!!stripes)
 }
 
 # @noRd
-.ldSquaredProductStripe <- function(start, ld, A, p) {
+.ldSquaredProductStripe <- function(start, ld, A, p, other = NULL) {
     rows <- seq.int(start, min(start + .ldStripeSize() - 1L, p))
-    .ldSourceRows(ld, rows)^2 %*% A
+    block <- .ldSourceRows(ld, rows)
+    second <- if (is.null(other)) block else .ldSourceRows(other, rows)
+    (block * second) %*% A
 }
 
 # `ldReference` cut to the variants `variantIds` names (matched as

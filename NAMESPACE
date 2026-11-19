@@ -59,9 +59,15 @@ export(GbjOptions)
 export(GenotypeFilterParam)
 export(GenotypeMixture)
 export(GlmnetOptions)
+export(GremlOptions)
 export(GwasFineMappingParam)
 export(GwasFineMappingResult)
 export(GwasSumStats)
+export(H2EstimateParam)
+export(H2GlsParam)
+export(H2LikelihoodParam)
+export(H2RegressionParam)
+export(H2TruncationParam)
 export(HibayesOptions)
 export(HibayesRssOptions)
 export(KrigingOptions)
@@ -218,7 +224,10 @@ export(enforceDesignFullRank)
 export(ensembleWeights)
 export(estCtwasGroupPriors)
 export(estimateH2)
+export(estimateLocalH2)
+export(estimateLocalRg)
 export(estimateSparsity)
+export(estimateStratifiedH2)
 export(extractCsInfo)
 export(extractTopPipInfo)
 export(fillFromReference)
@@ -251,6 +260,7 @@ export(genomicRegion)
 export(genotypeCovariates)
 export(genotypes)
 export(glmnetWeights)
+export(h2EstimateParam)
 export(h2EstimateToSldscTrait)
 export(heritabilityEstimate)
 export(heritabilityEstimateSe)
@@ -262,6 +272,7 @@ export(initializeWithSusieInf)
 export(intersectVariants)
 export(invertMinmaxScaling)
 export(isBinarySldscAnnot)
+export(isConditional)
 export(krigingOutlierQc)
 export(l0learnRssWeights)
 export(l0learnWeights)
@@ -389,6 +400,7 @@ export(standardizeSldscTrait)
 export(stratifiedHeritabilityEnrichment)
 export(studyName)
 export(sumStats)
+export(summarizeLocalRg)
 export(summaryStatsQc)
 export(susieAlpha)
 export(susieAshRssWeights)
@@ -442,6 +454,7 @@ exportClasses(GwasFineMappingParam)
 exportClasses(GwasFineMappingResult)
 exportClasses(GwasSumStats)
 exportClasses(H2Estimate)
+exportClasses(H2EstimateParam)
 exportClasses(LdEigen)
 exportClasses(LdMatrix)
 exportClasses(LdScore)
@@ -467,6 +480,7 @@ exportClasses(RangedTupleList)
 exportClasses(RelatednessColumnsParam)
 exportClasses(RelatednessPruningParam)
 exportClasses(ResidualizationParam)
+exportClasses(RgEstimate)
 exportClasses(SignalScreenParam)
 exportClasses(SlalomParam)
 exportClasses(SldscData)
@@ -521,6 +535,9 @@ exportMethods(dataType)
 exportMethods(eigenList)
 exportMethods(endoapply)
 exportMethods(estimateH2)
+exportMethods(estimateLocalH2)
+exportMethods(estimateLocalRg)
+exportMethods(estimateStratifiedH2)
 exportMethods(fineMappingPipeline)
 exportMethods(fineMappingResult)
 exportMethods(frqData)
@@ -532,12 +549,14 @@ exportMethods(genomicRegion)
 exportMethods(genotypeCovariates)
 exportMethods(genotypes)
 exportMethods(getListElement)
+exportMethods(h2EstimateParam)
 exportMethods(heritabilityEstimate)
 exportMethods(heritabilityEstimateSe)
 exportMethods(heritabilityIntercept)
 exportMethods(heritabilityInterceptSe)
 exportMethods(inSample)
 exportMethods(intersectVariants)
+exportMethods(isConditional)
 exportMethods(lapply)
 exportMethods(lbf)
 exportMethods(ldBlocks)
@@ -584,6 +603,7 @@ exportMethods(sort)
 exportMethods(stratifiedHeritabilityEnrichment)
 exportMethods(studyName)
 exportMethods(sumStats)
+exportMethods(summarizeLocalRg)
 exportMethods(susieAlpha)
 exportMethods(susieFit)
 exportMethods(testedAnnotations)
@@ -649,6 +669,7 @@ importFrom(IRanges,
   IRanges,
   findOverlaps,
   overlapsAny,
+  subsetByOverlaps,
   trim
 )
 importFrom(MASS,ginv)
@@ -796,6 +817,7 @@ importFrom(methods,
   validObject
 )
 importFrom(purrr,
+  accumulate,
   compact,
   detect,
   detect_index,
@@ -825,6 +847,7 @@ importFrom(purrr,
   pluck,
   pmap,
   pmap_chr,
+  pmap_dbl,
   possibly,
   pwalk,
   reduce,
@@ -876,6 +899,8 @@ importFrom(stats,
   complete.cases,
   cor,
   cov,
+  cov2cor,
+  dnorm,
   lm,
   lm.fit,
   median,
@@ -888,11 +913,15 @@ importFrom(stats,
   pnorm,
   predict,
   pt,
+  qchisq,
   qnorm,
   quantile,
+  rWishart,
+  rchisq,
   rnorm,
   sd,
   setNames,
+  uniroot,
   var
 )
 importFrom(stringr,
@@ -909,6 +938,7 @@ importFrom(stringr,
   str_remove_all,
   str_replace,
   str_replace_all,
+  str_replace_na,
   str_split,
   str_split_1,
   str_split_fixed,

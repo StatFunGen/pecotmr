@@ -12,8 +12,9 @@ An \code{LdEigen} object (extends \code{LdStatistic}) with an
 \description{
 An \code{LdEigen} reference for the eigendecomposition-based
 heritability estimators (\code{\link{estimateH2}} with
-\code{method = "lder"} or \code{"hdl"}, and
-\code{\link{computeLdScores}}). Built by \code{\link{buildLdEigen}}
+\code{method = "lder"} or \code{"hdl"},
+\code{\link{estimateStratifiedH2}} under the eigen statistic's settings,
+and \code{\link{computeLdScores}}). Built by \code{\link{buildLdEigen}}
 over the first 14 chr22 LD blocks of the de-identified
 \code{protocol_example} reference. Describes the same variants as
 \code{\link{ldScoreExample}}, so the four estimators can be compared on

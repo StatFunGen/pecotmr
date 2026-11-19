@@ -2037,7 +2037,9 @@ parseTraitIds <- function(traitId, data) {
             # The run's `h2`, settled on the summary statistics the joint
             # fits scale V by (.jointRssH2())
             h2Spec = .fmQssH2Spec(
-                cfg$h2,
+                # `[[` matches exactly, where `$` would take h2EstimateParam.
+                cfg[["h2Estimate"]],
+                cfg$h2EstimateParam,
                 list(
                     data = ssData,
                     contexts = cfg$contexts,
@@ -2662,7 +2664,9 @@ parseTraitIds <- function(traitId, data) {
             mashPriors = .twasQssMashPriors(cfg$mashPrior, tokens),
             ensemble = .ensembleResolve(cfg$ensembleParam),
             h2Spec = .twasQssH2Spec(
-                cfg$h2,
+                # `[[` matches exactly, where `$` would take h2EstimateParam.
+                cfg[["h2Estimate"]],
+                cfg$h2EstimateParam,
                 list(
                     data = ssData,
                     contexts = cfg$contexts,

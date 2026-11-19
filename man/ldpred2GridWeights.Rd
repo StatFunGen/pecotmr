@@ -8,7 +8,9 @@ ldpred2GridWeights(
   stat,
   ldReference,
   p = exp(seq(log(1e-05), 0, length.out = 21)),
-  h2 = NULL,
+  h2Grid = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   sparse = c(FALSE, TRUE),
   nIter = 150,
   nBurnin = 50,
@@ -31,11 +33,14 @@ to by \code{stat$variantNames}: a genotype panel (see
 
 \item{p}{The proportions of causal variants in the grid.}
 
-\item{h2}{The heritabilities in the grid: numbers, or one estimator,
-whose estimate for the window (see \code{h2Init} of
-\code{\link{ldpred2AutoWeights}}) times 0.3, 0.7, 1 and 1.4 makes the
-grid, as the LDpred2 vignette scales LD score regression's. \code{NULL}
-(default) is \code{"lava"}.}
+\item{h2Grid}{The heritabilities in the grid; \code{NULL} (the default)
+makes the grid a centre times 0.3, 0.7, 1 and 1.4, at most 1, as the
+LDpred2 vignette scales LD score regression's estimate.}
+
+\item{h2Estimate, h2EstimateParam}{The grid's centre, as
+\code{\link{ldpred2AutoWeights}} takes its start: a value, or the
+settings to estimate it under for the window; neither estimates it under
+the default settings, HDL-L's. Either with \code{h2Grid} is an error.}
 
 \item{sparse}{Whether each fit sets an effect whose inclusion probability
 falls below \code{p} to zero; both by default.}
@@ -96,7 +101,7 @@ if (requireNamespace("bigsnpr", quietly = TRUE)) {
   )
   ld <- LdMatrix(cor(X), nSamples = nrow(X))
   set.seed(1)
-  w <- ldpred2GridWeights(stat, ld, p = c(0.01, 0.1, 1), h2 = 0.1)
+  w <- ldpred2GridWeights(stat, ld, p = c(0.01, 0.1, 1), h2Grid = 0.1)
   attr(w, "ldpred2_selection")
 }
 }

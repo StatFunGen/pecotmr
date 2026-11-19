@@ -2432,6 +2432,10 @@ setMethod("dataType", "RangedTupleList", function(x) {
     # report the slot as having no merge rule.
     out <- discard(
         list(
+            param = if (is_in("param", own)) .h2CombineParam(parts, fn),
+            conditional = if (is_in("conditional", own)) {
+                .rgCombineConditional(parts, fn)
+            },
             qcOptions = if (is_in("qcOptions", own)) {
                 .ssCombineQcOptions(parts, fn)
             }

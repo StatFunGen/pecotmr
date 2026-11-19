@@ -10,7 +10,8 @@ bayesAlphabetRssWeights(
   method,
   backend = NULL,
   pi = NULL,
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   nIter = 5000,
   nBurnin = 1000,
   thin = 5,
@@ -44,18 +45,20 @@ non-null effects, where each engine's estimate of it starts; \code{NULL}
 gives 0.2 for \code{bayesB} and 0.1 for \code{bayesC}. Refused for the
 other methods.}
 
-\item{h2}{The trait's heritability in the window, which sets every
-engine's starting variances and the scales of its priors: \code{NULL}
-(the default) keeps each engine's own, 0.5; a number in [0, 1); or the
-estimator to estimate it with first, on \code{stat} and
-\code{ldReference}: \code{"lava"}, \code{"hdlL"} or \code{"fastHer"}
-(see \code{\link{estimateH2}}), taking the reference to share no
-samples with the study. It is used floored at 0.001 and capped at 0.99,
+\item{h2Estimate, h2EstimateParam}{The trait's heritability in the window,
+which sets every engine's starting variances and the scales of its
+priors: \code{h2Estimate}, a number in [0, 1) or a one-row
+\code{\linkS4class{H2Estimate}}; or \code{h2EstimateParam}, the
+\code{\link{H2EstimateParam}} settings to estimate it under first, on
+\code{stat} and \code{ldReference} (as \code{\link{estimateLocalH2}}
+estimates QTL summary statistics), taking the reference to share no
+samples with the study. Neither (the default) keeps each engine's own,
+0.5; both is an error. It is used floored at 0.001 and capped at 0.99,
 and an estimate that cannot be made leaves the engine's default, with a
-warning. qgg reads it as \code{h2}; hibayes, which fixes its own at
-0.5, gets the genetic and residual variances (\code{vg}, \code{ve}) its
-defaults would give at \code{h2}. Setting that engine's spelling
-through \code{methodArgs} as well is an error.}
+warning. qgg reads it as \code{h2}; hibayes, which fixes its own at 0.5,
+gets the genetic and residual variances (\code{vg}, \code{ve}) its
+defaults would give at it. Setting that engine's spelling through
+\code{methodArgs} as well is an error.}
 
 \item{nIter}{Integer. Total number of MCMC iterations, burn-in included,
 on every engine. Default \code{5000}.}

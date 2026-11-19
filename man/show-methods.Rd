@@ -4,7 +4,8 @@
 %   R/CtwasResultEntry.R, R/CtwasResult.R, R/GwasFineMappingResult.R,
 %   R/H2Estimate.R, R/LdEigen.R, R/LdScore.R, R/MashPrior.R, R/qtlSumStats.R,
 %   R/QtlDataset.R, R/MultiStudyQtlDataset.R, R/QtlFineMappingResult.R,
-%   R/gwasSumStats.R, R/fineMappingRow.R, R/twasWeights.R, R/twasWeightsRow.R
+%   R/RgEstimate.R, R/gwasSumStats.R, R/fineMappingRow.R, R/twasWeights.R,
+%   R/twasWeightsRow.R
 \name{show-methods}
 \alias{show-methods}
 \alias{show,GenotypeHandle-method}
@@ -22,6 +23,7 @@
 \alias{show,QtlDataset-method}
 \alias{show,MultiStudyQtlDataset-method}
 \alias{show,QtlFineMappingResult-method}
+\alias{show,RgEstimate-method}
 \alias{show,GwasSumStats-method}
 \alias{show,FineMappingRow-method}
 \alias{show,TwasWeights-method}
@@ -57,6 +59,8 @@
 \S4method{show}{MultiStudyQtlDataset}(object)
 
 \S4method{show}{QtlFineMappingResult}(object)
+
+\S4method{show}{RgEstimate}(object)
 
 \S4method{show}{GwasSumStats}(object)
 

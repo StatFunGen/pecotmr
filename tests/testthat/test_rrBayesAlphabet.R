@@ -607,7 +607,7 @@ test_that("the alphabet wrapper records and checks its settings", {
 })
 
 # ---- h2 ----
-test_that("h2 reaches qgg once, from the wrapper", {
+test_that("h2Estimate reaches qgg once, from the wrapper", {
     skip_if_not_installed("qgg")
     d <- .baXy()
     seen <- NULL
@@ -618,7 +618,13 @@ test_that("h2 reaches qgg once, from the wrapper", {
         },
         .package = "qgg"
     )
-    invisible(bayesNWeights(d$X, d$y, h2 = 0.2, nIter = 20, nBurnin = 5))
+    invisible(bayesNWeights(
+        d$X,
+        d$y,
+        h2Estimate = 0.2,
+        nIter = 20,
+        nBurnin = 5
+    ))
     expect_equal(seen$h2, 0.2)
     # NULL leaves the engine its own default, so none is sent.
     invisible(bayesNWeights(d$X, d$y, nIter = 20, nBurnin = 5))
@@ -634,7 +640,12 @@ test_that("h2 reaches qgg once, from the wrapper", {
     expect_equal(seen$h2, 0.3)
     # ...but both together are the same setting twice.
     expect_error(
-        bayesNWeights(d$X, d$y, h2 = 0.2, methodArgs = QggOptions(h2 = 0.3)),
+        bayesNWeights(
+            d$X,
+            d$y,
+            h2Estimate = 0.2,
+            methodArgs = QggOptions(h2 = 0.3)
+        ),
         "given twice: h2"
     )
 })
@@ -667,7 +678,7 @@ test_that("each backend reads h2 as its engine spells it", {
     )
 })
 
-test_that("h2 = 0.5, every engine's own default, changes no fit", {
+test_that("h2Estimate = 0.5, every engine's own default, changes no fit", {
     skip_if_not_installed("qgg")
     skip_if_not_installed("hibayes")
     skip_if_not_installed("BGLR")
@@ -679,7 +690,7 @@ test_that("h2 = 0.5, every engine's own default, changes no fit", {
             d$y,
             method,
             backend = backend,
-            h2 = h2,
+            h2Estimate = h2,
             nIter = 60,
             nBurnin = 10
         ))
@@ -705,7 +716,7 @@ test_that("h2 = 0.5, every engine's own default, changes no fit", {
             ld,
             "bayesN",
             backend = backend,
-            h2 = h2,
+            h2Estimate = h2,
             nIter = 60,
             nBurnin = 10
         ))
@@ -734,21 +745,37 @@ test_that("h2 can be estimated first, on the data the fit reads", {
         },
         .package = "qgg"
     )
-    invisible(bayesNWeights(d$X, d$y, h2 = "lava", nIter = 20, nBurnin = 5))
-    want <- pecotmr:::.h2IndividualFit("lava", d$X, d$y)$h2
+    lava <- .h2LocalSettings("lava")
+    invisible(bayesNWeights(
+        d$X,
+        d$y,
+        h2EstimateParam = lava,
+        nIter = 20,
+        nBurnin = 5
+    ))
+    want <- pecotmr:::.h2IndividualFitParam(lava, d$X, d$y)$h2
     expect_equal(seen$h2, min(max(want, 0.001), 0.99))
-    expect_error(bayesNWeights(d$X, d$y, h2 = "lavaa"), "must be one of")
+    # A name is not a heritability, and both sources are one too many.
+    expect_error(bayesNWeights(d$X, d$y, h2Estimate = "lava"), "h2Estimate")
+    expect_error(
+        bayesNWeights(d$X, d$y, h2Estimate = 0.2, h2EstimateParam = lava),
+        "not both"
+    )
     s <- .rrwPanelStatLd()
     got <- suppressWarnings(
-        pecotmr:::.alphabetRssH2("lava", s$stat, s$panel)
+        pecotmr:::.alphabetRssH2(NULL, lava, s$stat, s$panel)
     )
     est <- suppressWarnings(
-        pecotmr:::.h2StatFit("lava", s$stat, s$panel, "test")$h2
+        pecotmr:::.h2StatFit(lava, s$stat, s$panel, "test")$h2
     )
     expect_equal(got, min(max(est, 0.001), 0.99))
-    # GREML needs genotypes.
+    # REML needs genotypes.
     expect_error(
-        bayesNRssWeights(s$stat, s$panel, h2 = "greml"),
-        "must be one of"
+        bayesNRssWeights(
+            s$stat,
+            s$panel,
+            h2EstimateParam = .h2LocalSettings("greml")
+        ),
+        "the phenotype statistic needs individual-level data"
     )
 })

@@ -144,9 +144,14 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
             study = "test",
             context = NA_character_,
             trait = NA_character_,
-            method = "lder",
             h2 = 0.3,
             h2_se = 0.05,
+            h2_lower = NA_real_,
+            h2_upper = NA_real_,
+            h2_liability = NA_real_,
+            h2_liability_se = NA_real_,
+            h2_liability_lower = NA_real_,
+            h2_liability_upper = NA_real_,
             intercept = 1.01,
             intercept_se = 0.02,
             p_value = NA_real_,
@@ -160,7 +165,20 @@ makeTestH2Estimate <- function(with_enrichment = TRUE) {
             jackknife = list(annotationJackknifeCoefs),
             score_stats = list(NULL)
         ),
-        GenomicRanges::GRanges()
+        GenomicRanges::GRanges(),
+        .h2GenomeWideSettings("lder", with_enrichment, inSample = FALSE)
+    )
+}
+
+# The published settings of a genome-wide estimator by `method`, for a
+# stratified fit on `annotations` against `ref`: stratified as their design
+# is, and LDER's taper from the reference's kind, as the estimators' own
+# defaults take them.
+.h2MethodSettings <- function(method, annotations, ref) {
+    .h2GenomeWideSettings(
+        method,
+        .h2Stratified(annotations),
+        identical(method, "lder") && inSample(ref)
     )
 }
 

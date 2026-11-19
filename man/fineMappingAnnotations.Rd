@@ -34,8 +34,8 @@ used with.}
 \item{pipThreshold}{PIP cutoff for \code{"highPip"}. Default \code{0.5}.}
 
 \item{tier}{The tier the columns take: \code{"candidate"} (default), so
-\code{estimateH2} score-tests each for enrichment over the baseline, or
-\code{"baseline"}, to fit them jointly with it.}
+\code{estimateStratifiedH2} score-tests each for enrichment over the
+baseline, or \code{"baseline"}, to fit them jointly with it.}
 }
 \value{
 An \code{\linkS4class{AnnotationMatrix}} with one row per variant of
@@ -46,7 +46,8 @@ An \code{\linkS4class{AnnotationMatrix}} with one row per variant of
 \description{
 Turn fine-mapping results -- typically molecular QTLs -- into
   per-variant annotations over an LD reference's variants, for
-  \code{\link{estimateH2}} to test for heritability enrichment. Each
+  \code{\link{estimateStratifiedH2}} to test for heritability enrichment.
+  Each
   (\code{study}, \code{context}, \code{method}) unit of \code{x} pools its
   traits (e.g. genes) into one column per requested type:
   \describe{
@@ -77,7 +78,7 @@ Turn fine-mapping results -- typically molecular QTLs -- into
   \code{pipThreshold} -- is dropped, with a warning.
 
   The rows follow the reference's variants in its order, as
-  \code{estimateH2} requires.
+  \code{estimateStratifiedH2} requires.
 }
 \examples{
 data(qtlFineMappingExample)
