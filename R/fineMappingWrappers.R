@@ -2776,7 +2776,7 @@ trimFinemappingFit <- function(fit, effectIdx, method, csTables) {
         length(dim(lbf)) != 3L ||
             dim(lbf)[[3L]] < 2L ||
             !is.matrix(alpha) ||
-            !identical(dim(lbf)[1:2], dim(alpha)) ||
+            !identical(dim(lbf)[seq_len(2L)], dim(alpha)) ||
             length(setsObj$cs) == 0L
     ) {
         return(NULL)
@@ -4151,7 +4151,6 @@ mvsusieWeights <- function(
 #' @return Matrix of variant weights, with the fit attached as attribute
 #'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
-#' \donttest{
 #' data(multiTraitData)
 #' # The unmappable effects take conditions observed on the same samples.
 #' observed <- stats::complete.cases(multiTraitData$Y)
@@ -4164,7 +4163,6 @@ mvsusieWeights <- function(
 #'     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
 #'     methodArgs = MvsusieInfOptions(max_iter = 50))
 #'   mvsusieInfWeights(mvsusieInfFit = fit)
-#' }
 #' }
 #' @export
 mvsusieInfWeights <- function(
@@ -4196,7 +4194,6 @@ mvsusieInfWeights <- function(
 #' @return Matrix of variant weights, with the fit attached as attribute
 #'   \code{"fit"} unless \code{fitRetention = "none"}.
 #' @examples
-#' \donttest{
 #' data(multiTraitData)
 #' # The unmappable effects take conditions observed on the same samples.
 #' observed <- stats::complete.cases(multiTraitData$Y)
@@ -4209,7 +4206,6 @@ mvsusieInfWeights <- function(
 #'     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
 #'     methodArgs = MvsusieAshOptions(max_iter = 20))
 #'   mvsusieAshWeights(mvsusieAshFit = fit)
-#' }
 #' }
 #' @export
 mvsusieAshWeights <- function(
@@ -4677,7 +4673,6 @@ mvsusieInfRssWeights <- function(
 #' @return A numeric matrix of per-variant per-context weights (variants x
 #'   conditions).
 #' @examples
-#' \donttest{
 #' data(eqtlRegionExample)
 #' X <- eqtlRegionExample$X[, 1:30]
 #' y <- eqtlRegionExample$yRes
@@ -4696,7 +4691,6 @@ mvsusieInfRssWeights <- function(
 #'   fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
 #'     prior_variance = 1, methodArgs = MvsusieAshRssOptions(max_iter = 20))
 #'   mvsusieAshRssWeights(stat, mvsusieAshRssFit = fit)
-#' }
 #' }
 #' @export
 mvsusieAshRssWeights <- function(

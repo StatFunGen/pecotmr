@@ -2031,7 +2031,7 @@ loadGenotypeRegion <- function(
 
 # @noRd
 .bgenCheckFlags <- function(path, compression, layout) {
-    if (!is_in(layout, 1:2)) {
+    if (!is_in(layout, c(1L, 2L))) {
         abort(glue(
             "{path} has BGEN layout {layout}; the spec defines layouts 1 and 2."
         ))
@@ -2054,10 +2054,10 @@ loadGenotypeRegion <- function(
 .bgenReadSampleBlock <- function(con, nSamples) {
     blockLength <- .bgenUint(readBin(con, "raw", 4L))
     block <- readBin(con, "raw", blockLength - 4)
-    if (.bgenUint(block[1:4]) != nSamples) {
+    if (.bgenUint(block[seq_len(4L)]) != nSamples) {
         abort("The BGEN sample block's sample count disagrees with its header.")
     }
-    bgenSampleIdsCpp(block[-(1:4)], as.integer(nSamples))
+    bgenSampleIdsCpp(block[-seq_len(4L)], as.integer(nSamples))
 }
 
 # The sample ids of a BGEN file that does not store them, from the .sample
@@ -2219,7 +2219,7 @@ loadGenotypeRegion <- function(
 # @noRd
 .bgenParseIdentifying <- function(record, layout) {
     at <- if (layout == 1L) 5L else 1L
-    for (field in 1:3) {
+    for (field in seq_len(3L)) {
         # variant id, rsid, chromosome: a 2-byte length and the bytes
         at <- at + 2L + .bgenUint(record[at:(at + 1L)])
     }

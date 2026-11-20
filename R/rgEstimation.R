@@ -1595,7 +1595,7 @@ NULL
     }
     list(
         cov = solve(bread, t(solve(bread, meat))),
-        at = cumsum(c(1L, map_int(X[1:2], ncol)))
+        at = cumsum(c(1L, map_int(X[seq_len(2L)], ncol)))
     )
 }
 
@@ -1729,7 +1729,7 @@ NULL
 # A step-1 fit's (h2, noise), each held at no less than 0.
 # @noRd
 .rgStepModelCoef <- function(step) {
-    pmax(step$coef[1:2], 0)
+    pmax(step$coef[seq_len(2L)], 0)
 }
 
 # Condition `k`'s statistics' covariance (n_k h / M) R W R + c R.
@@ -4652,7 +4652,7 @@ setMethod(
     meat <- .rgTwoLdMeat(X, w, .rgTwoLdCovariances(fit))
     list(
         cov = solve(bread, t(solve(bread, meat))),
-        at = cumsum(c(1L, map_int(X[1:2], ncol)))
+        at = cumsum(c(1L, map_int(X[seq_len(2L)], ncol)))
     )
 }
 
@@ -4989,7 +4989,7 @@ setMethod(
     shape <- pair$shapes[[pair$basisOf[[1L]], pair$basisOf[[2L]]]]
     dec <- svd(shape$C)
     roots <- sqrt(map_dbl(pair$own, "noise"))
-    orders <- list(forward = 1:2, reverse = 2:1)
+    orders <- list(forward = c(1L, 2L), reverse = c(2L, 1L))
     means <- map(
         orders,
         .rgFixedMeans,
@@ -6487,9 +6487,9 @@ setMethod(
         return(invisible(NULL))
     }
     keys <- str_c(
-        .rgJoinedColumns(out, which(none), .RG_ID_COLS[1:3], "|"),
+        .rgJoinedColumns(out, which(none), .RG_ID_COLS[seq_len(3L)], "|"),
         " ~ ",
-        .rgJoinedColumns(out, which(none), .RG_ID_COLS[4:6], "|")
+        .rgJoinedColumns(out, which(none), .RG_ID_COLS[-seq_len(3L)], "|")
     )
     warn(glue(
         "estimateLocalRg: {sum(none)} of {length(none)} pair(s) have no rg ",

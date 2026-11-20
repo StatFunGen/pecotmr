@@ -29,6 +29,16 @@
 
 \item{...}{Passed on to \code{FUN}.}
 }
+\value{
+\code{getListElement()}, and so \code{x[[i]]}, returns row
+  \code{i}'s variants: a \code{GRanges} with every column back.
+
+\code{as.list()} returns every row's variants in a list, each a
+  \code{GRanges} with every column back.
+
+\code{lapply()} returns a list of \code{FUN}'s results, one per
+  row.
+}
 \description{
 Virtual base class for QTL and GWAS summary statistics
   collections. Concrete subclasses (\code{QtlSumStats}, \code{GwasSumStats})

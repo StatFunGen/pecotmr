@@ -3592,7 +3592,11 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(fit)
     }
     d <- dim(mu)
-    own <- array(mu[,, r], dim = d[1:2], dimnames = dimnames(mu)[1:2])
+    own <- array(
+        mu[,, r],
+        dim = d[seq_len(2L)],
+        dimnames = dimnames(mu)[seq_len(2L)]
+    )
     list_assign(fit, mu = own)
 }
 

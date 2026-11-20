@@ -47,7 +47,6 @@ The fit is checked against \code{stat} and \code{ldReference} as in
 effects, as in \code{\link{mvsusieAshWeights}}.
 }
 \examples{
-\donttest{
 data(eqtlRegionExample)
 X <- eqtlRegionExample$X[, 1:30]
 y <- eqtlRegionExample$yRes
@@ -66,6 +65,5 @@ if (requireNamespace("mvsusieR", quietly = TRUE) &&
   fit <- fitMvsusieRss(Z = stat$z, R = LD, N = nrow(X),
     prior_variance = 1, methodArgs = MvsusieAshRssOptions(max_iter = 20))
   mvsusieAshRssWeights(stat, mvsusieAshRssFit = fit)
-}
 }
 }

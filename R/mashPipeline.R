@@ -1802,7 +1802,7 @@ fitMashContrast <- function(
 .mashContrastDesign <- function(tested, nPop, grouping) {
     pairwiseVector <- set_names(rep(0, nPop), tested)
     if (nPop <= 2) {
-        contrast <- replace(pairwiseVector, tested[1:2], c(1, -1))
+        contrast <- replace(pairwiseVector, tested[seq_len(2L)], c(1, -1))
         return(matrix(
             contrast,
             ncol = 1,
