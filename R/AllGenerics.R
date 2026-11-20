@@ -2309,10 +2309,13 @@ setGeneric("traitPosition", function(x, ...) {
 })
 
 #' @title Get Residualized Genotypes
-#' @description Residualize the genotype matrix against the per-context
-#'   phenotype covariates and the genotype covariates, over the whole
-#'   dataset: narrow it first, with \code{x[i, j, ]}, to residualize part
-#'   of it.
+#' @description Residualize the genotype matrix over the whole dataset:
+#'   narrow it first, with \code{x[i, j, ]}, to residualize part of it. For
+#'   one context, against that context's phenotype covariates and the
+#'   genotype covariates. For several, the genotypes they share, over the
+#'   samples every one of them has, against the genotype covariates alone,
+#'   or under \code{covariateScope = "union"} against all the contexts'
+#'   covariates together.
 #' @param x A \code{QtlDataset} object.
 #' @param ... Passed on to methods.
 #' @param context Character vector. Context(s) whose data to extract.
@@ -2320,9 +2323,10 @@ setGeneric("traitPosition", function(x, ...) {
 #'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 #'   \code{genotypeCovariates} choose the covariate sets,
 #'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each
-#'   side on or off, and \code{covariateNaAction} says how missing
-#'   covariate values are handled. The same record the pipelines take, so a
-#'   setting means the same thing by either route.
+#'   side on or off, \code{covariateNaAction} says how missing covariate
+#'   values are handled, and \code{covariateScope} whose covariates several
+#'   contexts take. The same record the pipelines take, so a setting means
+#'   the same thing by either route.
 #' @return A numeric matrix (samples x variants).
 #' @examples
 #' data(qtlDatasetExample)
@@ -2337,9 +2341,11 @@ setGeneric("residualizedGenotypes", function(x, ...) {
 })
 
 #' @title Get Residualized Phenotypes
-#' @description Residualize the per-context phenotype matrices against the
-#'   per-context phenotype covariates and the genotype covariates, for one or
-#'   more requested contexts. Missing values and outliers are left as they
+#' @description Residualize each requested context's phenotypes against
+#'   that context's own phenotype covariates and the genotype covariates,
+#'   over its own samples, or under \code{covariateScope = "union"} against
+#'   the covariates of all the requested contexts together, over the samples
+#'   every one of them has. Missing values and outliers are left as they
 #'   are: they are a run's phenotype QC (\code{\link{PhenotypeFilterParam}}),
 #'   applied by the pipelines.
 #' @param x A \code{QtlDataset} object.
@@ -2351,9 +2357,10 @@ setGeneric("residualizedGenotypes", function(x, ...) {
 #'   \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 #'   \code{genotypeCovariates} choose the covariate sets,
 #'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each
-#'   side on or off, and \code{covariateNaAction} says how missing
-#'   covariate values are handled. The same record the pipelines take, so a
-#'   setting means the same thing by either route.
+#'   side on or off, \code{covariateNaAction} says how missing covariate
+#'   values are handled, and \code{covariateScope} whose covariates several
+#'   contexts take. The same record the pipelines take, so a setting means
+#'   the same thing by either route.
 #' @return A named list of numeric matrices keyed by context.
 #' @examples
 #' data(qtlDatasetExample)

@@ -1616,15 +1616,37 @@ test_that("a QtlDataset's conditions pair with a GWAS given their group", {
     # positive definite).
     expect_length(unique(res$r2_2), 1L)
     # The group is on the donors all three contexts have (c lacks 20), so
-    # every pair has one K; alone, each context is on its own donors.
+    # every pair has one K; alone, each context is on its own donors. The
+    # genotypes the group shares take the genotype covariates alone (none
+    # here): context c's, fitted without its phenotype covariates.
+    bare <- suppressWarnings(estimateLocalRg(
+        qd,
+        gwas = gw,
+        param = moments,
+        cisWindow = 1e6,
+        residualizationParam = ResidualizationParam(
+            residualizePhenotype = FALSE
+        )
+    ))
+    expect_length(unique(res$n_components), 1L)
+    expect_identical(res$n_components, rep(bare$n_components[[3L]], 3L))
+    # The contexts here share their covariates (sex and age), so their union
+    # is context c's own, and under it so are the group's genotypes and K.
+    union <- suppressWarnings(estimateLocalRg(
+        qd,
+        gwas = gw,
+        param = moments,
+        cisWindow = 1e6,
+        conditional = TRUE,
+        residualizationParam = ResidualizationParam(covariateScope = "union")
+    ))
     marginal <- suppressWarnings(estimateLocalRg(
         qd,
         gwas = gw,
         param = moments,
         cisWindow = 1e6
     ))
-    expect_length(unique(res$n_components), 1L)
-    expect_identical(res$n_components, rep(marginal$n_components[[3L]], 3L))
+    expect_identical(union$n_components, rep(marginal$n_components[[3L]], 3L))
     expect_gt(marginal$n_components[[1L]], marginal$n_components[[3L]])
     expect_error(
         estimateLocalRg(

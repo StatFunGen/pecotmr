@@ -2260,9 +2260,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
 # listed contexts), or a named list keyed by context. Returns a named list
 # keyed by context giving the actual character vector of covariate names
 # to use for that context (or character(0) if none). Errors when:
-#   - a named-list key is not in `contexts`
+#   - a named-list key names no context of the dataset
 #   - `contexts` contains entries missing from a supplied named-list
-#     (per the rule: named-list keys must equal `contexts`)
 #   - an explicitly requested name matches no actual covariate
 .qtlResolvePhenoSelection <- function(x, contexts, toResidualize) {
     if (is.null(toResidualize)) {
@@ -2287,8 +2286,9 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     abort(msg)
 }
 
-# List-form `phenotypeCovariates`: must be named with EXACTLY the
-# `contexts` set. Resolves each context's selection.
+# List-form `phenotypeCovariates`: every key a context of the dataset, and
+# every requested context keyed, so one list serves a run that reads its
+# contexts one at a time. Resolves each requested context's selection.
 # @noRd
 .qtlPhenoSelectionList <- function(x, contexts, toResidualize) {
     toResNames <- names(toResidualize)
@@ -2301,11 +2301,11 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         )
         abort(msg)
     }
-    badKeys <- setdiff(names(toResidualize), contexts)
+    badKeys <- setdiff(names(toResidualize), contexts(x))
     if (length(badKeys) > 0L) {
         msg <- glue(
-            "`phenotypeCovariates`: list key(s) not in ",
-            "`context`: {str_flatten(badKeys, ', ')}"
+            "`phenotypeCovariates`: list key(s) name no context of the ",
+            "dataset: {str_flatten(badKeys, ', ')}"
         )
         abort(msg)
     }
@@ -2313,9 +2313,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     if (length(missingKeys) > 0L) {
         msg <- glue(
             "`phenotypeCovariates`: list does not cover all ",
-            "`context`. Per-context lists must have exactly the same context ",
-            "set as `context`. Missing keys: ",
-            "{str_flatten(missingKeys, ', ')}"
+            "`context`. Every context the run reads needs a key. Missing ",
+            "keys: {str_flatten(missingKeys, ', ')}"
         )
         abort(msg)
     }
@@ -2347,12 +2346,11 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
 # Internal: build the covariate matrix used for residualization, given a
 # set of contexts, the resolved per-context phenotype selections, and the
 # resolved genotype-covariate selection. Honors the inclusion flags. For
-# `length(contexts) == 1` (per-context mode), the per-context phenotype
-# covariates and the genotype covariates are taken with no cross-context
-# alignment. For `length(contexts) >= 2` (joint mode), per-context
-# phenotype covariates from all listed contexts are concatenated
-# (prefixed with "{context}." to keep same-named columns distinct) and
-# the sample set is intersected across all contributing matrices.
+# one context, its phenotype covariates and the genotype covariates are taken
+# with no cross-context alignment. For several (the "union" scope), the
+# phenotype covariates of all listed contexts are concatenated (prefixed with
+# "{context}." to keep same-named columns distinct) and the sample set is
+# intersected across all contributing matrices.
 # Returns a single matrix (with rownames = sample IDs) or NULL.
 .qtlBuildResidualizationDesign <- function(
     x,
@@ -2519,8 +2517,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
 
 # residualizedGenotypes() for the pipelines: the genotypes of `window` and
 # `samples` under the run's resolved genotype `filter`, residualized on the
-# covariates of `contexts`. The accessor passes the whole dataset and the
-# all-default filter.
+# design .qtlGenoDesign() gives `contexts`. The accessor passes the whole
+# dataset and the all-default filter.
 # @noRd
 .qtlResidualizedGenotypes <- function(
     x,
@@ -2536,8 +2534,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
             "`context` is required for ",
             "residualizedGenotypes(QtlDataset). ",
             "Use contexts(x) to list the available contexts. ",
-            "Pass a single context for per-context mode or multiple ",
-            "contexts for joint mode (sample intersection)."
+            "Pass one context, or several for the genotypes they share, on ",
+            "the samples every one of them has."
         )
         abort(msg)
     }
@@ -2550,11 +2548,17 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
         abort(msg)
     }
-    G <- .qtlExtractBlock(x, window, samples, filter, read)$geno
+    G <- .qtlExtractBlock(
+        x,
+        window,
+        samples %||% .qtlSharedSamples(x, contexts, residualizationParam),
+        filter,
+        read
+    )$geno
     if (ncol(G) == 0L) {
         return(G)
     }
-    C <- .qtlResidCovariateMatrix(x, contexts, residualizationParam)
+    C <- .qtlGenoDesign(x, contexts, residualizationParam)
     aligned <- .qtlAlignGC(G, C, contexts)
     .qtlResidualizeQr(
         aligned$G,
@@ -2670,7 +2674,7 @@ setMethod(
         msg <- glue("Unknown context(s): {str_flatten(bad, \', \')}")
         abort(msg)
     }
-    C <- .qtlResidCovariateMatrix(x, contexts, residualizationParam)
+    designs <- .qtlPhenoDesigns(x, contexts, residualizationParam)
     Yraw <- .qtlResidPhenoY(
         x,
         contexts,
@@ -2681,7 +2685,7 @@ setMethod(
     .qtlResidPerContext(
         contexts,
         Yraw = Yraw,
-        C = C,
+        designs = designs,
         x = x,
         outlierAction = phenotypeFilter$outlierAction,
         outlierPvalThreshold = phenotypeFilter$outlierPvalThreshold,
@@ -2710,25 +2714,42 @@ setMethod(
     }
 )
 
-# What the phenotypes are regressed against: resolve the convenience vs
-# precise inclusion flags, pick the phenotype- and genotype-covariate sets
-# they select, build the design, and apply the NA policy to it. One step,
-# because none of the four halves means anything without the others.
+# What the data are regressed against: resolve the convenience vs precise
+# inclusion flags, pick the phenotype- and genotype-covariate sets they
+# select, build the design, and apply the NA policy to it. One step, because
+# none of the four halves means anything without the others.
+# `withPhenotype = FALSE` leaves the contexts' phenotype covariates out
+# whatever the settings say, as genotypes several contexts share take them
+# (.qtlGenoDesign()).
 # @noRd
-.qtlResidCovariateMatrix <- function(x, contexts, residualizationParam) {
+.qtlResidCovariateMatrix <- function(
+    x,
+    contexts,
+    residualizationParam,
+    withPhenotype = TRUE
+) {
+    .qtlDesignOf(
+        contexts,
+        x = x,
+        settings = .qtlDesignSettings(x, contexts, residualizationParam),
+        withPhenotype = withPhenotype
+    )
+}
+
+# What a run's designs are built from, resolved once for all of `contexts`:
+# the covariate selections, the inclusion flags and the NA policy.
+# @noRd
+.qtlDesignSettings <- function(x, contexts, residualizationParam) {
     # arg_match() reports on its argument by name, so it must be handed a
     # symbol: resolve the bundle field first, then validate it.
     covariateNaAction <- residualizationParam$covariateNaAction %||% "impute"
     covariateNaAction <- arg_match(covariateNaAction, c("impute", "drop"))
-    phenoSel <- .qtlResolvePhenoSelection(
-        x,
-        contexts,
-        residualizationParam$phenotypeCovariates
-    )
-    design <- .qtlBuildResidualizationDesign(
-        x,
-        contexts = contexts,
-        phenoSelection = phenoSel,
+    list(
+        phenoSelection = .qtlResolvePhenoSelection(
+            x,
+            contexts,
+            residualizationParam$phenotypeCovariates
+        ),
         genoSelection = .qtlResolveGenoSelection(
             x,
             residualizationParam$genotypeCovariates
@@ -2737,18 +2758,85 @@ setMethod(
         # historical default, now expressed as the absence of a value
         # rather than as a formal defaulting to TRUE.
         includePheno = residualizationParam$residualizePhenotype %||% TRUE,
-        includeGeno = residualizationParam$residualizeGenotype %||% TRUE
+        includeGeno = residualizationParam$residualizeGenotype %||% TRUE,
+        naAction = covariateNaAction
     )
-    .qtlHandleCovariateNa(design, covariateNaAction)
 }
 
-# Residualize every requested context, unwrapping a single-context request
-# the way the rest of the QtlDataset accessors do.
+# The design of `contexts` under `settings` (.qtlDesignSettings()), with its
+# NA policy applied.
+# @noRd
+.qtlDesignOf <- function(contexts, x, settings, withPhenotype = TRUE) {
+    design <- .qtlBuildResidualizationDesign(
+        x,
+        contexts = contexts,
+        phenoSelection = settings$phenoSelection,
+        genoSelection = settings$genoSelection,
+        includePheno = withPhenotype && settings$includePheno,
+        includeGeno = settings$includeGeno
+    )
+    .qtlHandleCovariateNa(design, settings$naAction)
+}
+
+# The covariate scope of a run on several contexts: the bundle's, else
+# "perOutcome".
+# @noRd
+.qtlCovariateScope <- function(residualizationParam) {
+    residualizationParam$covariateScope %||% "perOutcome"
+}
+
+# Each requested context's phenotype design, keyed by context: that context's
+# own, or under the "union" scope the one design of them all. The selections
+# are resolved once for every context, so a list keyed by all of them serves
+# each.
+# @noRd
+.qtlPhenoDesigns <- function(x, contexts, residualizationParam) {
+    settings <- .qtlDesignSettings(x, contexts, residualizationParam)
+    if (identical(.qtlCovariateScope(residualizationParam), "union")) {
+        design <- .qtlDesignOf(contexts, x, settings)
+        return(set_names(rep(list(design), length(contexts)), contexts))
+    }
+    set_names(
+        map(contexts, .qtlDesignOf, x = x, settings = settings),
+        contexts
+    )
+}
+
+# The design genotypes are regressed on: one context's own; for genotypes
+# several contexts share, the genotype covariates alone, or under the "union"
+# scope the design of them all.
+# @noRd
+.qtlGenoDesign <- function(x, contexts, residualizationParam) {
+    .qtlResidCovariateMatrix(
+        x,
+        contexts,
+        residualizationParam,
+        withPhenotype = length(contexts) == 1L ||
+            identical(.qtlCovariateScope(residualizationParam), "union")
+    )
+}
+
+# The samples genotypes several contexts share are read for when the caller
+# names none: those every context has. NULL, all of them, for one context or
+# under the "union" scope, whose design holds only those already.
+# @noRd
+.qtlSharedSamples <- function(x, contexts, residualizationParam) {
+    if (
+        length(contexts) == 1L ||
+            identical(.qtlCovariateScope(residualizationParam), "union")
+    ) {
+        return(NULL)
+    }
+    reduce(map(contexts, .qtlOneContextSamples, x = x), intersect)
+}
+
+# Residualize every requested context on its design in `designs`, unwrapping
+# a single-context request the way the rest of the QtlDataset accessors do.
 # @noRd
 .qtlResidPerContext <- function(
     contexts,
     Yraw,
-    C,
+    designs,
     x,
     outlierAction,
     outlierPvalThreshold,
@@ -2760,7 +2848,7 @@ setMethod(
             contexts,
             .qtlResidualizeContext,
             Yraw = Yraw,
-            C = C,
+            designs = designs,
             x = x,
             outlierAction = outlierAction,
             outlierPvalThreshold = outlierPvalThreshold,
@@ -2849,12 +2937,13 @@ setMethod("show", "QtlDataset", function(object) {
     .qtlResolveOne(ctx, toResidualize[[ctx]], x)
 }
 
-# Residualize + filter one context's raw phenotype matrix against covariates C.
+# Residualize + filter one context's raw phenotype matrix against its design
+# in `designs`.
 # @noRd
 .qtlResidualizeContext <- function(
     ctx,
     Yraw,
-    C,
+    designs,
     x,
     outlierAction,
     outlierPvalThreshold,
@@ -2863,7 +2952,7 @@ setMethod("show", "QtlDataset", function(object) {
 ) {
     .qtlResidualizeContextPheno(
         Yraw[[ctx]],
-        C,
+        designs[[ctx]],
         ctx,
         outlierAction,
         outlierPvalThreshold,
@@ -2889,14 +2978,17 @@ setClass(
         residualizePhenotype = "logical_OR_NULL",
         residualizeGenotype = "logical_OR_NULL",
         scaleResiduals = "logical_OR_NULL",
-        covariateNaAction = "character_OR_NULL"
+        covariateNaAction = "character_OR_NULL",
+        covariateScope = "character_OR_NULL"
     )
 )
 
 #' @title Covariate Residualization Settings
 #' @description What is regressed out of the phenotype and genotype before
-#'   fitting. Shared by \code{\link{fineMappingPipeline}} and
-#'   \code{\link{twasWeightsPipeline}}, which hold the same four settings.
+#'   fitting. Shared by \code{\link{fineMappingPipeline}},
+#'   \code{\link{twasWeightsPipeline}} and \code{\link{colocboostPipeline}},
+#'   and by the accessors \code{\link{residualizedPhenotypes}} and
+#'   \code{\link{residualizedGenotypes}}.
 #'
 #'   \code{fineMappingPipeline}'s \code{usePCA} / \code{nPCs} are
 #'   \strong{not} here. They do not residualize anything: they PCA-reduce a
@@ -2923,7 +3015,10 @@ setClass(
 #'   \code{maxVariants} are carried but ignored by
 #'   \code{fineMappingPipeline}.
 #' @param phenotypeCovariates Covariates to residualize the phenotype on, or
-#'   \code{NULL} (default) for the dataset's own.
+#'   \code{NULL} (default) for the dataset's own: names that apply to every
+#'   context, or a list of them keyed by context, with a key for every
+#'   context the run reads (keys for the dataset's other contexts are
+#'   allowed).
 #' @param genotypeCovariates Covariates to residualize the genotype on, or
 #'   \code{NULL} (default) for the dataset's own.
 #' @param residualizePhenotype Logical. Residualize on the phenotype
@@ -2940,9 +3035,46 @@ setClass(
 #' @param covariateNaAction How missing covariate values are handled when the
 #'   design is assembled: \code{"impute"} or \code{"drop"}. \code{NULL}
 #'   (default) leaves the accessor's own default in place.
+#' @param covariateScope Whose phenotype covariates a joint fit regresses
+#'   out of each outcome: \code{"perOutcome"}, the outcome's own context's
+#'   (the default when unset), or \code{"union"}, those of every outcome in
+#'   the fit. See the section on joint fits.
+#' @section Joint fits:
+#'   Phenotype covariates belong to a context, and every trait measured
+#'   there shares them. A joint fit whose outcomes all come from one
+#'   context, as a fit across its traits does, regresses each of them, and
+#'   the genotypes, on that context's covariates under either setting. The
+#'   setting matters where the outcomes span contexts.
+#'
+#'   Under \code{covariateScope = "perOutcome"}, each outcome's phenotypes are
+#'   regressed on its context's covariates and the genotype covariates, over
+#'   that context's samples: the residuals a fit of that outcome alone
+#'   takes, and so the data behind its own statistics, such as those a mash
+#'   prior is trained on. The genotypes the outcomes share are regressed on
+#'   the genotype covariates alone, over the samples every context has. They
+#'   are not adjusted for any one context's covariates, which shrinks an
+#'   outcome's standardized effects against its own statistics by about
+#'   \eqn{k / (2n)} for \eqn{k} such covariates on \eqn{n} samples (its
+#'   per-allele effects by about \eqn{k / n}), when the covariates are
+#'   unrelated to the genotypes. A covariate every context records, such as
+#'   sex or age, reaches the shared genotypes only when it is held with the
+#'   genotype covariates.
+#'
+#'   Under \code{covariateScope = "union"}, every outcome's phenotypes and the
+#'   genotypes they share are all regressed on the covariates of all the
+#'   contexts together, over the samples every context has. The union gains
+#'   columns with every context, and on few samples it can take much of each
+#'   phenotype's variation with it.
+#'
+#'   Studies have genotypes and samples of their own, so each is
+#'   residualized apart under either setting, as is each context in
+#'   \code{\link{colocboostPipeline}}, which fits each on its own genotypes.
 #' @return A \code{ResidualizationParam} object, a \code{\link{MethodParam}}.
 #' @examples
 #' ResidualizationParam(residualizeGenotype = FALSE)
+#' # Every context's phenotypes, and the genotypes they share, on the
+#' # covariates of all of them:
+#' ResidualizationParam(covariateScope = "union")
 #' @export
 ResidualizationParam <- function(
     phenotypeCovariates = NULL,
@@ -2950,7 +3082,8 @@ ResidualizationParam <- function(
     residualizePhenotype = NULL,
     residualizeGenotype = NULL,
     scaleResiduals = NULL,
-    covariateNaAction = NULL
+    covariateNaAction = NULL,
+    covariateScope = NULL
 ) {
     # NULL means "unset", which is why the accessors no longer need a
     # `missing()` companion for each flag: FALSE and "not given" are both
@@ -2963,9 +3096,27 @@ ResidualizationParam <- function(
         residualizePhenotype = residualizePhenotype,
         residualizeGenotype = residualizeGenotype,
         scaleResiduals = scaleResiduals,
-        covariateNaAction = covariateNaAction
+        covariateNaAction = covariateNaAction,
+        covariateScope = covariateScope
     )
 }
+
+# A set covariateScope is one of its two values, checked where the bundle is
+# built, so a bad value is reported against the argument that set it.
+setValidity("ResidualizationParam", function(object) {
+    if (is.null(object@covariateScope)) {
+        return(TRUE)
+    }
+    coll <- makeAssertCollection()
+    assertChoice(
+        object@covariateScope,
+        c("perOutcome", "union"),
+        .var.name = "covariateScope",
+        add = coll
+    )
+    problems <- coll$getMessages()
+    if (length(problems) == 0L) TRUE else problems
+})
 
 # Slots a QtlDataset held before its run settings moved to the pipelines'
 # Params (GenotypeFilterParam, ResidualizationParam). An object saved then

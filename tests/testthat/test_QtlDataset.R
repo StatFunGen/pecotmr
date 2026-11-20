@@ -480,7 +480,7 @@ test_that(".qtlResolvePhenoSelection: list missing keys errors", {
     )
 })
 
-test_that(".qtlResolvePhenoSelection: list with extra keys errors", {
+test_that(".qtlResolvePhenoSelection: a key naming no context errors", {
     qd <- .qh_makeDataset(contexts = "brain")
     expect_error(
         pecotmr:::.qtlResolvePhenoSelection(
@@ -488,8 +488,18 @@ test_that(".qtlResolvePhenoSelection: list with extra keys errors", {
             contexts = "brain",
             toResidualize = list(brain = "age", ghost = "sex")
         ),
-        "list key.*not in `context`"
+        "list key.*name no context of the dataset: ghost"
     )
+})
+
+test_that(".qtlResolvePhenoSelection: one context reads its key alone", {
+    qd <- .qh_makeDataset(contexts = c("brain", "liver"))
+    out <- pecotmr:::.qtlResolvePhenoSelection(
+        qd,
+        contexts = "brain",
+        toResidualize = list(brain = "age", liver = "sex")
+    )
+    expect_equal(out, list(brain = "age"))
 })
 
 test_that(".qtlResolvePhenoSelection: unnamed list errors", {
@@ -1791,6 +1801,182 @@ test_that("residualizedPhenotypes: scaleResiduals = FALSE skips rescaling", {
     # Without scaling the residual columns generally won't have sd = 1.
     sds <- apply(Y, 2L, sd)
     expect_false(any(abs(sds - 1) < 1e-6))
+})
+
+# ===========================================================================
+# covariateScope: whose covariates a run on several contexts takes
+# ===========================================================================
+
+# Two contexts with a covariate of their own and different samples: brain
+# has all 12, liver the first 10.
+.qr_scopeDataset <- function() {
+    set.seed(11)
+    brain <- .qr_makeSe(n_samples = 12L)
+    SummarizedExperiment::colData(brain) <- .qr_scopeCovariate("brainPc", 12L)
+    liver <- .qr_makeSe(n_samples = 10L)
+    SummarizedExperiment::colData(liver) <- .qr_scopeCovariate("liverPc", 10L)
+    QtlDataset(
+        studyName = "study1",
+        genotypes = .qr_makeHandle(),
+        phenotypes = list(brain = brain, liver = liver),
+        genotypeCovariates = matrix(
+            rnorm(24),
+            12L,
+            2L,
+            dimnames = list(paste0("s", 1:12), c("pc1", "pc2"))
+        )
+    )
+}
+
+.qr_scopeCovariate <- function(name, n) {
+    S4Vectors::DataFrame(
+        setNames(list(rnorm(n)), name),
+        row.names = paste0("s", seq_len(n))
+    )
+}
+
+# The largest absolute correlation between a column of `A` and one of `B`.
+.qr_maxCor <- function(A, B) {
+    max(abs(cor(A, B)))
+}
+
+test_that("each context's phenotypes take their own covariates by default", {
+    qd <- .qr_scopeDataset()
+    both <- residualizedPhenotypes(qd, context = c("brain", "liver"))
+    expect_equal(
+        both$brain,
+        residualizedPhenotypes(qd, context = "brain")$brain
+    )
+    expect_equal(
+        both$liver,
+        residualizedPhenotypes(qd, context = "liver")$liver
+    )
+    expect_equal(nrow(both$brain), 12L)
+    expect_equal(nrow(both$liver), 10L)
+})
+
+test_that("a selection keyed by every context serves each context", {
+    qd <- .qr_scopeDataset()
+    rp <- ResidualizationParam(
+        phenotypeCovariates = list(brain = "brainPc", liver = "liverPc")
+    )
+    res <- residualizedPhenotypes(
+        qd,
+        context = c("brain", "liver"),
+        residualizationParam = rp
+    )
+    expect_equal(res$brain, residualizedPhenotypes(qd, context = "brain")$brain)
+    expect_equal(res$liver, residualizedPhenotypes(qd, context = "liver")$liver)
+    # A run that reads one context at a time takes the same list.
+    one <- residualizedPhenotypes(
+        qd,
+        context = "liver",
+        residualizationParam = rp
+    )
+    expect_equal(one$liver, res$liver)
+})
+
+test_that("the union scope takes every context's covariates", {
+    qd <- .qr_scopeDataset()
+    shared <- paste0("s", 1:10)
+    pc <- phenotypeCovariates(qd, context = c("brain", "liver"))
+    covariates <- cbind(
+        pc$brain[shared, , drop = FALSE],
+        pc$liver[shared, , drop = FALSE],
+        genotypeCovariates(qd)[shared, ]
+    )
+    res <- residualizedPhenotypes(
+        qd,
+        context = c("brain", "liver"),
+        residualizationParam = ResidualizationParam(covariateScope = "union")
+    )
+    expect_equal(rownames(res$brain), shared)
+    expect_lt(.qr_maxCor(res$brain, covariates), 1e-6)
+    expect_lt(.qr_maxCor(res$liver, covariates), 1e-6)
+    # By default brain's residuals keep what liver's covariate explains.
+    own <- residualizedPhenotypes(qd, context = c("brain", "liver"))$brain
+    expect_gt(.qr_maxCor(own[shared, ], pc$liver[shared, , drop = FALSE]), 0.01)
+})
+
+test_that("genotypes several contexts share take the genotype covariates", {
+    qd <- .qr_scopeDataset()
+    local_mocked_bindings(
+        .handleDosage = .qr_mockExtractor(),
+        .package = "pecotmr"
+    )
+    shared <- paste0("s", 1:10)
+    G <- residualizedGenotypes(qd, context = c("brain", "liver"))
+    expect_equal(rownames(G), shared)
+    # One context's genotypes with its phenotype covariates left out, on the
+    # samples both contexts have.
+    alone <- pecotmr:::.qtlResidualizedGenotypes(
+        qd,
+        "brain",
+        samples = shared,
+        residualizationParam = ResidualizationParam(
+            residualizePhenotype = FALSE
+        )
+    )
+    expect_equal(unname(G), unname(alone))
+    expect_lt(.qr_maxCor(G, genotypeCovariates(qd)[shared, ]), 1e-6)
+})
+
+test_that("under the union scope shared genotypes take every covariate", {
+    qd <- .qr_scopeDataset()
+    local_mocked_bindings(
+        .handleDosage = .qr_mockExtractor(),
+        .package = "pecotmr"
+    )
+    shared <- paste0("s", 1:10)
+    pc <- phenotypeCovariates(qd, context = c("brain", "liver"))
+    G <- residualizedGenotypes(
+        qd,
+        context = c("brain", "liver"),
+        residualizationParam = ResidualizationParam(covariateScope = "union")
+    )
+    expect_equal(rownames(G), shared)
+    covariates <- cbind(
+        pc$brain[shared, , drop = FALSE],
+        pc$liver[shared, , drop = FALSE],
+        genotypeCovariates(qd)[shared, ]
+    )
+    expect_lt(.qr_maxCor(G, covariates), 1e-6)
+})
+
+test_that("a run on one context is the same under either scope", {
+    qd <- .qr_scopeDataset()
+    union <- ResidualizationParam(covariateScope = "union")
+    expect_equal(
+        residualizedPhenotypes(qd, context = "liver"),
+        residualizedPhenotypes(
+            qd,
+            context = "liver",
+            residualizationParam = union
+        )
+    )
+    local_mocked_bindings(
+        .handleDosage = .qr_mockExtractor(),
+        .package = "pecotmr"
+    )
+    expect_equal(
+        residualizedGenotypes(qd, context = "liver"),
+        residualizedGenotypes(
+            qd,
+            context = "liver",
+            residualizationParam = union
+        )
+    )
+})
+
+test_that("covariateScope is 'perOutcome' or 'union'", {
+    expect_equal(
+        ResidualizationParam(covariateScope = "union")$covariateScope,
+        "union"
+    )
+    expect_error(
+        ResidualizationParam(covariateScope = "both"),
+        "covariateScope"
+    )
 })
 
 # ===========================================================================

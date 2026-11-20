@@ -24,18 +24,22 @@ residualizedGenotypes(x, ...)
 \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 \code{genotypeCovariates} choose the covariate sets,
 \code{residualizePhenotype} / \code{residualizeGenotype} turn each
-side on or off, and \code{covariateNaAction} says how missing
-covariate values are handled. The same record the pipelines take, so a
-setting means the same thing by either route.}
+side on or off, \code{covariateNaAction} says how missing covariate
+values are handled, and \code{covariateScope} whose covariates several
+contexts take. The same record the pipelines take, so a setting means
+the same thing by either route.}
 }
 \value{
 A numeric matrix (samples x variants).
 }
 \description{
-Residualize the genotype matrix against the per-context
-  phenotype covariates and the genotype covariates, over the whole
-  dataset: narrow it first, with \code{x[i, j, ]}, to residualize part
-  of it.
+Residualize the genotype matrix over the whole dataset:
+  narrow it first, with \code{x[i, j, ]}, to residualize part of it. For
+  one context, against that context's phenotype covariates and the
+  genotype covariates. For several, the genotypes they share, over the
+  samples every one of them has, against the genotype covariates alone,
+  or under \code{covariateScope = "union"} against all the contexts'
+  covariates together.
 }
 \examples{
 data(qtlDatasetExample)

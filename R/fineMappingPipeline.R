@@ -361,7 +361,10 @@
 #'   \code{genotypeCovariates} name which covariates to regress out
 #'   (\code{NULL}, the default, uses every available one), and
 #'   \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
-#'   off.
+#'   off. \code{covariateScope} sets whose covariates a joint fit takes
+#'   where its outcomes span contexts: by default each outcome's phenotypes
+#'   its own context's, and the genotypes they share the genotype covariates
+#'   alone.
 #'
 #'   Only meaningful for \code{QtlDataset} / \code{MultiStudyQtlDataset}
 #'   input. A \code{QtlSumStats} / \code{GwasSumStats} run has no covariates
