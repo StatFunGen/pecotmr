@@ -16,6 +16,7 @@ ctwasPipeline(
   variantPruningParam = VariantPruningParam(),
   boundaryMergeParam = BoundaryMergeParam(),
   keepSnps = FALSE,
+  contextGroups = NULL,
   methodArgs = CtwasOptions()
 )
 }
@@ -127,6 +128,15 @@ own \code{"SNP"} group) so the full ctwas output is reconstructable from
 the SNP rows are the null background and are dropped from the structured
 gene-level result.}
 
+\item{contextGroups}{Optional named character vector pooling contexts
+into one cTWAS group: each name is a weight context and its value the
+group it joins, e.g. \code{c(BM36_pQTL_chr1_G1_P1 = "BM36_pQTL",
+BM36_pQTL_chr1_G2_P2 = "BM36_pQTL")}. A context it does not name keeps a
+group of its own, and names no weights carry are ignored, so one map can
+serve every chromosome; one naming none of the weights' contexts is
+refused. Groups stay per study and molecular type (see Groups and
+molecular types). Default \code{NULL}: one group per context.}
+
 \item{methodArgs}{Additional arguments forwarded to ctwas, built
 with \code{\link{CtwasOptions}}. Names are checked against what
 the ctwas steps accept between them.}
@@ -194,6 +204,16 @@ Pipeline that hands a per-block set of
   own, and a gene \code{{trait}|{study}_{context}_{type}_{method}}, the form
   cTWAS reads the trait from. Groups whose names would coincide are refused,
   as is a name holding \code{"|"}, on which cTWAS's EM splits a group.
+
+  Weights whose context names the molecular trait -- a protein or an
+  intron cluster, e.g. \code{BM36_pQTL_chr1_<gene>_<protein>} -- give
+  each gene a group of its own, and the EM cannot fit a group of one gene;
+  the pipeline warns when each of more than ten groups holds one.
+  \code{contextGroups} pools such contexts: a gene's group is then its
+  study, the group its context is mapped to, and its type. Only the group
+  changes: gene ids, results and their \code{context} columns keep each
+  gene's own context, and \code{\link{ctwasGroupPriors}} reports the
+  group's.
 }
 
 \section{cTWAS's log}{

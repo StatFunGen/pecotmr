@@ -33,6 +33,20 @@ extern "C" SEXP _pecotmr_dentistIterativeImputeFactor(SEXP factorR, SEXP nSample
     return cpp11::as_sexp(dentistIterativeImputeFactor(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(factorR), cpp11::as_cpp<cpp11::decay_t<int>>(nSample), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(zScoreR), cpp11::as_cpp<cpp11::decay_t<double>>(pValueThreshold), cpp11::as_cpp<cpp11::decay_t<double>>(propSVD), cpp11::as_cpp<cpp11::decay_t<bool>>(gcControl), cpp11::as_cpp<cpp11::decay_t<int>>(nIter), cpp11::as_cpp<cpp11::decay_t<double>>(gPvalueThreshold), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<bool>>(correctChenEtAlBug), cpp11::as_cpp<cpp11::decay_t<bool>>(verbose), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
   END_CPP11
 }
+// eigen_likelihood.cpp
+cpp11::writable::list eigenLikelihoodCpp(const std::string& model, const list& data, const doubles& thetaR, bool scoring);
+extern "C" SEXP _pecotmr_eigenLikelihoodCpp(SEXP model, SEXP data, SEXP thetaR, SEXP scoring) {
+  BEGIN_CPP11
+    return cpp11::as_sexp(eigenLikelihoodCpp(cpp11::as_cpp<cpp11::decay_t<const std::string&>>(model), cpp11::as_cpp<cpp11::decay_t<const list&>>(data), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(thetaR), cpp11::as_cpp<cpp11::decay_t<bool>>(scoring)));
+  END_CPP11
+}
+// eigen_likelihood.cpp
+cpp11::writable::list eigenLikelihoodFitCpp(const std::string& model, const list& data, const list& starts, const doubles& lowerR, const doubles& upperR, const doubles& fullR, const integers& freeR, int maxit, bool valueOnly);
+extern "C" SEXP _pecotmr_eigenLikelihoodFitCpp(SEXP model, SEXP data, SEXP starts, SEXP lowerR, SEXP upperR, SEXP fullR, SEXP freeR, SEXP maxit, SEXP valueOnly) {
+  BEGIN_CPP11
+    return cpp11::as_sexp(eigenLikelihoodFitCpp(cpp11::as_cpp<cpp11::decay_t<const std::string&>>(model), cpp11::as_cpp<cpp11::decay_t<const list&>>(data), cpp11::as_cpp<cpp11::decay_t<const list&>>(starts), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(lowerR), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(upperR), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(fullR), cpp11::as_cpp<cpp11::decay_t<const integers&>>(freeR), cpp11::as_cpp<cpp11::decay_t<int>>(maxit), cpp11::as_cpp<cpp11::decay_t<bool>>(valueOnly)));
+  END_CPP11
+}
 // ld_prune.cpp
 cpp11::writable::integers ldThresholdComponents(const doubles_matrix<>& standardized, double threshold, int stripe);
 extern "C" SEXP _pecotmr_ldThresholdComponents(SEXP standardized, SEXP threshold, SEXP stripe) {
@@ -145,6 +159,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_bgenSampleIdsCpp",             (DL_FUNC) &_pecotmr_bgenSampleIdsCpp,              2},
     {"_pecotmr_dentistIterativeImpute",       (DL_FUNC) &_pecotmr_dentistIterativeImpute,       12},
     {"_pecotmr_dentistIterativeImputeFactor", (DL_FUNC) &_pecotmr_dentistIterativeImputeFactor, 12},
+    {"_pecotmr_eigenLikelihoodCpp",           (DL_FUNC) &_pecotmr_eigenLikelihoodCpp,            4},
+    {"_pecotmr_eigenLikelihoodFitCpp",        (DL_FUNC) &_pecotmr_eigenLikelihoodFitCpp,         9},
     {"_pecotmr_jointPrsCpp",                  (DL_FUNC) &_pecotmr_jointPrsCpp,                  17},
     {"_pecotmr_jointPrsFactorCpp",            (DL_FUNC) &_pecotmr_jointPrsFactorCpp,            17},
     {"_pecotmr_ldThresholdComponents",        (DL_FUNC) &_pecotmr_ldThresholdComponents,         3},

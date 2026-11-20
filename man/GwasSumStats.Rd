@@ -13,6 +13,7 @@ GwasSumStats(
   nCase = NULL,
   nControl = NULL,
   nSample = NULL,
+  prevalence = NULL,
   qcOptions = list(),
   region = NULL,
   blockId = NULL,
@@ -55,6 +56,15 @@ as the study-level fallback for the per-variant \code{N} when a study has
 no per-variant \code{N} column and no case/control counts. Named
 \code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 sample size).}
+
+\item{prevalence}{Optional per-study population prevalence of a
+case/control trait, strictly between 0 and 1 (\code{NA} for the other
+studies), from which \code{\link{estimateH2}} and
+\code{\link{estimateStratifiedH2}} also give the heritability on the
+liability scale. Attached only when supplied (length 1 or length(study)),
+as \code{nCase} / \code{nControl} are. A study with one must record its
+case/control counts, as \code{nCase} and \code{nControl} or per-variant
+\code{N_CASE} / \code{N_CONTROL}; a quantitative trait has none.}
 
 \item{qcOptions}{A \code{list} recording the QC that ran. Empty
 \code{list()} on construction; \code{summaryStatsQc()} fills it.

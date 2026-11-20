@@ -2930,6 +2930,23 @@ test_that("summaryStatsQc(effectiveN=TRUE): counts, no N -> N == N_eff", {
     expect_identical(res$qcAudit[[1L]]$nSource, "effective")
 })
 
+test_that("summaryStatsQc keeps a study's prevalence", {
+    gr <- .ssQ_makeCCEntry(
+        nCase = c(100, 200, 150, 250),
+        nControl = c(900, 800, 850, 750)
+    )
+    ss <- GwasSumStats(
+        studyName = "g1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = .ssQ_makeHandle(),
+        prevalence = 0.02
+    )
+    res <- summaryStatsQc(ss)
+    expect_equal(as.numeric(res$prevalence), 0.02)
+    expect_identical(res$qcAudit[[1L]]$nSource, "effective")
+})
+
 test_that("summaryStatsQc(effectiveN=TRUE): counts + N -> counts win", {
     gr <- .ssQ_makeCCEntry(
         nCase = c(100, 200, 150, 250),

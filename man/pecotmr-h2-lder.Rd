@@ -14,11 +14,11 @@ Estimate SNP heritability by LD eigenvalue regression (Song et
   \eqn{x_i = (u_i'z)/\sqrt{\lambda_i}}, and the whitened \eqn{\chi^2 = x_i^2}
   is regressed on \eqn{\lambda_i} via IRWLS:
   \eqn{E[x_i^2] = (N h2/M)\lambda_i
-  + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. The IRWLS
-  weight
-  uses an in-sample (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) form
-  selected by \code{inSample}, and a two-stage step estimates the
-  confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The
+  + (1 + N a)}, so \eqn{Cov(z) = (N h2/M) R^2 + (1 + N a) R}. Under
+  LDER's settings the IRWLS weight takes an in-sample
+  (\eqn{\min(1,\lambda)}) or out-of-sample (logistic) eigenvalue taper,
+  as the reference's \code{inSample} sets, and a two-stage step estimates
+  the confounding inflation \eqn{a} on a \eqn{\chi^2}-filtered subset. The
   stratified extension regresses on \eqn{\lambda_i \ell_{ia}}
   (\eqn{\ell_{ia} = \sum_j A_{ja} V_{ji}^2}) and reduces to the univariate
   model when there is a single genome-wide annotation.

@@ -760,11 +760,11 @@ test_that("estimateH2 takes fineMappingAnnotations as candidates", {
         types = c("maxCpp", "credibleSet")
     )
     for (method in c("sldsc", "gldsc")) {
-        z <- scoreStats(estimateH2(
+        z <- scoreStats(estimateStratifiedH2(
             ss,
             ref,
-            method = method,
-            annotations = annot
+            annot,
+            param = .h2MethodSettings(method, annot, ref)
         ))[[1L]]$z
         expect_length(z, 2L)
         expect_true(all(is.finite(z)), info = method)

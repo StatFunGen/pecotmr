@@ -98,11 +98,12 @@ Container and metadata methods shared by every
   \code{$<-}, \code{mcols<-} or its older spellings \code{values<-} and
   \code{elementMetadata<-}, refuses an identity column (\code{study},
   \code{context}, \code{trait}, \code{method}, their \code{gwas}
-  counterparts and \code{blockId}) that is not character; \code{NA} values
-  are allowed. \code{[} selects elements and
-  \strong{rejects} a second argument, because the stock method would
-  silently discard it. \code{endoapply()} maps over the elements and
-  rebuilds the object with its collection-level slots intact;
+  counterparts, \code{blockId}, and a pair's \code{study_1} to
+  \code{trait_2}) that is not character; \code{NA} values are allowed.
+  \code{[} selects elements and \strong{rejects} a second argument,
+  because the stock method would silently discard it. \code{endoapply()}
+  maps over the elements and rebuilds the object with its collection-level
+  slots intact;
   \code{sort()}, \code{unique()} and \code{trim()} work on each element
   the same way, so they too return the collection's own class rather than
   a bare \code{GRangesList}.

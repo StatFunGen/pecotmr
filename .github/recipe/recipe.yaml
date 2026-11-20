@@ -54,6 +54,7 @@ requirements:
     - r-cpp11armadillo
     - r-ctwas
     - r-dbi
+    - r-dlib
     - r-dplyr
     - r-fdrtool
     - r-flashier
@@ -68,6 +69,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrix
+    - r-matrixsampling
     - r-matrixstats
     - r-metafor
     - r-mr.ash.alpha
@@ -131,6 +133,7 @@ requirements:
     - r-cpp11armadillo
     - r-ctwas
     - r-dbi
+    - r-dlib
     - r-dplyr
     - r-fdrtool
     - r-flashier
@@ -145,6 +148,7 @@ requirements:
     - r-magrittr
     - r-mashr
     - r-matrix
+    - r-matrixsampling
     - r-matrixstats
     - r-metafor
     - r-mr.ash.alpha

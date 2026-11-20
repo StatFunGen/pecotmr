@@ -227,7 +227,7 @@ buildLdScore <- function(
     assertFlag(inSample)
     assertFlag(keepLdMatrices)
     prep <- .h2RefPrepare(ldReference, ldBlocks, nSamples, genome)
-    l2 <- .ldScoreVector(prep, .ldscAssertN(prep$nRef))
+    l2 <- .ldScoreVector(prep, .ldScoreAssertN(prep$nRef))
     ldMatrixList <- if (isTRUE(keepLdMatrices) && is.null(prep$ldReference)) {
         map2(prep$blocks, prep$snpIdx, .ldScoreKeepMatrix)
     } else {
@@ -274,7 +274,7 @@ buildLdScore <- function(
     ld <- .ldStatBlockLd(block, ldReference)
     p <- .ldSourceSize(ld)
     raw <- .ldSquaredProduct(ld, matrix(1, p, 1L))
-    as.vector(.ldscUnbiasedSum(raw, p, nRef))
+    as.vector(.ldScoreUnbiasedSum(raw, p, nRef))
 }
 
 # ldsc's unbiased estimator of r^2 (ldscore.py, __l2_unbiased__): a sample
@@ -282,11 +282,11 @@ buildLdScore <- function(
 # term (r^2 = 1) stays 1, and negative estimates are kept, as in ldsc. Every
 # LD score pecotmr computes goes through this or its summed form below.
 # @noRd
-.ldscUnbiasedR2 <- function(r2, nRef) {
+.ldScoreUnbiasedR2 <- function(r2, nRef) {
     r2 - (1 - r2) / (nRef - 2)
 }
 
-# .ldscUnbiasedR2() summed over a block with weights a_k:
+# .ldScoreUnbiasedR2() summed over a block with weights a_k:
 #   sum_k a_k (r2_jk - (1 - r2_jk) / (n - 2))
 #     = ((n - 1) * sum_k a_k r2_jk - sum_k a_k) / (n - 2).
 # Exact, so a route that has the raw weighted sums but not r^2 itself -- an
@@ -294,27 +294,27 @@ buildLdScore <- function(
 # `rawSums` is variants x columns; `weightSums` holds each column's sum_k a_k
 # over the block, which for the unweighted base score is the block size.
 # @noRd
-.ldscUnbiasedSum <- function(rawSums, weightSums, nRef) {
+.ldScoreUnbiasedSum <- function(rawSums, weightSums, nRef) {
     sweep((nRef - 1) * rawSums, 2L, weightSums) / (nRef - 2)
 }
 
 # ldsc's unbiased r^2 divides by n - 2, so the panel must exceed 2 samples.
 # @noRd
-.ldscAssertN <- function(nRef) {
+.ldScoreAssertN <- function(nRef) {
     if (nRef > 2L) {
         return(nRef)
     }
     abort(glue(
-        "ldsc's unbiased r^2 divides by n - 2, so the LD reference panel ",
-        "needs more than 2 samples, and it records {nRef}. Give the panel's ",
-        "size as `nSamples`."
+        "The LD scores' unbiased r^2 divides by n - 2, so the LD reference ",
+        "panel needs more than 2 samples, and it records {nRef}. Give the ",
+        "panel's size as `nSamples`."
     ))
 }
 
 # The n of ldsc's unbiased r^2 for a built LD reference: its panel size.
 # @noRd
-.ldscPanelN <- function(ldRef) {
-    .ldscAssertN(ldPanelNSamples(ldRef))
+.ldScorePanelN <- function(ldRef) {
+    .ldScoreAssertN(ldPanelNSamples(ldRef))
 }
 
 # @noRd
@@ -358,7 +358,7 @@ setMethod("show", "LdScore", function(object) {
     if (length(x@ldMatrixList) > 0L) {
         return("stored matrices")
     }
-    "none (scores only; g-LDSC and stratified scores need it)"
+    "none (scores only; the variant GLS and stratified scores need it)"
 }
 
 # TRUE when each block's LD can be had: stored, or read from the panel.

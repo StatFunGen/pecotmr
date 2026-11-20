@@ -28,17 +28,20 @@ to select; \code{NULL} matches all traits in the dataset.}
 \code{\link{ResidualizationParam}}: \code{phenotypeCovariates} and
 \code{genotypeCovariates} choose the covariate sets,
 \code{residualizePhenotype} / \code{residualizeGenotype} turn each
-side on or off, and \code{covariateNaAction} says how missing
-covariate values are handled. The same record the pipelines take, so a
-setting means the same thing by either route.}
+side on or off, \code{covariateNaAction} says how missing covariate
+values are handled, and \code{covariateScope} whose covariates several
+contexts take. The same record the pipelines take, so a setting means
+the same thing by either route.}
 }
 \value{
 A named list of numeric matrices keyed by context.
 }
 \description{
-Residualize the per-context phenotype matrices against the
-  per-context phenotype covariates and the genotype covariates, for one or
-  more requested contexts. Missing values and outliers are left as they
+Residualize each requested context's phenotypes against
+  that context's own phenotype covariates and the genotype covariates,
+  over its own samples, or under \code{covariateScope = "union"} against
+  the covariates of all the requested contexts together, over the samples
+  every one of them has. Missing values and outliers are left as they
   are: they are a run's phenotype QC (\code{\link{PhenotypeFilterParam}}),
   applied by the pipelines.
 }

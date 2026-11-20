@@ -514,13 +514,13 @@ twasWeightsPipeline(
 -  `phenotypeFilterParam` is the run's phenotype QC (see the
     [fine-mapping vignette](fine-mapping.html#common-parameters) for
     semantics).
--  `h2` gives the Bayesian alphabet (`bayesA` to `bayesR`) and, on summary
-    statistics, LDpred2 a starting heritability for each trait in place of
-    their engines' guess of 0.5. An estimator's name (`"lava"`, `"hdlL"`,
-    `"fastHer"`, and on individual-level data `"greml"`) estimates each
-    trait's first, on the variants and samples its methods fit; the
-    `H2Estimate` that `estimateH2()` returns supplies values estimated
-    earlier. See the
+-  `h2EstimateParam` and `h2Estimate` give the Bayesian alphabet (`bayesA`
+    to `bayesR`) and, on summary statistics, LDpred2 a starting heritability
+    for each trait in place of their engines' guess of 0.5. Settings (an
+    `H2EstimateParam`, on individual-level data REML's too) estimate each
+    trait's first, on the variants and samples its methods fit; `h2Estimate`
+    supplies one number for every trait, or the `H2Estimate` that
+    `estimateLocalH2()` returns, with values estimated earlier. See the
     [heritability vignette](heritability.html#starting-other-methods-from-it).
 
 ## Reading the result

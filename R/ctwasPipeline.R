@@ -227,6 +227,16 @@ BoundaryMergeParam <- function(
 #'   cTWAS reads the trait from. Groups whose names would coincide are refused,
 #'   as is a name holding \code{"|"}, on which cTWAS's EM splits a group.
 #'
+#'   Weights whose context names the molecular trait -- a protein or an
+#'   intron cluster, e.g. \code{BM36_pQTL_chr1_<gene>_<protein>} -- give
+#'   each gene a group of its own, and the EM cannot fit a group of one gene;
+#'   the pipeline warns when each of more than ten groups holds one.
+#'   \code{contextGroups} pools such contexts: a gene's group is then its
+#'   study, the group its context is mapped to, and its type. Only the group
+#'   changes: gene ids, results and their \code{context} columns keep each
+#'   gene's own context, and \code{\link{ctwasGroupPriors}} reports the
+#'   group's.
+#'
 #' @section cTWAS's log: cTWAS narrates each of its steps through the
 #'   \code{logging} package, which writes to the console with \code{cat()},
 #'   out of reach of \code{suppressMessages()}. The pipeline keeps that
@@ -351,6 +361,14 @@ BoundaryMergeParam <- function(
 #'   \code{\link{ctwasPosteriors}} / \code{susieAlpha}. Default \code{FALSE} --
 #'   the SNP rows are the null background and are dropped from the structured
 #'   gene-level result.
+#' @param contextGroups Optional named character vector pooling contexts
+#'   into one cTWAS group: each name is a weight context and its value the
+#'   group it joins, e.g. \code{c(BM36_pQTL_chr1_G1_P1 = "BM36_pQTL",
+#'   BM36_pQTL_chr1_G2_P2 = "BM36_pQTL")}. A context it does not name keeps a
+#'   group of its own, and names no weights carry are ignored, so one map can
+#'   serve every chromosome; one naming none of the weights' contexts is
+#'   refused. Groups stay per study and molecular type (see Groups and
+#'   molecular types). Default \code{NULL}: one group per context.
 #' @param methodArgs Additional arguments forwarded to ctwas, built
 #'   with \code{\link{CtwasOptions}}. Names are checked against what
 #'   the ctwas steps accept between them.
@@ -412,6 +430,7 @@ ctwasPipeline <- function(
     variantPruningParam = VariantPruningParam(),
     boundaryMergeParam = BoundaryMergeParam(),
     keepSnps = FALSE,
+    contextGroups = NULL,
     methodArgs = CtwasOptions()
 ) {
     .ctwasAssertBundles(
@@ -428,7 +447,8 @@ ctwasPipeline <- function(
         twasWeights,
         twasZ,
         fineMappingResult,
-        weightSelectionParam
+        weightSelectionParam,
+        contextGroups
     )
     rows <- list_c(map(
         plan$runs,
@@ -455,7 +475,8 @@ ctwasPipeline <- function(
     twasWeights,
     twasZ,
     fineMappingResult,
-    weightSelectionParam
+    weightSelectionParam,
+    contextGroups
 ) {
     build <- .inputsBuild(
         list(gwasSumStats, twasWeights, twasZ, fineMappingResult),
@@ -465,7 +486,8 @@ ctwasPipeline <- function(
         gwasSumStats,
         twasWeights,
         twasZ,
-        fineMappingResult
+        fineMappingResult,
+        contextGroups
     )
     list(
         build = build,
@@ -657,7 +679,8 @@ assembleCtwasInputs <- function(
     twasZ = NULL,
     fineMappingResult = NULL,
     weightSelectionParam = WeightSelectionParam(),
-    variantPruningParam = VariantPruningParam()
+    variantPruningParam = VariantPruningParam(),
+    contextGroups = NULL
 ) {
     .assertMethodParam(
         variantPruningParam,
@@ -668,7 +691,8 @@ assembleCtwasInputs <- function(
         gwasSumStats,
         twasWeights,
         twasZ,
-        fineMappingResult
+        fineMappingResult,
+        contextGroups
     )
     runs <- .ctwasRunPlan(
         inp$twasWeights,
@@ -698,7 +722,8 @@ assembleCtwasInputs <- function(
         fp,
         inp$fineMappingResult,
         .ctwasPruningCutoffs(variantPruningParam),
-        unique(list_c(map(fp$zSnpPieces, "id")))
+        unique(list_c(map(fp$zSnpPieces, "id"))),
+        inp$contextGroups
     )
     .ctwasAssembleResult(
         regionIds,
@@ -759,7 +784,8 @@ assembleCtwasInputs <- function(
     gwasSumStats,
     twasWeights,
     twasZ,
-    fineMappingResult
+    fineMappingResult,
+    contextGroups = NULL
 ) {
     .ctwasValidateGwasList(gwasSumStats)
     globalPanelInfo <- .ctwasGlobalPanelInfo(gwasSumStats)
@@ -777,7 +803,8 @@ assembleCtwasInputs <- function(
         twasWeights = placed,
         globalPanelInfo = globalPanelInfo,
         gwasStudy = gwasStudy,
-        fineMappingResult = fineMappingResult
+        fineMappingResult = fineMappingResult,
+        contextGroups = .ctwasCheckContextGroups(contextGroups, placed)
     )
 }
 
@@ -1080,14 +1107,16 @@ assembleCtwasInputs <- function(
     fp,
     fineMappingResult,
     cutoffs,
-    globalGwasSnpIds
+    globalGwasSnpIds,
+    contextGroups = NULL
 ) {
     ctx <- .ctwasGeneContext(
         fp$globalPanelInfo,
         fp$globalVariance,
         globalGwasSnpIds,
         fineMappingResult,
-        cutoffs
+        cutoffs,
+        contextGroups
     )
     perRegion <- map(
         regionIds,
@@ -2568,13 +2597,15 @@ mergeCtwasBoundaryRegions <- function(
 }
 
 # Each group's study, context and molecular type, under cTWAS's name for it.
+# The context is the group's (`contextGroups`), which several of the genes'
+# own contexts can share.
 # @noRd
 .ctwasGroupInfo <- function(weights) {
     records <- unname(weights)
     genes <- tibble(
         group = map_chr(records, .ctwasEntryGroup),
         study = map_chr(records, "study"),
-        context = map_chr(records, "qtl_context"),
+        context = map_chr(records, .ctwasEntryGroupContext),
         type = map_chr(records, "type")
     )
     bind_rows(
@@ -3154,7 +3185,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     spanVariance,
     gwasSnpIds,
     fineMappingResult,
-    cutoffs
+    cutoffs,
+    contextGroups = NULL
 ) {
     list(
         spanInfo = spanInfo,
@@ -3167,7 +3199,8 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         varianceRows = match(spanInfo$id, names(spanVariance)),
         positions = .ctwasPositionIndex(spanInfo$pos),
         fineMappingResult = fineMappingResult,
-        cutoffs = cutoffs
+        cutoffs = cutoffs,
+        contextGroups = contextGroups
     )
 }
 
@@ -3230,6 +3263,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     keys <- map_chr(placed, "key")
     .ctwasRequireUniqueGenes(keys)
     .ctwasRequireDistinctGroups(placed)
+    .ctwasWarnSingletonGroups(placed)
     set_names(
         map2(
             placed,
@@ -3334,16 +3368,17 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     ))
 }
 
-# cTWAS tells groups apart by their names, so distinct (study, context, type)
-# must not read the same: the underscores of a result's label cannot be split
-# back. And its EM finds a group's context and type by splitting the name on the
-# "|" between them (.ctwasEntryGroup()), so none of the three may hold one.
+# cTWAS tells groups apart by their names, so distinct (study, group context,
+# type) must not read the same: the underscores of a result's label cannot be
+# split back. And its EM finds a group's context and type by splitting the
+# name on the "|" between them (.ctwasEntryGroup()), so none of the three may
+# hold one.
 # @noRd
 .ctwasRequireDistinctGroups <- function(prepared) {
     metas <- map(prepared, "meta")
     groups <- distinct(tibble(
         study = map_chr(metas, "study"),
-        context = map_chr(metas, "context"),
+        context = map_chr(metas, "groupContext"),
         type = map_chr(metas, "type")
     ))
     labels <- str_c(groups$study, "_", groups$context, "_", groups$type)
@@ -3389,24 +3424,27 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 # context, keeping two studies' contexts of one name apart as cTWAS's own FAQ
 # suggests, its weight_name, as cTWAS's default forms it but for the study and
 # the method, and its id, whose first "|" field cTWAS reads as the molecular id.
+# The context cTWAS sees is the gene's group context (`contextGroups`), which
+# only its group reads: the weight name and id keep the gene's own context.
 # @noRd
-.ctwasGeneMeta <- function(twasWeights, unit) {
+.ctwasGeneMeta <- function(twasWeights, unit, contextGroups = NULL) {
     i <- unit$row
     studyName <- as.character(twasWeights$study)[[i]]
     context <- as.character(twasWeights$context)[[i]]
     trait <- as.character(twasWeights$trait)[[i]]
     method <- unit$method
     type <- .ctwasUnitType(twasWeights, unit)
-    engineContext <- str_c(studyName, "_", context)
-    weightName <- str_c(engineContext, "_", type, "_", method)
+    groupContext <- .ctwasGroupContext(context, contextGroups)
+    weightName <- str_c(studyName, "_", context, "_", type, "_", method)
     list(
         study = studyName,
         context = context,
+        groupContext = groupContext,
         trait = trait,
         method = method,
         joint = .jointKeyAt(twasWeights, i),
         type = type,
-        engineContext = engineContext,
+        engineContext = str_c(studyName, "_", groupContext),
         weightName = weightName,
         traitPos = .ctwasTraitPosAt(twasWeights, i),
         key = str_c(trait, "|", weightName)
@@ -3554,7 +3592,11 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         return(fit)
     }
     d <- dim(mu)
-    own <- array(mu[,, r], dim = d[1:2], dimnames = dimnames(mu)[1:2])
+    own <- array(
+        mu[,, r],
+        dim = d[seq_len(2L)],
+        dimnames = dimnames(mu)[seq_len(2L)]
+    )
     list_assign(fit, mu = own)
 }
 
@@ -3610,6 +3652,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
         gene_name = meta$trait,
         study = meta$study,
         qtl_context = meta$context,
+        group_context = meta$groupContext,
         method = meta$method,
         n_wgt = length(g$vids),
         chrom = g$span$chrom,
@@ -3650,6 +3693,96 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     str_c(entry$context, "|", entry$type)
 }
 
+# The context of a gene's group (`contextGroups`), its own where it has none.
+# @noRd
+.ctwasEntryGroupContext <- function(entry) {
+    entry$group_context %||% entry$qtl_context
+}
+
+# A context's group context: the one `contextGroups` names for it, else its
+# own.
+# @noRd
+.ctwasGroupContext <- function(context, contextGroups) {
+    if (is.null(contextGroups) || !is_in(context, names(contextGroups))) {
+        return(context)
+    }
+    unname(contextGroups[[context]])
+}
+
+# `contextGroups`: NULL, or a named character vector mapping a weight context
+# to its group. Context names it holds that no weights carry are allowed, so
+# one map can serve every block and chromosome; a map naming none of them is
+# taken for a mistake.
+# @noRd
+.ctwasCheckContextGroups <- function(contextGroups, twasWeights) {
+    if (is.null(contextGroups)) {
+        return(NULL)
+    }
+    keys <- names(contextGroups)
+    if (
+        !is.character(contextGroups) ||
+            is.null(keys) ||
+            anyNA(keys) ||
+            any(!nzchar(keys)) ||
+            anyNA(contextGroups) ||
+            any(!nzchar(contextGroups))
+    ) {
+        abort(glue(
+            "`contextGroups` must be a named character vector mapping a ",
+            "weight context (name) to its cTWAS group (value), with no ",
+            "empty or missing names or values."
+        ))
+    }
+    repeated <- unique(keys[duplicated(keys)])
+    if (length(repeated) > 0L) {
+        abort(glue(
+            "`contextGroups` names a context more than once: ",
+            "{str_flatten(head(repeated, 5L), ', ')}."
+        ))
+    }
+    weightContexts <- unique(list_c(map(unname(twasWeights), contexts)))
+    if (!any(is_in(keys, weightContexts))) {
+        abort(c(
+            "`contextGroups` names none of the weights' contexts.",
+            i = glue(
+                "The weights' contexts include ",
+                "{str_flatten(head(weightContexts, 3L), ', ')}."
+            )
+        ))
+    }
+    contextGroups
+}
+
+# cTWAS's EM estimates one prior per group and cannot fit a group of one gene
+# (its log-likelihood becomes NaN). Many groups of one gene each usually means
+# the contexts name the molecular trait -- a protein, an intron cluster -- and
+# want pooling with `contextGroups`.
+# @noRd
+.ctwasWarnSingletonGroups <- function(prepared) {
+    metas <- map(prepared, "meta")
+    groups <- str_c(
+        map_chr(metas, "study"),
+        "_",
+        map_chr(metas, "groupContext"),
+        "|",
+        map_chr(metas, "type")
+    )
+    sizes <- table(groups)
+    if (length(sizes) <= 10L || any(sizes > 1L)) {
+        return(invisible(NULL))
+    }
+    warn(c(
+        glue(
+            "Each of the {length(sizes)} cTWAS groups holds one gene, so the ",
+            "prior EM will likely fail."
+        ),
+        i = str_c(
+            "If the contexts name the molecular trait, pool them with ",
+            "`contextGroups`."
+        )
+    ))
+}
+
 # The gene's own position for row i, or NULL when the weight source carries no
 # traitPos provenance.
 # @noRd
@@ -3679,7 +3812,7 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
     if (is.null(aligned)) {
         return(NULL)
     }
-    meta <- .ctwasGeneMeta(twasWeights, unit)
+    meta <- .ctwasGeneMeta(twasWeights, unit, ctx$contextGroups)
     if (length(aligned$vids) == 0L) {
         return(list(key = meta$key, vids = character(0), lost = 1))
     }

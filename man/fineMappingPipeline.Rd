@@ -56,7 +56,8 @@ fineMappingPipeline(data, ...)
   residualizationParam = ResidualizationParam(),
   signalScreenParam = SignalScreenParam(),
   susieRssParam = SusieRssParam(),
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   usePCA = FALSE,
   nPCs = 10L,
   seed = NULL,
@@ -80,7 +81,8 @@ fineMappingPipeline(data, ...)
   verbose = 1,
   fitRetention = c("slim", "full"),
   susieRssParam = SusieRssParam(),
-  h2 = NULL,
+  h2Estimate = NULL,
+  h2EstimateParam = NULL,
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam(),
   residualizationParam = ResidualizationParam()
@@ -270,7 +272,10 @@ present are not refit.}
   \code{genotypeCovariates} name which covariates to regress out
   (\code{NULL}, the default, uses every available one), and
   \code{residualizePhenotype} / \code{residualizeGenotype} turn each side
-  off.
+  off. \code{covariateScope} sets whose covariates a joint fit takes
+  where its outcomes span contexts: by default each outcome's phenotypes
+  its own context's, and the genotypes they share the genotype covariates
+  alone.
 
   Only meaningful for \code{QtlDataset} / \code{MultiStudyQtlDataset}
   input. A \code{QtlSumStats} / \code{GwasSumStats} run has no covariates
@@ -397,27 +402,29 @@ reference: \itemize{
     purity reads the reference with the estimated weights.
 }}
 
-\item{h2}{For \code{QtlSumStats} input (and a
+\item{h2Estimate, h2EstimateParam}{For \code{QtlSumStats} input (and a
 \code{MultiStudyQtlDataset}'s summary statistics), each trait's
 heritability in its window, which sets the residual variance of its
 SuSiE-RSS fits to \eqn{1 - h^2} on the z scale instead of 1.
 \code{susie_rss} holds that variance fixed by default, and with a cis
-heritability of 0.3 the true one is 0.7. \code{NULL} (the default)
-leaves it at 1. An estimator estimates each trait's first, on the
-variants and LD its fits read: \code{"lava"}, \code{"hdlL"} or
-\code{"fastHer"} (see \code{\link{estimateH2}}), the reference taken to
-share no samples with the study. An \code{\linkS4class{H2Estimate}}, as
-\code{estimateH2()} returns, gives each selected (study, context, trait)
-its row's estimate, and must hold exactly one row for each. A value is
-used floored at 0.001 and capped at 0.99, and a trait with no estimate
-keeps 1, with a warning. It reaches \code{susie} and \code{susieAsh},
-chained from \code{susieInf} or not, and the joint mvSuSiE fits, whose
-residual variances it sets condition by condition, with the
-correlations of the residual covariance of the run's mr.mash fit, or
-without one those \code{mvsusie_rss} estimates from the z-scores.
-\code{susieInf} re-estimates its residual variance every sweep, as
-\code{mvsusieInf} does from that start; \code{ser} takes none from it.
-A \code{residual_variance} set through \code{methods} wins.}
+heritability of 0.3 the true one is 0.7. Neither (the default) leaves it
+at 1; both is an error. \code{h2Estimate} is one number for every trait,
+or an \code{\linkS4class{H2Estimate}}, as \code{estimateLocalH2()}
+returns, which gives each selected (study, context, trait) its row's
+estimate and must hold exactly one row for each.
+\code{h2EstimateParam}, an \code{\link{H2EstimateParam}} of
+summary-statistic settings, estimates each trait's first, on the
+variants and LD its fits read (see \code{\link{estimateLocalH2}}), the
+reference taken to share no samples with the study. A value is used
+floored at 0.001 and capped at 0.99, and a trait with no estimate keeps
+1, with a warning. It reaches \code{susie} and \code{susieAsh}, chained
+from \code{susieInf} or not, and the joint mvSuSiE fits, whose residual
+variances it sets condition by condition, with the correlations of the
+residual covariance of the run's mr.mash fit, or without one those
+\code{mvsusie_rss} estimates from the z-scores. \code{susieInf}
+re-estimates its residual variance every sweep, as \code{mvsusieInf}
+does from that start; \code{ser} takes none from it. A
+\code{residual_variance} set through \code{methods} wins.}
 }
 \value{
 A \code{QtlFineMappingResult} keyed by \code{(study, context,

@@ -12,12 +12,16 @@ ResidualizationParam(
   residualizePhenotype = NULL,
   residualizeGenotype = NULL,
   scaleResiduals = NULL,
-  covariateNaAction = NULL
+  covariateNaAction = NULL,
+  covariateScope = NULL
 )
 }
 \arguments{
 \item{phenotypeCovariates}{Covariates to residualize the phenotype on, or
-\code{NULL} (default) for the dataset's own.}
+\code{NULL} (default) for the dataset's own: names that apply to every
+context, or a list of them keyed by context, with a key for every
+context the run reads (keys for the dataset's other contexts are
+allowed).}
 
 \item{genotypeCovariates}{Covariates to residualize the genotype on, or
 \code{NULL} (default) for the dataset's own.}
@@ -39,14 +43,21 @@ individual-level fit draws its genotypes through.}
 \item{covariateNaAction}{How missing covariate values are handled when the
 design is assembled: \code{"impute"} or \code{"drop"}. \code{NULL}
 (default) leaves the accessor's own default in place.}
+
+\item{covariateScope}{Whose phenotype covariates a joint fit regresses
+out of each outcome: \code{"perOutcome"}, the outcome's own context's
+(the default when unset), or \code{"union"}, those of every outcome in
+the fit. See the section on joint fits.}
 }
 \value{
 A \code{ResidualizationParam} object, a \code{\link{MethodParam}}.
 }
 \description{
 What is regressed out of the phenotype and genotype before
-  fitting. Shared by \code{\link{fineMappingPipeline}} and
-  \code{\link{twasWeightsPipeline}}, which hold the same four settings.
+  fitting. Shared by \code{\link{fineMappingPipeline}},
+  \code{\link{twasWeightsPipeline}} and \code{\link{colocboostPipeline}},
+  and by the accessors \code{\link{residualizedPhenotypes}} and
+  \code{\link{residualizedGenotypes}}.
 
   \code{fineMappingPipeline}'s \code{usePCA} / \code{nPCs} are
   \strong{not} here. They do not residualize anything: they PCA-reduce a
@@ -76,6 +87,42 @@ What is regressed out of the phenotype and genotype before
   \code{fineMappingPipeline}.
 }
 
+\section{Joint fits}{
+
+  Phenotype covariates belong to a context, and every trait measured
+  there shares them. A joint fit whose outcomes all come from one
+  context, as a fit across its traits does, regresses each of them, and
+  the genotypes, on that context's covariates under either setting. The
+  setting matters where the outcomes span contexts.
+
+  Under \code{covariateScope = "perOutcome"}, each outcome's phenotypes are
+  regressed on its context's covariates and the genotype covariates, over
+  that context's samples: the residuals a fit of that outcome alone
+  takes, and so the data behind its own statistics, such as those a mash
+  prior is trained on. The genotypes the outcomes share are regressed on
+  the genotype covariates alone, over the samples every context has. They
+  are not adjusted for any one context's covariates, which shrinks an
+  outcome's standardized effects against its own statistics by about
+  \eqn{k / (2n)} for \eqn{k} such covariates on \eqn{n} samples (its
+  per-allele effects by about \eqn{k / n}), when the covariates are
+  unrelated to the genotypes. A covariate every context records, such as
+  sex or age, reaches the shared genotypes only when it is held with the
+  genotype covariates.
+
+  Under \code{covariateScope = "union"}, every outcome's phenotypes and the
+  genotypes they share are all regressed on the covariates of all the
+  contexts together, over the samples every context has. The union gains
+  columns with every context, and on few samples it can take much of each
+  phenotype's variation with it.
+
+  Studies have genotypes and samples of their own, so each is
+  residualized apart under either setting, as is each context in
+  \code{\link{colocboostPipeline}}, which fits each on its own genotypes.
+}
+
 \examples{
 ResidualizationParam(residualizeGenotype = FALSE)
+# Every context's phenotypes, and the genotypes they share, on the
+# covariates of all of them:
+ResidualizationParam(covariateScope = "union")
 }

@@ -5710,6 +5710,7 @@ effectiveN <- function(nCase, nControl) {
         nCase = .ssqcNumericColumn(sumstats, "nCase"),
         nControl = .ssqcNumericColumn(sumstats, "nControl"),
         nSample = .ssqcNumericColumn(sumstats, "nSample"),
+        prevalence = .ssqcNumericColumn(sumstats, "prevalence"),
         qcOptions = qcOptions,
         # Carry the existing block keys through: the entries are already
         # split, so without this the constructor re-derives them from
@@ -5746,7 +5747,13 @@ effectiveN <- function(nCase, nControl) {
 .SSQC_QTL_COLUMNS <- c(.SSQC_SHARED_COLUMNS, "context", "trait", "traitPos")
 
 # @noRd
-.SSQC_GWAS_COLUMNS <- c(.SSQC_SHARED_COLUMNS, "nCase", "nControl", "blockId")
+.SSQC_GWAS_COLUMNS <- c(
+    .SSQC_SHARED_COLUMNS,
+    "nCase",
+    "nControl",
+    "prevalence",
+    "blockId"
+)
 
 # @noRd
 .ssqcExtraCols <- function(sumstats, known) {

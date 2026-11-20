@@ -211,16 +211,23 @@ causalInferencePipeline <- function(
         mrParam = mrParam
     ))
     if (length(twasRows) + length(mrRows) == 0L) {
-        # .cipChosenCells() has said why when it chose no TWAS weights and
-        # there is no MR to run.
-        if (nrow(cells) > 0L || length(mrTuples) > 0L) {
-            inform(
-                "causalInferencePipeline: no (qtl, gwas) tuple produced a result."
-            )
-        }
-        return(.cipEmptyResult())
+        return(.cipNothingScored(cells, mrTuples))
     }
     .cipFinalize(c(twasRows, mrRows), combineMethods)
+}
+
+# A run that scored nothing returns the empty result, and says so unless
+# .cipChosenCells() has said why: it chose no TWAS weights and there is no MR
+# to run.
+# @noRd
+.cipNothingScored <- function(cells, mrTuples) {
+    if (nrow(cells) > 0L || length(mrTuples) > 0L) {
+        inform(glue(
+            "causalInferencePipeline: no (qtl, gwas) tuple produced ",
+            "a result."
+        ))
+    }
+    .cipEmptyResult()
 }
 
 # The result of a run that scored nothing: no rows, and the columns a scored

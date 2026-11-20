@@ -1,12 +1,12 @@
 # =============================================================================
-# Rebuild h2EstimateExample: a stratified estimateH2() result.
+# Rebuild h2EstimateExample: a stratified estimateStratifiedH2() result.
 # -----------------------------------------------------------------------------
-# g-LDSC on the shipped ldScoreExample (inst/scripts/build_h2_examples.R),
-# for a GWAS simulated on that reference's LD in which one baseline
-# annotation, over the first half of the variants, carries three times the
-# per-variant heritability of the rest. A second
-# annotation, over every third variant, is a candidate scored against the
-# fit. It needs only the package's own data:
+# g-LDSC's settings on the shipped ldScoreExample
+# (inst/scripts/build_h2_examples.R), for a GWAS simulated on that
+# reference's LD in which one baseline annotation, over the first half of the
+# variants, carries three times the per-variant heritability of the rest. A
+# second annotation, over every third variant, is a candidate scored against
+# the fit. It needs only the package's own data:
 #   Rscript inst/scripts/build_h2_estimate_example.R
 # =============================================================================
 
@@ -60,11 +60,20 @@ annot <- AnnotationMatrix(
     genome = genome
 )
 
-h2EstimateExample <- estimateH2(
+gldsc <- H2EstimateParam(
+    statistic = "variant",
+    criterion = "gls",
+    noise = "free",
+    crossNoise = "window",
+    referenceNoise = "none",
+    sampleSize = "median",
+    inference = "jackknife"
+)
+h2EstimateExample <- estimateStratifiedH2(
     gwas,
     ldScoreExample,
-    method = "gldsc",
-    annotations = annot
+    annot,
+    param = gldsc
 )
 print(h2EstimateExample)
 stopifnot(

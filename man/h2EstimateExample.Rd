@@ -6,11 +6,12 @@
 \title{Example Heritability Estimate}
 \format{
 An \code{H2Estimate} holding one estimate (study \code{trait1},
-  method \code{gldsc}), which carries an enrichment table, the annotation
-  jackknife matrix and a candidate's score statistics.
+  under g-LDSC's settings), which carries an enrichment table, the
+  annotation jackknife matrix and a candidate's score statistics.
 }
 \description{
-A stratified g-LDSC estimate from \code{\link{estimateH2}},
+A stratified g-LDSC estimate from
+\code{\link{estimateStratifiedH2}},
 on \code{\link{ldScoreExample}}, of a GWAS simulated on that reference's
 LD with one baseline annotation carrying three times the per-variant
 heritability of the rest, and one candidate annotation scored against the

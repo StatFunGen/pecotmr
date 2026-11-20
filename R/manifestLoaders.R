@@ -1801,6 +1801,7 @@ loadQtlDatasetFromManifest <- function(
     nCase = c("nCase", "n_case"),
     nControl = c("nControl", "n_control"),
     nSample = c("nSample", "n_sample"),
+    prevalence = c("prevalence"),
     varY = c("varY", "var_y"),
     genome = c("genome"),
     ldReferencePath = c("ldReferencePath", "ld_reference_path", "ld_reference")
@@ -1855,7 +1856,9 @@ loadQtlDatasetFromManifest <- function(
 #' @param manifest A data.frame or path. Columns (snake_case aliases accepted):
 #'   \code{study} (required, unique), \code{sumStatsPath} (required),
 #'   \code{columnMapping} (optional), \code{nCase} / \code{nControl} (optional),
-#'   \code{nSample} (optional study-level total N), \code{varY} (optional), the
+#'   \code{nSample} (optional study-level total N), \code{prevalence}
+#'   (optional population prevalence of a case/control trait; see
+#'   \code{\link{GwasSumStats}}), \code{varY} (optional), the
 #'   single-valued \code{genome}, and \code{ldReferencePath}, which may differ
 #'   between studies (each distinct reference is read once, for the
 #'   chromosomes its studies cover, and stored once). When a row
@@ -2144,6 +2147,9 @@ loadGwasSumStatsFromManifest <- function(
             nCase = ns$nCase,
             nControl = ns$nControl,
             nSample = ns$nSample,
+            prevalence = if (is_in("prevalence", names(df))) {
+                as.numeric(df$prevalence)
+            },
             varY = if (is_in("varY", names(df))) as.numeric(df$varY)
         ))
     )

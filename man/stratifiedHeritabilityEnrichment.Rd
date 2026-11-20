@@ -15,7 +15,7 @@ stratifiedHeritabilityEnrichment(object)
 \value{
 A tibble with one row per annotation of each stratified estimate,
   led by the estimate's identity (\code{study}, \code{context},
-  \code{trait}, \code{method}); no rows when none is stratified.
+  \code{trait}); no rows when none is stratified.
 }
 \description{
 Extract the per-annotation enrichment of an

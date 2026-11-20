@@ -3,223 +3,45 @@
 \name{estimateH2}
 \alias{estimateH2}
 \alias{estimateH2,GwasSumStats,LdStatistic-method}
-\alias{estimateH2,QtlSumStats,missing-method}
-\alias{estimateH2,QtlDataset,missing-method}
-\title{Estimate SNP Heritability}
+\title{Estimate Genome-Wide SNP Heritability}
 \usage{
-estimateH2(data, ldRef, method = "lder", annotations = NULL, ...)
+estimateH2(data, ldRef, param = NULL, ...)
 
-\S4method{estimateH2}{GwasSumStats,LdStatistic}(
-  data,
-  ldRef,
-  method = "lder",
-  annotations = NULL,
-  studyName = NULL,
-  estimatorArgs = list()
-)
-
-\S4method{estimateH2}{QtlSumStats,missing}(
-  data,
-  ldRef,
-  method = "lava",
-  annotations = NULL,
-  contexts = NULL,
-  traitId = NULL,
-  cisWindow = NULL,
-  BPPARAM = SerialParam(),
-  referenceOverlap = 0
-)
-
-\S4method{estimateH2}{QtlDataset,missing}(
-  data,
-  ldRef,
-  method = "lava",
-  annotations = NULL,
-  contexts = NULL,
-  traitId = NULL,
-  region = NULL,
-  cisWindow = NULL,
-  genotypeFilterParam = GenotypeFilterParam(),
-  residualizationParam = ResidualizationParam(),
-  phenotypeFilterParam = PhenotypeFilterParam()
-)
+\S4method{estimateH2}{GwasSumStats,LdStatistic}(data, ldRef, param = NULL, studyName = NULL)
 }
 \arguments{
-\item{data}{A \code{GwasSumStats}; a \code{QtlSumStats} that has been
-through \code{\link{summaryStatsQc}}, each row with an LD reference; or
-a \code{QtlDataset}.}
+\item{data}{A \code{GwasSumStats}.}
 
-\item{ldRef}{For a \code{GwasSumStats}, an \code{LdStatistic} object
-(method-appropriate subclass): an \code{\link{LdScore}} for
-\code{"sldsc"} / \code{"gldsc"}, an \code{\link{LdEigen}} for
-\code{"lder"} / \code{"hdl"}. Build either from loaded LD with
-\code{\link{buildLdScore}} / \code{\link{buildLdEigen}}. Omitted for a
-\code{QtlSumStats}, whose rows carry their own, and for a
-\code{QtlDataset}, whose genotypes give their own.}
+\item{ldRef}{An \code{LdStatistic} object the settings read: an
+\code{\link{LdScore}} for the variant statistic (S-LDSC's and g-LDSC's
+settings; a scores-only \code{LdScore} serves S-LDSC's, the cheapest),
+an \code{\link{LdEigen}} for the eigen statistic (LDER's and HDL's).
+Build either from loaded LD with \code{\link{buildLdScore}} /
+\code{\link{buildLdEigen}}.}
 
-\item{method}{Character. For a \code{QtlSumStats}, one of \code{"lava"}
-(the default), \code{"hdlL"} or \code{"fastHer"}; for a
-\code{QtlDataset}, one of those or \code{"greml"} (see Details). For a
-\code{GwasSumStats}, one of \code{"lder"} (the default),
-\code{"sldsc"}, \code{"gldsc"} or \code{"hdl"}:
-\describe{
-  \item{\code{"sldsc"}}{Stratified LD score regression (Finucane et al.
-    2015): weighted least squares of \eqn{\chi^2} on LD scores. Needs
-    only per-variant scores when unstratified, so it is the cheapest of
-    the four and the only one that runs on a scores-only
-    \code{LdScore}.}
-  \item{\code{"gldsc"}}{Generalized LD score regression (Xiong et al.
-    2024): GLS using the full per-block LD matrices.}
-  \item{\code{"lder"}}{LD eigenvalue regression (Song et al. 2022).}
-  \item{\code{"hdl"}}{High-definition likelihood (Ning et al. 2020),
-    stratified as sHDL. Models reference-panel noise explicitly, so it
-    shrinks hard when \code{nRef} is small.}
-}}
-
-\item{annotations}{For a \code{GwasSumStats}, an \code{AnnotationMatrix}
-object, or NULL for unstratified estimation.}
+\item{param}{An \code{\link{H2EstimateParam}}; \code{NULL} (the default)
+uses HDL's settings (Ning et al. 2020), the HDL model every estimate
+takes by default. A frequency exponent (\code{alpha}) weighs the
+variants by their frequencies in the reference, as
+\code{\link{estimateStratifiedH2}} describes.}
 
 \item{...}{Additional method-specific arguments.}
 
-\item{studyName}{For a \code{GwasSumStats}, the study to estimate (length
-1), or \code{NULL} when it holds one.}
-
-\item{estimatorArgs}{For a \code{GwasSumStats}, an optional named list of
-estimator-specific options (\code{nIter} for sldsc).}
-
-\item{contexts}{For a \code{QtlSumStats}: optional context selection, as
-\code{\link{twasWeightsPipeline}} takes it; \code{NULL} (the default)
-uses every context.}
-
-\item{traitId}{For a \code{QtlSumStats}: optional trait selection, as
-\code{\link{twasWeightsPipeline}} takes it; \code{NULL} (the default)
-uses every trait.}
-
-\item{cisWindow}{For a \code{QtlSumStats}: optionally, each selected row
-is analysed over its \code{traitPos} \eqn{\pm} \code{cisWindow}, within
-its \code{region}. Every selected row then needs a \code{traitPos}.}
-
-\item{BPPARAM}{For a \code{QtlSumStats}: a \code{BiocParallelParam} over
-the selected rows, each row's estimate on one worker. Default
-\code{SerialParam()}.}
-
-\item{referenceOverlap}{For a \code{QtlSumStats}: the share of the study's
-samples that are in the LD reference, from 0 to 1, one value or one per
-selected row. Default 0. Usually unknown, and with a reference of thousands
-it hardly matters (see Details): set it when the LD came from the study's
-own samples or a small cohort holding them, 1 if it holds them all. Only
-\code{"lava"} reads it, and its estimates record it in
-\code{reference_overlap}: HDL-L's intercept absorbs what it measures, and
-FastHer assumes the study's own LD.}
-
-\item{region}{For a \code{QtlDataset}: optionally, one region that every
-selected trait is analysed over, as \code{\link{twasWeightsPipeline}}
-takes it; otherwise each trait's own window (see \code{cisWindow}).}
-
-\item{genotypeFilterParam, residualizationParam, phenotypeFilterParam}{For a
-\code{QtlDataset}: the genotype filters, the covariate residualization
-and the phenotype filters, as \code{\link{twasWeightsPipeline}} takes
-them, so that each estimate is on the genotypes and phenotype that the
-trait's TWAS fits are on.}
+\item{studyName}{The study to estimate (length 1), or \code{NULL} when it
+holds one.}
 }
 \value{
-An \code{\linkS4class{H2Estimate}}. From a \code{GwasSumStats},
-  one row: the study's genome-wide estimate, whose element holds no
-  ranges. From a \code{QtlSumStats} or a \code{QtlDataset}, one row per
-  selected (study, context, trait), whose element is the window it covers.
+An \code{\linkS4class{H2Estimate}} of one row: the study's
+  genome-wide estimate, whose element holds no ranges.
 }
 \description{
-Estimate SNP heritability, genome-wide from GWAS summary
-  statistics or per trait in its cis window from QTL summary statistics
-  or individual-level QTL data. From a \code{GwasSumStats} and an LD
-  reference, one of four methods (S-LDSC, g-LDSC, LDER, or HDL/sHDL) gives
-  one genome-wide estimate; supplying \code{annotations} makes any of them
-  stratified. From a \code{QtlSumStats}, one of three methods (LAVA, HDL-L
-  or FastHer) gives one estimate per selected (study, context, trait) row,
-  each from the row's own statistics and LD reference. From a
-  \code{QtlDataset}, those three or GREML give one estimate per selected
-  (study, context, trait), each from the trait's own genotypes.
-}
-\details{
-Each per-trait method is written from its authors' published
-  estimator and reports what they report. All three read a row's \code{z}
-  as the t statistic of a marginal regression, the correlation being
-  \eqn{r = z / \sqrt{z^2 + n - 2}}: \eqn{z / \sqrt{n}}, which HDL-L's and
-  FastHer's own code read instead, overstates \eqn{r^2} by a factor of
-  \eqn{1 / (1 - r^2)}, about 1.4 for a strong QTL at \eqn{r^2 = 0.3}.
-  \describe{
-    \item{\code{"lava"}}{(default) LAVA's univariate estimator (Werme et
-      al. 2022), on the \eqn{K} standardized LD components that hold 99\%
-      of the LD variance (at least 2, at most 0.75 times the sample size).
-      Whether LD is the study's own is not a yes or no: how far a reference
-      of \eqn{N} samples, holding a share \eqn{\rho} of the \eqn{n} study
-      samples (\code{referenceOverlap}), lies from the study's LD in units
-      of its sampling noise is \eqn{\phi = 1 + (1 - 2\rho) n / N}: 0 for
-      the study's own samples, about 1 for a panel of thousands. The
-      estimate is \eqn{(\delta'\delta - m) / (1 + m (\phi - 1))} with
-      \eqn{m = K / (n - 1)}, which at \eqn{\phi = 0} is exactly LAVA's
-      adjusted \eqn{R^2} of the trait on the components. LAVA's own noise
-      term holds only there: with a panel of 3000 on real genotypes it gave
-      0.55-0.63 at a true 0.5 with \eqn{K / n} of 0.1-0.2, 0.69 at 0.3, and
-      \code{NA} for 70\% of traits at 0.6; this estimate stayed at
-      0.47-0.52 across references of every kind. Assuming \eqn{\rho = 0}
-      costs about \eqn{2 \rho K / N} of the estimate, under 10\% for a
-      whole cis window with a panel of thousands holding all the study's
-      samples, but LD from the study's own samples at that default comes out
-      at half or less, hence a warning when \eqn{N \le 2 n}. Divergence
-      between populations of one ancestry raises \eqn{\phi}, unmodelled:
-      about 0.54 at a true 0.5 at Fst 0.001, and 0.62 at 0.003. The p-value
-      tests no heritability, with \eqn{\phi} in its variance. It is the
-      exact F test at \eqn{\phi = 0}, but ran at about 0.09 at a nominal
-      0.05 with a panel, as real genotypes' components have heavier tails
-      than it assumes; HDL-L's held at 0.03-0.05, so prefer it for testing.
-      LAVA itself withholds the estimate where \eqn{K} exceeds a tenth of
-      the sample size, which a cis window's components usually do at QTL
-      sample sizes; it is reported here at any \eqn{K}. The estimate can be
-      negative or exceed 1.}
-    \item{\code{"hdlL"}}{HDL-L (Li et al. 2025): the likelihood of the
-      statistics rotated onto the LD eigenvectors that cover 99\% of the
-      trace, in the heritability and an intercept, with a term for the
-      reference's sampling noise. Its p-value is the likelihood ratio
-      against no heritability, referred to the equal mixture of a
-      chi-square on one degree of freedom and a point mass at 0 since that
-      null is on the boundary of the heritability's range, half of what
-      HDL-L reports; \code{intercept} is the fitted intercept.
-      \code{NA} where no fit converges and beats that null.}
-    \item{\code{"fastHer"}}{FastHer (Svishcheva 2025): the maximum
-      likelihood of an infinitesimal model for the study samples,
-      computed in the LD eigenbasis, with a standard error from the
-      expected information; \code{scale} is the fitted phenotypic
-      variance relative to its standardized value, about 1 when the model
-      fits. HEELS (Li, Mazumder and Lin 2023) maximizes the same
-      likelihood by iteration. The standard error holds under that model:
-      with few causal variants it is too small, 0.77 of the estimates'
-      spread at a heritability of 0.2 with one causal variant, and 0.59 at
-      0.5, on real genotypes. The likelihood assumes in-sample LD and is
-      undefined when the reference's rank, or the statistics' squared
-      norm in the LD's metric, reaches the sample size, as it can with LD
-      from outside the study; such traits are \code{NA}, with a warning.}
-    \item{\code{"greml"}}{(a \code{QtlDataset} only) GREML: the restricted
-      maximum likelihood of the trait's genetic and residual variances, by
-      \code{qgg::greml} on the relationship matrix \eqn{X X' / p} of the
-      window's \eqn{p} standardized genotypes, as FUSION estimates a gene's
-      cis heritability. Its standard error is the delta method's, from the
-      variances' asymptotic covariance; it reports no p-value.}
-  }
-  Every per-trait method assumes the LD reference matches the population
-  of the statistics, as the QC step (\code{\link{summaryStatsQc}})
-  checks. LAVA and HDL-L read the reference's sample size, so an
-  \code{\link{LdMatrix}} reference must record \code{nSamples}. A trait
-  whose window holds no variants is \code{NA}, with a warning.
-
-  From a \code{QtlDataset}, a trait's genotypes are its own LD. The three
-  summary-statistic methods read each variant's marginal statistic against
-  the trait, computed from those genotypes and its phenotype, with the
-  reference being the study's own samples (\code{referenceOverlap = 1}),
-  so LAVA's estimate is exactly the adjusted \eqn{R^2} of the trait on the
-  genotypes' components. Each trait is estimated on the window, samples,
-  filters and residualized, scaled genotypes and phenotype that
-  \code{\link{twasWeightsPipeline}} fits it on.
+Estimate a study's SNP heritability genome-wide from GWAS
+  summary statistics and an LD reference, unstratified, under the model
+  settings \code{param} gives (\code{\link{H2EstimateParam}}), which
+  lists the settings that reproduce S-LDSC, g-LDSC, LDER and HDL. The
+  estimate records them (\code{\link{h2EstimateParam}}). The stratified
+  estimate is \code{\link{estimateStratifiedH2}}'s, and each trait's cis
+  estimate from QTL data \code{\link{estimateLocalH2}}'s.
 }
 \examples{
 data(ldScoreExample)
@@ -243,30 +65,30 @@ if (requireNamespace("PlinkMatrix", quietly = TRUE)) {
         genome = unique(unname(GenomeInfoDb::genome(ldScoreExample))),
         ldReference = panel
     )
-    print(estimateH2(ss, ldScoreExample, method = "sldsc"))
-
-    # Per-trait cis heritability, each row against its own LD reference.
-    data(qtlSumStatsExample)
-    print(estimateH2(qtlSumStatsExample, referenceOverlap = 1))
-
-    # From individual-level data, on each trait's own genotypes.
-    data(qtlDatasetExample)
-    estimateH2(qtlDatasetExample, cisWindow = 1e6)
+    # S-LDSC's settings, unstratified.
+    sldsc <- H2EstimateParam(
+        statistic = "variant",
+        criterion = "regression",
+        noise = "free",
+        crossNoise = "window",
+        referenceNoise = "unbiasedR2",
+        sampleSize = "median",
+        inference = "jackknife",
+        procedures = H2RegressionParam(
+            initialWeights = "moments",
+            ldRedundancy = TRUE,
+            iterations = 2,
+            twoStage = TRUE,
+            chi2Threshold = 30
+        )
+    )
+    est <- estimateH2(ss, ldScoreExample, param = sldsc)
+    print(est)
+    h2EstimateParam(est)
 }
 }
 \references{
-Werme J, van der Sluis S, Posthuma D, de Leeuw CA (2022). An
-  integrated framework for local genetic correlation analysis. Nature
-  Genetics 54, 274-282.
-
-  Li Y, Pawitan Y, Shen X (2025). An enhanced framework for local genetic
-  correlation analysis. Nature Genetics. doi:10.1038/s41588-025-02123-3.
-
-  Svishcheva GR (2025). FastHer: a fast and accurate estimator of local
-  heritability from GWAS summary statistics. bioRxiv.
-  doi:10.64898/2025.12.24.696369.
-
-  Li H, Mazumder R, Lin X (2023). Accurate and efficient estimation of
-  local heritability using summary statistics and the linkage
-  disequilibrium matrix. Nature Communications 14, 7954.
+Song S, Jiang W, Zhang Y, Hou L, Zhao H (2022). Leveraging LD
+  eigenvalue regression to improve the estimation of SNP heritability and
+  confounding inflation. American Journal of Human Genetics 109, 802-811.
 }

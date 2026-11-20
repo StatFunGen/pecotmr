@@ -5055,3 +5055,51 @@ test_that("mr.mash's priors are the group's own, in full and per fold", {
     expect_null(out2$methodList$mrmash_weights$dataDrivenPriorMatrices)
     expect_length(out2$dataDrivenPriorMatricesCv, 1L)
 })
+
+test_that("a joint group's heritability is each condition's own fit", {
+    data(eqtlRegionExample, envir = environment())
+    G <- eqtlRegionExample$X
+    af <- colMeans(G) / 2
+    G <- G[, pmin(af, 1 - af) > 0.05][, 1:100]
+    X <- scale(G)
+    n <- nrow(X)
+    set.seed(3L)
+    y <- X %*% matrix(rnorm(200L, sd = 0.1), 100L) + matrix(rnorm(2L * n), n)
+    r <- stats::cor(X, y)
+    z <- r * sqrt((n - 2) / (1 - r^2))
+    ids <- colnames(G)
+    R <- stats::cor(G)
+    ref <- LdMatrix(`dimnames<-`(R, list(ids, ids)), nSamples = n)
+    stat <- list(z = z, n = n, variantNames = ids)
+    cond <- list(
+        study = c("s", "s"),
+        context = c("a", "b"),
+        trait = c("g", "g")
+    )
+    hdl <- pecotmr:::.h2LocalSettings("hdlL")
+    h2 <- map_dbl(
+        1:2,
+        pecotmr:::.jointConditionH2,
+        stat = stat,
+        cond = cond,
+        ld = list(R = R),
+        refs = ref,
+        spec = list(param = hdl),
+        label = "test"
+    )
+    own <- map_dbl(
+        1:2,
+        function(k) {
+            pecotmr:::.h2SumStatsFit(
+                hdl,
+                z = z[, k],
+                n = rep(n, 100L),
+                ld = list(R = R, nSamples = n),
+                label = "test",
+                ldReference = ref,
+                ids = ids
+            )$h2
+        }
+    )
+    expect_equal(h2, pmin(pmax(own, 0.001), 0.99))
+})

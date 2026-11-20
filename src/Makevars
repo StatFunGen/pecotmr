@@ -1,2 +1,6 @@
+# dlib's headers use std::auto_ptr and std::binary_function, which libc++
+# drops under C++17 unless asked to keep them (see dlib_compat.h).
+PKG_CPPFLAGS = -D_LIBCPP_ENABLE_CXX17_REMOVED_AUTO_PTR \
+               -D_LIBCPP_ENABLE_CXX17_REMOVED_UNARY_BINARY_FUNCTION
 PKG_CXXFLAGS = $(SHLIB_OPENMP_CXXFLAGS) -DARMA_64BIT_WORD=1
 PKG_LIBS     = $(SHLIB_OPENMP_CXXFLAGS) $(LAPACK_LIBS) $(BLAS_LIBS) $(LDFLAGS)

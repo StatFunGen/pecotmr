@@ -762,7 +762,7 @@ test_that("twasWeightsPipeline(QtlSumStats) fits LDpred2-grid weights", {
     set.seed(1)
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         .tp_makeQtlSumStats(),
-        methods = list(ldpred2Grid = list(p = c(0.1, 1), h2 = 0.1)),
+        methods = list(ldpred2Grid = list(p = c(0.1, 1), h2Grid = 0.1)),
         verbose = 0
     )))
     expect_setequal(methodNames(res), "ldpred2Grid")
@@ -4147,6 +4147,47 @@ test_that("multi-study TWAS keeps per-study options", {
     expect_false(cap$cfg$residualizationParam$residualizeGenotype)
 })
 
+test_that("a MultiStudyQtlDataset's joint fits start from the run's h2", {
+    # The joint fits across studies read the run's heritability from the
+    # joint record, settled against every study's selected tuples as each
+    # study's own run settles its own.
+    mt <- MultiStudyQtlDataset(
+        qtlDatasets = list(
+            A = .tp_twoContextStudy("A"),
+            B = .tp_twoContextStudy("B")
+        )
+    )
+    cfg <- list(
+        contexts = NULL,
+        traitId = NULL,
+        region = NULL,
+        h2Estimate = 0.25
+    )
+    expect_identical(pecotmr:::.twasMsH2Spec(cfg, mt), list(value = 0.25))
+    lava <- .h2LocalSettings("lava")
+    expect_identical(
+        pecotmr:::.twasMsH2Spec(
+            list_assign(cfg, h2Estimate = NULL, h2EstimateParam = lava),
+            mt
+        )$param,
+        lava
+    )
+    expect_null(pecotmr:::.twasMsH2Spec(
+        list_assign(cfg, h2Estimate = NULL),
+        mt
+    ))
+    seen <- new.env(parent = emptyenv())
+    local_mocked_bindings(
+        .twasJointCfg = function(..., h2 = NULL) {
+            seen$h2 <- h2
+            list()
+        },
+        .package = "pecotmr"
+    )
+    pecotmr:::.twasMsJointCfg(cfg, mt, NULL)
+    expect_identical(seen$h2, list(value = 0.25))
+})
+
 test_that("MultiStudyQtlDataset: components get fitRetention as asked", {
     # .twasRetentionEnum() once tested isTRUE() on this enum, so every
     # component ran with "none" whatever the caller asked for. The test above
@@ -7116,62 +7157,85 @@ test_that("twasWeightsPipeline(QtlSumStats) gives each row's trait its h2", {
     seen <- list()
     local_mocked_bindings(
         .handleDosage = .tp_mockExtractor(),
-        bayesRRssWeights = function(stat, ldReference, h2 = NULL, ...) {
-            seen <<- c(seen, list(h2))
+        bayesRRssWeights = function(stat, ldReference, h2Estimate = NULL, ...) {
+            seen <<- c(seen, list(h2Estimate))
             rep(0, length(stat$variantNames))
         },
         .package = "pecotmr"
     )
-    run <- function(methods = "bayesR", h2 = NULL) {
+    run <- function(
+        methods = "bayesR",
+        h2Estimate = NULL,
+        h2EstimateParam = NULL
+    ) {
         seen <<- list()
         suppressMessages(suppressWarnings(
-            twasWeightsPipeline(ss, methods = methods, h2 = h2, verbose = 0)
+            twasWeightsPipeline(
+                ss,
+                methods = methods,
+                h2Estimate = h2Estimate,
+                h2EstimateParam = h2EstimateParam,
+                verbose = 0
+            )
         ))
         seen
     }
     # None: the method keeps its engines' own.
     expect_null(run()[[1L]])
-    # An estimator estimates the row's first, settled for the engines.
-    estimated <- run(h2 = "lava")[[1L]]
+    # Settings estimate the row's first, settled for the engines.
+    estimated <- run(h2EstimateParam = .h2LocalSettings("lava"))[[1L]]
     expect_true(is.numeric(estimated) && estimated >= 0.001)
     expect_lte(estimated, 0.99)
+    # One number serves every trait.
+    expect_equal(run(h2Estimate = 0.35)[[1L]], 0.35)
     # An H2Estimate gives the row its value; a method's own setting wins.
-    est <- suppressWarnings(estimateH2(ss))
+    est <- suppressWarnings(estimateLocalH2(ss))
     S4Vectors::mcols(est)$h2 <- 0.42
-    expect_equal(run(h2 = est)[[1L]], 0.42)
-    expect_equal(run(list(bayesR = list(h2 = 0.3)), est)[[1L]], 0.3)
-    expect_error(run(h2 = "greml"), "must be one of")
+    expect_equal(run(h2Estimate = est)[[1L]], 0.42)
+    expect_equal(
+        run(list(bayesR = list(h2Estimate = 0.3)), est)[[1L]],
+        0.3
+    )
+    expect_error(
+        run(h2EstimateParam = .h2LocalSettings("greml")),
+        "the phenotype statistic needs individual-level data"
+    )
+    expect_error(
+        run(h2Estimate = 0.3, h2EstimateParam = .h2LocalSettings("lava")),
+        "not both"
+    )
     # It must cover every selected tuple.
     two <- .tp_makeQtlSumStats(n_entries = 2L)
-    one <- suppressWarnings(estimateH2(two, contexts = "c1"))
+    one <- suppressWarnings(estimateLocalH2(two, contexts = "c1"))
     expect_error(
         suppressMessages(twasWeightsPipeline(
             two,
             methods = "bayesR",
-            h2 = one,
+            h2Estimate = one,
             verbose = 0
         )),
         "holds no row for 1 selected"
     )
 })
 
-test_that("twasWeightsPipeline(QtlDataset) estimates h2 as estimateH2 does", {
+test_that("twasWeightsPipeline(QtlDataset) estimates h2 in-sample", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     seen <- list()
     local_mocked_bindings(
         .handleDosage = .tp_mockExtractor(),
-        bayesNWeights = function(X, y, h2 = NULL, ...) {
-            seen <<- c(seen, list(h2))
+        bayesNWeights = function(X, y, h2Estimate = NULL, ...) {
+            seen <<- c(seen, list(h2Estimate))
             rep(0, ncol(X))
         },
         .package = "pecotmr"
     )
-    run <- function(h2) {
+    run <- function(h2Estimate = NULL, h2EstimateParam = NULL) {
         seen <<- list()
         suppressMessages(twasWeightsPipeline(
             qd,
             methods = "bayesN",
-            h2 = h2,
+            h2Estimate = h2Estimate,
+            h2EstimateParam = h2EstimateParam,
             cisWindow = 1000L,
             estimatePi = FALSE,
             verbose = 0,
@@ -7179,56 +7243,71 @@ test_that("twasWeightsPipeline(QtlDataset) estimates h2 as estimateH2 does", {
         ))
         seen[[1L]]
     }
-    est <- suppressWarnings(estimateH2(qd, cisWindow = 1000L))
+    est <- suppressWarnings(estimateLocalH2(qd, cisWindow = 1000L))
     want <- heritabilityEstimate(est)
-    got <- suppressWarnings(run("lava"))
+    got <- suppressWarnings(run(h2EstimateParam = H2EstimateParam()))
     if (is.na(want)) {
         expect_null(got)
     } else {
         expect_equal(got, min(max(want, 0.001), 0.99))
     }
     S4Vectors::mcols(est)$h2 <- 0.25
-    expect_equal(run(est), 0.25)
+    expect_equal(run(h2Estimate = est), 0.25)
 })
 
 test_that("a run's h2 reaches each method as that method takes it", {
     withH2 <- pecotmr:::.twasWithH2
-    estimated <- list(method = "hdlL", value = 0.4)
-    supplied <- list(method = NULL, value = 0.4)
-    expect_equal(withH2(list(), "bayesR", estimated, "sumstat")$h2, 0.4)
-    # LDpred2 runs the estimator itself, on its own terms...
+    hdlL <- .h2LocalSettings("hdlL")
+    estimated <- list(param = hdlL, value = 0.4)
+    supplied <- list(param = NULL, value = 0.4)
     expect_equal(
-        withH2(list(), "ldpred2Auto", estimated, "sumstat")$h2Init,
-        "hdlL"
+        withH2(list(), "bayesR", estimated, "sumstat")$h2Estimate,
+        0.4
     )
-    expect_equal(withH2(list(), "ldpred2Grid", estimated, "sumstat")$h2, "hdlL")
-    # ...or takes the value, the grid centred on it and capped at 1.
-    expect_equal(withH2(list(), "ldpred2Auto", supplied, "sumstat")$h2Init, 0.4)
+    # LDpred2 estimates under the settings itself, on its own terms...
+    expect_identical(
+        withH2(list(), "ldpred2Auto", estimated, "sumstat")$h2EstimateParam,
+        hdlL
+    )
+    expect_identical(
+        withH2(list(), "ldpred2Grid", estimated, "sumstat")$h2EstimateParam,
+        hdlL
+    )
+    # ...or takes the value, LDpred2-grid centring its grid on it.
     expect_equal(
-        withH2(list(), "ldpred2Grid", list(value = 0.8), "sumstat")$h2,
-        c(0.24, 0.56, 0.8, 1)
+        withH2(list(), "ldpred2Auto", supplied, "sumstat")$h2Estimate,
+        0.4
+    )
+    expect_equal(
+        withH2(list(), "ldpred2Grid", supplied, "sumstat")$h2Estimate,
+        0.4
     )
     # A method that takes none, or sets its own, is left alone.
     expect_identical(withH2(list(), "lasso", supplied, "sumstat"), list())
     own <- list(backend = "hibayes", vg = 0.1)
     expect_identical(withH2(own, "bayesR", supplied, "individual"), own)
     expect_identical(
-        withH2(list(h2 = 0.3), "bayesC", supplied, "sumstat"),
-        list(h2 = 0.3)
+        withH2(list(h2Estimate = 0.3), "bayesC", supplied, "sumstat"),
+        list(h2Estimate = 0.3)
+    )
+    expect_identical(
+        withH2(list(h2Grid = 0.2), "ldpred2Grid", supplied, "sumstat"),
+        list(h2Grid = 0.2)
     )
     expect_identical(withH2(list(), "bayesR", NULL, "sumstat"), list())
 })
 
-test_that("a collection holding summary statistics refuses h2 = \"greml\"", {
+test_that("a collection holding summary statistics refuses REML's settings", {
     msqd <- MultiStudyQtlDataset(
         qtlDatasets = list(study1 = .tp_makeQtlDataset()),
         sumStats = .tp_makeQtlSumStats()
     )
     expect_error(
-        pecotmr:::.msAssertH2("greml", msqd, "test"),
+        pecotmr:::.msAssertH2(.h2LocalSettings("greml"), msqd, "test"),
         "needs individual-level data"
     )
-    expect_null(pecotmr:::.msAssertH2("lava", msqd, "test"))
+    expect_null(pecotmr:::.msAssertH2(.h2LocalSettings("lava"), msqd, "test"))
+    expect_null(pecotmr:::.msAssertH2(NULL, msqd, "test"))
 })
 
 # ---------------------------------------------------------------------------
@@ -7601,4 +7680,19 @@ test_that("weights read off fits across studies need a fit or a CV", {
         .twasAcrossStudyEntry = function(...) NULL
     )
     expect_null(pecotmr:::.twasAcrossStudyRecord(1L, fm, read))
+})
+
+test_that("a MultiStudyQtlDataset's heritability tuples are each study's", {
+    skip_if_not_installed("PlinkMatrix")
+    data(multiStudyQtlDatasetExample, envir = environment())
+    qd <- as.list(multiStudyQtlDatasetExample)[[1L]]
+    cfg <- list(contexts = NULL, traitId = NULL, region = NULL)
+    tuples <- pecotmr:::.twasMsStudyTuples(qd, cfg)
+    expect_gt(nrow(tuples), 0L)
+    expect_true(all(tuples$study == studyName(qd)))
+    # A method given neither a value nor settings has no heritability.
+    expect_null(pecotmr:::.twasH2Given(
+        "bayesC",
+        list(param = NULL, value = NULL)
+    ))
 })

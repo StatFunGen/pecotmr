@@ -168,8 +168,10 @@
 #'   out of each side and --- through \code{scaleResiduals} --- whether the
 #'   columns are scaled to unit variance, as in
 #'   \code{\link{fineMappingPipeline}} and
-#'   \code{\link{twasWeightsPipeline}}. \strong{Ignored} on
-#'   \code{QtlSumStats} input, which has nothing to residualize.
+#'   \code{\link{twasWeightsPipeline}}. Each context is residualized on its
+#'   own covariates with its own genotypes, so \code{covariateScope} changes
+#'   nothing here. \strong{Ignored} on \code{QtlSumStats} input, which has
+#'   nothing to residualize.
 #' @param alleleFlip Logical, default \code{TRUE}. When TRUE, harmonize variants
 #'   across the individual X, sumstats, and LD by (chrom, pos) with ref/alt
 #'   swaps recognized (flipping z / residualized dosage / LD to a shared

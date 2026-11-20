@@ -2187,18 +2187,22 @@ test_that(".fmDispatchJointSpecsMultiStudy: summary statistics take the h2", {
         },
         .package = "pecotmr"
     )
-    run <- function(h2) {
+    run <- function(...) {
         pecotmr:::.fmDispatchJointSpecsMultiStudy(
             list(list(axes = "context", scope = NULL)),
             "mvsusie",
             list(),
-            list(data = mt, verbose = 0, h2 = h2),
+            list(data = mt, verbose = 0, ...),
             components = FALSE
         )
         seen$cfg
     }
-    expect_identical(run("lava")$h2Spec, list(method = "lava"))
-    expect_null(run(NULL)$h2Spec)
+    # Each source alone: the record holding only the settings must not read
+    # them as a heritability too.
+    lava <- .h2LocalSettings("lava")
+    expect_identical(run(h2EstimateParam = lava)$h2Spec, list(param = lava))
+    expect_identical(run(h2Estimate = 0.3)$h2Spec, list(value = 0.3))
+    expect_null(run()$h2Spec)
 })
 
 test_that(".fmDispatchJointSpecsMultiStudy: a study spec joins the studies", {

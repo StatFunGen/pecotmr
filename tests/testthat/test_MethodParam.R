@@ -947,9 +947,10 @@ test_that("no formal that shadows a pecotmr function is passed as a value", {
 test_that("an argument taking a *Param record is named after its class", {
     # Settings pecotmr reads travel as *Param records, passed under the
     # class's own name (crossValidationParam = CrossValidationParam()); engine
-    # argument bundles (*Options) keep the *Args / methodArgs names. The four
-    # below are named for their role instead, and are the only exceptions.
-    roleNamed <- c("prior", "priors", "columns", "pruning")
+    # argument bundles (*Options) keep the *Args / methodArgs names. The five
+    # below are named for their role instead, and are the only exceptions:
+    # truncation is one of H2EstimateParam()'s settings, named as they are.
+    roleNamed <- c("prior", "priors", "columns", "pruning", "truncation")
     expect_false(.mpNamedAfterClass(
         list(formal = "crossValidationArgs", class = "CrossValidationParam"),
         roleNamed = roleNamed

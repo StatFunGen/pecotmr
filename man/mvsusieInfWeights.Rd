@@ -42,7 +42,6 @@ Extracts coefficients from an existing mvSuSiE-inf fit
 }
 
 \examples{
-\donttest{
 data(multiTraitData)
 # The unmappable effects take conditions observed on the same samples.
 observed <- stats::complete.cases(multiTraitData$Y)
@@ -55,6 +54,5 @@ if (requireNamespace("mvsusieR", quietly = TRUE) &&
     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
     methodArgs = MvsusieInfOptions(max_iter = 50))
   mvsusieInfWeights(mvsusieInfFit = fit)
-}
 }
 }

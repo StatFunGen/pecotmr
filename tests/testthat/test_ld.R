@@ -3156,6 +3156,23 @@ test_that("R o R products read the same from a matrix, factor or eigenpairs", {
     )
     expect_equal(pecotmr:::.ldSquaredProduct(list(R = R), A), want)
     expect_equal(pecotmr:::.ldSquaredProduct(eig, A), want)
+    # With a second source, (R o R2) A: the cross-population LD scores.
+    other <- pecotmr:::.ldFactorFromDosage(
+        matrix(rbinom(50 * 600, 2, 0.3), 50, 600)
+    )
+    R2 <- crossprod(other) / (nrow(other) - 1)
+    expect_equal(
+        pecotmr:::.ldSquaredProduct(
+            list(ldFactor = ldFactor),
+            A,
+            list(ldFactor = other)
+        ),
+        (R * R2) %*% A
+    )
+    expect_equal(
+        pecotmr:::.ldSquaredProduct(list(R = R), A, list(R = R2)),
+        (R * R2) %*% A
+    )
     expect_equal(
         pecotmr:::.ldSourceRows(list(ldFactor = ldFactor), 3:5),
         R[3:5, ]

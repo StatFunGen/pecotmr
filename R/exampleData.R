@@ -669,8 +669,9 @@ NULL
 #'
 #' @description An \code{LdEigen} reference for the eigendecomposition-based
 #' heritability estimators (\code{\link{estimateH2}} with
-#' \code{method = "lder"} or \code{"hdl"}, and
-#' \code{\link{computeLdScores}}). Built by \code{\link{buildLdEigen}}
+#' \code{method = "lder"} or \code{"hdl"},
+#' \code{\link{estimateStratifiedH2}} under the eigen statistic's settings,
+#' and \code{\link{computeLdScores}}). Built by \code{\link{buildLdEigen}}
 #' over the first 14 chr22 LD blocks of the de-identified
 #' \code{protocol_example} reference. Describes the same variants as
 #' \code{\link{ldScoreExample}}, so the four estimators can be compared on
@@ -705,7 +706,8 @@ NULL
 #' @description An \code{LdScore} reference (per-variant LD scores, weights,
 #' and per-block LD matrices) for the LD-score-based heritability estimators
 #' (\code{\link{estimateH2}} with \code{method = "sldsc"} or
-#' \code{"gldsc"}). Built by \code{\link{buildLdScore}} over the first 14
+#' \code{"gldsc"}, and \code{\link{estimateStratifiedH2}} under the
+#' variants' settings). Built by \code{\link{buildLdScore}} over the first 14
 #' chr22 LD blocks of the de-identified \code{protocol_example} reference,
 #' from the same simulated 20,000-person panel as
 #' \code{\link{ldEigenExample}}, and describes the same variants.
@@ -733,7 +735,8 @@ NULL
 #'
 #' @docType data
 #'
-#' @description A stratified g-LDSC estimate from \code{\link{estimateH2}},
+#' @description A stratified g-LDSC estimate from
+#' \code{\link{estimateStratifiedH2}},
 #' on \code{\link{ldScoreExample}}, of a GWAS simulated on that reference's
 #' LD with one baseline annotation carrying three times the per-variant
 #' heritability of the rest, and one candidate annotation scored against the
@@ -742,8 +745,8 @@ NULL
 #' \code{inst/scripts/build_h2_estimate_example.R}.
 #'
 #' @format An \code{H2Estimate} holding one estimate (study \code{trait1},
-#'   method \code{gldsc}), which carries an enrichment table, the annotation
-#'   jackknife matrix and a candidate's score statistics.
+#'   under g-LDSC's settings), which carries an enrichment table, the
+#'   annotation jackknife matrix and a candidate's score statistics.
 #' @keywords data
 #'
 #' @examples

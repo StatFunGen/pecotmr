@@ -43,7 +43,6 @@ Extracts coefficients from an existing mvSuSiE-ash fit
 }
 
 \examples{
-\donttest{
 data(multiTraitData)
 # The unmappable effects take conditions observed on the same samples.
 observed <- stats::complete.cases(multiTraitData$Y)
@@ -56,6 +55,5 @@ if (requireNamespace("mvsusieR", quietly = TRUE) &&
     prior_variance = buildMvsusieMixturePrior(R = ncol(Y)),
     methodArgs = MvsusieAshOptions(max_iter = 20))
   mvsusieAshWeights(mvsusieAshFit = fit)
-}
 }
 }

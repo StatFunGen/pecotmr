@@ -190,8 +190,10 @@ Reaches both \code{\link{residualizedGenotypes}} and
 out of each side and --- through \code{scaleResiduals} --- whether the
 columns are scaled to unit variance, as in
 \code{\link{fineMappingPipeline}} and
-\code{\link{twasWeightsPipeline}}. \strong{Ignored} on
-\code{QtlSumStats} input, which has nothing to residualize.}
+\code{\link{twasWeightsPipeline}}. Each context is residualized on its
+own covariates with its own genotypes, so \code{covariateScope} changes
+nothing here. \strong{Ignored} on \code{QtlSumStats} input, which has
+nothing to residualize.}
 
 \item{methodArgs}{Additional arguments forwarded to
 \code{colocboost::colocboost}, built with

@@ -3572,7 +3572,7 @@ test_that("QtlSumStats joint fits take h2 and the RSS settings", {
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    est <- suppressWarnings(estimateH2(ss))
+    est <- suppressWarnings(estimateLocalH2(ss))
     S4Vectors::mcols(est)$h2 <- 0.3
     # mvsusie_rss's arguments with the mr.mash fit's residual covariance V
     capture <- function(V) {
@@ -3593,7 +3593,7 @@ test_that("QtlSumStats joint fits take h2 and the RSS settings", {
         suppressMessages(fineMappingPipeline(
             ss,
             methods = "mvsusie",
-            h2 = est,
+            h2Estimate = est,
             susieRssParam = SusieRssParam(rMismatch = "eb")
         ))
         captured
@@ -7039,42 +7039,57 @@ test_that("fineMappingPipeline(QtlSumStats) gives SuSiE-RSS 1 - h2", {
         .fmPostprocessOne = .fmp_mockPostprocess(),
         .package = "pecotmr"
     )
-    run <- function(methods = "susie", h2 = NULL) {
+    run <- function(
+        methods = "susie",
+        h2Estimate = NULL,
+        h2EstimateParam = NULL
+    ) {
         capture$userArgs <- NULL
         suppressMessages(suppressWarnings(fineMappingPipeline(
             .fmp_qss,
             methods = methods,
             initializeWithSusieInf = FALSE,
-            h2 = h2
+            h2Estimate = h2Estimate,
+            h2EstimateParam = h2EstimateParam
         )))
         capture$userArgs
     }
     expect_null(run()$residual_variance)
-    est <- suppressWarnings(estimateH2(.fmp_qss))
+    est <- suppressWarnings(estimateLocalH2(.fmp_qss))
     S4Vectors::mcols(est)$h2 <- 0.3
-    expect_equal(run(h2 = est)$residual_variance, 0.7)
+    expect_equal(run(h2Estimate = est)$residual_variance, 0.7)
+    expect_equal(run(h2Estimate = 0.4)$residual_variance, 0.6)
     expect_equal(
         run(list(susie = list(residual_variance = 0.8)), est)$residual_variance,
         0.8
     )
-    estimated <- run(h2 = "lava")$residual_variance
+    lava <- .h2LocalSettings("lava")
+    estimated <- run(h2EstimateParam = lava)$residual_variance
     expect_true(is.numeric(estimated) && estimated >= 0.01 && estimated < 1)
-    expect_error(run(h2 = "greml"), "must be one of")
-    # A collection's run checks the estimator at entry, before any study.
-    expect_error(pecotmr:::.fmAssertH2Method("greml"), "must be one of")
-    expect_null(pecotmr:::.fmAssertH2Method("lava"))
-    expect_null(pecotmr:::.fmAssertH2Method(NULL))
+    greml <- .h2LocalSettings("greml")
+    expect_error(
+        run(h2EstimateParam = greml),
+        "the phenotype statistic needs individual-level data"
+    )
+    # A collection's run checks the settings at entry, before any study.
+    expect_error(
+        pecotmr:::.fmAssertH2Settings(NULL, greml),
+        "the phenotype statistic needs individual-level data"
+    )
+    expect_error(pecotmr:::.fmAssertH2Settings(0.3, lava), "not both")
+    expect_null(pecotmr:::.fmAssertH2Settings(NULL, lava))
+    expect_null(pecotmr:::.fmAssertH2Settings(NULL, NULL))
 })
 
 test_that("a real SuSiE-RSS fit holds the residual variance h2 sets", {
     skip_if_not_installed("PlinkMatrix")
-    est <- estimateH2(.rssf_ss, referenceOverlap = 1)
+    est <- estimateLocalH2(.rssf_ss, referenceOverlap = 1)
     S4Vectors::mcols(est)$h2 <- 0.3
     res <- suppressMessages(suppressWarnings(fineMappingPipeline(
         .rssf_ss,
         methods = "susie",
         initializeWithSusieInf = FALSE,
-        h2 = est
+        h2Estimate = est
     )))
     fit <- susieFit(
         res,

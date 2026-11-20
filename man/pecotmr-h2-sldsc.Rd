@@ -20,7 +20,8 @@ Estimate heritability and functional enrichment by weighted
   variants in strong LD from being counted many times. Standard errors come
   from a delete-one-block jackknife over the LD blocks.
 
-  Two routes are taken, matching \code{ldsc.py} -- the split is on
+  Its regression settings (\code{\link{H2RegressionParam}}) choose the
+  route. S-LDSC's own take the two of \code{ldsc.py}, whose split is on
   annotation count, not on preference:
   \describe{
     \item{unstratified}{the two-step estimator: the intercept is fit on
@@ -33,10 +34,10 @@ Estimate heritability and functional enrichment by weighted
       weighted least-squares fit follows.}
   }
 
-  The intercept is reported as estimated and is not floored at 1: the
-  model implies at least 1, but a value below it is informative rather
-  than an error to clamp away, and clamping would move the heritability
-  too.
+  The intercept is reported as estimated and is not floored at 1 unless
+  the settings floor the noise: the model implies at least 1, but a value
+  below it is informative rather than an error to clamp away, and
+  clamping would move the heritability too.
 
   Estimates agree with the original \code{ldsc} implementation to
   roughly 1e-6 relative; the residual is a small ridge in the weighted

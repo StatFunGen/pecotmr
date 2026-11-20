@@ -421,6 +421,8 @@ methods::setValidity("SumStatsBase", function(object) {
 #' @param x A summary-statistics collection.
 #' @param i The row: a position or an element name.
 #' @param exact Passed on to the element lookup.
+#' @return \code{getListElement()}, and so \code{x[[i]]}, returns row
+#'   \code{i}'s variants: a \code{GRanges} with every column back.
 #' @importFrom S4Vectors getListElement
 #' @export
 setMethod("getListElement", "SumStatsBase", function(x, i, exact = TRUE) {
@@ -429,6 +431,8 @@ setMethod("getListElement", "SumStatsBase", function(x, i, exact = TRUE) {
 
 #' @rdname SumStatsBase-class
 #' @param use.names Whether the list keeps the element names.
+#' @return \code{as.list()} returns every row's variants in a list, each a
+#'   \code{GRanges} with every column back.
 #' @export
 setMethod("as.list", "SumStatsBase", function(x, use.names = TRUE) {
     as.list(.ssPlainRows(x), use.names = use.names)
@@ -438,6 +442,8 @@ setMethod("as.list", "SumStatsBase", function(x, use.names = TRUE) {
 #' @param X A summary-statistics collection.
 #' @param FUN The function applied to each row's variants.
 #' @param ... Passed on to \code{FUN}.
+#' @return \code{lapply()} returns a list of \code{FUN}'s results, one per
+#'   row.
 #' @importFrom BiocGenerics lapply
 #' @export
 setMethod("lapply", "SumStatsBase", function(X, FUN, ...) {

@@ -57,6 +57,7 @@ setClass(
             add = coll
         )
         coll$push(.sumStatsCheckGenome(object))
+        coll$push(.gwasPrevalenceProblem(object))
         assertList(object@qcOptions, .var.name = "qcOptions", add = coll)
         slotErrors <- coll$getMessages()
         if (length(slotErrors) > 0L) {
@@ -156,6 +157,14 @@ NULL
 #'   no per-variant \code{N} column and no case/control counts. Named
 #'   \code{nSample} to avoid clashing with \code{nSamples()} (the LD-panel
 #'   sample size).
+#' @param prevalence Optional per-study population prevalence of a
+#'   case/control trait, strictly between 0 and 1 (\code{NA} for the other
+#'   studies), from which \code{\link{estimateH2}} and
+#'   \code{\link{estimateStratifiedH2}} also give the heritability on the
+#'   liability scale. Attached only when supplied (length 1 or length(study)),
+#'   as \code{nCase} / \code{nControl} are. A study with one must record its
+#'   case/control counts, as \code{nCase} and \code{nControl} or per-variant
+#'   \code{N_CASE} / \code{N_CONTROL}; a quantitative trait has none.
 #' @param region Optional analysis windows, typically LD blocks: a
 #'   \code{GRanges}, or the path of a BED file, read as BED with a 0-based
 #'   start (a fourth column, when present, names each window). One set of
@@ -221,6 +230,7 @@ GwasSumStats <- function(
     nCase = NULL,
     nControl = NULL,
     nSample = NULL,
+    prevalence = NULL,
     qcOptions = list(),
     region = NULL,
     blockId = NULL,
@@ -236,7 +246,15 @@ GwasSumStats <- function(
         study = as.character(studyName),
         varY = varY
     ) |>
-        .gwasAppendOptional(nCase, nControl, nSample, studyName) |>
+        .gwasAppendOptional(
+            list(
+                nCase = nCase,
+                nControl = nControl,
+                nSample = nSample,
+                prevalence = prevalence
+            ),
+            studyName
+        ) |>
         .gwasAppendExtras(extraCols)
     dict <- .ldRefDict(.ldRefPerTuple(ldReference, length(entry)))
     dfArgs <- c(cols, list(ldReference = dict$keys, check.names = FALSE))
@@ -447,24 +465,60 @@ GwasSumStats <- function(
     .recyclePerStudy(varY, "varY", studyName)
 }
 
-# Attach the OPTIONAL per-study nCase / nControl / nSample columns (each only
-# when supplied; NA for the non-case/control studies in a mixed collection).
+# Attach the OPTIONAL per-study nCase / nControl / nSample / prevalence
+# columns in `optional` (each only when supplied; NA for the studies without
+# one in a mixed collection).
 # @noRd
-.gwasAppendOptional <- function(cols, nCase, nControl, nSample, studyName) {
+.gwasAppendOptional <- function(cols, optional, studyName) {
+    given <- compact(optional)
     c(
         cols,
-        compact(list(
-            nCase = if (!is.null(nCase)) {
-                .recyclePerStudy(nCase, "nCase", studyName)
-            },
-            nControl = if (!is.null(nControl)) {
-                .recyclePerStudy(nControl, "nControl", studyName)
-            },
-            nSample = if (!is.null(nSample)) {
-                .recyclePerStudy(nSample, "nSample", studyName)
-            }
-        ))
+        set_names(
+            map2(given, names(given), .recyclePerStudy, studyName = studyName),
+            names(given)
+        )
     )
+}
+
+# A recorded prevalence's problem, NULL where it has none: each lies strictly
+# between 0 and 1, on a study that records its case/control counts (its
+# nCase and nControl, or its variants' N_CASE and N_CONTROL), which say what
+# share of its samples are cases; a quantitative trait records none.
+# @noRd
+.gwasPrevalenceProblem <- function(object) {
+    md <- mcols(object, use.names = FALSE)
+    if (!is_in("prevalence", colnames(md))) {
+        return(NULL)
+    }
+    prevalence <- md[["prevalence"]]
+    given <- !is.na(prevalence)
+    if (any(prevalence[given] <= 0 | prevalence[given] >= 1)) {
+        return("`prevalence` must lie strictly between 0 and 1.")
+    }
+    uncounted <- given & !.gwasCountedRows(object, md)
+    if (!any(uncounted)) {
+        return(NULL)
+    }
+    str_c(
+        "`prevalence` is given for study ",
+        str_flatten(unique(as.character(md[["study"]][uncounted])), ", "),
+        " without its case/control counts (nCase and nControl, or ",
+        "per-variant N_CASE and N_CONTROL)."
+    )
+}
+
+# The rows that record their case/control counts: study-level nCase and
+# nControl, or per-variant N_CASE and N_CONTROL among the variants' columns.
+# @noRd
+.gwasCountedRows <- function(object, md) {
+    perVariant <- all(is_in(
+        c("N_CASE", "N_CONTROL"),
+        colnames(mcols(unlist(object, use.names = FALSE)))
+    ))
+    if (perVariant || !all(is_in(c("nCase", "nControl"), colnames(md)))) {
+        return(rep(perVariant, nrow(md)))
+    }
+    !is.na(md[["nCase"]]) & !is.na(md[["nControl"]])
 }
 
 # Append any user-supplied extra columns (from `...`).

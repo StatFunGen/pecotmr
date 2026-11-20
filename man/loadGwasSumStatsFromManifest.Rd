@@ -19,7 +19,9 @@ loadGwasSumStatsFromManifest(
 \item{manifest}{A data.frame or path. Columns (snake_case aliases accepted):
 \code{study} (required, unique), \code{sumStatsPath} (required),
 \code{columnMapping} (optional), \code{nCase} / \code{nControl} (optional),
-\code{nSample} (optional study-level total N), \code{varY} (optional), the
+\code{nSample} (optional study-level total N), \code{prevalence}
+(optional population prevalence of a case/control trait; see
+\code{\link{GwasSumStats}}), \code{varY} (optional), the
 single-valued \code{genome}, and \code{ldReferencePath}, which may differ
 between studies (each distinct reference is read once, for the
 chromosomes its studies cover, and stored once). When a row
