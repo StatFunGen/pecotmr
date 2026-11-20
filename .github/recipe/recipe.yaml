@@ -54,6 +54,7 @@ requirements:
     - r-cpp11armadillo
     - r-ctwas
     - r-dbi
+    - r-dlib
     - r-dplyr
     - r-fdrtool
     - r-flashier
@@ -132,6 +133,7 @@ requirements:
     - r-cpp11armadillo
     - r-ctwas
     - r-dbi
+    - r-dlib
     - r-dplyr
     - r-fdrtool
     - r-flashier

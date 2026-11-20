@@ -84,8 +84,10 @@ each under a license compatible with GPL-3.
    https://github.com/zhenin/HDL
    Copyright (C) the HDL authors (Zheng Ning, Xia Shen; HDL-L: Yuying Li,
    Xia Shen). License: GPL-3 or (at your option) any later version.
-   - R/h2EstimationWrappers.R: the HDL likelihood and fit (after llfun.R
-     and HDL.h2.R) and HDL-L's per-locus fit (after HDL.L.R).
+   - R/h2EstimationWrappers.R: the HDL fit (after HDL.h2.R) and HDL-L's
+     per-locus fit (after HDL.L.R).
+   - src/eigen_likelihood.cpp: the eigen likelihood (after llfun.R) and
+     the pair's conditional likelihood (after HDL.L.R).
 
 10. LDER
     https://github.com/shuangsong0110/LDER
@@ -107,6 +109,8 @@ each under a license compatible with GPL-3.
     copyright line, so the line above gives its author and year.
     - R/h2EstimationWrappers.R: the local heritability's inputs, eigen cut
       and standard error (after fasther.R).
+    - src/eigen_likelihood.cpp: the likelihood over all of a study's
+      samples (after fasther.R).
 
 13. RAiSS
     https://gitlab.pasteur.fr/statistical-genetics/raiss

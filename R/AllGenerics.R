@@ -362,9 +362,17 @@ setGeneric(
 #'   on the genotypes' components. Each trait is estimated on the window,
 #'   samples, filters and residualized, scaled genotypes and phenotype that
 #'   \code{\link{twasWeightsPipeline}} fits it on.
+#'
+#'   From a \code{MultiStudyQtlDataset}, each study's traits are estimated as
+#'   a \code{QtlDataset}'s, on its own donors and genotypes, and each
+#'   selected row of its summary statistics as a \code{QtlSumStats}'s, on its
+#'   own reference, all in one \code{H2Estimate}. Contexts and traits given
+#'   by name select within the studies that hold them. One set of settings
+#'   serves every study, so where the selection keeps summary-statistic rows
+#'   it cannot use the phenotype statistic.
 #' @param data A \code{QtlSumStats} that has been through
-#'   \code{\link{summaryStatsQc}}, each row with an LD reference; or a
-#'   \code{QtlDataset}.
+#'   \code{\link{summaryStatsQc}}, each row with an LD reference; a
+#'   \code{QtlDataset}; or a \code{MultiStudyQtlDataset}.
 #' @param param An \code{\link{H2EstimateParam}}; \code{NULL} (the default)
 #'   uses its defaults, HDL-L's settings.
 #' @param ... Additional method-specific arguments.
@@ -577,7 +585,11 @@ setGeneric(
 #' @param gwasH2Estimate With \code{gwas}, the GWAS studies' genome-wide
 #'   \code{\linkS4class{H2Estimate}} (\code{\link{estimateH2}} or
 #'   \code{\link{estimateStratifiedH2}}), whose intercept each GWAS side's
-#'   own noise is held at.
+#'   own noise is held at. Under the moments, which tie each condition's
+#'   noise per component to its heritability, as \eqn{(c + h^2 (\phi - 1)) /
+#'   (n - 1)} with the overlap factor \eqn{\phi}, the intercept is \eqn{c},
+#'   1 without one: an intercept above 1 (confounding, as LD score regression
+#'   reads it) is then not taken for heritability.
 #' @param conditional Report each pair given the other conditions of its
 #'   group (see Details). Default \code{FALSE}.
 #' @return An \code{\linkS4class{RgEstimate}}, one row per pair, whose element

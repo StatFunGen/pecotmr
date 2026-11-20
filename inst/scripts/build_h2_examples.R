@@ -146,11 +146,11 @@ set.seed(1)
 recovered <- replicate(5, {
     z <- simZ()
     c(
-        sldsc = pecotmr:::sldscUnivariate(z, N, ldScoreExample)$h2,
-        gldsc = pecotmr:::gldscUnivariate(z, N, ldScoreExample)$h2,
-        lder = pecotmr:::lderUnivariate(z, N, ldEigenExample)$h2,
+        sldsc = pecotmr:::variantRegressionUnivariate(z, N, ldScoreExample)$h2,
+        gldsc = pecotmr:::variantGlsUnivariate(z, N, ldScoreExample)$h2,
+        lder = pecotmr:::eigenRegressionUnivariate(z, N, ldEigenExample)$h2,
         hdl = suppressWarnings(
-            pecotmr:::hdlUnivariate(z, N, ldEigenExample)$h2
+            pecotmr:::eigenLikelihoodUnivariate(z, N, ldEigenExample)$h2
         )
     )
 })

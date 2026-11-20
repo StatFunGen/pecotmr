@@ -81,6 +81,7 @@ r45 = {features = ["r45"]}
 "r-cpp11armadillo" = "*"
 "r-ctwas" = "*"
 "r-dbi" = "*"
+"r-dlib" = "*"
 "r-dplyr" = "*"
 "r-fdrtool" = "*"
 "r-flashier" = "*"

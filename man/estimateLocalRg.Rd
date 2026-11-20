@@ -108,7 +108,11 @@ names. Required with \code{crossNoise = "supplied"}; with
 \item{gwasH2Estimate}{With \code{gwas}, the GWAS studies' genome-wide
 \code{\linkS4class{H2Estimate}} (\code{\link{estimateH2}} or
 \code{\link{estimateStratifiedH2}}), whose intercept each GWAS side's
-own noise is held at.}
+own noise is held at. Under the moments, which tie each condition's
+noise per component to its heritability, as \eqn{(c + h^2 (\phi - 1)) /
+(n - 1)} with the overlap factor \eqn{\phi}, the intercept is \eqn{c},
+1 without one: an intercept above 1 (confounding, as LD score regression
+reads it) is then not taken for heritability.}
 
 \item{conditional}{Report each pair given the other conditions of its
 group (see Details). Default \code{FALSE}.}

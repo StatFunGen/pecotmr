@@ -170,8 +170,8 @@ test_that("the summed form of the unbiased r^2 is exact under any weights", {
     R <- cov2cor(crossprod(matrix(rnorm(40 * 8), 40, 8)))
     a <- cbind(base = 1, binary = c(1, 0, 0, 1, 1, 0, 1, 0), cont = runif(8))
     expect_equal(
-        pecotmr:::.ldscUnbiasedSum((R^2) %*% a, colSums(a), 40L),
-        pecotmr:::.ldscUnbiasedR2(R^2, 40L) %*% a,
+        pecotmr:::.ldScoreUnbiasedSum((R^2) %*% a, colSums(a), 40L),
+        pecotmr:::.ldScoreUnbiasedR2(R^2, 40L) %*% a,
         tolerance = 1e-12
     )
 })

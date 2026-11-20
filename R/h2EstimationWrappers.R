@@ -328,7 +328,7 @@ RmaOptions <- function(...) {
 NULL
 
 # =============================================================================
-# Univariate LDER
+# The eigen regression, genome-wide
 # =============================================================================
 
 #' @title Univariate LDER
@@ -355,7 +355,8 @@ NULL
 #' @importFrom stats lm.fit quantile cor
 NULL
 
-# Baseline annotation matrix (NULL when absent or empty). Shared by LDER + HDL.
+# Baseline annotation matrix (NULL when absent or empty). Shared by the eigen
+# regression and the eigen likelihood.
 .h2BaselineMat <- function(annotations) {
     if (is.null(annotations)) {
         return(NULL)
@@ -545,7 +546,7 @@ NULL
 # not list are added as rows with x = 0 and lam = 0. Under frequency weights
 # `w` the block's pseudo-eigenpairs stand in for its eigenpairs
 # (.h2WeightedBlock()), and the annotation matrices are the weighted ones.
-.lderBlockStats <- function(
+.h2EigenRegressionBlockStats <- function(
     block,
     eigenRef,
     z,
@@ -603,20 +604,26 @@ NULL
 }
 
 # Delete-one-block jackknife standard error from the n leave-one-out
-# estimates `v`: sqrt((n - 1) / n * sum((v - mean(v))^2)). The LDER, gLDSC,
-# HDL and S-LDSC jackknifes all report this quantity.
+# estimates `v`: sqrt((n - 1) / n * sum((v - mean(v))^2)). Every genome-wide
+# estimator's jackknife reports this quantity.
 # @noRd
 .jackknifeSeFromLoo <- function(v) {
     n <- length(v)
     sqrt((n - 1) / n * sum((v - mean(v))^2))
 }
 
-# LDER candidate-annotation score statistics against the fitted baseline:
-# the regression of x^2 on mu, the rows' fitted mean, scored for each
-# candidate's column N lam l_c with the weights 1 / (2 mu^2) and the
+# The eigen regression's candidate-annotation score statistics against the
+# fitted baseline: the regression of x^2 on mu, the rows' fitted mean, scored
+# for each candidate's column N lam l_c with the weights 1 / (2 mu^2) and the
 # baseline and inflation (the rows' columns) as nuisance
 # (.h2EfficientScoreBlocks()).
-.lderScoreStats <- function(rows, fit, blockStats, annotations, N) {
+.h2EigenRegressionScoreStats <- function(
+    rows,
+    fit,
+    blockStats,
+    annotations,
+    N
+) {
     candidate <- testedAnnotations(annotations)
     candMat <- assay(candidate, "annotations")
     if (ncol(candMat) == 0) {
@@ -641,11 +648,12 @@ NULL
     )
 }
 
-# LDER, stratified by `annotations` where given, under the settings `param`
-# (LDER's own by default: .h2GenomeWideSettings()): each block's whitened
-# statistics as rows of the regression every eigen regression fits
-# (.lderRows(), .h2Regression()), with the delete-one-block jackknife.
-lderUnivariate <- function(
+# The genome-wide eigen regression, stratified by `annotations` where given,
+# under the settings `param` (the lder preset's by default:
+# .h2GenomeWideSettings()): each block's whitened statistics as rows of the
+# regression every eigen regression fits (.h2EigenRegressionRows(),
+# .h2Regression()), with the delete-one-block jackknife.
+eigenRegressionUnivariate <- function(
     z,
     n,
     eigenRef,
@@ -659,34 +667,46 @@ lderUnivariate <- function(
 ) {
     baselineMat <- .h2DesignMat(annotations)
     modelMat <- .h2WeightedDesign(baselineMat, weights)
-    blockStats <- .lderAllBlockStats(
+    blockStats <- .h2EigenRegressionAllBlockStats(
         eigenRef,
         z,
         modelMat,
         annotations,
         weights
     )
-    rows <- .lderRows(blockStats, modelMat, n, length(eigenRef), param)
+    rows <- .h2EigenRegressionRows(
+        blockStats,
+        modelMat,
+        n,
+        length(eigenRef),
+        param
+    )
     fit <- .h2Regression(param, rows)
     .h2RowsResult(
         fit,
         .h2RegressionLooCoefs(param, rows),
         rows,
         baselineMat,
-        .lderCandidateScores(rows, fit, blockStats, annotations, n),
+        .h2EigenRegressionCandidateScores(
+            rows,
+            fit,
+            blockStats,
+            annotations,
+            n
+        ),
         weights
     )
 }
 
-# LDER's rows: each direction's whitened chi-square x^2 on its eigenvalue
-# scores, column a scaled by n / M_a (.h2ColumnSizes()) so that its
+# The eigen regression's rows: each direction's whitened chi-square x^2 on its
+# eigenvalue scores, column a scaled by n / M_a (.h2ColumnSizes()) so that its
 # coefficient times its share (.h2ColumnShares()) is annotation a's
-# heritability, and the noise column; with the eigenvalue taper, the
-# weights' cap on each column (M_a / M, a per-variant rate of at most 1 /
-# M), the unstratified column for the first weights, and each direction's
-# block for the jackknife.
+# heritability, and the noise column; with the eigenvalue taper, the weights'
+# cap on each column (M_a / M, a per-variant rate of at most 1 / M), the
+# unstratified column for the first weights, and each direction's block for the
+# jackknife.
 # @noRd
-.lderRows <- function(blockStats, modelMat, n, M, param) {
+.h2EigenRegressionRows <- function(blockStats, modelMat, n, M, param) {
     x <- list_c(map(blockStats, "x"))
     lam <- list_c(map(blockStats, "lam"))
     ldAnnot <- exec(rbind, !!!map(blockStats, "ldAnnot"))
@@ -729,12 +749,12 @@ lderUnivariate <- function(
     )
 }
 
-# Each LD block's LDER statistics, in one pass over the blocks, each
+# Each LD block's eigen-regression statistics, in one pass over the blocks, each
 # decomposed only while its statistics are taken, so a reference read from a
 # panel holds one block at a time; under frequency weights `w`, the weighted
 # baseline `baselineMat` and candidates.
 # @noRd
-.lderAllBlockStats <- function(
+.h2EigenRegressionAllBlockStats <- function(
     eigenRef,
     z,
     baselineMat,
@@ -743,7 +763,7 @@ lderUnivariate <- function(
 ) {
     map(
         .ldEigenBlocks(eigenRef),
-        .lderBlockStats,
+        .h2EigenRegressionBlockStats,
         eigenRef = eigenRef,
         z = z,
         baselineMat = baselineMat,
@@ -752,14 +772,26 @@ lderUnivariate <- function(
     )
 }
 
-# LDER's score statistics for the candidate annotations; NULL when there are
-# none to test.
+# The eigen regression's score statistics for the candidate annotations; NULL
+# when there are none to test.
 # @noRd
-.lderCandidateScores <- function(rows, fit, blockStats, annotations, n) {
+.h2EigenRegressionCandidateScores <- function(
+    rows,
+    fit,
+    blockStats,
+    annotations,
+    n
+) {
     if (is.null(annotations)) {
         return(NULL)
     }
-    .lderScoreStats(rows, fit, blockStats, annotations, n)$scoreStats
+    .h2EigenRegressionScoreStats(
+        rows,
+        fit,
+        blockStats,
+        annotations,
+        n
+    )$scoreStats
 }
 
 
@@ -824,7 +856,7 @@ NULL
 
 # The annotation matrix A the LD-score estimators regress on: the baseline
 # design (.h2DesignMat()), or the all-ones base alone when unstratified.
-.gldscAnnotMatrix <- function(annotations, M) {
+.h2VariantAnnotMatrix <- function(annotations, M) {
     .h2DesignMat(annotations) %||%
         matrix(1, M, 1, dimnames = list(NULL, "base"))
 }
@@ -836,7 +868,7 @@ NULL
 # LDSCmatrix), and the GLS design is reproduced from it. A block read from a
 # genotype panel gets its scores from the panel's factor a stripe of rows at
 # a time (.ldSquaredProduct()).
-.gldscBlockDesign <- function(block, panel, z, A, candMat) {
+.h2GlsBlockDesign <- function(block, panel, z, A, candMat) {
     idx <- block$idx
     Ab <- .denseBlock(A, idx)
     Cb <- if (!is.null(candMat)) .denseBlock(candMat, idx)
@@ -844,7 +876,7 @@ NULL
     nA <- ncol(Ab)
     list(
         Ab = Ab,
-        ldsc = scores[, seq_len(nA), drop = FALSE],
+        ldScores = scores[, seq_len(nA), drop = FALSE],
         ldCand = if (!is.null(Cb)) scores[, -seq_len(nA), drop = FALSE],
         y = z[idx]^2 - 1
     )
@@ -854,10 +886,10 @@ NULL
 # reduced to its leading eigenpairs carrying `cutpoint` of the eigenvalue
 # mass (.h2TruncatedEigen()). A variant's entry of Da is its plug-in
 # variance, which a column taking negative values can drive below 0 and the
-# square root in .gldscS() cannot take, so it is floored there; Omega only
+# square root in .h2GlsS() cannot take, so it is floored there; Omega only
 # weights the fit, whose mean model this leaves alone.
-.gldscOmegaEigen <- function(ld, Ab, rawNtau, cutpoint = 0.99) {
-    S <- .gldscS(ld, pmax(rowSums(Ab), 0), rawNtau)
+.h2GlsOmegaEigen <- function(ld, Ab, rawNtau, cutpoint = 0.99) {
+    S <- .h2GlsS(ld, pmax(rowSums(Ab), 0), rawNtau)
     .h2TruncatedEigen(S^2, cutpoint)
 }
 
@@ -906,9 +938,9 @@ NULL
 # with R = F'F / (m - 1), S = F' (rawNtau / (m - 1) * (F Da F') F + noise F) /
 # (m - 1): only S is formed, which Omega needs whole, never the block's R.
 # Any other source's R is formed first.
-.gldscS <- function(ld, d, rawNtau, noise = 1) {
+.h2GlsS <- function(ld, d, rawNtau, noise = 1) {
     if (is.null(ld$R) && is.null(ld$ldFactor)) {
-        return(.gldscS(list(R = .ldSourceMatrix(ld)), d, rawNtau, noise))
+        return(.h2GlsS(list(R = .ldSourceMatrix(ld)), d, rawNtau, noise))
     }
     if (!is.null(ld$R)) {
         return(rawNtau * crossprod(ld$R * sqrt(d)) + noise * ld$R)
@@ -927,21 +959,21 @@ NULL
 # R = X'Omega^-1 y with X = [1 | l], plus its candidate-score pieces. Omega
 # is formed for the block, decomposed and dropped, so only one block's is
 # ever in memory; its inverse keeps `cutpoint` of the eigenvalue mass.
-.gldscBlockContrib <- function(block, design, panel, rawNtau, cutpoint) {
-    om <- .gldscOmegaEigen(
+.h2GlsBlockContrib <- function(block, design, panel, rawNtau, cutpoint) {
+    om <- .h2GlsOmegaEigen(
         .ldStatBlockLd(block, panel),
         design$Ab,
         rawNtau,
         cutpoint
     )
-    X <- cbind(1, design$ldsc)
+    X <- cbind(1, design$ldScores)
     P <- crossprod(om$vectors, X)
     Py <- crossprod(om$vectors, design$y)
     Pw <- P / om$values
     list(
         L = crossprod(Pw, P),
         R = as.vector(crossprod(Pw, Py)),
-        cand = .gldscCandidatePieces(om, design$ldCand, P, Py)
+        cand = .h2GlsCandidatePieces(om, design$ldCand, P, Py)
     )
 }
 
@@ -950,7 +982,7 @@ NULL
 # coef: keeping l_c' Omega^-1 y and l_c' Omega^-1 X lets the block's score be
 # formed once the fit is known, without revisiting the block. NULL without
 # candidates.
-.gldscCandidatePieces <- function(om, ldCand, P, Py) {
+.h2GlsCandidatePieces <- function(om, ldCand, P, Py) {
     if (is.null(ldCand)) {
         return(NULL)
     }
@@ -964,7 +996,7 @@ NULL
 # GLS estimate from accumulated normal equations: tau = solve(L, R)/N (the
 # leading entry is the confounding intercept), partitioned h2 = A'A tau, the
 # relative `ridge` on the normal equations (.h2RidgeSolve()).
-.gldscEstimate <- function(left, right, A, N, ridge) {
+.h2GlsEstimate <- function(left, right, A, N, ridge) {
     coef <- as.vector(.h2RidgeSolve(left, right, ridge))
     tauAll <- coef / N
     tau <- tauAll[-1]
@@ -980,10 +1012,10 @@ NULL
 # from the accumulated normal equations (so folds stay GLS-weighted), each
 # fold's Omega the full data's, as the original gldsc's oneout() keeps it.
 # Jackknife variance = var * (nB-1)^2 / nB (Xiong et al.).
-.gldscJackknife <- function(contrib, left, right, A, N, ridge) {
+.h2GlsJackknife <- function(contrib, left, right, A, N, ridge) {
     loo <- map(
         contrib,
-        .gldscLooEstimate,
+        .h2GlsLooEstimate,
         left = left,
         right = right,
         A = A,
@@ -1005,7 +1037,7 @@ NULL
 # vanishes (X' Omega^-1 r = 0 at the fit); block by block it does not, and
 # it is what makes the blocks' scores the efficient ones the jackknife
 # variance is taken over.
-.gldscCandidateBlock <- function(cb, coef, beta) {
+.h2GlsCandidateBlock <- function(cb, coef, beta) {
     U <- cb$cand$Uy - as.vector(cb$cand$UX %*% coef)
     Xr <- cb$R - as.vector(cb$L %*% coef)
     U - as.vector(crossprod(beta, Xr))
@@ -1015,13 +1047,13 @@ NULL
 # calibrated by the blocks' own spread (.h2BlockScoreStats()) rather than by
 # the model information l_c' Omega^-1 l_c, which ignored the estimated
 # baseline and trusted the plug-in Omega.
-.gldscScoreStats <- function(contrib, coef, ridge) {
+.h2GlsScoreStats <- function(contrib, coef, ridge) {
     left <- reduce(map(contrib, "L"), `+`)
-    lX <- reduce(map(contrib, .gldscCandidateCross), `+`)
+    lX <- reduce(map(contrib, .h2GlsCandidateCross), `+`)
     beta <- .h2RidgeSolve(left, lX, ridge)
     blockScores <- map(
         contrib,
-        .gldscCandidateBlock,
+        .h2GlsCandidateBlock,
         coef = coef,
         beta = beta
     )
@@ -1030,7 +1062,7 @@ NULL
 
 # One block's candidate cross-products X' Omega^-1 l_c, design by candidate.
 # @noRd
-.gldscCandidateCross <- function(cb) {
+.h2GlsCandidateCross <- function(cb) {
     t(cb$cand$UX)
 }
 
@@ -1075,9 +1107,9 @@ NULL
     list(scoreZ = unname(U / sqrt(pmax(V, .Machine$double.xmin))), R = R)
 }
 
-# g-LDSC, stratified by `annotations` where given, under the settings `param`
-# (g-LDSC's own by default: .h2GenomeWideSettings()).
-gldscUnivariate <- function(
+# The genome-wide variant GLS, stratified by `annotations` where given, under
+# the settings `param` (the gldsc preset's by default: .h2GenomeWideSettings()).
+variantGlsUnivariate <- function(
     z,
     n,
     ldRef,
@@ -1086,9 +1118,9 @@ gldscUnivariate <- function(
     weights = .h2RefWeights(param, ldRef)
 ) {
     proc <- param@procedures
-    .gldscAssertLd(ldRef)
+    .h2GlsAssertLd(ldRef)
     M <- length(ldRef)
-    A <- .gldscAnnotMatrix(annotations, M)
+    A <- .h2VariantAnnotMatrix(annotations, M)
     # The model's columns: each variant's variance under frequency weights
     # is its weight times A's; A itself is what the annotations cover.
     modelMat <- .h2WeightedDesign(A, weights)
@@ -1098,37 +1130,37 @@ gldscUnivariate <- function(
     # block's design first. A block read from a panel is read once per pass.
     designs <- map(
         blocks,
-        .gldscBlockDesign,
+        .h2GlsBlockDesign,
         panel = panel,
         z = z,
         A = modelMat,
         candMat = .h2WeightedDesign(.h2CandidateMat(annotations), weights)
     )
     rawNtau <- sum(list_c(map(designs, "y"))) /
-        sum(list_c(map(designs, "ldsc")))
+        sum(list_c(map(designs, "ldScores")))
     contrib <- map2(
         blocks,
         designs,
-        .gldscBlockContrib,
+        .h2GlsBlockContrib,
         panel = panel,
         rawNtau = rawNtau,
         cutpoint = proc@omegaFraction
     )
     left <- reduce(map(contrib, "L"), `+`)
     right <- reduce(map(contrib, "R"), `+`)
-    fit <- .gldscEstimate(left, right, modelMat, n, proc@ridge)
-    jk <- .gldscJackknife(contrib, left, right, modelMat, n, proc@ridge)
-    .gldscResult(fit, jk, annotations, contrib, A, proc@ridge, weights)
+    fit <- .h2GlsEstimate(left, right, modelMat, n, proc@ridge)
+    jk <- .h2GlsJackknife(contrib, left, right, modelMat, n, proc@ridge)
+    .h2GlsResult(fit, jk, annotations, contrib, A, proc@ridge, weights)
 }
 
 # The candidate-annotation score statistics, when candidates were supplied.
 # NULL otherwise.
 # @noRd
-.gldscCandidateScores <- function(annotations, contrib, fit, ridge) {
+.h2GlsCandidateScores <- function(annotations, contrib, fit, ridge) {
     if (is.null(.h2CandidateMat(annotations))) {
         return(NULL)
     }
-    sc <- .gldscScoreStats(contrib, fit$coef, ridge)
+    sc <- .h2GlsScoreStats(contrib, fit$coef, ridge)
     list(
         z = sc$scoreZ,
         R = sc$R,
@@ -1138,15 +1170,18 @@ gldscUnivariate <- function(
     )
 }
 
-# g-LDSC forms each block's Omega from its LD, which a scores-only LdScore
-# does not carry.
+# The variant GLS forms each block's Omega from its LD, which a scores-only
+# LdScore does not carry.
 # @noRd
-.gldscAssertLd <- function(ldRef) {
+.h2GlsAssertLd <- function(ldRef) {
     if (.ldScoreHasLd(ldRef)) {
         return(invisible(NULL))
     }
     abort(c(
-        "g-LDSC needs each LD block's LD, and this LdScore carries none.",
+        str_c(
+            "The variant GLS needs each LD block's LD, and this LdScore ",
+            "carries none."
+        ),
         i = str_c(
             "Build it from a genotype panel, or from LdMatrix blocks ",
             "with `keepLdMatrices = TRUE`."
@@ -1154,8 +1189,8 @@ gldscUnivariate <- function(
     ))
 }
 
-# Assemble the gldscUnivariate return (enrichment, candidate scores).
-.gldscResult <- function(fit, jk, annotations, contrib, A, ridge, w = NULL) {
+# Assemble the variantGlsUnivariate return (enrichment, candidate scores).
+.h2GlsResult <- function(fit, jk, annotations, contrib, A, ridge, w = NULL) {
     .h2FitResult(
         h2 = fit$h2,
         h2Se = jk$h2Se,
@@ -1164,7 +1199,7 @@ gldscUnivariate <- function(
         A = if (is.null(.h2BaselineMat(annotations))) NULL else A,
         tau = fit$tau,
         tauBlocks = jk$annotationJackknifeCoefs,
-        scoreStats = .gldscCandidateScores(annotations, contrib, fit, ridge),
+        scoreStats = .h2GlsCandidateScores(annotations, contrib, fit, ridge),
         w = w
     )
 }
@@ -1193,44 +1228,58 @@ gldscUnivariate <- function(
 NULL
 
 # =============================================================================
-# Every eigen likelihood's maximum: Fisher scoring
+# Every eigen likelihood's maximum: projected Fisher scoring
 # =============================================================================
 
-# The maximum of a log-likelihood by Fisher scoring from each of `starts` (a
-# list of parameter vectors) within [lower, upper]. `objective(theta, data,
-# scoring)` gives the log-likelihood at theta (`value`) and, where `scoring`
-# asks, its `score` and expected `information`. Each step solves the
-# information against the score for the parameters no bound holds (one the
-# score pushes past it) and is kept in the box; one that overshoots the
-# line's maximum is drawn back, and one that falls is held off a floor's kink
-# or halved until the log-likelihood rises (.h2ScoringAscend()). A run
-# converges when no step raises it or its step no longer moves it. A run
-# whose value alone is read (`valueOnly`: a null's or a profile's) also
-# converges where its step's predicted rise is below 1e-10 of the value,
+# The maximum of the log-likelihood `model` gives `data` from each of `starts`
+# (a list of parameter vectors) within [lower, upper], by projected Fisher
+# scoring in compiled code (eigenLikelihoodFitCpp(), src/eigen_likelihood.cpp):
+# dlib's box-constrained minimizer along a projected Newton direction whose
+# Hessian is the expected information. `model` is one of "variance" (b ~ N(0,
+# offset + G theta), floored), "tied" (the noise tied to 1 - h2, with a scale
+# where fitted), "nullSpace" (the tied model over all n samples), "cross" (a
+# pair's second statistics given the first's), "reduced" (a pair on two
+# references as independent pairs) and "joint" (a group, on one reference or
+# several); `data` holds what it reads. With `free`, the fit is in those
+# parameters alone, the rest held at `full`'s. Each iteration is one of
+# dlib's, its line search from the whole step. A run stops where the next
+# step's predicted rise is below 1e-14 of the log-likelihood's size, or below
+# 1e-10 where its value alone is read (`valueOnly`: a null's or a profile's),
 # closer than an interval's root or a p-value reads it (at a value of 200,
-# 2e-8 moves a root by under 1e-8); a fit's steps go on past that, as
-# its score still points them closer. Each start's fit:
-# list(par, value, converged, information).
+# 2e-8 moves a root by under 1e-8), or where an iteration does not raise it;
+# it has not converged where it reaches `maxit` iterations first. Each
+# start's fit: list(par, value, converged, information).
 # @noRd
 .h2Scoring <- function(
-    objective,
+    model,
     data,
     starts,
     lower,
     upper,
     maxit,
-    valueOnly = FALSE
+    valueOnly = FALSE,
+    full = NULL,
+    free = NULL
 ) {
-    map(
-        starts,
-        .h2ScoringRun,
-        objective = objective,
-        data = data,
-        lower = lower,
-        upper = upper,
-        maxit = maxit,
-        valueOnly = valueOnly
+    eigenLikelihoodFitCpp(
+        model,
+        data,
+        map(starts, as.double),
+        as.double(lower),
+        as.double(upper),
+        as.double(full %||% numeric()),
+        as.integer(free %||% integer()),
+        as.integer(maxit),
+        valueOnly
     )
+}
+
+# The log-likelihood `model` gives `data` at theta (.h2Scoring()'s models)
+# and, where `scoring` asks, its score and expected information
+# (eigenLikelihoodCpp()).
+# @noRd
+.h2Likelihood <- function(model, data, theta, scoring = FALSE) {
+    eigenLikelihoodCpp(model, data, as.double(theta), scoring)
 }
 
 # The best of `fits` that converged with a value no worse than `nullValue`,
@@ -1247,204 +1296,6 @@ NULL
     fits[[which.max(replace(values, !accepted, -Inf))]]
 }
 
-# One run of .h2Scoring() from `start`. Each step reads the last, so this
-# stays a loop. It stops where the step moves no parameter by more than 1e-10
-# of its size, where no halving of it raises the value or, for a value alone,
-# where the step's predicted rise is below 1e-10 of it (.h2ScoringClose()).
-# @noRd
-.h2ScoringRun <- function(
-    start,
-    objective,
-    data,
-    lower,
-    upper,
-    maxit,
-    valueOnly
-) {
-    theta <- pmin(pmax(start, lower), upper)
-    at <- objective(theta, data, TRUE)
-    converged <- FALSE
-    level <- 0L
-    for (i in seq_len(maxit)) {
-        step <- .h2ScoringStep(theta, at, lower, upper)
-        box <- list(lower = lower, upper = upper, level = level)
-        moved <- if (!(valueOnly && .h2ScoringClose(at, step))) {
-            .h2ScoringAscend(theta, step, at, objective, data, box)
-        }
-        if (is.null(moved)) {
-            converged <- TRUE
-            break
-        }
-        still <- max(abs(moved$par - theta)) <= 1e-10 * max(1, abs(theta))
-        theta <- moved$par
-        at <- moved$at
-        level <- .h2ScoringLevel(box$level, moved$level)
-        if (still) {
-            converged <- TRUE
-            break
-        }
-    }
-    list(
-        par = theta,
-        value = at$value,
-        converged = converged,
-        information = at$information
-    )
-}
-
-# The halving the next step starts from: one less where this step's first
-# trial rose (its length grows back toward the whole step), else the halving
-# this one needed.
-# @noRd
-.h2ScoringLevel <- function(started, taken) {
-    if (taken == started) max(started - 1L, 0L) else taken
-}
-
-# Whether the step's predicted rise in the log-likelihood, half its inner
-# product with the score, is below 1e-10 of the value.
-# @noRd
-.h2ScoringClose <- function(at, step) {
-    moving <- step != 0
-    rise <- sum(at$score[moving] * step[moving]) / 2
-    isTRUE(rise <= 1e-10 * max(1, abs(at$value)))
-}
-
-# The scoring step at `at`, the objective's value, score and information at
-# theta: zero for a parameter at a bound its score pushes past, and none at
-# all without information. Its damping is 1e-12 of the information's mean
-# diagonal, not of each parameter's own (.h2RidgeSolve()): it holds the step
-# finite along a direction the data barely inform, as dependent annotations
-# give, where a parameter's own entry is itself near 0.
-# @noRd
-.h2ScoringStep <- function(theta, at, lower, upper) {
-    held <- (theta <= lower & at$score < 0) | (theta >= upper & at$score > 0)
-    free <- !held & is.finite(at$score)
-    info <- at$information[free, free, drop = FALSE]
-    scale <- if (any(free)) mean(abs(diag(info))) else 0
-    if (!is.finite(scale) || scale <= 0) {
-        return(numeric(length(theta)))
-    }
-    solved <- solve(info + diag(1e-12 * scale, sum(free)), at$score[free])
-    replace(numeric(length(theta)), free, solved)
-}
-
-# The step, kept in the box (`box`: its bounds and the halving to start
-# from), with the objective's score and information there and the halving
-# taken: from the whole step, drawn back where it rises past the line's
-# maximum (.h2ScoringBack()) and held off the score's change across it where
-# it falls (.h2ScoringAcross()); else halved, from the halving the last step
-# leaves (.h2ScoringLevel()), until the log-likelihood rises above `at`'s
-# value, so that a region whose steps all need halving does not halve each
-# one from the whole; NULL when no halving raises it.
-# @noRd
-.h2ScoringAscend <- function(theta, step, at, objective, data, box) {
-    if (all(step == 0)) {
-        return(NULL)
-    }
-    lower <- box$lower
-    upper <- box$upper
-    if (box$level == 0L) {
-        whole <- pmin(pmax(theta + step, lower), upper)
-        there <- objective(whole, data, TRUE)
-        if (isTRUE(there$value > at$value)) {
-            back <- .h2ScoringBack(theta, whole, at, there, objective, data)
-            return(list_assign(back, level = 0L))
-        }
-        ends <- list(at = at, there = there)
-        across <- .h2ScoringAcross(theta, step, ends, objective, data, box)
-        if (!is.null(across)) {
-            return(list_assign(across, level = 0L))
-        }
-    }
-    halving <- detect(
-        max(box$level, 1L):40,
-        .h2ScoringRises,
-        theta = theta,
-        step = step,
-        value = at$value,
-        objective = objective,
-        data = data,
-        lower = lower,
-        upper = upper
-    )
-    if (is.null(halving)) {
-        return(NULL)
-    }
-    par <- pmin(pmax(theta + step / 2^halving, lower), upper)
-    list(par = par, at = objective(par, data, TRUE), level = halving)
-}
-
-# A step to `whole` that rises, with `there` the objective at it; or, where
-# the log-likelihood's slope along it has turned from rising to falling (the
-# information understates the curvature, and full steps would overshoot from
-# side to side), the point short of it where the slope's secant puts the
-# line's maximum, if that lies under three quarters of the way and is higher.
-# The point lies between the two ends, so in the box.
-# @noRd
-.h2ScoringBack <- function(theta, whole, at, there, objective, data) {
-    move <- whole - theta
-    moving <- move != 0
-    first <- sum(at$score[moving] * move[moving])
-    last <- sum(there$score[moving] * move[moving])
-    fraction <- first / (first - last)
-    if (!isTRUE(first > 0 && last < 0 && fraction < 0.75)) {
-        return(list(par = whole, at = there))
-    }
-    par <- theta + fraction * move
-    back <- objective(par, data, TRUE)
-    if (isTRUE(back$value > there$value)) {
-        list(par = par, at = back)
-    } else {
-        list(par = whole, at = there)
-    }
-}
-
-# Where the step falls: the step held off the change in the score between its
-# ends, in the information's metric (d = I^-1 g less its part along I^-1 m,
-# m the change, so that m'd = 0), kept in the box, where that rises. A floor
-# crossed between the ends (a direction's variance reaching it) changes the
-# score along that direction's normal, so this steps along the kink, where
-# halving a step across it would close in on the kink short of the maximum.
-# NULL where it does not rise.
-# @noRd
-.h2ScoringAcross <- function(theta, step, ends, objective, data, box) {
-    free <- step != 0
-    m <- ends$there$score[free] - ends$at$score[free]
-    if (!all(is.finite(m)) || all(m == 0)) {
-        return(NULL)
-    }
-    info <- ends$at$information[free, free, drop = FALSE]
-    damping <- diag(1e-12 * mean(abs(diag(info))), sum(free))
-    Im <- as.vector(solve(info + damping, m))
-    d <- step[free] - Im * sum(m * step[free]) / sum(m * Im)
-    if (!all(is.finite(d))) {
-        return(NULL)
-    }
-    moved <- replace(theta, free, theta[free] + d)
-    par <- pmin(pmax(moved, box$lower), box$upper)
-    near <- objective(par, data, TRUE)
-    if (isTRUE(near$value > ends$at$value)) {
-        list(par = par, at = near)
-    } else {
-        NULL
-    }
-}
-
-# @noRd
-.h2ScoringRises <- function(
-    halving,
-    theta,
-    step,
-    value,
-    objective,
-    data,
-    lower,
-    upper
-) {
-    candidate <- pmin(pmax(theta + step / 2^halving, lower), upper)
-    isTRUE(objective(candidate, data, FALSE)$value > value)
-}
-
 # A parameter's standard error, the first's, from the expected information at
 # a fit; NA unless the settings ask for it.
 # @noRd
@@ -1453,71 +1304,6 @@ NULL
         return(NA_real_)
     }
     sqrt(solve(fit$information)[[1L, 1L]])
-}
-
-# The score and expected information of Gaussian terms e ~ N(0, D), each
-# conditional on those before it, with their log-likelihood `value`: from the
-# terms' squared residuals e2 and variances D, and the derivatives (terms x
-# parameters) of the variances (dD) and, where the terms' means move with the
-# parameters, of the residuals (de, with the residuals e); `w` weighs a term
-# standing for several alike (only where the means do not move). The score
-# is sum(-e de / D + (e^2 / D - 1) dD / (2 D)), the information sum(de de' /
-# D + dD dD' / (2 D^2)).
-# @noRd
-.h2ConditionalScoring <- function(
-    value,
-    D,
-    dD,
-    e2,
-    e = NULL,
-    de = NULL,
-    w = 1
-) {
-    varianceScore <- crossprod(dD, w * (e2 / D - 1) / (2 * D))
-    varianceInfo <- crossprod(dD * sqrt(w) / D) / 2
-    if (is.null(de)) {
-        return(list(
-            value = value,
-            score = as.vector(varianceScore),
-            information = varianceInfo
-        ))
-    }
-    list(
-        value = value,
-        score = as.vector(varianceScore + crossprod(de, -e / D)),
-        information = varianceInfo + crossprod(de / sqrt(D))
-    )
-}
-
-# The eigen likelihood of rotated statistics b ~ N(0, v), v = offset + G theta
-# floored at `floor`, as .h2Scoring() reads it: `data` holds G, b2 (the
-# squared statistics), offset and floor. A direction at the floor carries no
-# parameter.
-# @noRd
-.h2VarianceObjective <- function(theta, data, scoring) {
-    raw <- data$offset + as.vector(data$G %*% theta)
-    v <- pmax(raw, data$floor)
-    value <- -sum(log(v) + data$b2 / v) / 2
-    if (!scoring) {
-        return(list(value = value))
-    }
-    .h2ConditionalScoring(value, v, data$G * (raw > data$floor), data$b2)
-}
-
-# An objective in the parameters `data$free` of `data$objective`'s, the rest
-# held at `data$full`'s, as .h2Scoring() reads it.
-# @noRd
-.h2FixedObjective <- function(theta, data, scoring) {
-    full <- replace(data$full, data$free, theta)
-    at <- data$objective(full, data$inner, scoring)
-    if (!scoring) {
-        return(at)
-    }
-    list(
-        value = at$value,
-        score = at$score[data$free],
-        information = at$information[data$free, data$free, drop = FALSE]
-    )
 }
 
 # The 95% interval of a coordinate from inverting the likelihood ratio: the
@@ -1596,17 +1382,17 @@ NULL
 }
 
 # =============================================================================
-# HDL likelihood + design
+# The eigen likelihood: the genome-wide design and fit
 # =============================================================================
 
-# Per-block HDL quantities: eigenvalues, rotated N-normalized effects
-# bstar = V'(z/sqrt(n)), stratified eigenvalue scores l_{ia} (NULL when
-# unstratified) and the candidate annotations' scores, from the block's
-# decomposition. The zero-eigenvalue directions a decomposition from a
-# panel's factor does not list are added with lam = 0. Under frequency
-# weights `w` the pseudo-eigenpairs stand in (.h2WeightedBlock()), with the
-# weighted annotation matrices.
-.hdlBlockData <- function(
+# Per-block quantities of the eigen likelihood: eigenvalues, rotated
+# N-normalized effects bstar = V'(z/sqrt(n)), stratified eigenvalue scores
+# l_{ia} (NULL when unstratified) and the candidate annotations' scores, from
+# the block's decomposition. The zero-eigenvalue directions a decomposition from
+# a panel's factor does not list are added with lam = 0. Under frequency weights
+# `w` the pseudo-eigenpairs stand in (.h2WeightedBlock()), with the weighted
+# annotation matrices.
+.h2EigenBlockData <- function(
     block,
     eigenRef,
     z,
@@ -1620,20 +1406,20 @@ NULL
     bstar <- as.vector(crossprod(dec$vectors, zb))
     list(
         lam = c(dec$values, numeric(dec$nNull)),
-        bstar = c(bstar, .hdlNullBstar(zb, bstar, dec$nNull)),
+        bstar = c(bstar, .h2UnlistedBstar(zb, bstar, dec$nNull)),
         ldAnnot = .h2EigenAnnot(dec, baselineMat),
         ldCand = .h2EigenAnnot(dec, candMat)
     )
 }
 
-# The rotated effects along a block's unlisted zero-eigenvalue directions.
-# HDL gives every such direction the same modelled variance, its floor, so
-# the likelihood sees only their total sum of squares: the part of z outside
+# The rotated effects along a block's unlisted zero-eigenvalue directions. The
+# likelihood gives every such direction the same modelled variance, its floor,
+# so the likelihood sees only their total sum of squares: the part of z outside
 # the listed directions, spread evenly over them, leaves every estimate as a
 # full decomposition would give it. With frequency weights, whose
-# pseudo-eigenvectors are not orthonormal, the share is not that part, but
-# no estimate reads it: no parameter reaches the floor.
-.hdlNullBstar <- function(zb, bstar, nNull) {
+# pseudo-eigenvectors are not orthonormal, the share is not that part, but no
+# estimate reads it: no parameter reaches the floor.
+.h2UnlistedBstar <- function(zb, bstar, nNull) {
     if (nNull == 0L) {
         return(numeric())
     }
@@ -1641,10 +1427,10 @@ NULL
 }
 
 # Genome-wide design: eigenvalues, rotated effects, block ids and the scaled
-# eigenvalue-score matrix, with the parametrization `basis` (.hdlFitBasis()).
-# Univariate uses a single all-ones score column (l_{i,base} = 1) scaled by
-# total M, h2 within the procedures' bounds.
-.hdlDesign <- function(blockData, M, basis, proc) {
+# eigenvalue-score matrix, with the parametrization `basis`
+# (.h2AnnotationBasis()). Univariate uses a single all-ones score column
+# (l_{i,base} = 1) scaled by total M, h2 within the procedures' bounds.
+.h2EigenDesign <- function(blockData, M, basis, proc) {
     lam <- list_c(map(blockData, "lam"))
     fit <- basis %||%
         list(
@@ -1690,7 +1476,7 @@ NULL
 # parameter is within twice that: its positive and negative parts cancel,
 # and with non-negative variant rates each is at most the total.
 # @noRd
-.hdlFitBasis <- function(A, w = NULL, bounds = c(0, 1)) {
+.h2AnnotationBasis <- function(A, w = NULL, bounds = c(0, 1)) {
     weighted <- .h2WeightedDesign(A, w)
     ones <- .h2OnesCoef(A)
     anchored <- colSums(A != 0) < nrow(A) & colSums(A < 0) == 0
@@ -1700,9 +1486,9 @@ NULL
     size <- replace(
         colSums(abs(weighted)),
         centered,
-        .hdlCenteredSize(A[, centered, drop = FALSE], means[centered], w)
+        .h2CenteredSize(A[, centered, drop = FALSE], means[centered], w)
     )
-    carried <- .hdlCarriedColumns(A[, !centered, drop = FALSE])
+    carried <- .h2CarriedColumns(A[, !centered, drop = FALSE])
     alone <- replace(logical(ncol(A)), !centered, carried)
     span <- bounds[[2L]] - bounds[[1L]]
     list(
@@ -1721,13 +1507,13 @@ NULL
 # The total absolute value of each column of `A` about its mean, each
 # variant's term times its frequency weight in `w` where there are weights.
 # @noRd
-.hdlCenteredSize <- function(A, means, w = NULL) {
+.h2CenteredSize <- function(A, means, w = NULL) {
     colSums(abs(as.matrix(A) - rep(means, each = nrow(A))) * (w %||% 1))
 }
 
 # Whether some variant is non-zero on each column of `A` and on no other.
 # @noRd
-.hdlCarriedColumns <- function(A) {
+.h2CarriedColumns <- function(A) {
     nonZero <- A != 0
     alone <- rowSums(nonZero) == 1L
     colSums(nonZero[alone, , drop = FALSE]) > 0
@@ -1736,23 +1522,24 @@ NULL
 # The coefficients of the design's columns from its parameters, one set per row
 # of `h2a`.
 # @noRd
-.hdlTau <- function(h2a, design) {
+.h2AnnotationTau <- function(h2a, design) {
     sweep(h2a, 2L, design$size, "/") %*% t(design$transform)
 }
 
-# Fit HDL over (h2_1..h2_nTau, int) by Fisher scoring (.h2Scoring()), with
-# each h2_a in the design's bounds (.hdlFitBasis(); the procedures' h2 bounds
-# unstratified) and int in theirs ([0, 10] in Ning et al. 2020), from the
-# procedures' starts (.h2VarianceStarts()), keeping the best that converges;
-# NA where none does. Parametrizing by per-annotation h2 (scale ~1) keeps the
-# information well conditioned.
-.hdlFit <- function(design, n, nSamples, proc, warnOnBound = TRUE) {
+# Fit the genome-wide eigen likelihood over (h2_1..h2_nTau, int) by Fisher
+# scoring (.h2Scoring()), with each h2_a in the design's bounds
+# (.h2AnnotationBasis(); the procedures' h2 bounds unstratified) and int in
+# theirs ([0, 10] in Ning et al. 2020), from the procedures' starts
+# (.h2VarianceStarts()), keeping the best that converges; NA where none does.
+# Parametrizing by per-annotation h2 (scale ~1) keeps the information well
+# conditioned.
+.h2VarianceFit <- function(design, n, nSamples, proc, warnOnBound = TRUE) {
     nTau <- ncol(design$ldAnnotScaled)
-    data <- .hdlScoringData(design, n, nSamples, proc)
+    data <- .h2VarianceData(design, n, nSamples, proc)
     lower <- c(design$lower, proc@interceptBounds[[1L]])
     upper <- c(design$upper, proc@interceptBounds[[2L]])
     best <- .h2ScoringBest(.h2Scoring(
-        .h2VarianceObjective,
+        "variance",
         data,
         .h2VarianceStarts(proc, data, nTau, lower, upper),
         lower,
@@ -1763,18 +1550,18 @@ NULL
         return(list(h2a = rep(NA_real_, nTau), int = NA_real_, h2 = NA_real_))
     }
     if (warnOnBound) {
-        .hdlWarnIfAtBound(best$par, upper, n, nSamples)
+        .h2WarnIfAtBound(best$par, upper, n, nSamples)
     }
     h2a <- best$par[seq_len(nTau)]
     list(h2a = h2a, int = best$par[[nTau + 1L]], h2 = sum(h2a * design$share))
 }
 
-# What .h2VarianceObjective() reads of a genome-wide HDL design: each
+# What the "variance" likelihood reads of a genome-wide design: each
 # direction's variance in (h2_1..h2_nTau, int), G = [its scaled eigenvalue
 # scores times lam^2, less lam share / nRef; lam / n], its squared rotated
 # effect, and the procedures' floor.
 # @noRd
-.hdlScoringData <- function(design, n, nSamples, proc) {
+.h2VarianceData <- function(design, n, nSamples, proc) {
     list(
         G = cbind(
             design$ldAnnotScaled *
@@ -1788,7 +1575,7 @@ NULL
     )
 }
 
-# HDL's likelihood carries a finite-reference term, -lam * h2 / nRef, that
+# The eigen likelihood carries a finite-reference term, -lam * h2 / nRef, that
 # subtracts from the modelled variance. Once the reference is small enough
 # relative to the GWAS, that term outgrows the signal term, the modelled
 # variance is driven negative across most directions, and the optimiser walks
@@ -1805,7 +1592,7 @@ NULL
 # legitimate estimate for a null trait. Warning on those would fire on
 # healthy fits and train the reader to ignore the message.
 # @noRd
-.hdlWarnIfAtBound <- function(par, upper, n, nSamples) {
+.h2WarnIfAtBound <- function(par, upper, n, nSamples) {
     tol <- 1e-6
     atUpper <- par >= upper - tol
     if (!any(atUpper)) {
@@ -1817,8 +1604,9 @@ NULL
         "heritability"
     }
     warn(glue(
-        "HDL: the fitted {which} sits at the top of its range, so the ",
-        "estimate reflects that bound rather than the data. This usually ",
+        "In the eigen likelihood's fit, the fitted {which} sits at the top ",
+        "of its range, so the estimate reflects that bound rather than the ",
+        "data. This usually ",
         "means the LD reference is too small for the GWAS -- the ",
         "finite-reference correction scales as 1/nSamples, and here ",
         "nSamples = {nSamples} against N = {round(n)}. Compare the other ",
@@ -1828,9 +1616,9 @@ NULL
     invisible(TRUE)
 }
 
-# Baseline modeled variance lamh2_i at the fitted parameters (for the sHDL
-# candidate score test).
-.hdlBaselineVar <- function(design, ft, n, nSamples, lim = exp(-10)) {
+# Baseline modeled variance lamh2_i at the fitted parameters (for the
+# candidate annotations' score test).
+.h2BaselineVariance <- function(design, ft, n, nSamples, lim = exp(-10)) {
     s <- as.vector(design$ldAnnotScaled %*% ft$h2a)
     pmax(
         s *
@@ -1842,17 +1630,17 @@ NULL
 }
 
 # =============================================================================
-# HDL standard errors (delete-one-block jackknife) + enrichment inputs
+# The eigen likelihood's standard errors (jackknife) + enrichment inputs
 # =============================================================================
 
 # Delete-one-block jackknife (Ning et al. 2020): refit leaving each block out,
 # SE = sqrt(mean((jack - mean)^2) * (nBlocks - 1)). Returns per-annotation and
 # total-h2 SEs, the intercept SE, and the LOO per-annotation blocks.
-.hdlJackknife <- function(blockData, M, basis, n, nSamples, proc) {
+.h2VarianceJackknife <- function(blockData, M, basis, n, nSamples, proc) {
     nBlocks <- length(blockData)
     loo <- map(
         seq_len(nBlocks),
-        .hdlLooFit,
+        .h2VarianceLooFit,
         blockData = blockData,
         M = M,
         basis = basis,
@@ -2220,7 +2008,7 @@ NULL
 # kept standardized directions, delta = Lambda_K^-1/2 Q_K' r, for the
 # summarized sample size n, with no estimate from fewer than `minimum`
 # directions or with no degrees of freedom left. With phi how far the
-# reference's LD lies from the study's own (.lavaPhi()), the noise per
+# reference's LD lies from the study's own (.h2OverlapFactor()), the noise per
 # direction is (1 - h2 + h2 phi) / (n - 1), which gives
 #   h2 = (delta'delta - m) / v, m = K / (n - 1), v = 1 + m (phi - 1).
 # At phi = 0 that is LAVA's adjusted R^2 exactly; for a reference sharing no
@@ -2229,7 +2017,7 @@ NULL
 # delta'delta) / (n - K - 1), holds at phi = 0 alone: past it, it leaves h2 m
 # in the estimate, and it has no answer once delta'delta reaches 1, as a
 # reference's components can with K / n large. Without the overlap factor,
-# phi is 1: a reference with no sampling noise of its own. p is .lavaP()'s.
+# phi is 1: a reference with no sampling noise of its own. p is .h2MomentsP()'s.
 # LAVA withholds h2 where K / n exceeds 0.1; it is reported here at any K,
 # since a cis window's K usually does.
 # @noRd
@@ -2245,12 +2033,12 @@ NULL
     m <- K / (n - 1)
     factor <- identical(param@referenceNoise, "overlapFactor")
     overlap <- ld$referenceOverlap %||% 0
-    phi <- if (factor) .lavaPhi(n, ld$nSamples, overlap) else 1
+    phi <- if (factor) .h2OverlapFactor(n, ld$nSamples, overlap) else 1
     v <- 1 + m * (phi - 1)
     .cisH2Result(
         K,
         h2 = (dtd - m) / v,
-        p = .lavaP(dtd, m, v, n),
+        p = .h2MomentsP(dtd, m, v, n),
         smallReference = factor && overlap == 0 && ld$nSamples <= 2 * n
     )
 }
@@ -2262,7 +2050,7 @@ NULL
 # Divergence between the populations adds to it, unmodelled: measuring that
 # takes the study's own LD.
 # @noRd
-.lavaPhi <- function(n, nRef, overlap) {
+.h2OverlapFactor <- function(n, nRef, overlap) {
     1 + (1 - 2 * overlap) * n / nRef
 }
 
@@ -2272,7 +2060,7 @@ NULL
 # NA where they fit no Beta, at a very small n.
 # @noRd
 #' @importFrom stats pbeta
-.lavaP <- function(dtd, m, v, n) {
+.h2MomentsP <- function(dtd, m, v, n) {
     s <- (1 - m) * (n + 1) / (2 * v) - 1
     if (s <= 0) {
         return(NA_real_)
@@ -2283,8 +2071,8 @@ NULL
 # ---- the likelihood ----------------------------------------------------------
 
 # The Gaussian likelihood of the rotated correlations bstar = Q'r over the
-# kept directions, with the noise free (an intercept, HDL-L's) or tied (1 -
-# h2, FastHer's): the data each fit reads.
+# kept directions, with the noise free (an intercept) or tied (1 - h2): the
+# data each fit reads.
 # @noRd
 .h2EigenLikelihood <- function(param, z, nVariant, ld) {
     n <- .h2SampleSize(param@sampleSize, nVariant)
@@ -2324,21 +2112,21 @@ NULL
     if (param@procedures@halfBoundaryP) p / 2 else p
 }
 
-# Free noise, HDL-L's model (HDL's HDL.L()): h2 and the intercept together
+# Free noise: h2 and the intercept together
 # by Fisher scoring (.h2Scoring()) from every start the procedures give
 # (.h2VarianceStarts()), keeping the best fit that converges and, where the
-# procedures say, beats the intercept-only fit (.hdlLocusNull()); every
-# estimate is NA when none does, where HDL.L() itself stops with an error.
+# procedures say, beats the intercept-only fit (.h2WindowNull()); every
+# estimate is NA when none does.
 # @noRd
 .h2LikelihoodFree <- function(param, data) {
     proc <- param@procedures
     K <- length(data$lam)
-    full <- .hdlLocusScoringData(data)
+    full <- .h2WindowData(data)
     lower <- c(proc@h2Bounds[[1L]], proc@interceptBounds[[1L]])
     upper <- c(proc@h2Bounds[[2L]], proc@interceptBounds[[2L]])
-    null <- .hdlLocusNull(data, proc)
+    null <- .h2WindowNull(data, proc)
     fits <- .h2Scoring(
-        .h2VarianceObjective,
+        "variance",
         full,
         .h2VarianceStarts(proc, full, 1L, lower, upper),
         lower,
@@ -2360,12 +2148,12 @@ NULL
     )
 }
 
-# What .h2VarianceObjective() reads of one window's rotated statistics: their
+# What the "variance" likelihood reads of one window's rotated statistics: their
 # variance in (h2, intercept), G = [lam^2 / M - lam / nRef, lam / n]; with h2
 # held at `h2`, the intercept's column alone; with the intercept held at
 # `intercept`, h2's alone.
 # @noRd
-.hdlLocusScoringData <- function(data, h2 = NULL, intercept = NULL) {
+.h2WindowData <- function(data, h2 = NULL, intercept = NULL) {
     genetic <- data$lam^2 / data$M - data$lam / data$nRef
     noise <- data$lam / data$n
     G <- if (!is.null(h2)) {
@@ -2394,10 +2182,10 @@ NULL
 # starts, the best that converges; NULL when none does. At 0, the
 # intercept-only null.
 # @noRd
-.hdlLocusNull <- function(data, proc, h2 = 0) {
+.h2WindowNull <- function(data, proc, h2 = 0) {
     .h2ScoringBest(.h2Scoring(
-        .h2VarianceObjective,
-        .hdlLocusScoringData(data, h2 = h2),
+        "variance",
+        .h2WindowData(data, h2 = h2),
         as.list(unique(proc@interceptStarts)),
         proc@interceptBounds[[1L]],
         proc@interceptBounds[[2L]],
@@ -2407,7 +2195,7 @@ NULL
 }
 
 # The 95% interval for h2 from inverting the likelihood ratio, its profile
-# the intercept refitted within its bounds (.hdlLocusProfile(),
+# the intercept refitted within its bounds (.h2WindowProfile(),
 # .h2LrInterval()). NA unless the settings ask for the likelihood-ratio test.
 # @noRd
 .h2ProfileInterval <- function(param, data, estimate) {
@@ -2418,8 +2206,8 @@ NULL
     .h2LrInterval(
         estimate,
         proc@h2Bounds,
-        .hdlLocusProfile(estimate, data, proc),
-        .hdlLocusProfile,
+        .h2WindowProfile(estimate, data, proc),
+        .h2WindowProfile,
         data = data,
         proc = proc
     )
@@ -2427,15 +2215,15 @@ NULL
 
 # The log-likelihood at h2 with the intercept refitted within its bounds.
 # @noRd
-.hdlLocusProfile <- function(h2, data, proc) {
-    .hdlLocusNull(data, proc, h2)$value %||% -Inf
+.h2WindowProfile <- function(h2, data, proc) {
+    .h2WindowNull(data, proc, h2)$value %||% -Inf
 }
 
 
 # The modelled variance of the rotated correlations at heritability `h2` and
 # `intercept`: h2 / M lam^2 - h2 lam / nRef + intercept lam / n, floored.
 # @noRd
-.hdlLocusVar <- function(h2, data, intercept) {
+.h2WindowVariance <- function(h2, data, intercept) {
     pmax(
         h2 /
             data$M *
@@ -2461,7 +2249,7 @@ NULL
         floor = data$floor,
         scaled = scaled
     )
-    fit <- .h2TiedScoring(.h2TiedObjective, model, proc)
+    fit <- .h2TiedScoring("tied", model, proc)
     if (is.null(fit$best)) {
         return(.cisH2Result(length(data$lam)))
     }
@@ -2474,59 +2262,35 @@ NULL
     )
 }
 
-# A tied fit by Fisher scoring in (h2, and the scale where `model$scaled`)
-# from the procedures' h2 starts, the scale from 1, with the log-likelihood
-# at h2 = 0, the scale refitted there: list(best, null).
+# A tied fit of the likelihood `likelihood` ("tied" or "nullSpace") by
+# Fisher scoring in (h2, and the scale where `model$scaled`) from the
+# procedures' h2 starts, the scale from 1, with the log-likelihood at h2 = 0,
+# the scale refitted there: list(best, null).
 # @noRd
-.h2TiedScoring <- function(objective, model, proc) {
+.h2TiedScoring <- function(likelihood, model, proc) {
     scaled <- model$scaled
     lower <- c(proc@h2Bounds[[1L]], if (scaled) 1e-8)
     upper <- c(proc@h2Bounds[[2L]], if (scaled) Inf)
     starts <- map(unique(proc@h2Starts), c, if (scaled) 1)
     best <- .h2ScoringBest(
-        .h2Scoring(objective, model, starts, lower, upper, proc@maxit)
+        .h2Scoring(likelihood, model, starts, lower, upper, proc@maxit)
     )
     null <- if (scaled) {
         .h2ScoringBest(.h2Scoring(
-            .h2FixedObjective,
-            list(
-                objective = objective,
-                inner = model,
-                full = c(0, 1),
-                free = 2L
-            ),
+            likelihood,
+            model,
             list(1),
             1e-8,
             Inf,
             proc@maxit,
-            valueOnly = TRUE
+            valueOnly = TRUE,
+            full = c(0, 1),
+            free = 2L
         ))$value
     } else {
-        objective(0, model, FALSE)$value
+        .h2Likelihood(likelihood, model, 0)$value
     }
     list(best = best, null = null %||% NA_real_)
-}
-
-# The tied likelihood of rotated statistics b ~ N(0, s v), v = lam / n + h2 g
-# floored, g = lam^2 / M - lam / nRef - lam / n, the scale s fitted where
-# `data$scaled` (1 otherwise), as .h2Scoring() reads it.
-# @noRd
-.h2TiedObjective <- function(theta, data, scoring) {
-    raw <- data$offset + data$g * theta[[1L]]
-    v <- pmax(raw, data$floor)
-    scale <- if (data$scaled) theta[[2L]] else 1
-    D <- scale * v
-    value <- -sum(log(D) + data$b2 / D) / 2
-    if (!scoring) {
-        return(list(value = value))
-    }
-    dh <- scale * data$g * (raw > data$floor)
-    .h2ConditionalScoring(
-        value,
-        D,
-        if (data$scaled) cbind(dh, v) else cbind(dh),
-        data$b2
-    )
 }
 
 # Tied noise with the null space: the n study samples' y ~ N(0, d (h2 X X' /
@@ -2555,7 +2319,7 @@ NULL
         n = n,
         scaled = proc@profileScale
     )
-    fit <- .h2TiedScoring(.h2NullSpaceObjective, model, proc)
+    fit <- .h2TiedScoring("nullSpace", model, proc)
     if (is.null(fit$best)) {
         return(.cisH2Result(r))
     }
@@ -2565,33 +2329,6 @@ NULL
         h2Se = .h2ScoringSe(param, fit$best),
         p = .h2LikelihoodP(param, fit$best$value, fit$null),
         scale = if (model$scaled) fit$best$par[[2L]] else NA_real_
-    )
-}
-
-# FastHer's log-likelihood at (h2, d), d held at 1 unless `data$scaled`, as
-# .h2Scoring() reads it: the r components a_k with variance d (1 + h2 c_k),
-# and the n - r directions the genotypes do not span, whose squares sum to n
-# - S, each with variance d (1 - h2), one term weighted n - r.
-# @noRd
-.h2NullSpaceObjective <- function(theta, data, scoring) {
-    h2 <- theta[[1L]]
-    d <- if (data$scaled) theta[[2L]] else 1
-    rest <- data$n - length(data$a)
-    shape <- c(1 + h2 * data$ck, 1 - h2)
-    D <- d * shape
-    e2 <- c(data$a, (data$n - sum(data$a)) / rest)
-    w <- c(rep(1, length(data$a)), rest)
-    value <- -sum(w * (log(D) + e2 / D)) / 2
-    if (!scoring) {
-        return(list(value = value))
-    }
-    dh <- d * c(data$ck, -1)
-    .h2ConditionalScoring(
-        value,
-        D,
-        if (data$scaled) cbind(dh, shape) else cbind(dh),
-        e2,
-        w = w
     )
 }
 
@@ -2658,7 +2395,7 @@ NULL
         wLd = wLd,
         M = M,
         hsqScale = 1,
-        weights = "ldsc",
+        weights = "ldScore",
         index = seq_len(M),
         ldModel = list(ld = ld, w = .h2SourceWeights(param, ld), n = n, M = M)
     )
@@ -2689,7 +2426,11 @@ NULL
     if (!identical(param@referenceNoise, "unbiasedR2")) {
         return(as.vector(raw))
     }
-    as.vector(.ldscUnbiasedSum(raw, sum(weights), .ldscAssertN(ld$nSamples)))
+    as.vector(.ldScoreUnbiasedSum(
+        raw,
+        sum(weights),
+        .ldScoreAssertN(ld$nSamples)
+    ))
 }
 
 # The LD scores the LD-redundancy weight divides by, where the procedures
@@ -2803,11 +2544,11 @@ NULL
 
 # The noise term from the first of two stages: the free fit on the rows at or
 # below the chi-square threshold (every row where fewer than four are),
-# LDER's own threshold where none is set, from the first weights `w0`.
+# .h2Chi2Threshold()'s where none is set, from the first weights `w0`.
 # @noRd
 .h2StageNoise <- function(param, rows, w0) {
     threshold <- param@procedures@chi2Threshold %||%
-        .h2LderThreshold(param, rows)
+        .h2Chi2Threshold(param, rows)
     below <- rows$chi2 <= threshold
     stage <- if (sum(below) < 4L) rep(TRUE, length(below)) else below
     fit <- .h2SolveRegression(
@@ -2819,12 +2560,12 @@ NULL
     fit$coef[[ncol(rows$X)]]
 }
 
-# LDER's threshold: 3.5 sqrt(m / N) + 2.5 on the chi-square, or its top 5 /
-# m where a rough free fit's inflation reaches 1.05; the rough fit takes the
-# linear eigenvalue taper on eigen rows, as LDER's does.
+# The default chi-square threshold, LDER's: 3.5 sqrt(m / N) + 2.5, or the
+# chi-square's top 5 / m where a rough free fit's inflation reaches 1.05; the
+# rough fit takes the linear eigenvalue taper on eigen rows, as LDER's does.
 # @noRd
 #' @importFrom stats quantile
-.h2LderThreshold <- function(param, rows) {
+.h2Chi2Threshold <- function(param, rows) {
     m <- length(rows$y)
     rough <- if (is.null(rows$lam)) {
         rows
@@ -2880,7 +2621,7 @@ NULL
 .h2Irwls <- function(param, rows, design, noise, tied, w0 = NULL) {
     proc <- param@procedures
     w <- w0 %||% .h2FirstWeights(param, rows)
-    coef <- .sldscWlsCoef(design$X, design$y, w)
+    coef <- .h2WlsCoef(design$X, design$y, w)
     for (i in seq_len(.h2WeightUpdates(proc))) {
         w <- .h2RegressionWeights(
             proc,
@@ -2892,7 +2633,7 @@ NULL
             proc,
             rows,
             list(previous = previous, noise = noise, tied = tied),
-            .sldscWlsCoef(design$X, design$y, w)
+            .h2WlsCoef(design$X, design$y, w)
         )
         if (.h2Converged(proc, previous, coef)) {
             break
@@ -3022,11 +2763,18 @@ NULL
     if (identical(rows$weights, "cross")) {
         return(rows$taper * rows$redundancy / (rows$mu11 * rows$mu22))
     }
-    if (identical(rows$weights, "ldsc")) {
-        hsq <- .sldscAggregateH2(rows$y, rows$ldTotal, rows$n, rows$M)
+    if (identical(rows$weights, "ldScore")) {
+        hsq <- .h2AggregateH2(rows$y, rows$ldTotal, rows$n, rows$M)
         return(
             rows$taper *
-                .sldscWeights(rows$ldTotal, rows$wLd, rows$n, rows$M, hsq, 1)
+                .h2LdScoreWeights(
+                    rows$ldTotal,
+                    rows$wLd,
+                    rows$n,
+                    rows$M,
+                    hsq,
+                    1
+                )
         )
     }
     base <- rows$base %||% rows$X[, 1L]
@@ -3037,7 +2785,7 @@ NULL
 
 # The weights at (genetic coefficients, noise): a cross-product's
 # (.h2CrossWeights()) where the rows are two conditions' cross-products;
-# ldsc's (.sldscWeights()), from the first coefficient and the LD scores'
+# ldsc's (.h2LdScoreWeights()), from the first coefficient and the LD scores'
 # total, where the rows take them; otherwise the inverse variance 1 / (2
 # mu^2) for the fitted mean mu (.h2WeightMean()); each times the taper and
 # the LD-redundancy factor.
@@ -3046,7 +2794,7 @@ NULL
     if (identical(rows$weights, "cross")) {
         return(.h2CrossWeights(rows, coef))
     }
-    if (!identical(rows$weights, "ldsc")) {
+    if (!identical(rows$weights, "ldScore")) {
         return(
             rows$taper *
                 rows$redundancy /
@@ -3056,7 +2804,7 @@ NULL
     k <- ncol(rows$X)
     noise <- if (proc@fitWeightIntercept) max(coef[[k]], 0) else 1
     rows$taper *
-        .sldscWeights(
+        .h2LdScoreWeights(
             rows$ldTotal,
             rows$wLd,
             rows$n,
@@ -3125,7 +2873,7 @@ NULL
 # @noRd
 .h2RowsModelS <- function(rows, coef) {
     model <- rows$ldModel
-    S <- .gldscS(
+    S <- .h2GlsS(
         model$ld,
         model$w %||% rep(1, model$M),
         model$n * max(coef[[1L]], 0) / model$M,
@@ -3211,7 +2959,7 @@ NULL
 # n r^2 - 1 on [1, l] by generalized least squares, with Omega = S o S for S
 # = rawNtau R + R (no annotations), its rawNtau from a first pass of the
 # same statistics in the window, inverted over the eigenpairs that hold the
-# procedures' share of its mass (.gldscOmegaEigen()). With Var(z^2) = 2 S^2,
+# procedures' share of its mass (.h2GlsOmegaEigen()). With Var(z^2) = 2 S^2,
 # the coefficients' covariance is 2 (X' Omega^-1 X)^-1.
 # @noRd
 .h2VariantGls <- function(param, z, nVariant, ld) {
@@ -3220,7 +2968,7 @@ NULL
     M <- length(z)
     l <- .h2WindowLdScores(param, ld, M)
     y <- n * .zToCor(z, nVariant)^2 - 1
-    om <- .gldscOmegaEigen(
+    om <- .h2GlsOmegaEigen(
         ld,
         matrix(.h2SourceWeights(param, ld) %||% 1, M, 1L),
         sum(y) / sum(l),
@@ -3241,16 +2989,17 @@ NULL
     )
 }
 
-# sHDL candidate-annotation score statistics. Each eigen-direction's rotated
-# effect has modelled variance v_i = lamh2_i, and the likelihood's score for
-# a candidate's heritability is sum_i g_ic (bstar_i^2 / v_i^2 - 1 / v_i),
-# with g_ic = dv_i/dh2_c = l_ic lam_i^2 / size_c - share_c lam_i / nPanel, for
-# a column's total absolute value size_c and share_c = M_c / size_c, and
-# information weight 2 / v_i^2. The baseline heritabilities and the intercept
-# are the nuisance (.h2EfficientScoreBlocks()), with derivatives from the fit's
-# own parameters (.hdlFitBasis()) and lam_i / n. Under frequency weights `w`
-# a candidate's column, and so its size and share, is the weighted one.
-.shdlStratified <- function(
+# Candidate-annotation score statistics of the stratified eigen likelihood. Each
+# eigen-direction's rotated effect has modelled variance v_i = lamh2_i, and the
+# likelihood's score for a candidate's heritability is sum_i g_ic (bstar_i^2 /
+# v_i^2 - 1 / v_i), with g_ic = dv_i/dh2_c = l_ic lam_i^2 / size_c - share_c
+# lam_i / nPanel, for a column's total absolute value size_c and share_c = M_c /
+# size_c, and information weight 2 / v_i^2. The baseline heritabilities and the
+# intercept are the nuisance (.h2EfficientScoreBlocks()), with derivatives from
+# the fit's own parameters (.h2AnnotationBasis()) and lam_i / n. Under frequency
+# weights `w` a candidate's column, and so its size and share, is the weighted
+# one.
+.h2VarianceScoreStats <- function(
     blockData,
     nPanel,
     annotations,
@@ -3269,14 +3018,14 @@ NULL
     ldCand <- exec(rbind, !!!blockCands)
     weighted <- .h2WeightedDesign(candMat, w)
     candSize <- colSums(abs(weighted))
-    gC <- .shdlGradient(
+    gC <- .h2VarianceGradient(
         sweep(ldCand, 2L, candSize, "/"),
         lam,
         nPanel,
         colSums(weighted) / candSize
     )
     G <- cbind(
-        .shdlGradient(design$ldAnnotScaled, lam, nPanel, design$share),
+        .h2VarianceGradient(design$ldAnnotScaled, lam, nPanel, design$share),
         lam / n
     )
     Ub <- .h2EfficientScoreBlocks(
@@ -3298,18 +3047,19 @@ NULL
 # parameter, from the column's LD scores scaled by its size: l_ia lam_i^2 /
 # size_a - share_a lam_i / nPanel.
 # @noRd
-.shdlGradient <- function(scaled, lam, nPanel, share) {
+.h2VarianceGradient <- function(scaled, lam, nPanel, share) {
     scaled * lam^2 - tcrossprod(lam, share) / nPanel
 }
 
 # =============================================================================
-# hdlUnivariate -- orchestrator
+# eigenLikelihoodUnivariate -- orchestrator
 # =============================================================================
 
-# HDL, stratified by `annotations` as sHDL where given, under the settings
-# `param` (HDL's own by default: .h2GenomeWideSettings()). Without the
-# eigenvalue term the reference is taken to have no sampling noise.
-hdlUnivariate <- function(
+# The genome-wide eigen likelihood, stratified by `annotations` where given,
+# under the settings `param` (the hdl preset's by default:
+# .h2GenomeWideSettings()). Without the eigenvalue term the reference is taken
+# to have no sampling noise.
+eigenLikelihoodUnivariate <- function(
     z,
     n,
     eigenRef,
@@ -3319,12 +3069,12 @@ hdlUnivariate <- function(
 ) {
     proc <- param@procedures
     M <- length(eigenRef)
-    nPanel <- .hdlPanelSize(param, eigenRef)
+    nPanel <- .h2PanelSize(param, eigenRef)
     baselineMat <- .h2DesignMat(annotations)
     # One pass over the blocks, each decomposed only while its data are taken.
     blockData <- map(
         .ldEigenBlocks(eigenRef),
-        .hdlBlockData,
+        .h2EigenBlockData,
         eigenRef = eigenRef,
         z = z,
         n = n,
@@ -3333,20 +3083,20 @@ hdlUnivariate <- function(
         w = weights
     )
     basis <- if (!is.null(baselineMat)) {
-        .hdlFitBasis(baselineMat, weights, proc@h2Bounds)
+        .h2AnnotationBasis(baselineMat, weights, proc@h2Bounds)
     }
-    design <- .hdlDesign(blockData, M, basis, proc)
-    ft <- .hdlFit(design, n, nPanel, proc)
-    jk <- .hdlJackknife(blockData, M, basis, n, nPanel, proc)
+    design <- .h2EigenDesign(blockData, M, basis, proc)
+    ft <- .h2VarianceFit(design, n, nPanel, proc)
+    jk <- .h2VarianceJackknife(blockData, M, basis, n, nPanel, proc)
     .h2FitResult(
         h2 = ft$h2,
         h2Se = jk$h2Se,
         intercept = ft$int,
         interceptSe = jk$intSe,
         A = baselineMat,
-        tau = as.vector(.hdlTau(matrix(ft$h2a, 1L), design)),
-        tauBlocks = .hdlTau(jk$h2aBlocks, design),
-        scoreStats = .hdlCandidateScores(
+        tau = as.vector(.h2AnnotationTau(matrix(ft$h2a, 1L), design)),
+        tauBlocks = .h2AnnotationTau(jk$h2aBlocks, design),
+        scoreStats = .h2CandidateScores(
             blockData,
             nPanel,
             annotations,
@@ -3360,10 +3110,10 @@ hdlUnivariate <- function(
     )
 }
 
-# The reference size HDL's eigenvalue term reads, or none (infinite) where the
+# The reference size the eigenvalue term reads, or none (infinite) where the
 # settings take the reference to have no sampling noise.
 # @noRd
-.hdlPanelSize <- function(param, eigenRef) {
+.h2PanelSize <- function(param, eigenRef) {
     if (identical(param@referenceNoise, "eigenTerm")) {
         ldPanelNSamples(eigenRef)
     } else {
@@ -3371,10 +3121,10 @@ hdlUnivariate <- function(
     }
 }
 
-# sHDL's score statistics for the candidate annotations, under the variances
+# The score statistics for the candidate annotations, under the variances
 # the baseline fit implies; NULL when there are none to test.
 # @noRd
-.hdlCandidateScores <- function(
+.h2CandidateScores <- function(
     blockData,
     nPanel,
     annotations,
@@ -3387,8 +3137,8 @@ hdlUnivariate <- function(
     if (is.null(annotations)) {
         return(NULL)
     }
-    lamh2 <- .hdlBaselineVar(design, ft, n, nPanel, proc@varianceFloor)
-    .shdlStratified(
+    lamh2 <- .h2BaselineVariance(design, ft, n, nPanel, proc@varianceFloor)
+    .h2VarianceScoreStats(
         blockData,
         nPanel,
         annotations,
@@ -3411,7 +3161,7 @@ hdlUnivariate <- function(
 NULL
 
 # =============================================================================
-# S-LDSC (Finucane et al. 2015) -- stratified LD score regression
+# The variant regression: stratified LD score regression (Finucane et al. 2015)
 # -----------------------------------------------------------------------------
 # The original method the other three descend from. It regresses per-variant
 # chi-square on annotation-stratified LD scores:
@@ -3419,10 +3169,10 @@ NULL
 #   E[chi2_j] = N * sum_C tau_C * l(j, C) + N*a + 1
 #   with l(j, C) = sum_{k in C} r2_jk
 #
-# Unlike g-LDSC it needs only the per-variant scores, not the per-block LD
-# matrices, so an unstratified run works off a scores-only LdScore. The
-# stratified run needs the matrices, since the per-annotation scores are
-# formed from them exactly as g-LDSC forms its own.
+# Unlike the variant GLS it needs only the per-variant scores, not the per-block
+# LD matrices, so an unstratified run works off a scores-only LdScore. The
+# stratified run needs the matrices, since the per-annotation scores are formed
+# from them exactly as the variant GLS forms its own.
 # =============================================================================
 
 #' @title S-LDSC: Stratified LD Score Regression
@@ -3488,13 +3238,13 @@ NULL
 #'   summary statistics. Nature Genetics 47(11):1228-1235.
 NULL
 
-# S-LDSC, stratified by `annotations` where given, under the settings
-# `param` (S-LDSC's own by default: .h2GenomeWideSettings()): each variant's
-# chi-square on its LD scores as rows of the regression every variant
-# regression fits (.sldscRows(), .h2Regression()), with the
-# delete-one-block jackknife.
+# The genome-wide variant regression, stratified by `annotations` where given,
+# under the settings `param` (the sldsc preset's by default:
+# .h2GenomeWideSettings()): each variant's chi-square on its LD scores as rows
+# of the regression every variant regression fits (.h2VariantRegressionRows(),
+# .h2Regression()), with the delete-one-block jackknife.
 # @noRd
-sldscUnivariate <- function(
+variantRegressionUnivariate <- function(
     z,
     n,
     ldRef,
@@ -3503,18 +3253,18 @@ sldscUnivariate <- function(
     weights = .h2RefWeights(param, ldRef)
 ) {
     M <- length(ldRef)
-    # Same design g-LDSC uses (.h2DesignMat()), so `crossprod(A)` is the
+    # The design the variant GLS uses (.h2DesignMat()), so `crossprod(A)` is the
     # annotation overlap matrix; the model's columns are its weighted ones.
-    A <- .gldscAnnotMatrix(annotations, M)
+    A <- .h2VariantAnnotMatrix(annotations, M)
     modelMat <- .h2WeightedDesign(A, weights)
-    rows <- .sldscRows(
+    rows <- .h2VariantRegressionRows(
         z^2,
-        .sldscScoreMatrix(ldRef, A, weights),
+        .h2VariantScoreMatrix(ldRef, A, weights),
         modelMat,
         as.vector(mcols(ldRef)$ldScores[, 1L]),
         n,
         param,
-        .sldscBlockIndex(ldRef)
+        .h2VariantBlockIndex(ldRef)
     )
     fit <- .h2Regression(param, rows)
     .h2RowsResult(
@@ -3522,19 +3272,27 @@ sldscUnivariate <- function(
         .h2RegressionLooCoefs(param, rows),
         rows,
         if (is.null(.h2BaselineMat(annotations))) NULL else A,
-        .sldscCandidateScores(fit, ldRef, annotations, weights),
+        .h2VariantRegressionCandidateScores(fit, ldRef, annotations, weights),
         weights
     )
 }
 
-# S-LDSC's rows: each variant's chi-square on its LD scores, column a scaled
-# by n / M_a (.h2ColumnSizes()) so that its coefficient times its share is
-# annotation a's heritability, and the noise column; with ldsc's weights
-# (.sldscWeights()), which read the LD scores' total, the stored base score
-# the weights divide by and the first coefficient's ldsc scale, and each
-# variant's block for the jackknife.
+# The variant regression's rows: each variant's chi-square on its LD scores,
+# column a scaled by n / M_a (.h2ColumnSizes()) so that its coefficient times
+# its share is annotation a's heritability, and the noise column; with ldsc's
+# weights (.h2LdScoreWeights()), which read the LD scores' total, the stored
+# base score the weights divide by and the first coefficient's ldsc scale, and
+# each variant's block for the jackknife.
 # @noRd
-.sldscRows <- function(chi2, scores, modelMat, baseScore, n, param, blockIdx) {
+.h2VariantRegressionRows <- function(
+    chi2,
+    scores,
+    modelMat,
+    baseScore,
+    n,
+    param,
+    blockIdx
+) {
     M <- length(chi2)
     size <- .h2ColumnSizes(modelMat, M)
     share <- .h2ColumnShares(modelMat, size)
@@ -3547,16 +3305,17 @@ sldscUnivariate <- function(
         chi2 = chi2,
         n = n,
         taper = rep(1, M),
-        redundancy = 1 / pmax(.sldscRedundancy(param@procedures, baseScore), 1),
+        redundancy = 1 /
+            pmax(.h2RedundancyScore(param@procedures, baseScore), 1),
         size = size,
         share = share,
         ldTotal = rowSums(scores),
-        wLd = .sldscRedundancy(param@procedures, baseScore),
+        wLd = .h2RedundancyScore(param@procedures, baseScore),
         M = M,
         hsqScale = M / size[[1L]],
         index = seq_len(M),
         block = blockOf,
-        weights = "ldsc"
+        weights = "ldScore"
     )
 }
 
@@ -3565,15 +3324,21 @@ sldscUnivariate <- function(
 # weights `w`) is scored against the fitted residual in the fit's final
 # weights, with the fitted design as nuisance (.h2EfficientScoreBlocks()).
 # @noRd
-.sldscCandidateScores <- function(fit, ldRef, annotations, w = NULL) {
+.h2VariantRegressionCandidateScores <- function(
+    fit,
+    ldRef,
+    annotations,
+    w = NULL
+) {
     candMat <- .h2CandidateMat(annotations)
     if (is.null(candMat)) {
         return(NULL)
     }
     if (!.ldScoreHasLd(ldRef)) {
         abort(str_c(
-            "S-LDSC's candidate-annotation score test needs each LD block's ",
-            "LD to form the candidates' LD scores. Build the reference from ",
+            "The variant regression's candidate-annotation score test needs ",
+            "each LD block's LD to form the candidates' LD scores. Build the ",
+            "reference from ",
             "a genotype panel, or with `buildLdScore(keepLdMatrices = TRUE)`."
         ))
     }
@@ -3601,16 +3366,17 @@ sldscUnivariate <- function(
 }
 
 # The design's LD-score columns, one per column of the annotation matrix `A`
-# (.gldscAnnotMatrix()): the stored base score for the base column, and a
+# (.h2VariantAnnotMatrix()): the stored base score for the base column, and a
 # stratified score for each baseline annotation. Stratified scores come from
-# each block's LD, the same source g-LDSC uses, and take ldsc's unbiased r^2
-# as the stored base score does: ldsc applies it to every annotation column.
-# Under frequency weights `w` every column, the base's too, is the weighted
-# one's score sum_k r^2_jk w_k A_ka, which the stored scores are not.
+# each block's LD, the same source the variant GLS uses, and take ldsc's
+# unbiased r^2 as the stored base score does: ldsc applies it to every
+# annotation column. Under frequency weights `w` every column, the base's too,
+# is the weighted one's score sum_k r^2_jk w_k A_ka, which the stored scores are
+# not.
 # @noRd
-.sldscScoreMatrix <- function(ldRef, A, w = NULL) {
+.h2VariantScoreMatrix <- function(ldRef, A, w = NULL) {
     if (!is.null(w)) {
-        return(.sldscWeightedScores(ldRef, .h2WeightedDesign(A, w)))
+        return(.h2VariantWeightedScores(ldRef, .h2WeightedDesign(A, w)))
     }
     base <- matrix(
         as.vector(mcols(ldRef)$ldScores[, 1L]),
@@ -3624,7 +3390,8 @@ sldscUnivariate <- function(
     }
     if (!.ldScoreHasLd(ldRef)) {
         abort(str_c(
-            "stratified S-LDSC needs each LD block's LD to form the ",
+            "The stratified variant regression needs each LD block's LD to ",
+            "form the ",
             "per-annotation LD scores. Build the reference from a genotype ",
             "panel, or with `buildLdScore(keepLdMatrices = TRUE)`."
         ))
@@ -3636,10 +3403,11 @@ sldscUnivariate <- function(
 # The weighted design's LD scores, from each block's LD, which a scores-only
 # LdScore does not carry.
 # @noRd
-.sldscWeightedScores <- function(ldRef, weighted) {
+.h2VariantWeightedScores <- function(ldRef, weighted) {
     if (!.ldScoreHasLd(ldRef)) {
         abort(str_c(
-            "S-LDSC with a frequency exponent (alpha) needs each LD block's ",
+            "The variant regression with a frequency exponent (alpha) needs ",
+            "each LD block's ",
             "LD to form the weighted LD scores. Build the reference from a ",
             "genotype panel, or with `buildLdScore(keepLdMatrices = TRUE)`."
         ))
@@ -3659,7 +3427,7 @@ sldscUnivariate <- function(
             .h2BlockAnnotScores,
             panel = ldReference(ldRef),
             annotMat = annotMat,
-            nRef = .ldscPanelN(ldRef)
+            nRef = .ldScorePanelN(ldRef)
         )
     )
 }
@@ -3671,13 +3439,13 @@ sldscUnivariate <- function(
     idx <- block$idx
     Ab <- .denseBlock(annotMat, idx)
     raw <- .ldSquaredProduct(.ldStatBlockLd(block, panel), Ab)
-    list(idx = idx, values = .ldscUnbiasedSum(raw, colSums(Ab), nRef))
+    list(idx = idx, values = .ldScoreUnbiasedSum(raw, colSums(Ab), nRef))
 }
 
 # Per-block variant indices: the LD blocks the estimators walk, which the
 # jackknife leaves out one at a time.
 # @noRd
-.sldscBlockIndex <- function(ldRef) {
+.h2VariantBlockIndex <- function(ldRef) {
     map(.ldScoreBlocks(ldRef), "idx")
 }
 
@@ -3694,7 +3462,7 @@ sldscUnivariate <- function(
 # the same column -- also the usual case with the original ldsc, where
 # --w-ld-chr names the same file as --ref-ld-chr.
 # @noRd
-.sldscWeights <- function(ld, wLd, n, M, hsq, intercept) {
+.h2LdScoreWeights <- function(ld, wLd, n, M, hsq, intercept) {
     hsq <- min(max(hsq, 0), 1)
     ld <- pmax(ld, 1)
     wLd <- pmax(wLd, 1)
@@ -3705,20 +3473,20 @@ sldscUnivariate <- function(
 # LDSC's `aggregate`: the method-of-moments h2 that seeds the first weights.
 #   h2 = M (mean(chi2) - intercept) / mean(N * ld)
 # @noRd
-.sldscAggregateH2 <- function(chi2, baseScore, n, M, intercept = 1) {
+.h2AggregateH2 <- function(chi2, baseScore, n, M, intercept = 1) {
     M * (mean(chi2) - intercept) / mean(n * baseScore)
 }
 
 # The LD score the weights divide by: the base score with the LD-redundancy
 # correction, 1 (no division) without it.
 # @noRd
-.sldscRedundancy <- function(proc, baseScore) {
+.h2RedundancyScore <- function(proc, baseScore) {
     if (proc@ldRedundancy) baseScore else rep(1, length(baseScore))
 }
 
 # The weighted least-squares solve of every regression (.h2RidgeSolve()).
 # @noRd
-.sldscWlsCoef <- function(design, y, w) {
+.h2WlsCoef <- function(design, y, w) {
     sw <- sqrt(pmax(w, 0))
     x <- design * sw
     as.vector(.h2RidgeSolve(crossprod(x), crossprod(x, y * sw), 1e-8))
@@ -3868,10 +3636,10 @@ sldscUnivariate <- function(
 .h2GenomeWideFit <- function(param, z, n, ldRef, annotations) {
     fit <- switch(
         str_c(param@statistic, "/", param@criterion),
-        "variant/regression" = sldscUnivariate,
-        "variant/gls" = gldscUnivariate,
-        "eigen/regression" = lderUnivariate,
-        "eigen/likelihood" = hdlUnivariate
+        "variant/regression" = variantRegressionUnivariate,
+        "variant/gls" = variantGlsUnivariate,
+        "eigen/regression" = eigenRegressionUnivariate,
+        "eigen/likelihood" = eigenLikelihoodUnivariate
     )
     fit(z, n, ldRef, annotations, param = param)
 }
@@ -4137,7 +3905,8 @@ setMethod(
     function(data, ldRef, param = NULL, studyName = NULL) {
         .assertMethodParam(param %||% list(), "H2EstimateParam", "param")
         # An empty list carries no settings, as everywhere a Param is taken.
-        # The default is the HDL model, as every estimate's is: HDL's.
+        # The default is the eigen likelihood (the hdl preset), as every
+        # estimate's is.
         settings <- if (length(param) == 0L) {
             .h2GenomeWideSettings("hdl", FALSE, inSample(ldRef))
         } else {
@@ -4163,8 +3932,8 @@ setMethod(
         assertClass(annotations, "AnnotationMatrix", .var.name = "annotations")
         .assertMethodParam(param %||% list(), "H2EstimateParam", "param")
         # An empty list carries no settings, as everywhere a Param is taken.
-        # The default is the HDL model, as every estimate's is: stratified
-        # HDL's.
+        # The default is the eigen likelihood (the hdl preset), stratified, as
+        # every estimate's is.
         settings <- if (length(param) == 0L) {
             .h2GenomeWideSettings(
                 "hdl",
@@ -4203,9 +3972,10 @@ setMethod(
 #' @param BPPARAM For a \code{QtlSumStats}: a \code{BiocParallelParam} over
 #'   the selected rows, each row's estimate on one worker. Default
 #'   \code{SerialParam()}.
-#' @param referenceOverlap For a \code{QtlSumStats}: the share of the study's
-#'   samples that are in the LD reference, from 0 to 1, one value or one per
-#'   selected row. Default 0. Usually unknown, and with a reference of
+#' @param referenceOverlap For a \code{QtlSumStats} (and a
+#'   \code{MultiStudyQtlDataset}'s summary statistics): the share of the
+#'   study's samples that are in the LD reference, from 0 to 1, one value or
+#'   one per selected row. Default 0. Usually unknown, and with a reference of
 #'   thousands it hardly matters (see Details): set it when the LD came from
 #'   the study's own samples or a small cohort holding them, 1 if it holds
 #'   them all. Only the overlap factor (\code{referenceNoise =
@@ -4562,11 +4332,13 @@ setMethod(
 # =============================================================================
 
 #' @rdname estimateLocalH2
-#' @param region For a \code{QtlDataset}: optionally, one region that every
+#' @param region For a \code{QtlDataset} (each study of a
+#'   \code{MultiStudyQtlDataset}): optionally, one region that every
 #'   selected trait is analysed over, as \code{\link{twasWeightsPipeline}}
 #'   takes it; otherwise each trait's own window (see \code{cisWindow}).
 #' @param genotypeFilterParam,residualizationParam,phenotypeFilterParam For a
-#'   \code{QtlDataset}: the genotype filters, the covariate residualization
+#'   \code{QtlDataset} (each study of a \code{MultiStudyQtlDataset}): the
+#'   genotype filters, the covariate residualization
 #'   and the phenotype filters, as \code{\link{twasWeightsPipeline}} takes
 #'   them, so that each estimate is on the genotypes and phenotype that the
 #'   trait's TWAS fits are on.
@@ -4744,7 +4516,7 @@ setMethod(
     fit <- if (ncol(Xs) == 0L) {
         .cisH2Result(NA_integer_)
     } else if (identical(param@criterion, "reml")) {
-        .h2Greml(.h2WeightedColumns(Xs, param, ld), y, param@procedures)
+        .h2Reml(.h2WeightedColumns(Xs, param, ld), y, param@procedures)
     } else {
         n <- nrow(Xs)
         .h2LocalFit(
@@ -4779,7 +4551,7 @@ setMethod(
 # its standard error the delta method's from the variances' inverse average
 # information.
 # @noRd
-.h2Greml <- function(Xs, y, options) {
+.h2Reml <- function(Xs, y, options) {
     if (!requireNamespace("qgg", quietly = TRUE)) {
         abort("Package 'qgg' is required for the reml criterion.")
     }
@@ -4817,6 +4589,124 @@ setMethod(
     )
     .cisH2WarnUndefined(out, map_lgl(rows, "undefined"))
     out
+}
+
+# =============================================================================
+# estimateLocalH2 on a MultiStudyQtlDataset -- each study as its own kind
+# =============================================================================
+
+#' @rdname estimateLocalH2
+#' @export
+setMethod(
+    "estimateLocalH2",
+    "MultiStudyQtlDataset",
+    function(
+        data,
+        param = NULL,
+        contexts = NULL,
+        traitId = NULL,
+        region = NULL,
+        cisWindow = NULL,
+        genotypeFilterParam = GenotypeFilterParam(),
+        residualizationParam = ResidualizationParam(),
+        phenotypeFilterParam = PhenotypeFilterParam(),
+        referenceOverlap = 0
+    ) {
+        label <- "estimateLocalH2(MultiStudyQtlDataset)"
+        selection <- list(contexts = contexts, traitId = traitId)
+        summary <- .h2MsSummarySelection(sumStats(data), selection)
+        settings <- .h2LocalParam(param, individual = is.null(summary))
+        .h2AssertOneRegion(region, cisWindow, label)
+        studies <- map(
+            as.list(data),
+            .h2MsStudyEstimate,
+            settings = settings,
+            selection = selection,
+            args = list(
+                region = region,
+                cisWindow = cisWindow,
+                genotypeFilterParam = genotypeFilterParam,
+                residualizationParam = residualizationParam,
+                phenotypeFilterParam = phenotypeFilterParam
+            )
+        )
+        parts <- compact(c(
+            unname(studies),
+            list(.h2MsSummaryEstimate(
+                sumStats(data),
+                summary,
+                settings,
+                cisWindow,
+                referenceOverlap
+            ))
+        ))
+        if (length(parts) == 0L) {
+            abort(glue("{label}: no study holds a selected context and trait."))
+        }
+        exec(c, !!!parts)
+    }
+)
+
+# The contexts and traits of a selection that a component holds, a selection
+# not given by name left to it; NULL where it holds none of them.
+# @noRd
+.h2MsHeld <- function(selection, contexts, traits) {
+    held <- list(
+        contexts = .rgMsHeld(selection$contexts, contexts),
+        traitId = .rgMsHeld(selection$traitId, traits)
+    )
+    none <- identical(held$contexts, character(0)) ||
+        identical(held$traitId, character(0))
+    if (none) NULL else held
+}
+
+# One study's estimates, as a QtlDataset's are, under its share of the
+# selection; NULL where it holds none of it.
+# @noRd
+.h2MsStudyEstimate <- function(qd, settings, selection, args) {
+    held <- .h2MsHeld(selection, contexts(qd), .spListTraits(qd))
+    if (is.null(held)) {
+        return(NULL)
+    }
+    exec(
+        estimateLocalH2,
+        qd,
+        settings,
+        contexts = held$contexts,
+        traitId = held$traitId,
+        !!!args
+    )
+}
+
+# The selection's share of the summary statistics' rows; NULL where there
+# are none or it holds none of them.
+# @noRd
+.h2MsSummarySelection <- function(ss, selection) {
+    if (is.null(ss)) {
+        return(NULL)
+    }
+    .h2MsHeld(
+        selection,
+        unique(as.character(ss$context)),
+        unique(as.character(ss$trait))
+    )
+}
+
+# The summary statistics' estimates, as a QtlSumStats's are, under their
+# share of the selection; NULL without one.
+# @noRd
+.h2MsSummaryEstimate <- function(ss, held, settings, cisWindow, overlap) {
+    if (is.null(held)) {
+        return(NULL)
+    }
+    estimateLocalH2(
+        ss,
+        settings,
+        contexts = held$contexts,
+        traitId = held$traitId,
+        cisWindow = cisWindow,
+        referenceOverlap = overlap
+    )
 }
 
 # =============================================================================
@@ -5115,7 +5005,7 @@ setMethod(
     Vd <- sweep(block$vectors, 2, block$values, "*")
     list(
         idx = block$snpIdx,
-        values = .ldscUnbiasedSum(
+        values = .ldScoreUnbiasedSum(
             cbind(rowSums(Vd^2)),
             length(block$snpIdx),
             nRef
@@ -5182,7 +5072,7 @@ setMethod(
     raw <- .ldSquaredProduct(dec[c("vectors", "values")], cbind(1, Ab))
     list(
         idx = idx,
-        values = .ldscUnbiasedSum(raw, c(length(idx), colSums(Ab)), nRef)
+        values = .ldScoreUnbiasedSum(raw, c(length(idx), colSums(Ab)), nRef)
     )
 }
 
@@ -5194,7 +5084,7 @@ setMethod(
     function(ldRef, annotations = NULL) {
         # LD scores from the eigendecompositions, under ldsc's unbiased r^2,
         # so they match buildLdScore() on the same reference.
-        nRef <- .ldscPanelN(ldRef)
+        nRef <- .ldScorePanelN(ldRef)
         if (is.null(annotations)) {
             return(.computeLdScoresBase(ldRef, nRef))
         }
@@ -5323,22 +5213,21 @@ h2EstimateToSldscTrait <- function(h2Est) {
 
 # ---- map/apply helpers (lambda-free callbacks) ---------------------------
 
-# One g-LDSC delete-one-block jackknife fold: re-solve the normal equations with
-# block `cb`'s Omega-weighted contribution removed.
+# One delete-one-block jackknife fold of the variant GLS: re-solve the normal
+# equations with block `cb`'s Omega-weighted contribution removed.
 # @noRd
-.gldscLooEstimate <- function(cb, left, right, A, N, ridge) {
-    .gldscEstimate(left - cb$L, right - cb$R, A, N, ridge)
+.h2GlsLooEstimate <- function(cb, left, right, A, N, ridge) {
+    .h2GlsEstimate(left - cb$L, right - cb$R, A, N, ridge)
 }
 
-# g-LDSC leave-one-block-out standardized candidate score vector for block `b`.
+# One delete-one-block jackknife fold of the genome-wide eigen likelihood: refit
+# leaving block `b` out.
 # @noRd
-# One HDL delete-one-block jackknife fold: refit leaving block `b` out.
-# @noRd
-.hdlLooFit <- function(b, blockData, M, basis, n, nSamples, proc) {
+.h2VarianceLooFit <- function(b, blockData, M, basis, n, nSamples, proc) {
     # The full-data fit already reported any bound it hit; repeating that
     # once per left-out block would bury it in noise.
-    .hdlFit(
-        .hdlDesign(blockData[-b], M, basis, proc),
+    .h2VarianceFit(
+        .h2EigenDesign(blockData[-b], M, basis, proc),
         n,
         nSamples,
         proc,

@@ -339,10 +339,10 @@ test_that("estimators read annotations stored sparse as they read dense", {
         computeLdScores(storedScore, annotations = annot)
     )
     runs <- list(
-        lder = list(pecotmr:::lderUnivariate, storedEigen),
-        gldsc = list(pecotmr:::gldscUnivariate, storedScore),
-        sldsc = list(pecotmr:::sldscUnivariate, storedScore),
-        hdl = list(pecotmr:::hdlUnivariate, storedEigen)
+        lder = list(pecotmr:::eigenRegressionUnivariate, storedEigen),
+        gldsc = list(pecotmr:::variantGlsUnivariate, storedScore),
+        sldsc = list(pecotmr:::variantRegressionUnivariate, storedScore),
+        hdl = list(pecotmr:::eigenLikelihoodUnivariate, storedEigen)
     )
     # HDL warns on this small panel that its intercept sits at its bound;
     # the estimates agree either way, which is what is checked here.
@@ -374,9 +374,17 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
     n <- 2000
     z <- .h2PanelZ(fx$ld, n, h2 = 0.5)
     runs <- list(
-        lder = list(pecotmr:::lderUnivariate, lazyEigen, storedEigen),
-        gldsc = list(pecotmr:::gldscUnivariate, lazyScore, storedScore),
-        sldsc = list(pecotmr:::sldscUnivariate, lazyScore, storedScore)
+        lder = list(
+            pecotmr:::eigenRegressionUnivariate,
+            lazyEigen,
+            storedEigen
+        ),
+        gldsc = list(pecotmr:::variantGlsUnivariate, lazyScore, storedScore),
+        sldsc = list(
+            pecotmr:::variantRegressionUnivariate,
+            lazyScore,
+            storedScore
+        )
     )
     for (method in names(runs)) {
         fn <- runs[[method]][[1L]]
@@ -386,35 +394,35 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
             expect_equal(lazy, stored, tolerance = 1e-8, label = method)
         }
     }
-    # HDL's likelihood is the same function either way. Its fit then agrees
-    # to the optimizer's tolerance: L-BFGS-B turns the likelihood's rounding
-    # (1e-13) into differences near 1e-7 in the optimum.
-    hdlDesign <- function(ref) {
+    # The eigen likelihood is the same function either way, and so its fit
+    # agrees to rounding: here h2 to 1e-13 and its jackknife SE to 1e-9,
+    # well inside the tolerance.
+    eigenDesign <- function(ref) {
         data <- map(
             pecotmr:::.ldEigenBlocks(ref),
-            pecotmr:::.hdlBlockData,
+            pecotmr:::.h2EigenBlockData,
             eigenRef = ref,
             z = z,
             n = n,
             baselineMat = NULL,
             candMat = NULL
         )
-        pecotmr:::.hdlDesign(
+        pecotmr:::.h2EigenDesign(
             data,
             length(ref),
             NULL,
             .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures
         )
     }
-    lazyDesign <- hdlDesign(lazyEigen)
-    storedDesign <- hdlDesign(storedEigen)
+    lazyDesign <- eigenDesign(lazyEigen)
+    storedDesign <- eigenDesign(storedEigen)
     expect_equal(length(lazyDesign$lam), length(storedDesign$lam))
     proc <- .h2GenomeWideSettings("hdl", FALSE, FALSE)@procedures
     ll <- function(design, par) {
-        pecotmr:::.h2VarianceObjective(
-            par,
-            pecotmr:::.hdlScoringData(design, n, 100, proc),
-            FALSE
+        pecotmr:::.h2Likelihood(
+            "variance",
+            pecotmr:::.h2VarianceData(design, n, 100, proc),
+            par
         )$value
     }
     for (par in list(c(0.3, 1), c(0.5, 1.2))) {
@@ -424,10 +432,10 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
             tolerance = 1e-10
         )
     }
-    hdl <- pecotmr:::hdlUnivariate
+    eigenFit <- pecotmr:::eigenLikelihoodUnivariate
     expect_equal(
-        suppressWarnings(hdl(z, n, lazyEigen, NULL)),
-        suppressWarnings(hdl(z, n, storedEigen, NULL)),
+        suppressWarnings(eigenFit(z, n, lazyEigen, NULL)),
+        suppressWarnings(eigenFit(z, n, storedEigen, NULL)),
         tolerance = 1e-6
     )
     # Stratified, this fixture (a 100-sample panel, so the intercept sits at
@@ -435,7 +443,7 @@ test_that("estimators read a panel's LD on demand as they read stored LD", {
     # ridge: the two optima have the same likelihood to 1e-7 but sit apart
     # along it, so only the total heritability is pinned down.
     stratifiedH2 <- function(ref) {
-        suppressWarnings(hdl(z, n, ref, annot))$h2
+        suppressWarnings(eigenFit(z, n, ref, annot))$h2
     }
     expect_equal(
         stratifiedH2(lazyEigen),
@@ -628,7 +636,7 @@ test_that("a genome-wide estimate is one row for the study", {
     )
     expect_equal(
         heritabilityEstimate(res),
-        hdlUnivariate(z(ss), 50000, ref)$h2
+        eigenLikelihoodUnivariate(z(ss), 50000, ref)$h2
     )
 })
 
@@ -791,10 +799,10 @@ test_that("estimateStratifiedH2 runs the fit its settings choose", {
     scoreRef <- makeTestScoreRef(with_ld_matrices = TRUE)
     annot <- makeTestAnnotations()
     fits <- list(
-        lder = lderUnivariate,
-        hdl = hdlUnivariate,
-        gldsc = gldscUnivariate,
-        sldsc = sldscUnivariate
+        lder = eigenRegressionUnivariate,
+        hdl = eigenLikelihoodUnivariate,
+        gldsc = variantGlsUnivariate,
+        sldsc = variantRegressionUnivariate
     )
     for (method in names(fits)) {
         ref <- if (method %in% c("lder", "hdl")) eigenRef else scoreRef
@@ -952,7 +960,12 @@ test_that("estimateH2 fits the settings it is given and records them", {
     expect_identical(h2EstimateParam(res), settings)
     expect_identical(
         heritabilityEstimate(res),
-        sldscUnivariate(z(ss), median(sampleSize(ss)), ref, param = settings)$h2
+        variantRegressionUnivariate(
+            z(ss),
+            median(sampleSize(ss)),
+            ref,
+            param = settings
+        )$h2
     )
     # Without settings, HDL's.
     eigenRef <- makeTestEigenRef()
@@ -979,7 +992,7 @@ test_that("unstratified S-LDSC runs without the per-block LD matrices", {
     ss <- makeTestSumstatsForRef(noMat)
     expect_error(
         estimateH2(ss, noMat, param = .h2MethodSettings("gldsc", NULL, noMat)),
-        "g-LDSC needs each LD block's LD"
+        "The variant GLS needs each LD block's LD"
     )
     res <- estimateH2(
         ss,
@@ -1005,7 +1018,7 @@ test_that("stratified S-LDSC needs the per-block LD matrices", {
             annot,
             param = .h2MethodSettings("sldsc", annot, noMat)
         ),
-        "stratified S-LDSC needs each LD block's LD"
+        "stratified variant regression needs each LD block's LD"
     )
 })
 
@@ -1055,7 +1068,7 @@ test_that("S-LDSC requires an LdScore, not an LdEigen", {
 test_that("the S-LDSC weights reproduce the original Hsq.weights", {
     # het_w = 1 / (2 (intercept + hsq*N/M * ld)^2), oc_w = 1 / w_ld, both
     # LD scores floored at 1 and hsq clamped to [0, 1].
-    w <- pecotmr:::.sldscWeights(
+    w <- pecotmr:::.h2LdScoreWeights(
         ld = c(4, 1, 0.5),
         wLd = c(10, 1, 0.2),
         n = 1000,
@@ -1070,12 +1083,12 @@ test_that("the S-LDSC weights reproduce the original Hsq.weights", {
 
     # hsq is clamped, so an out-of-range estimate cannot blow the weights up.
     expect_equal(
-        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 5, intercept = 1),
-        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 1, intercept = 1)
+        pecotmr:::.h2LdScoreWeights(2, 1, 1000, 100, hsq = 5, intercept = 1),
+        pecotmr:::.h2LdScoreWeights(2, 1, 1000, 100, hsq = 1, intercept = 1)
     )
     expect_equal(
-        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = -3, intercept = 1),
-        pecotmr:::.sldscWeights(2, 1, 1000, 100, hsq = 0, intercept = 1)
+        pecotmr:::.h2LdScoreWeights(2, 1, 1000, 100, hsq = -3, intercept = 1),
+        pecotmr:::.h2LdScoreWeights(2, 1, 1000, 100, hsq = 0, intercept = 1)
     )
 })
 
@@ -1084,9 +1097,9 @@ test_that("the S-LDSC weights reproduce the original Hsq.weights", {
 #
 # A real LD block is routinely rank-deficient, and its decomposition then
 # carries a tail of tiny negative eigenvalues (order -1e-15) that are pure
-# floating-point noise. Those used to reach .lderWeights() as negative
-# regression weights, so IRWLS took sqrt() of a negative and lm.fit aborted
-# with "NA/NaN/Inf in 'x'".
+# floating-point noise. Those used to reach the eigen regression's weights as
+# negative regression weights, so IRWLS took sqrt() of a negative and lm.fit
+# aborted with "NA/NaN/Inf in 'x'".
 # ===========================================================================
 
 # An LD block with `dup` variants repeated, so R is singular by construction
@@ -1148,7 +1161,7 @@ test_that("the eigen regression's weights are never negative", {
     # The in-sample (linear) taper, min(1, lambda), is the one a negative
     # eigenvalue would turn negative.
     param <- .h2GenomeWideSettings("lder", FALSE, TRUE)
-    rows <- pecotmr:::.lderRows(
+    rows <- pecotmr:::.h2EigenRegressionRows(
         list(list(x = rep(1, 6), lam = lam, ldAnnot = matrix(1, 6, 1))),
         NULL,
         1e5,
@@ -1227,7 +1240,7 @@ test_that("buildLdScore(keepLdMatrices = FALSE) is rejected by g-LDSC", {
             scoreRef,
             param = .h2MethodSettings("gldsc", NULL, scoreRef)
         ),
-        "g-LDSC needs each LD block's LD"
+        "The variant GLS needs each LD block's LD"
     )
 })
 
@@ -1646,8 +1659,8 @@ test_that("checkGenomeBuild works with AnnotationMatrix", {
     expect_true(pecotmr:::checkGenomeBuild(am, ld_blocks))
 })
 
-# Tests for the heritability estimators lderUnivariate, gldscUnivariate and
-# hdlUnivariate.
+# Tests for the heritability estimators eigenRegressionUnivariate,
+# variantGlsUnivariate and eigenLikelihoodUnivariate.
 
 set.seed(42)
 
@@ -1821,22 +1834,22 @@ test_that(".h2Stratified reads the width of the baseline design", {
 # they take a half-on/half-off baseline instead.
 .h2Runs <- list(
     lder = list(
-        fn = pecotmr:::lderUnivariate,
+        fn = pecotmr:::eigenRegressionUnivariate,
         ref = "eigen_ref",
         baseline = "ones"
     ),
     gldsc = list(
-        fn = pecotmr:::gldscUnivariate,
+        fn = pecotmr:::variantGlsUnivariate,
         ref = "ld_score_ref",
         baseline = "spatial"
     ),
     hdl = list(
-        fn = pecotmr:::hdlUnivariate,
+        fn = pecotmr:::eigenLikelihoodUnivariate,
         ref = "eigen_ref",
         baseline = "ones"
     ),
     sldsc = list(
-        fn = pecotmr:::sldscUnivariate,
+        fn = pecotmr:::variantRegressionUnivariate,
         ref = "ld_score_ref",
         baseline = "spatial"
     )
@@ -1890,10 +1903,10 @@ test_that("each univariate estimator returns a finite h2 and a positive SE", {
     }
 })
 
-test_that("lderUnivariate reports its intercept on the others' scale", {
+test_that("the eigen regression reports its intercept on the others' scale", {
     # The fit's inflation a enters as E[chi2Rot] = n * h2/M * d + 1 + n * a. The
     # estimators report that intercept, 1 + n * a, about 1 without confounding.
-    res <- pecotmr:::lderUnivariate(dat$z, dat$n, dat$eigen_ref)
+    res <- pecotmr:::eigenRegressionUnivariate(dat$z, dat$n, dat$eigen_ref)
     expect_true(is.finite(res$intercept))
     expect_gte(res$intercept, 1)
     expect_lt(res$intercept, 1 + dat$n * 0.01)
@@ -2117,20 +2130,26 @@ test_that("h2EstimateToSldscTrait names unnamed jackknife categories", {
 # block for its jackknife, so its cost grows with the square of the block
 # count, and on 10 blocks the mean estimate still lands well inside the
 # tolerances.
-test_that("hdlUnivariate recovers a known h2 (deterministic, seed = 1)", {
+test_that("eigenLikelihoodUnivariate recovers a known h2 (seed = 1)", {
     d <- .h2RecoveryRefs(nBlocks = 10L)
     uni <- rep(0.4 / d$M, d$M)
     set.seed(1)
-    ests <- replicate(30, hdlUnivariate(d$simZ(uni), d$N, d$eigenRef)$h2)
+    ests <- replicate(
+        30,
+        eigenLikelihoodUnivariate(d$simZ(uni), d$N, d$eigenRef)$h2
+    )
     expect_lt(abs(mean(ests) - 0.4), 0.05) # recovers true h2 = 0.4
     expect_equal(mean(ests), 0.395, tolerance = 0.04) # stored known output
 })
 
-test_that("lderUnivariate recovers a known h2 (deterministic, seed = 1)", {
+test_that("eigenRegressionUnivariate recovers a known h2 (seed = 1)", {
     d <- .h2RecoveryRefs()
     uni <- rep(0.4 / d$M, d$M)
     set.seed(1)
-    ests <- replicate(30, lderUnivariate(d$simZ(uni), d$N, d$eigenRef)$h2)
+    ests <- replicate(
+        30,
+        eigenRegressionUnivariate(d$simZ(uni), d$N, d$eigenRef)$h2
+    )
     expect_lt(abs(mean(ests) - 0.4), 0.05)
     expect_equal(mean(ests), 0.389, tolerance = 0.04)
 })
@@ -2424,13 +2443,13 @@ test_that("the enrichment p-value is ldsc's t test of inside against outside", {
     expect_true(is.na(whole$enrichmentP))
 })
 
-test_that(".hdlFitBasis centers only columns whose zero is out of reach", {
+test_that(".h2AnnotationBasis centers only columns whose zero is unreached", {
     M <- 20L
     bin <- rep(0:1, each = 10L)
     x <- seq(-1, 1, length.out = M)
     # A column reaching 0 keeps its heritability parametrization; the base
     # is a real variant's rate and an annotation beside it an excess.
-    b <- pecotmr:::.hdlFitBasis(cbind(base = 1, bin = bin))
+    b <- pecotmr:::.h2AnnotationBasis(cbind(base = 1, bin = bin))
     expect_equal(b$transform, diag(2L))
     expect_equal(b$size, c(M, 10))
     expect_equal(b$share, c(1, 1))
@@ -2438,31 +2457,35 @@ test_that(".hdlFitBasis centers only columns whose zero is out of reach", {
     expect_equal(b$upper, c(1, 1))
     # Each level of a partition is its own variants' rate.
     expect_equal(
-        pecotmr:::.hdlFitBasis(cbind(a = bin, b = 1L - bin))$lower,
+        pecotmr:::.h2AnnotationBasis(cbind(a = bin, b = 1L - bin))$lower,
         c(0, 0)
     )
     # Annotations covering every variant leave the base no variant of its own.
     expect_equal(
-        pecotmr:::.hdlFitBasis(cbind(base = 1, a = bin, b = 1L - bin))$lower,
+        pecotmr:::.h2AnnotationBasis(cbind(
+            base = 1,
+            a = bin,
+            b = 1L - bin
+        ))$lower,
         c(-1, -1, -1)
     )
     # A column above 0 throughout moves its location into the base, which
     # then reads as the total heritability.
-    shifted <- pecotmr:::.hdlFitBasis(cbind(base = 1, x = x + 3))
+    shifted <- pecotmr:::.h2AnnotationBasis(cbind(base = 1, x = x + 3))
     expect_equal(shifted$size, c(M, sum(abs(x))))
     expect_equal(shifted$share, c(1, 0))
     expect_equal(shifted$lower, c(0, -2))
     expect_equal(shifted$upper, c(1, 2))
     # The procedures' h2 bounds scale them: a heritability within them, an
     # excess within their span, a centered column's within twice it.
-    capped <- pecotmr:::.hdlFitBasis(
+    capped <- pecotmr:::.h2AnnotationBasis(
         cbind(base = 1, x = x + 3),
         NULL,
         c(0, 0.5)
     )
     expect_equal(capped$lower, c(0, -1))
     expect_equal(capped$upper, c(0.5, 1))
-    excess <- pecotmr:::.hdlFitBasis(
+    excess <- pecotmr:::.h2AnnotationBasis(
         cbind(base = 1, bin = bin),
         NULL,
         c(0, 0.5)
@@ -2476,7 +2499,7 @@ test_that(".hdlFitBasis centers only columns whose zero is out of reach", {
     # Columns that themselves span the all-ones vector cannot all be centered.
     u <- seq(0.1, 0.9, length.out = M)
     expect_equal(
-        pecotmr:::.hdlFitBasis(cbind(u = u, v = 1 - u))$transform,
+        pecotmr:::.h2AnnotationBasis(cbind(u = u, v = 1 - u))$transform,
         diag(2L)
     )
 })
@@ -2545,14 +2568,14 @@ test_that("a column of mean 0 fits by every estimator, without an enrichment", {
 
 test_that("gLDSC's Omega floors a negative plug-in variance", {
     R <- 0.5^abs(outer(1:4, 1:4, "-"))
-    negative <- pecotmr:::.gldscOmegaEigen(
+    negative <- pecotmr:::.h2GlsOmegaEigen(
         list(R = R),
         cbind(c(1, 1, 1, 1), c(-3, 0.5, 0, 0)),
         2
     )
     expect_true(all(is.finite(negative$values)))
     # The floor reads the variants at 0, and only those.
-    floored <- pecotmr:::.gldscOmegaEigen(
+    floored <- pecotmr:::.h2GlsOmegaEigen(
         list(R = R),
         cbind(c(0, 1.5, 1, 1)),
         2
@@ -2632,36 +2655,41 @@ test_that("S-LDSC's candidate score test needs the reference's LD", {
     )
 })
 
-test_that("gldscUnivariate recovers a known h2 (deterministic, seed = 1)", {
+test_that("variantGlsUnivariate recovers a known h2 (seed = 1)", {
     d <- .h2RecoveryRefs()
     uni <- rep(0.4 / d$M, d$M)
     set.seed(1)
-    ests <- replicate(30, gldscUnivariate(d$simZ(uni), d$N, d$scoreRef)$h2)
+    ests <- replicate(30, variantGlsUnivariate(d$simZ(uni), d$N, d$scoreRef)$h2)
     expect_lt(abs(mean(ests) - 0.4), 0.1) # g-LDSC has higher finite-block var
     expect_equal(mean(ests), 0.365, tolerance = 0.08)
 })
 
-test_that("hdlUnivariate recovers partitioned h2 (block-separable annots)", {
+test_that("eigenLikelihoodUnivariate recovers block-separable partitioned h2", {
     d <- .h2RecoveryRefs(nBlocks = 10L)
     annot <- .h2RecoveryAnnot(d$M, d$M / 2)
     perSnp <- ifelse(seq_len(d$M) <= d$M / 2, 0.6 / d$M, 0.2 / d$M)
     M_a <- c(d$M / 2, d$M / 2)
     set.seed(1)
     h2 <- rowMeans(replicate(15, {
-        r <- hdlUnivariate(d$simZ(perSnp), d$N, d$eigenRef, annotations = annot)
+        r <- eigenLikelihoodUnivariate(
+            d$simZ(perSnp),
+            d$N,
+            d$eigenRef,
+            annotations = annot
+        )
         r$enrichment$tau * M_a
     }))
     expect_lt(abs(h2[1] - 0.3), 0.06) # annotA true h2 = 0.3
     expect_lt(abs(h2[2] - 0.1), 0.05) # annotB true h2 = 0.1
 })
 
-test_that("gldscUnivariate recovers enrichment direction (annotA > annotB)", {
+test_that("variantGlsUnivariate recovers enrichment's direction (A > B)", {
     d <- .h2RecoveryRefs()
     annot <- .h2RecoveryAnnot(d$M, d$M / 2)
     perSnp <- ifelse(seq_len(d$M) <= d$M / 2, 0.6 / d$M, 0.2 / d$M)
     set.seed(1)
     e <- rowMeans(replicate(20, {
-        gldscUnivariate(
+        variantGlsUnivariate(
             d$simZ(perSnp),
             d$N,
             d$scoreRef,
@@ -2680,8 +2708,8 @@ test_that("LDER uses the in-sample vs out-of-sample weight switch", {
     refIn <- d$eigenRef
     refIn@inSample <- TRUE
     expect_false(isTRUE(all.equal(
-        lderUnivariate(z, d$N, refOut)$h2,
-        lderUnivariate(z, d$N, refIn)$h2
+        eigenRegressionUnivariate(z, d$N, refOut)$h2,
+        eigenRegressionUnivariate(z, d$N, refIn)$h2
     )))
 })
 
@@ -2694,13 +2722,13 @@ test_that("LDER uses the in-sample vs out-of-sample weight switch", {
 # So these tests check that the estimator is in the right neighbourhood and
 # that its machinery behaves, not that it hits the truth; the attenuation is
 # a property of the data, not of the fit.
-test_that("sldscUnivariate lands near a known h2 on a small reference", {
+test_that("variantRegressionUnivariate lands near h2 on a small reference", {
     d <- .h2RecoveryRefs(N = 5000)
     uni <- rep(0.4 / d$M, d$M)
     set.seed(1)
     ests <- replicate(
         20,
-        pecotmr:::sldscUnivariate(d$simZ(uni), d$N, d$scoreRef)$h2
+        pecotmr:::variantRegressionUnivariate(d$simZ(uni), d$N, d$scoreRef)$h2
     )
     expect_gt(mean(ests), 0.15)
     expect_lt(mean(ests), 0.65)
@@ -2713,7 +2741,7 @@ test_that("S-LDSC tracks h2 upward when the true h2 rises", {
     set.seed(1)
     low <- replicate(
         10,
-        pecotmr:::sldscUnivariate(
+        pecotmr:::variantRegressionUnivariate(
             d$simZ(rep(0.1 / d$M, d$M)),
             d$N,
             d$scoreRef
@@ -2722,7 +2750,7 @@ test_that("S-LDSC tracks h2 upward when the true h2 rises", {
     set.seed(1)
     high <- replicate(
         10,
-        pecotmr:::sldscUnivariate(
+        pecotmr:::variantRegressionUnivariate(
             d$simZ(rep(0.6 / d$M, d$M)),
             d$N,
             d$scoreRef
@@ -2738,7 +2766,7 @@ test_that("the S-LDSC intercept is estimated on the low-chi2 variants", {
     # rather than an error to be clamped away.
     d <- .h2RecoveryRefs(N = 5000)
     set.seed(1)
-    res <- pecotmr:::sldscUnivariate(
+    res <- pecotmr:::variantRegressionUnivariate(
         d$simZ(rep(0.4 / d$M, d$M)),
         d$N,
         d$scoreRef
@@ -2767,7 +2795,7 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
     perSnp <- ifelse(seq_len(M) <= M / 2, 0.6 / M, 0.2 / M)
     set.seed(1)
     e <- mean(replicate(10, {
-        pecotmr:::sldscUnivariate(
+        pecotmr:::variantRegressionUnivariate(
             d$simZ(perSnp),
             d$N,
             d$scoreRef,
@@ -2792,7 +2820,7 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
 #                  = True)
 #
 # Agreement is to about 1e-6 relative; the residual is the small ridge in
-# .sldscWlsCoef(), which the original has no equivalent of. Case 2's
+# .h2WlsCoef(), which the original has no equivalent of. Case 2's
 # intercept sits below 1 and case 3's partitioned h2 is negative -- the
 # original returns those too, and reproducing them is the point: the
 # implementation should track the reference, pathologies included.
@@ -2841,7 +2869,7 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
     base <- numeric(nrow(fx$snpInfo))
     for (b in blocks) {
         base[b$snpIdx] <- rowSums(
-            pecotmr:::.ldscUnbiasedR2(b$R^2, nSamples)
+            pecotmr:::.ldScoreUnbiasedR2(b$R^2, nSamples)
         )
     }
     eigens <- map(blocks, function(b) {
@@ -2873,11 +2901,11 @@ test_that("S-LDSC recovers enrichment direction for one annotation", {
     )
 }
 
-# S-LDSC's fit through the regression every variant regression fits, from
-# its LD scores `scores` (the stored base score `baseScore` the weights
-# divide by) and the design `A`.
-.sldscRowsFit <- function(chi2, scores, baseScore, n, A, param) {
-    rows <- pecotmr:::.sldscRows(
+# The variant regression's fit through .h2Regression(), from its LD scores
+# `scores` (the stored base score `baseScore` the weights divide by), the
+# design `A` and the settings `param`.
+.variantRegressionRowsFit <- function(chi2, scores, baseScore, n, A, param) {
+    rows <- pecotmr:::.h2VariantRegressionRows(
         chi2,
         scores,
         A,
@@ -2920,7 +2948,7 @@ test_that("univariate S-LDSC reproduces the original ldsc to 1e-5", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        fit <- .sldscRowsFit(
+        fit <- .variantRegressionRowsFit(
             z^2,
             scores,
             baseScore,
@@ -2938,7 +2966,7 @@ test_that("partitioned S-LDSC reproduces the original ldsc to 1e-5", {
     M <- length(ref)
     inA <- as.integer(seq_len(M) <= M / 2)
     A <- cbind(base = 1, annotA = inA)
-    scores <- pecotmr:::.sldscScoreMatrix(ref, A)
+    scores <- pecotmr:::.h2VariantScoreMatrix(ref, A)
 
     reference <- list(
         list(
@@ -2965,7 +2993,7 @@ test_that("partitioned S-LDSC reproduces the original ldsc to 1e-5", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        fit <- .sldscRowsFit(
+        fit <- .variantRegressionRowsFit(
             z^2,
             scores,
             scores[, 1],
@@ -2987,7 +3015,7 @@ test_that("S-LDSC's two sets of settings differ, as the original ldsc's do", {
     M <- length(ref)
     z <- .h2ParityZ(0.4, 10000, 42)
     scores <- matrix(as.vector(mcols(ref)$ldScores[, 1]), ncol = 1)
-    uni <- .sldscRowsFit(
+    uni <- .variantRegressionRowsFit(
         z^2,
         scores,
         scores[, 1],
@@ -2996,9 +3024,9 @@ test_that("S-LDSC's two sets of settings differ, as the original ldsc's do", {
         .h2GenomeWideSettings("sldsc", FALSE, FALSE)
     )
     inA <- as.integer(seq_len(M) <= M / 2)
-    part <- .sldscRowsFit(
+    part <- .variantRegressionRowsFit(
         z^2,
-        pecotmr:::.sldscScoreMatrix(ref, cbind(base = 1, annotA = inA)),
+        pecotmr:::.h2VariantScoreMatrix(ref, cbind(base = 1, annotA = inA)),
         scores[, 1],
         10000,
         cbind(base = 1, annotA = inA),
@@ -3014,7 +3042,12 @@ test_that("S-LDSC's regression settings each reach its fit", {
         initialize(base, procedures = initialize(base@procedures, ...))
     }
     h2 <- function(param) {
-        sldscUnivariate(dat$z, dat$n, dat$ld_score_ref, param = param)$h2
+        variantRegressionUnivariate(
+            dat$z,
+            dat$n,
+            dat$ld_score_ref,
+            param = param
+        )$h2
     }
     published <- h2(base)
     expect_false(isTRUE(all.equal(h2(with(ldRedundancy = FALSE)), published)))
@@ -3050,7 +3083,13 @@ test_that("floored noise holds S-LDSC's intercept at the floor", {
             makeCoverageAnnot(dat$n_snps, "spatial", nCand = 0L)
         }
         fit <- function(param) {
-            sldscUnivariate(z, dat$n, dat$ld_score_ref, annot, param = param)
+            variantRegressionUnivariate(
+                z,
+                dat$n,
+                dat$ld_score_ref,
+                annot,
+                param = param
+            )
         }
         expect_lt(fit(free)$intercept, 1)
         expect_equal(fit(floored)$intercept, 1)
@@ -3064,7 +3103,7 @@ test_that("S-LDSC's two stages take LDER's threshold when none is set", {
     m <- dat$n_snps
     n <- 2000
     threshold <- function(chi2) {
-        rows <- pecotmr:::.sldscRows(
+        rows <- pecotmr:::.h2VariantRegressionRows(
             chi2,
             scores,
             matrix(1, m, 1),
@@ -3073,7 +3112,7 @@ test_that("S-LDSC's two stages take LDER's threshold when none is set", {
             param,
             list(seq_len(m))
         )
-        pecotmr:::.h2LderThreshold(param, rows)
+        pecotmr:::.h2Chi2Threshold(param, rows)
     }
     # Chi-squares the model fits exactly, so the free fit's intercept is the
     # one they are built with. No inflation: LDER's rule on the variants.
@@ -3113,8 +3152,8 @@ test_that("LDER counts a truncated LdEigen's variants, not its directions", {
     kept <- sum(map_int(eigenList(truncated), function(e) length(e$values)))
     expect_lt(kept, 0.6 * length(truncated))
     expect_gt(
-        pecotmr:::lderUnivariate(z, 1e5, truncated)$h2 /
-            pecotmr:::lderUnivariate(z, 1e5, full)$h2,
+        pecotmr:::eigenRegressionUnivariate(z, 1e5, truncated)$h2 /
+            pecotmr:::eigenRegressionUnivariate(z, 1e5, full)$h2,
         0.85
     )
 })
@@ -3124,16 +3163,21 @@ test_that("LDER's threshold leaves the caller's settings unchanged", {
     # function would change the caller's record in place, and the LDER fit
     # after it would weigh with the wrong taper.
     dat <- simulateH2Data()
-    blockStats <- .lderAllBlockStats(dat$eigen_ref, dat$z, NULL, NULL)
+    blockStats <- .h2EigenRegressionAllBlockStats(
+        dat$eigen_ref,
+        dat$z,
+        NULL,
+        NULL
+    )
     param <- .h2GenomeWideSettings("lder", FALSE, FALSE)
-    rows <- pecotmr:::.lderRows(
+    rows <- pecotmr:::.h2EigenRegressionRows(
         blockStats,
         NULL,
         dat$n,
         length(dat$eigen_ref),
         param
     )
-    pecotmr:::.h2LderThreshold(param, rows)
+    pecotmr:::.h2Chi2Threshold(param, rows)
     expect_identical(param@procedures@eigenvalueTaper, "logistic")
     expect_equal(rows$taper, pecotmr:::.h2Taper("logistic", pmax(rows$lam, 0)))
 })
@@ -3154,13 +3198,13 @@ test_that("HDL reports when its fit lands on an optimiser bound", {
 
     small <- .h2ParityRef(nSamples = 1000L)$eigen
     expect_warning(
-        est <- pecotmr:::hdlUnivariate(z, 1e5, small)$h2,
+        est <- pecotmr:::eigenLikelihoodUnivariate(z, 1e5, small)$h2,
         "sits at the top of its range"
     )
 
     big <- .h2ParityRef(nSamples = 20000L)$eigen
     expect_no_warning(
-        ok <- pecotmr:::hdlUnivariate(z, 1e5, big)$h2,
+        ok <- pecotmr:::eigenLikelihoodUnivariate(z, 1e5, big)$h2,
         message = "sits at the top of its range"
     )
     expect_gt(ok, 0.3) # recovers the simulated 0.4
@@ -3176,7 +3220,11 @@ test_that("HDL recovers a known h2 given an adequate reference", {
         1:5,
         function(seed) {
             suppressWarnings(
-                pecotmr:::hdlUnivariate(.h2ParityZ(0.4, 1e5, seed), 1e5, ref)$h2
+                pecotmr:::eigenLikelihoodUnivariate(
+                    .h2ParityZ(0.4, 1e5, seed),
+                    1e5,
+                    ref
+                )$h2
             )
         }
     )
@@ -3250,39 +3298,40 @@ test_that("HDL reproduces the original HDL's model at its maximum", {
     for (g in reference) {
         ref <- .h2ParityRef(nSamples = g$nRef)$eigen
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        fit <- suppressWarnings(pecotmr:::hdlUnivariate(z, g$n, ref))
+        fit <- suppressWarnings(pecotmr:::eigenLikelihoodUnivariate(
+            z,
+            g$n,
+            ref
+        ))
         expect_equal(fit$h2, g$want, tolerance = g$within)
         expect_equal(fit$h2, g$original, tolerance = 2e-4)
         blocks <- map(
             pecotmr:::.ldEigenBlocks(ref),
-            pecotmr:::.hdlBlockData,
+            pecotmr:::.h2EigenBlockData,
             eigenRef = ref,
             z = z,
             n = g$n,
             baselineMat = NULL,
             candMat = NULL
         )
-        data <- pecotmr:::.hdlScoringData(
-            pecotmr:::.hdlDesign(blocks, length(ref), NULL, proc),
+        data <- pecotmr:::.h2VarianceData(
+            pecotmr:::.h2EigenDesign(blocks, length(ref), NULL, proc),
             g$n,
             g$nRef,
             proc
         )
         at <- function(theta) {
-            pecotmr:::.h2VarianceObjective(theta, data, FALSE)$value
+            pecotmr:::.h2Likelihood("variance", data, theta)$value
         }
         original <- pecotmr:::.h2ScoringBest(pecotmr:::.h2Scoring(
-            pecotmr:::.h2FixedObjective,
-            list(
-                objective = pecotmr:::.h2VarianceObjective,
-                inner = data,
-                full = c(g$original, 1),
-                free = 2L
-            ),
+            "variance",
+            data,
             list(1),
             0,
             10,
-            100
+            100,
+            full = c(g$original, 1),
+            free = 2L
         ))
         expect_gte(at(c(fit$h2, fit$intercept)), original$value - 1e-8)
     }
@@ -3308,7 +3357,7 @@ test_that("LDER reproduces the original LDER", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        est <- pecotmr:::lderUnivariate(z, g$n, ref)$h2
+        est <- pecotmr:::eigenRegressionUnivariate(z, g$n, ref)$h2
         expect_equal(est, g$want, tolerance = 1e-6)
     }
 })
@@ -3321,7 +3370,7 @@ test_that("gLDSC reproduces the original gldsc", {
     )
     for (g in reference) {
         z <- .h2ParityZ(g$h2, g$n, g$seed)
-        est <- pecotmr:::gldscUnivariate(z, g$n, ref)$h2
+        est <- pecotmr:::variantGlsUnivariate(z, g$n, ref)$h2
         expect_equal(est, g$want, tolerance = 1e-6)
     }
 })
@@ -3346,7 +3395,12 @@ test_that("stratified gLDSC reproduces the original gldsc", {
         ),
         genome = unique(GenomeInfoDb::genome(ref))
     )
-    fit <- pecotmr:::gldscUnivariate(.h2ParityZ(0.4, 5e4, 3), 5e4, ref, annot)
+    fit <- pecotmr:::variantGlsUnivariate(
+        .h2ParityZ(0.4, 5e4, 3),
+        5e4,
+        ref,
+        annot
+    )
     expect_equal(
         fit$enrichment$tau,
         c(-6.50492608301308e-06, 0.000122544026681053),
@@ -3405,7 +3459,7 @@ test_that("the chi2 filter is abandoned when too few variants survive it", {
     # The original ldsc drops chi2 >= 30, but with fewer than 4 survivors the
     # regression has nothing to fit, so the filter is dropped rather than
     # returning an estimate from 3 points.
-    out <- .sldscRowsFit(
+    out <- .variantRegressionRowsFit(
         rep(100, 6L),
         cbind(seq_len(6L)),
         rep(1, 6L),
@@ -3425,7 +3479,7 @@ test_that("the chi2 filter is abandoned when too few variants survive it", {
 test_that("HDL warns only when a parameter sits at its UPPER bound", {
     # Only upper bounds are diagnostic: an intercept resting at 0 just means
     # no confounding and is routine, so a lower bound must not warn.
-    f <- pecotmr:::.hdlWarnIfAtBound
+    f <- pecotmr:::.h2WarnIfAtBound
     expect_silent(f(c(0.1, 0.5), c(1, 2), 1000, 500))
     # At a lower bound: still silent.
     expect_silent(f(c(0, 0), c(1, 2), 1000, 500))
@@ -3433,7 +3487,7 @@ test_that("HDL warns only when a parameter sits at its UPPER bound", {
 
 test_that("the HDL bound warning names which parameter pinned", {
     # The last parameter is the intercept; anything else is heritability.
-    f <- pecotmr:::.hdlWarnIfAtBound
+    f <- pecotmr:::.h2WarnIfAtBound
     expect_warning(
         f(c(0.1, 2), c(1, 2), 1000, 500),
         "the fitted intercept sits at the top of its range"
@@ -3448,7 +3502,7 @@ test_that("the partitioned chi2 filter is abandoned when too few survive", {
     # Stratified S-LDSC needs more surviving variants than annotations + 2;
     # below that the filter is dropped rather than solving an underdetermined
     # system.
-    out <- .sldscRowsFit(
+    out <- .variantRegressionRowsFit(
         rep(1e6, 6L),
         cbind(seq_len(6L), rev(seq_len(6L))),
         rep(1, 6L),
@@ -3513,7 +3567,7 @@ test_that("LDER in one stage with free noise returns the free fit", {
         noise = "free",
         procedures = initialize(lder@procedures, twoStage = FALSE)
     )
-    rows <- pecotmr:::.lderRows(
+    rows <- pecotmr:::.h2EigenRegressionRows(
         list(list(
             x = rnorm(m),
             lam = abs(rnorm(m, 3, 0.5)),
@@ -3530,7 +3584,7 @@ test_that("LDER in one stage with free noise returns the free fit", {
     expect_true(is.finite(res$intercept))
 })
 
-test_that(".sldscBlockIndex errors when no block covers a variant", {
+test_that(".h2VariantBlockIndex errors when no block covers a variant", {
     n <- 6L
     snpInfo <- data.frame(
         CHR = rep("chr22", n),
@@ -3557,11 +3611,11 @@ test_that(".sldscBlockIndex errors when no block covers a variant", {
         mk(GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 10000)))
     )
     expect_error(
-        suppressWarnings(pecotmr:::.sldscBlockIndex(disjoint)),
+        suppressWarnings(pecotmr:::.h2VariantBlockIndex(disjoint)),
         "no LD block covers any reference variant"
     )
     covering <- mk(GenomicRanges::GRanges("chr22", IRanges::IRanges(1, 10000)))
-    idx <- pecotmr:::.sldscBlockIndex(covering)
+    idx <- pecotmr:::.h2VariantBlockIndex(covering)
     expect_equal(unname(lengths(idx)), n)
 })
 
@@ -3659,7 +3713,7 @@ test_that("estimateH2 reads a study split across LD blocks as one study", {
 
 # Real genotypes from eqtlRegionExample: the LD from 150 of its 415 people and
 # statistics simulated on the other 265, over 300 variants.
-.hdlLocusFixture <- function(seed, h2) {
+.windowLikelihoodFixture <- function(seed, h2) {
     data(eqtlRegionExample, envir = environment())
     G <- eqtlRegionExample$X
     af <- colMeans(G) / 2
@@ -3702,7 +3756,7 @@ test_that("HDL-L's settings reproduce HDL.L()'s per-locus heritability", {
     h2 <- c(0.05, 0.1, 0.2)
     hdl <- .h2LocalSettings("hdlL")
     for (i in 1:3) {
-        fx <- .hdlLocusFixture(i + 1L, h2[[i]])
+        fx <- .windowLikelihoodFixture(i + 1L, h2[[i]])
         expect_equal(
             .localFit(
                 hdl,
@@ -3739,7 +3793,7 @@ test_that("HDL-L's settings report HDL.L()'s p-value, halved, and intercept", {
     full <- hdl
     full@procedures@halfBoundaryP <- FALSE
     for (i in 1:3) {
-        fx <- .hdlLocusFixture(i + 1L, h2[[i]])
+        fx <- .windowLikelihoodFixture(i + 1L, h2[[i]])
         ld <- list(R = fx$R, nSamples = 150L)
         fit <- .localFit(hdl, fx$corInput, fx$n, ld)
         expect_equal(fit$p, wantP[[i]] / 2, tolerance = 1e-6)
@@ -3749,7 +3803,7 @@ test_that("HDL-L's settings report HDL.L()'s p-value, halved, and intercept", {
 })
 
 test_that("HDL-L's settings give NA without signal, start a flat locus at 0", {
-    fx <- .hdlLocusFixture(2L, 0.05)
+    fx <- .windowLikelihoodFixture(2L, 0.05)
     hdl <- .h2LocalSettings("hdlL")
     # No fit beats the intercept-only null when every effect is zero.
     expect_true(is.na(
@@ -3778,7 +3832,7 @@ test_that("a free intercept absorbs the reference term into the noise", {
     # The reference's -h2 lam / nRef is proportional to lam, as the noise
     # term is, so with the intercept free only the intercept moves: by h2 n /
     # nRef, the variance the reference term takes away.
-    fx <- .hdlLocusFixture(3L, 0.1)
+    fx <- .windowLikelihoodFixture(3L, 0.1)
     hdl <- .h2LocalSettings("hdlL")
     noRef <- hdl
     noRef@referenceNoise <- "none"
@@ -3796,7 +3850,7 @@ test_that("a free intercept absorbs the reference term into the noise", {
 # ---- the moments (LAVA's settings) and the null space (FastHer's) ----
 
 test_that("the moments follow the reference's distance from the study's LD", {
-    fx <- .hdlLocusFixture(3L, 0.1)
+    fx <- .windowLikelihoodFixture(3L, 0.1)
     z <- fx$corInput * sqrt(fx$n)
     e <- eigen(fx$R, symmetric = TRUE)
     lam <- e$values[e$values > 0]
@@ -3866,8 +3920,8 @@ test_that("the moments follow the reference's distance from the study's LD", {
 })
 
 test_that("LAVA's test has no Beta to fit at a very small n", {
-    expect_true(is.na(pecotmr:::.lavaP(0.5, 0.8, 1, 6)))
-    expect_true(is.finite(pecotmr:::.lavaP(0.5, 0.8, 1, 100)))
+    expect_true(is.na(pecotmr:::.h2MomentsP(0.5, 0.8, 1, 6)))
+    expect_true(is.finite(pecotmr:::.h2MomentsP(0.5, 0.8, 1, 100)))
 })
 
 test_that("the moments hold on real genotypes where delta'delta passes 1", {
@@ -4128,7 +4182,7 @@ test_that("the eigen regression to convergence is the free-noise likelihood", {
     # equations are the likelihood's score: with the same directions and
     # sample size, HDL-L's estimate, the reference term going to the noise.
     for (seed in 2:4) {
-        fx <- .hdlLocusFixture(seed, 0.1)
+        fx <- .windowLikelihoodFixture(seed, 0.1)
         ld <- list(R = fx$R, nSamples = 150L)
         reg <- .localFit(
             .localSettings()$eigenRegression,
@@ -4190,7 +4244,7 @@ test_that("an eigen regression to convergence halves steps that cycle", {
 })
 
 test_that("the local GLS and variant regression estimate a window", {
-    fx <- .hdlLocusFixture(4L, 0.2)
+    fx <- .windowLikelihoodFixture(4L, 0.2)
     ld <- list(R = fx$R, nSamples = 150L)
     settings <- .localSettings()
     gls <- .localFit(settings$variantGls, fx$corInput, fx$n, ld)
@@ -4209,7 +4263,7 @@ test_that("the local GLS and variant regression estimate a window", {
 })
 
 test_that("the regression's noise can be tied, floored or fitted in stages", {
-    fx <- .hdlLocusFixture(3L, 0.1)
+    fx <- .windowLikelihoodFixture(3L, 0.1)
     ld <- list(R = fx$R, nSamples = 150L)
     base <- .localSettings()$eigenRegression
     free <- .localFit(base, fx$corInput, fx$n, ld)
@@ -4251,7 +4305,7 @@ test_that("the regression's noise can be tied, floored or fitted in stages", {
 })
 
 test_that("the weights read the intercept and start as the settings say", {
-    fx <- .hdlLocusFixture(3L, 0.1)
+    fx <- .windowLikelihoodFixture(3L, 0.1)
     ld <- list(R = fx$R, nSamples = 150L)
     eigen <- .localSettings()$eigenRegression
     free <- .localFit(eigen, fx$corInput, fx$n, ld)
@@ -4924,7 +4978,7 @@ test_that("the frequency exponent's pseudo-eigenpairs keep the dense model", {
     # Var(r) = h2 R W R / M + c R / n: rotated onto the pseudo-eigenpairs,
     # every direction is independent, and their likelihood is the dense one's
     # up to a constant.
-    fx <- .hdlLocusFixture(1L, 0.1)
+    fx <- .windowLikelihoodFixture(1L, 0.1)
     M <- ncol(fx$R)
     p <- seq(0.05, 0.5, length.out = M)
     w <- pecotmr:::.h2FrequencyWeights(2 * p * (1 - p), 0)
@@ -4959,7 +5013,7 @@ test_that("the frequency exponent's pseudo-eigenpairs keep the dense model", {
 })
 
 test_that("alpha weighs nothing where every frequency is alike", {
-    fx <- .hdlLocusFixture(1L, 0.1)
+    fx <- .windowLikelihoodFixture(1L, 0.1)
     ld <- list(ldFactor = fx$ldFactor, nSamples = 150L, het = rep(0.42, 300))
     settings <- c(
         list(
@@ -4983,7 +5037,7 @@ test_that("alpha weighs nothing where every frequency is alike", {
 test_that("alpha reads frequencies where they are recorded, or refuses", {
     lava0 <- methods::initialize(.h2LocalSettings("lava"), alpha = 0)
     # A bare genotype matrix, which may be residualized, records none.
-    fx <- .hdlLocusFixture(1L, 0.1)
+    fx <- .windowLikelihoodFixture(1L, 0.1)
     expect_error(
         pecotmr:::.h2IndividualFitParam(
             lava0,
@@ -5124,10 +5178,10 @@ test_that("genome-wide alpha weighs nothing where every frequency is alike", {
         ),
         storedEigen
     )
-    hdlDesign <- function(weights) {
+    eigenDesign <- function(weights) {
         data <- map(
             pecotmr:::.ldEigenBlocks(storedEigen),
-            pecotmr:::.hdlBlockData,
+            pecotmr:::.h2EigenBlockData,
             eigenRef = storedEigen,
             z = z,
             n = n,
@@ -5135,20 +5189,20 @@ test_that("genome-wide alpha weighs nothing where every frequency is alike", {
             candMat = NULL,
             w = weights
         )
-        pecotmr:::.hdlDesign(
+        pecotmr:::.h2EigenDesign(
             data,
             length(storedEigen),
-            pecotmr:::.hdlFitBasis(A, weights),
+            pecotmr:::.h2AnnotationBasis(A, weights),
             proc
         )
     }
-    perSdDesign <- hdlDesign(NULL)
-    alikeDesign <- hdlDesign(w)
+    perSdDesign <- eigenDesign(NULL)
+    alikeDesign <- eigenDesign(w)
     nll <- function(design, par) {
-        pecotmr:::.h2VarianceObjective(
-            par,
-            pecotmr:::.hdlScoringData(design, n, ncol(fx$panel), proc),
-            FALSE
+        pecotmr:::.h2Likelihood(
+            "variance",
+            pecotmr:::.h2VarianceData(design, n, ncol(fx$panel), proc),
+            par
         )$value
     }
     for (par in list(c(0.2, 0.1, 0.05, 1), c(0.4, 0, -0.1, 1.2))) {
@@ -5204,7 +5258,7 @@ test_that("estimateH2 weighs a genome-wide reference's variants", {
         keepLdMatrices = FALSE
     )
     expect_error(
-        pecotmr:::sldscUnivariate(
+        pecotmr:::variantRegressionUnivariate(
             rnorm(300),
             2000,
             scoresOnly,
@@ -5248,7 +5302,7 @@ test_that("the variant regression's information reads LD between variants", {
     # weights h2's estimate is linear in the responses, so at the model's own
     # S the sandwich is its variance, which draws from that model reproduce.
     # A signal small enough that every draw's sqrt(n) r stays a correlation's.
-    fx <- .hdlLocusFixture(1L, 0.1)
+    fx <- .windowLikelihoodFixture(1L, 0.1)
     M <- ncol(fx$R)
     n <- 300
     S <- n * 0.1 / M * fx$R %*% fx$R + fx$R
@@ -5291,7 +5345,7 @@ test_that("HDL-L's interval inverts its likelihood ratio", {
     # intercept refitted, has fallen half the chi-square's 95% point below
     # its value at the fit; settings without the likelihood-ratio test give
     # none.
-    fx <- .hdlLocusFixture(2L, 0.1)
+    fx <- .windowLikelihoodFixture(2L, 0.1)
     ld <- list(ldFactor = fx$ldFactor, nSamples = 150L)
     hdl <- .h2LocalSettings("hdlL")
     fit <- .localFit(hdl, fx$corInput, fx$n, ld)
@@ -5308,7 +5362,7 @@ test_that("HDL-L's interval inverts its likelihood ratio", {
         floor = hdl@procedures@varianceFloor
     )
     profile <- function(h) {
-        pecotmr:::.hdlLocusProfile(h, data, hdl@procedures)
+        pecotmr:::.h2WindowProfile(h, data, hdl@procedures)
     }
     top <- profile(fit$h2)
     for (end in c(fit$h2Lower, fit$h2Upper)) {
@@ -5439,31 +5493,219 @@ test_that("a window with too few directions or variants has no estimate", {
     expect_true(is.na(noTest$h2Lower) && is.na(noTest$h2Upper))
 })
 
-test_that("the fits' small helpers take each kind of input", {
-    # A step across a kink whose projection is undefined is not taken.
-    expect_null(pecotmr:::.h2ScoringAcross(
-        c(0, 0),
-        c(1, 2),
-        list(
-            at = list(score = c(0, 0), information = matrix(c(0, 1, 1, 0), 2L)),
-            there = list(score = c(1, 0))
+# ---- the eigen likelihoods in compiled code ---------------------------------
+
+# Each one-window likelihood's data and a point inside its bounds, small
+# enough to check by hand; the variance model's last two directions sit at
+# their floor.
+.likelihoodModels <- function() {
+    set.seed(3)
+    K <- 12L
+    lam <- sort(rexp(K), decreasing = TRUE)
+    b1 <- rnorm(K, sd = 0.05)
+    b2 <- rnorm(K, sd = 0.05)
+    genetic <- lam^2 / K
+    noise <- lam / 1000
+    tied <- list(
+        offset = noise,
+        g = genetic - noise,
+        b2 = b1^2,
+        floor = 1e-6
+    )
+    nullSpace <- list(a = rexp(K), ck = 500 * lam / K - 1, n = 500)
+    list(
+        variance = list(
+            data = list(
+                G = cbind(genetic, noise),
+                b2 = b1^2,
+                offset = c(rep(0, K - 2L), -1, -1),
+                floor = 1e-6
+            ),
+            theta = c(0.3, 1.2)
         ),
-        NULL,
-        NULL,
-        list(lower = c(-1, -1), upper = c(1, 1))
-    ))
+        tied = list(data = c(tied, scaled = FALSE), theta = 0.3),
+        tiedScaled = list(data = c(tied, scaled = TRUE), theta = c(0.3, 1.1)),
+        nullSpace = list(data = c(nullSpace, scaled = FALSE), theta = 0.3),
+        nullSpaceScaled = list(
+            data = c(nullSpace, scaled = TRUE),
+            theta = c(0.3, 0.9)
+        ),
+        cross = list(
+            data = list(
+                G = cbind(genetic, noise),
+                b1 = b1,
+                b2 = b2,
+                v11 = 0.3 * genetic + noise,
+                v22 = 0.4 * genetic + noise,
+                offset = 0,
+                floor = 1e-8
+            ),
+            theta = c(0.1, 0.2)
+        ),
+        reduced = list(
+            data = list(
+                s = runif(K),
+                a = rnorm(K),
+                b = rnorm(K),
+                floor = 1e-6
+            ),
+            theta = 0.4
+        )
+    )
+}
+
+# A likelihood's central difference in each parameter.
+.likelihoodSlope <- function(model, data, theta, h = 1e-6) {
+    map_dbl(seq_along(theta), function(j) {
+        at <- function(x) pecotmr:::.h2Likelihood(model, data, x)$value
+        (at(replace(theta, j, theta[[j]] + h)) -
+            at(replace(theta, j, theta[[j]] - h))) /
+            (2 * h)
+    })
+}
+
+test_that("every one-window likelihood's score is its slope", {
+    models <- .likelihoodModels()
+    kind <- c(
+        variance = "variance",
+        tied = "tied",
+        tiedScaled = "tied",
+        nullSpace = "nullSpace",
+        nullSpaceScaled = "nullSpace",
+        cross = "cross",
+        reduced = "reduced"
+    )
+    for (m in names(models)) {
+        x <- models[[m]]
+        at <- pecotmr:::.h2Likelihood(kind[[m]], x$data, x$theta, TRUE)
+        expect_equal(
+            at$score,
+            .likelihoodSlope(kind[[m]], x$data, x$theta),
+            tolerance = 1e-6,
+            info = m
+        )
+        expect_equal(at$information, t(at$information), info = m)
+        values <- eigen(at$information, TRUE, only.values = TRUE)$values
+        expect_gt(min(values), -1e-10)
+    }
+    # The variance model's terms, by hand: a direction at its floor carries
+    # no parameter.
+    x <- models$variance
+    raw <- x$data$offset + as.vector(x$data$G %*% x$theta)
+    v <- pmax(raw, x$data$floor)
+    G <- x$data$G * (raw > x$data$floor)
+    at <- pecotmr:::.h2Likelihood("variance", x$data, x$theta, TRUE)
+    expect_equal(at$value, -sum(log(v) + x$data$b2 / v) / 2)
+    expect_equal(at$information, unname(crossprod(G / v)) / 2)
+})
+
+test_that("a fit is the maximum within its bounds, or its free part's", {
+    x <- .likelihoodModels()$variance
+    lower <- c(0, 0.5)
+    upper <- c(1, 10)
+    fits <- pecotmr:::.h2Scoring(
+        "variance",
+        x$data,
+        list(c(0.5, 1), c(0.05, 5)),
+        lower,
+        upper,
+        1000
+    )
+    expect_true(all(map_lgl(fits, "converged")))
+    best <- pecotmr:::.h2ScoringBest(fits)
+    score <- pecotmr:::.h2Likelihood("variance", x$data, best$par, TRUE)$score
+    inside <- best$par > lower & best$par < upper
+    expect_lt(max(abs(score[inside])), 1e-4)
+    expect_true(all(score[best$par == lower] <= 0))
+    expect_true(all(score[best$par == upper] >= 0))
+    # With h2 held, the intercept alone, and its value the full model's.
+    held <- pecotmr:::.h2Scoring(
+        "variance",
+        x$data,
+        list(1),
+        0.5,
+        10,
+        1000,
+        full = c(0.3, 1),
+        free = 2L
+    )[[1L]]
+    expect_length(held$par, 1L)
+    expect_equal(dim(held$information), c(1L, 1L))
+    expect_equal(
+        held$value,
+        pecotmr:::.h2Likelihood("variance", x$data, c(0.3, held$par))$value
+    )
+    expect_gte(best$value, held$value)
+})
+
+test_that("a fit that runs out of steps or reads no finite value fails", {
+    models <- .likelihoodModels()
+    x <- models$variance
+    short <- pecotmr:::.h2Scoring(
+        "variance",
+        x$data,
+        list(c(0.9, 9)),
+        c(0, 0.5),
+        c(1, 10),
+        1
+    )
+    expect_false(short[[1L]]$converged)
+    # At h2 = 1 the null space's variance is 0: no finite log-likelihood.
+    y <- models$nullSpace
+    edge <- pecotmr:::.h2Scoring("nullSpace", y$data, list(1), 0, 1, 100)
+    expect_false(edge[[1L]]$converged)
+    expect_equal(edge[[1L]]$value, -Inf)
+})
+
+test_that("a parameter no direction informs takes no step", {
+    # Every direction at its floor: a flat likelihood, read from a design
+    # given as a vector.
+    flat <- list(G = rep(1, 3), b2 = c(1, 2, 3), offset = -10, floor = 0.1)
+    fit <- pecotmr:::.h2Scoring("variance", flat, list(0.5), 0, 1, 100)
+    expect_true(fit[[1L]]$converged)
+    expect_equal(fit[[1L]]$par, 0.5)
+})
+
+test_that("the compiled likelihoods refuse data they cannot read", {
+    x <- .likelihoodModels()$variance
+    expect_error(
+        pecotmr:::.h2Likelihood("other", x$data, x$theta),
+        "Unknown likelihood"
+    )
+    expect_error(
+        pecotmr:::.h2Likelihood("variance", list(1, 2), 0),
+        "has no 'G'"
+    )
+    expect_error(
+        pecotmr:::.h2Likelihood("variance", x$data[c("G", "b2", "offset")], 0),
+        "has no 'floor'"
+    )
+    expect_error(
+        pecotmr:::.h2Scoring(
+            "variance",
+            x$data,
+            list(c(0.1, 1, 2)),
+            c(0, 0, 0),
+            c(1, 1, 1),
+            10
+        ),
+        "incompatible"
+    )
+})
+
+test_that("the fits' small helpers take each kind of input", {
     # Settings without the eigenvalue term read no reference size.
     hdl <- .h2GenomeWideSettings("hdl", FALSE, FALSE)
     hdl@referenceNoise <- "none"
-    expect_identical(pecotmr:::.hdlPanelSize(hdl, NULL), Inf)
+    expect_identical(pecotmr:::.h2PanelSize(hdl, NULL), Inf)
     # g-LDSC's S from eigenpairs is the one from their matrix.
     fx <- .nullSpaceFixture()
     R <- crossprod(fx$X) / fx$n
     e <- eigen(R, symmetric = TRUE)
     d <- seq(0.5, 1.5, length.out = nrow(R))
     expect_equal(
-        pecotmr:::.gldscS(list(vectors = e$vectors, values = e$values), d, 2),
-        pecotmr:::.gldscS(list(R = R), d, 2)
+        pecotmr:::.h2GlsS(list(vectors = e$vectors, values = e$values), d, 2),
+        pecotmr:::.h2GlsS(list(R = R), d, 2)
     )
     # REML's genotypes carry the frequency weights as column scales.
     het <- c(0.1, 0.2, 0.3, 0.4, 0.42, 0.45, 0.48, 0.5)
@@ -5495,4 +5737,65 @@ test_that("a panel that records its frequencies gives them to the weights", {
         pecotmr:::.h2RefHeterozygosity(lazyEigen),
         rep(2 * 0.3 * 0.7, length(lazyEigen))
     )
+})
+
+test_that("estimateLocalH2 on a MultiStudyQtlDataset is each study's own", {
+    skip_if_not_installed("PlinkMatrix")
+    ms <- .twoStudyFixture()
+    got <- estimateLocalH2(ms, cisWindow = 1e6)
+    own <- c(
+        estimateLocalH2(as.list(ms)$s1, cisWindow = 1e6),
+        estimateLocalH2(as.list(ms)$s2, cisWindow = 1e6)
+    )
+    expect_identical(got$study, own$study)
+    expect_identical(got$context, own$context)
+    expect_identical(heritabilityEstimate(got), heritabilityEstimate(own))
+    # Its summary statistics' rows are estimated as a QtlSumStats's.
+    withSummary <- MultiStudyQtlDataset(
+        qtlDatasets = as.list(ms),
+        sumStats = .summaryStudy(ms)
+    )
+    all <- estimateLocalH2(withSummary, cisWindow = 1e6, referenceOverlap = 1)
+    rows <- estimateLocalH2(
+        sumStats(withSummary),
+        cisWindow = 1e6,
+        referenceOverlap = 1
+    )
+    expect_identical(all$study, c(own$study, "s3"))
+    expect_identical(
+        heritabilityEstimate(all),
+        c(heritabilityEstimate(own), heritabilityEstimate(rows))
+    )
+    # A context named selects within the studies that hold it.
+    onlyB <- estimateLocalH2(withSummary, cisWindow = 1e6, contexts = "b")
+    expect_identical(onlyB$study, c("s1", "s2"))
+    expect_identical(onlyB$context, c("b", "b"))
+    expect_error(
+        estimateLocalH2(ms, cisWindow = 1e6, traitId = "none"),
+        "no study holds a selected context and trait"
+    )
+})
+
+test_that("a MultiStudyQtlDataset's REML needs no summary rows selected", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("qgg")
+    ms <- .twoStudyFixture()
+    withSummary <- MultiStudyQtlDataset(
+        qtlDatasets = as.list(ms),
+        sumStats = .summaryStudy(ms)
+    )
+    greml <- .h2LocalSettings("greml")
+    expect_error(
+        estimateLocalH2(withSummary, greml, cisWindow = 1e6),
+        "needs individual-level data"
+    )
+    # The summary study holds only context a, so b selects none of it.
+    onlyB <- estimateLocalH2(
+        withSummary,
+        greml,
+        cisWindow = 1e6,
+        contexts = "b"
+    )
+    expect_identical(onlyB$study, c("s1", "s2"))
+    expect_true(all(is.finite(heritabilityEstimate(onlyB))))
 })

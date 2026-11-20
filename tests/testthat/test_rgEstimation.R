@@ -393,7 +393,7 @@ test_that("canonical partial correlations give a correlation matrix", {
     )
 })
 
-test_that("the joint likelihood is HDL.L()'s at two conditions", {
+test_that("the joint likelihood is the pair's at two conditions", {
     ud <- .rgTrivariateUnitData()
     param <- .rgJointSettings()
     d <- pecotmr:::.rgEigenData(param, ud)
@@ -429,10 +429,10 @@ test_that("the joint likelihood is HDL.L()'s at two conditions", {
     for (theta in list(c(-0.4, -0.5), c(0.2, 0.3), c(0.7, 0.3))) {
         expect_equal(
             pecotmr:::.rgJointLl(theta, joint, NULL) - first,
-            pecotmr:::.rgCrossObjective(
-                c(theta[[1L]] * sqrt(prod(h2[1:2])), theta[[2L]]),
+            pecotmr:::.h2Likelihood(
+                "cross",
                 pecotmr:::.rgCrossScoringData(cross),
-                FALSE
+                c(theta[[1L]] * sqrt(prod(h2[1:2])), theta[[2L]])
             )$value
         )
     }
@@ -789,7 +789,7 @@ test_that("tied shared noise is the phenotypes' correlation less G12", {
         crossNoise = "tied"
     )
     got <- pecotmr:::.rgFit(moments, ud)[[1L]]$values
-    phi <- pecotmr:::.lavaPhi(fx$n, 150L, 0)
+    phi <- pecotmr:::.h2OverlapFactor(fx$n, 150L, 0)
     own <- (1 + c(got$h2_1, got$h2_2) * (phi - 1)) / (fx$n - 1)
     expect_equal(
         got$noise_correlation * sqrt(prod(own)),
@@ -1156,6 +1156,65 @@ test_that("a case/control GWAS side is on the liability scale as well", {
     expect_true(all(is.na(plain$covariance_liability)))
 })
 
+test_that("the moments hold a GWAS side's noise at its genome-wide intercept", {
+    qs <- .rgQtlFixture(contexts = c("a", "b"))
+    gw <- .rgGwasFixture(qs)
+    intercept <- function(c) {
+        pecotmr:::.h2EstimateNew(
+            list(GenomicRanges::GRanges()),
+            list(
+                study = "gw",
+                context = NA_character_,
+                trait = NA_character_,
+                h2 = 0.2,
+                h2_se = 0.01,
+                h2_lower = NA_real_,
+                h2_upper = NA_real_,
+                h2_liability = NA_real_,
+                h2_liability_se = NA_real_,
+                h2_liability_lower = NA_real_,
+                h2_liability_upper = NA_real_,
+                intercept = c,
+                intercept_se = 0.01,
+                p_value = NA_real_,
+                n_snps = 100L,
+                n_components = NA_integer_,
+                scale = NA_real_,
+                reference_overlap = NA_real_
+            ),
+            pecotmr:::.h2NoObjects(1L),
+            GenomicRanges::GRanges(),
+            .h2GenomeWideSettings("lder", FALSE, FALSE)
+        )
+    }
+    # Without the overlap factor (phi = 1), an intercept c takes
+    # K (c - 1) / (n - 1) off the GWAS side's heritability, on n = 20,000.
+    lava <- .rgSettings()$moments
+    lava@referenceNoise <- "none"
+    for (effects in c("fixed", "random")) {
+        param <- methods::initialize(lava, effects = effects)
+        fit <- function(h2) {
+            suppressWarnings(estimateLocalRg(
+                qs,
+                gwas = gw,
+                param = param,
+                gwasH2Estimate = h2
+            ))
+        }
+        tied <- fit(NULL)
+        one <- fit(intercept(1))
+        held <- fit(intercept(1.2))
+        expect_equal(one$h2_2, tied$h2_2, info = effects)
+        expect_equal(held$h2_1, tied$h2_1, info = effects)
+        expect_equal(
+            tied$h2_2 - held$h2_2,
+            held$n_components * 0.2 / (20000 - 1),
+            info = effects
+        )
+        expect_true(all(is.finite(held$rg)), info = effects)
+    }
+})
+
 test_that("estimateLocalRg refuses settings no pair can be fitted under", {
     qs <- .rgQtlFixture(contexts = c("a", "b"))
     base <- H2EstimateParam()
@@ -1186,18 +1245,6 @@ test_that("estimateLocalRg refuses settings no pair can be fitted under", {
     expect_error(
         estimateLocalRg(qs, gwasH2Estimate = makeTestH2Estimate()),
         "so it needs `gwas`"
-    )
-    expect_error(
-        estimateLocalRg(
-            qs,
-            gwas = .rgGwasFixture(qs),
-            param = methods::initialize(
-                .h2LocalSettings("lava"),
-                crossNoise = "zero"
-            ),
-            gwasH2Estimate = makeTestH2Estimate()
-        ),
-        "the moments tie each condition's noise"
     )
     expect_error(
         estimateLocalRg(qs, noiseCorrelation = matrix(c(1, 0.2, 0.3, 1), 2)),
@@ -2117,9 +2164,9 @@ test_that("fixed-effects means hold a group's cross-products", {
 
 # The log-likelihood's central difference in parameter j.
 .rgJointSlope <- function(j, theta, data, h = 1e-6) {
-    f <- pecotmr:::.rgJointObjective
-    up <- f(replace(theta, j, theta[[j]] + h), data, FALSE)$value
-    down <- f(replace(theta, j, theta[[j]] - h), data, FALSE)$value
+    f <- pecotmr:::.h2Likelihood
+    up <- f("joint", data, replace(theta, j, theta[[j]] + h))$value
+    down <- f("joint", data, replace(theta, j, theta[[j]] - h))$value
     (up - down) / (2 * h)
 }
 
@@ -2146,10 +2193,93 @@ test_that("the joint likelihood's score on two references is its slope", {
     bounds <- pecotmr:::.rgJointBounds(joint, param@procedures, NULL)
     data <- pecotmr:::.rgJointScoringData(joint, NULL, bounds)
     for (theta in list(c(0.2, 0.1), c(-0.3, 0.4))) {
-        score <- pecotmr:::.rgJointObjective(theta, data, TRUE)$score
+        score <- pecotmr:::.h2Likelihood("joint", data, theta, TRUE)$score
         slope <- map_dbl(seq_along(theta), .rgJointSlope, theta, data)
         expect_equal(score, slope, tolerance = 1e-5)
     }
+})
+
+test_that("the joint likelihood's score on one reference is its slope", {
+    ud <- .rgTrivariateUnitData()
+    param <- .rgJointSettings()
+    proc <- param@procedures
+    d <- pecotmr:::.rgEigenData(param, ud)
+    members <- map(
+        1:3,
+        pecotmr:::.rgLikelihoodMember,
+        d = d,
+        floor = proc@varianceFloor
+    )
+    steps <- map2(
+        members,
+        ud$heldIntercept,
+        pecotmr:::.rgLikelihoodStep1,
+        param = param
+    )
+    joint <- pecotmr:::.rgJointData(
+        d,
+        members,
+        map_dbl(steps, "h2"),
+        map_dbl(steps, "intercept"),
+        param,
+        matrix(0, 3L, 3L)
+    )
+    theta <- c(0.5, -0.2, 0.3, 0.1, 0.25, -0.2)
+    fitted <- pecotmr:::.rgJointScoringData(
+        joint,
+        NULL,
+        pecotmr:::.rgJointBounds(joint, proc, NULL)
+    )
+    held <- matrix(0.1, 3L, 3L)
+    given <- pecotmr:::.rgJointScoringData(
+        joint,
+        held,
+        pecotmr:::.rgJointBounds(joint, proc, held)
+    )
+    cases <- list(list(fitted, theta), list(given, theta[1:3]))
+    for (case in cases) {
+        at <- pecotmr:::.h2Likelihood("joint", case[[1L]], case[[2L]], TRUE)
+        slope <- map_dbl(
+            seq_along(case[[2L]]),
+            .rgJointSlope,
+            case[[2L]],
+            case[[1L]]
+        )
+        expect_equal(at$score, slope, tolerance = 1e-6)
+        expect_equal(at$information, t(at$information))
+    }
+})
+
+test_that("a floored block's derivative is its likelihood's slope", {
+    ud <- .rgDenseTwoLd()
+    param <- .rgJointSettings()
+    bases <- map(
+        seq_along(ud$lds),
+        pecotmr:::.rgBasisEigen,
+        param = param,
+        ud = ud
+    )
+    step1 <- pecotmr:::.rgMixedStep1(param, ud, bases)
+    joint <- pecotmr:::.rgMixedData(
+        bases,
+        step1,
+        ud$ldOf,
+        param@procedures@varianceFloor,
+        pecotmr:::.rgTieOf(param, ud, 2L)
+    )
+    bounds <- pecotmr:::.rgJointBounds(joint, param@procedures, NULL)
+    theta <- c(0.6, 0.2)
+    plain <- pecotmr:::.rgJointScoringData(joint, NULL, bounds)
+    # A floor above half of the second condition's own variances.
+    high <- list_assign(joint, floor = stats::median(joint$v[[2L]]))
+    floored <- pecotmr:::.rgJointScoringData(high, NULL, bounds)
+    expect_false(isTRUE(all.equal(
+        pecotmr:::.h2Likelihood("joint", plain, theta)$value,
+        pecotmr:::.h2Likelihood("joint", floored, theta)$value
+    )))
+    at <- pecotmr:::.h2Likelihood("joint", floored, theta, TRUE)
+    slope <- map_dbl(seq_along(theta), .rgJointSlope, theta, floored)
+    expect_equal(at$score, slope, tolerance = 1e-5)
 })
 
 test_that("a group on several references is the joint fit when they agree", {
@@ -2297,52 +2427,9 @@ test_that("a GWAS side reads its own reference where it names one", {
     expect_identical(h2EstimateParam(shared)@crossNoise, "window")
 })
 
-# Two studies of qtlDatasetExample's 165 donors (82 and 83), contexts a and b
-# with polygenic effects shared across the studies (a with b at 0.6).
-.rgTwoStudyFixture <- function() {
-    data(qtlDatasetExample, envir = environment())
-    panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
-    brain <- pecotmr:::.qtlContextSe(qtlDatasetExample, "brain")
-    G <- scale(t(as.matrix(SummarizedExperiment::assay(panel))))
-    G[!is.finite(G)] <- 0
-    set.seed(4L)
-    b <- matrix(rnorm(2L * ncol(G)), ncol = 2L) %*%
-        chol(matrix(c(1, 0.6, 0.6, 1), 2L))
-    e <- matrix(rnorm(2L * nrow(G)), ncol = 2L)
-    y <- scale(G %*% b) * sqrt(0.5) + e * sqrt(0.5)
-    contexts <- stats::setNames(nm = c("a", "b"))
-    full <- map(
-        c(s1 = "s1", s2 = "s2"),
-        .rgStudyOf,
-        panel = panel,
-        phenotypes = map(contexts, .rgContextOf, y = y, brain = brain)
-    )
-    donors <- rownames(G)
-    MultiStudyQtlDataset(
-        qtlDatasets = list(
-            s1 = full$s1[, donors[1:82], ],
-            s2 = full$s2[, donors[83:165], ]
-        )
-    )
-}
-
-.rgStudyOf <- function(name, panel, phenotypes) {
-    QtlDataset(studyName = name, genotypes = panel, phenotypes = phenotypes)
-}
-
-.rgContextOf <- function(cx, y, brain) {
-    se <- brain[, rownames(y)]
-    SummarizedExperiment::assay(se) <- matrix(
-        y[, match(cx, c("a", "b"))],
-        1L,
-        dimnames = dimnames(se)
-    )
-    se
-}
-
 test_that("a MultiStudyQtlDataset pairs studies on their own genotypes", {
     skip_if_not_installed("PlinkMatrix")
-    ms <- .rgTwoStudyFixture()
+    ms <- .twoStudyFixture()
     # Within each study: its contexts on its genotypes, the noise fitted.
     within <- suppressWarnings(estimateLocalRg(ms, cisWindow = 1e6))
     expect_identical(within$study_1, c("s1", "s2"))
@@ -2365,7 +2452,7 @@ test_that("a MultiStudyQtlDataset pairs studies on their own genotypes", {
 
 test_that("tied noise ties a two-study group's pairs that share donors", {
     skip_if_not_installed("PlinkMatrix")
-    ms <- .rgTwoStudyFixture()
+    ms <- .twoStudyFixture()
     tied <- function(param) methods::initialize(param, crossNoise = "tied")
     fits <- list(
         pairs = list(tied(H2EstimateParam()), FALSE),
@@ -2472,7 +2559,7 @@ test_that("estimateLocalRg weighs each reference's variants by alpha", {
 test_that("a MultiStudyQtlDataset weighs each study's variants by alpha", {
     skip_if_not_installed("PlinkMatrix")
     est <- suppressWarnings(estimateLocalRg(
-        .rgTwoStudyFixture(),
+        .twoStudyFixture(),
         cisWindow = 1e6,
         param = methods::initialize(H2EstimateParam(), alpha = 0),
         jointSpecification = "study"
@@ -2934,7 +3021,7 @@ test_that("a QtlDataset pair on fewer than three shared donors has none", {
 
 test_that("a MultiStudyQtlDataset pairs its conditions with a GWAS", {
     skip_if_not_installed("PlinkMatrix")
-    ms <- .rgTwoStudyFixture()
+    ms <- .twoStudyFixture()
     gw <- .rgDatasetGwas(as.list(ms)$s1)
     each <- suppressWarnings(estimateLocalRg(ms, gwas = gw, cisWindow = 1e6))
     expect_length(each, 4L)
@@ -2959,63 +3046,13 @@ test_that("a MultiStudyQtlDataset pairs its conditions with a GWAS", {
     expect_error(estimateLocalRg(ms, cisWindow = 1e6, traitId = "none"))
 })
 
-# A summary-statistics study "s3" of context a's trait, on study s1's donors
-# with their LD as its reference, beside a MultiStudyQtlDataset's studies;
-# its trait anchored `shift` bases from the studies'.
-.rgSummaryStudy <- function(ms, shift = 0L) {
-    qd <- as.list(ms)$s1
-    panel <- pecotmr:::.qtlGenotypeSe(qd)
-    rr <- SummarizedExperiment::rowRanges(panel)
-    a <- pecotmr:::.qtlContextSe(qd, "a")
-    y <- SummarizedExperiment::assay(a)[1L, ]
-    G <- t(as.matrix(SummarizedExperiment::assay(panel)))
-    donors <- intersect(names(y)[!is.na(y)], rownames(G))
-    X <- scale(G[donors, ])
-    X[!is.finite(X)] <- 0
-    r <- suppressWarnings(as.vector(stats::cor(X, y[donors])))
-    r <- replace(r, !is.finite(r), 0)
-    ids <- paste(
-        GenomicRanges::seqnames(rr),
-        GenomicRanges::start(rr),
-        rr$A2,
-        rr$A1,
-        sep = ":"
-    )
-    gr <- GenomicRanges::GRanges(
-        GenomicRanges::seqnames(rr),
-        IRanges::IRanges(GenomicRanges::start(rr), width = 1L)
-    )
-    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
-        SNP = ids,
-        A1 = rr$A1,
-        A2 = rr$A2,
-        Z = pecotmr:::.corToZ(r, length(donors)),
-        N = length(donors)
-    )
-    R <- stats::cov2cor(
-        crossprod(X) + diag(as.numeric(colSums(X^2) == 0), ncol(X))
-    )
-    QtlSumStats(
-        studyName = "s3",
-        context = "a",
-        trait = rownames(a),
-        entry = list(gr),
-        genome = "hg19",
-        ldReference = LdMatrix(
-            `dimnames<-`(R, list(ids, ids)),
-            nSamples = length(donors)
-        ),
-        traitPos = IRanges::shift(SummarizedExperiment::rowRanges(a), shift),
-        qcOptions = list(qc = "ok")
-    )
-}
 
 test_that("a MultiStudyQtlDataset pairs a summary study with its own", {
     skip_if_not_installed("PlinkMatrix")
-    ms <- .rgTwoStudyFixture()
+    ms <- .twoStudyFixture()
     withSummary <- MultiStudyQtlDataset(
         qtlDatasets = as.list(ms),
-        sumStats = .rgSummaryStudy(ms)
+        sumStats = .summaryStudy(ms)
     )
     across <- suppressWarnings(estimateLocalRg(
         withSummary,
@@ -3039,12 +3076,12 @@ test_that("a MultiStudyQtlDataset pairs a summary study with its own", {
 
 test_that("a summary study in a window of its own pairs with a GWAS alone", {
     skip_if_not_installed("PlinkMatrix")
-    ms <- .rgTwoStudyFixture()
+    ms <- .twoStudyFixture()
     # Its trait anchored 50 kb off the studies': a window of its own, which
     # neither genotyped study has a condition in.
     shifted <- MultiStudyQtlDataset(
         qtlDatasets = as.list(ms),
-        sumStats = .rgSummaryStudy(ms, shift = 50000L)
+        sumStats = .summaryStudy(ms, shift = 50000L)
     )
     gw <- .rgDatasetGwas(as.list(ms)$s1)
     each <- suppressWarnings(estimateLocalRg(

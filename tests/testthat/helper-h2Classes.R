@@ -213,3 +213,104 @@ makeTestGwasGenotypeHandle <- function() {
     )
     gr
 }
+
+# ---- multi-study fixtures (estimateLocalH2 and estimateLocalRg) -------------
+
+# Two studies of qtlDatasetExample's 165 donors (82 and 83), contexts a and b
+# with polygenic effects shared across the studies (a with b at 0.6).
+.twoStudyFixture <- function() {
+    data(qtlDatasetExample, envir = environment())
+    panel <- pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
+    brain <- pecotmr:::.qtlContextSe(qtlDatasetExample, "brain")
+    G <- scale(t(as.matrix(SummarizedExperiment::assay(panel))))
+    G[!is.finite(G)] <- 0
+    set.seed(4L)
+    b <- matrix(rnorm(2L * ncol(G)), ncol = 2L) %*%
+        chol(matrix(c(1, 0.6, 0.6, 1), 2L))
+    e <- matrix(rnorm(2L * nrow(G)), ncol = 2L)
+    y <- scale(G %*% b) * sqrt(0.5) + e * sqrt(0.5)
+    contexts <- stats::setNames(nm = c("a", "b"))
+    full <- map(
+        c(s1 = "s1", s2 = "s2"),
+        .studyOf,
+        panel = panel,
+        phenotypes = map(contexts, .contextOf, y = y, brain = brain)
+    )
+    donors <- rownames(G)
+    MultiStudyQtlDataset(
+        qtlDatasets = list(
+            s1 = full$s1[, donors[1:82], ],
+            s2 = full$s2[, donors[83:165], ]
+        )
+    )
+}
+
+
+# A study of `phenotypes` on the `panel` genotypes.
+.studyOf <- function(name, panel, phenotypes) {
+    QtlDataset(studyName = name, genotypes = panel, phenotypes = phenotypes)
+}
+
+
+# One context's phenotypes: column cx of `y` on the brain context's trait.
+.contextOf <- function(cx, y, brain) {
+    se <- brain[, rownames(y)]
+    SummarizedExperiment::assay(se) <- matrix(
+        y[, match(cx, c("a", "b"))],
+        1L,
+        dimnames = dimnames(se)
+    )
+    se
+}
+
+
+# A summary-statistics study "s3" of context a's trait, on study s1's donors
+# with their LD as its reference, beside a MultiStudyQtlDataset's studies;
+# its trait anchored `shift` bases from the studies'.
+.summaryStudy <- function(ms, shift = 0L) {
+    qd <- as.list(ms)$s1
+    panel <- pecotmr:::.qtlGenotypeSe(qd)
+    rr <- SummarizedExperiment::rowRanges(panel)
+    a <- pecotmr:::.qtlContextSe(qd, "a")
+    y <- SummarizedExperiment::assay(a)[1L, ]
+    G <- t(as.matrix(SummarizedExperiment::assay(panel)))
+    donors <- intersect(names(y)[!is.na(y)], rownames(G))
+    X <- scale(G[donors, ])
+    X[!is.finite(X)] <- 0
+    r <- suppressWarnings(as.vector(stats::cor(X, y[donors])))
+    r <- replace(r, !is.finite(r), 0)
+    ids <- paste(
+        GenomicRanges::seqnames(rr),
+        GenomicRanges::start(rr),
+        rr$A2,
+        rr$A1,
+        sep = ":"
+    )
+    gr <- GenomicRanges::GRanges(
+        GenomicRanges::seqnames(rr),
+        IRanges::IRanges(GenomicRanges::start(rr), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = rr$A1,
+        A2 = rr$A2,
+        Z = pecotmr:::.corToZ(r, length(donors)),
+        N = length(donors)
+    )
+    R <- stats::cov2cor(
+        crossprod(X) + diag(as.numeric(colSums(X^2) == 0), ncol(X))
+    )
+    QtlSumStats(
+        studyName = "s3",
+        context = "a",
+        trait = rownames(a),
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = LdMatrix(
+            `dimnames<-`(R, list(ids, ids)),
+            nSamples = length(donors)
+        ),
+        traitPos = IRanges::shift(SummarizedExperiment::rowRanges(a), shift),
+        qcOptions = list(qc = "ok")
+    )
+}

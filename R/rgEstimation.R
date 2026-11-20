@@ -10,16 +10,17 @@
 # condition's own heritability and noise, as estimateLocalH2() fits them, then
 # the covariance with those held.
 #
-#   eigen / likelihood   HDL-L's (HDL.L()): the second condition's rotated
-#                        statistics given the first's, the shared noise free
-#                        (the window's own), held or zero
+#   eigen / likelihood   the second condition's rotated statistics given the
+#                        first's, the shared noise free (the window's own),
+#                        held or zero
 #   eigen / regression   the cross-products u1 u2 / lambda regressed on
 #                        lambda / M and the shared-noise column
 #   eigen / moments      LAVA's Omega = Delta'Delta / K - Sigma for every
 #                        condition of a group at once, Sigma's off-diagonal
 #                        supplied or zero; LAVA's simulation p-value
 #   variant / regression cross-trait LD score regression in the window
-#   variant / gls        g-LDSC's GLS with the cross-trait weight
+#   variant / gls        the GLS of the cross-products with the cross-trait
+#                        weight
 #
 # The covariance is on the heritability's scale; rg = G12 / sqrt(h1 h2), NA
 # where either heritability is not positive.
@@ -175,17 +176,16 @@ NULL
     )
 }
 
-# ---- the likelihood: HDL-L's two steps ---------------------------------------
+# ---- the likelihood's two steps ----------------------------------------------
 
 # A pair's fit by the Gaussian likelihood of the two conditions' statistics
-# rotated onto the kept LD eigenvectors, as HDL-L (HDL.L()) makes it: each
-# condition's heritability and intercept from its own likelihood (step 1),
-# then the covariance by the likelihood of the second condition's statistics
-# given the first's, with those held (step 2). The p-value is the likelihood
-# ratio against no covariance; rg is the fitted covariance over the root of
-# the product of the heritabilities, its interval the likelihood ratio's
-# inverted along the profile (.rgLikelihoodResult()); neither has a
-# standard error.
+# rotated onto the kept LD eigenvectors: each condition's heritability and
+# intercept from its own likelihood (step 1), then the covariance by the
+# likelihood of the second condition's statistics given the first's, with those
+# held (step 2). The p-value is the likelihood ratio against no covariance; rg
+# is the fitted covariance over the root of the product of the heritabilities,
+# its interval the likelihood ratio's inverted along the profile
+# (.rgLikelihoodResult()); neither has a standard error.
 # @noRd
 .rgEigenLikelihood <- function(param, ud) {
     d <- .rgEigenData(param, ud)
@@ -239,8 +239,8 @@ NULL
     )
 }
 
-# Step 1 for one condition: HDL-L's own fit, or, where its intercept is held
-# (a GWAS side's genome-wide intercept), its heritability alone.
+# Step 1 for one condition: its own free-noise fit, or, where its intercept is
+# held (a GWAS side's genome-wide intercept), its heritability alone.
 # @noRd
 .rgLikelihoodStep1 <- function(data, heldIntercept, param) {
     if (is.na(heldIntercept)) {
@@ -256,7 +256,7 @@ NULL
 # @noRd
 .rgLikelihoodHeld <- function(param, data, intercept) {
     proc <- param@procedures
-    held <- .hdlLocusScoringData(data, intercept = intercept)
+    held <- .h2WindowData(data, intercept = intercept)
     lower <- proc@h2Bounds[[1L]]
     upper <- proc@h2Bounds[[2L]]
     starts <- c(
@@ -265,10 +265,10 @@ NULL
         },
         as.list(unique(proc@h2Starts))
     )
-    nullValue <- .h2VarianceObjective(0, held, FALSE)$value
+    nullValue <- .h2Likelihood("variance", held, 0)$value
     best <- .h2ScoringBest(
         .h2Scoring(
-            .h2VarianceObjective,
+            "variance",
             held,
             starts,
             lower,
@@ -295,8 +295,8 @@ NULL
         M = d$M,
         bstar1 = d$u[[1L]],
         bstar2 = d$u[[2L]],
-        v11 = .hdlLocusVar(h2[[1L]], members[[1L]], intercepts[[1L]]),
-        v22 = .hdlLocusVar(h2[[2L]], members[[2L]], intercepts[[2L]]),
+        v11 = .h2WindowVariance(h2[[1L]], members[[1L]], intercepts[[1L]]),
+        v22 = .h2WindowVariance(h2[[2L]], members[[2L]], intercepts[[2L]]),
         crossScale = 1 / sqrt(d$n[[1L]] * d$n[[2L]]),
         bound = sqrt(h2[[1L]] * h2[[2L]]),
         intercepts = intercepts,
@@ -305,7 +305,7 @@ NULL
     )
 }
 
-# What .rgCrossObjective() reads of step 2's data: the two conditions'
+# What the "cross" likelihood reads of step 2's data: the two conditions'
 # rotated statistics and own modelled variances, and their covariance v12 =
 # offset + G theta in the parameters the fit leaves free: (h12, int12) where
 # the window fits the shared noise; h12 alone with it held at `held` (less
@@ -334,35 +334,11 @@ NULL
     )
 }
 
-# The log-likelihood of the second condition's statistics given the first's
-# (HDL.L()'s llfun.gcov.part.2) at the covariance v12 = offset + G theta, the
-# conditional variance floored, as .h2Scoring() reads it.
-# @noRd
-.rgCrossObjective <- function(theta, data, scoring) {
-    v12 <- data$offset + as.vector(data$G %*% theta)
-    e <- data$b2 - v12 / data$v11 * data$b1
-    raw <- data$v22 - v12^2 / data$v11
-    cv <- pmax(raw, data$floor)
-    value <- -sum(log(cv) + e^2 / cv) / 2
-    if (!scoring) {
-        return(list(value = value))
-    }
-    .h2ConditionalScoring(
-        value,
-        cv,
-        -data$G * (2 * v12 / data$v11 * (raw > data$floor)),
-        e^2,
-        e,
-        -data$G * (data$b1 / data$v11)
-    )
-}
-
-# Step 2: the covariance, and the cross intercept where the settings fit it
-# in the window, by Fisher scoring (.rgCrossBest()), keeping the best fit
-# that converges and, where the procedures say, beats no covariance. A
-# window fit that never does falls back to the supplied noise correlation
-# where one is given; otherwise the pair has no estimate, where HDL.L()
-# stops with an error.
+# Step 2: the covariance, and the cross intercept where the settings fit it in
+# the window, by Fisher scoring (.rgCrossBest()), keeping the best fit that
+# converges and, where the procedures say, beats no covariance. A window fit
+# that never does falls back to the supplied noise correlation where one is
+# given; otherwise the pair has no estimate.
 # @noRd
 .rgLikelihoodCross <- function(param, ud, d, cross, base) {
     fit <- .rgLikelihoodCrossFit(param, ud, d, cross)
@@ -411,7 +387,7 @@ NULL
     bounds <- proc@crossInterceptBounds
     best <- .h2ScoringBest(
         .h2Scoring(
-            .rgCrossObjective,
+            "cross",
             data,
             c(starts, if (window) list(c(0, null$par))),
             c(-cross$bound, if (window) bounds[[1L]]),
@@ -455,10 +431,10 @@ NULL
 .rgCrossNullFit <- function(cross, proc, window, held, starts) {
     if (!window) {
         data <- .rgCrossScoringData(cross, held)
-        return(list(value = .rgCrossObjective(0, data, FALSE)$value))
+        return(list(value = .h2Likelihood("cross", data, 0)$value))
     }
     .h2ScoringBest(.h2Scoring(
-        .rgCrossObjective,
+        "cross",
         .rgCrossScoringData(cross, h12 = 0),
         as.list(unique(map_dbl(starts, 2L))),
         proc@crossInterceptBounds[[1L]],
@@ -476,11 +452,11 @@ NULL
 .rgCrossRefit <- function(h12, start, cross, proc, held) {
     if (!is.na(held)) {
         data <- .rgCrossScoringData(cross, held)
-        value <- .rgCrossObjective(h12, data, FALSE)$value
+        value <- .h2Likelihood("cross", data, h12)$value
         return(list(value = value, par = numeric(0)))
     }
     .h2ScoringBest(.h2Scoring(
-        .rgCrossObjective,
+        "cross",
         .rgCrossScoringData(cross, h12 = h12),
         list(start),
         proc@crossInterceptBounds[[1L]],
@@ -490,9 +466,9 @@ NULL
     ))
 }
 
-# The correlation of the two conditions' statistics over the variants where
-# both are below 8 in size, as HDL.L() starts its cross intercept; 0 where
-# there is none to take.
+# The correlation of the two conditions' statistics over the variants where both
+# are below 8 in size, a start for the cross intercept; 0 where there is none to
+# take.
 # @noRd
 #' @importFrom stats cor
 .rgStatisticCorrelation <- function(z) {
@@ -679,14 +655,13 @@ NULL
 
 # A group's fit by the likelihood of all its conditions' rotated statistics at
 # once (H2LikelihoodParam(jointFit = TRUE)): each condition's heritability and
-# intercept from its own likelihood (step 1, as for a pair), then every
-# pair's covariance and, where the window fits it, shared noise together
-# (step 2), the genetic correlation matrix built from canonical partial
-# correlations so that it is one. At two conditions this is HDL.L()'s step 2,
-# which a pair's own fit runs. Each pair's p-value is the likelihood ratio of
-# its covariance at zero with the rest refitted, and its interval is where
-# the likelihood ratio along its correlation, the rest held, stays within the
-# chi-square's cutoff.
+# intercept from its own likelihood (step 1, as for a pair), then every pair's
+# covariance and, where the window fits it, shared noise together (step 2), the
+# genetic correlation matrix built from canonical partial correlations so that
+# it is one. At two conditions this is a pair's own step 2. Each pair's p-value
+# is the likelihood ratio of its covariance at zero with the rest refitted, and
+# its interval is where the likelihood ratio along its correlation, the rest
+# held, stays within the chi-square's cutoff.
 # @noRd
 .rgJointLikelihood <- function(param, ud) {
     P <- length(ud$z)
@@ -798,7 +773,7 @@ NULL
 # ties a pair's (.rgTieOf()).
 # @noRd
 .rgJointData <- function(d, members, h2, intercepts, param, tie) {
-    variances <- pmap(list(h2, members, intercepts), .hdlLocusVar)
+    variances <- pmap(list(h2, members, intercepts), .h2WindowVariance)
     rotated <- d$u
     P <- length(h2)
     list(
@@ -819,306 +794,15 @@ NULL
 
 # The log-likelihood of every condition's statistics at canonical partial
 # correlations theta[1:nPairs] (row by row of the lower triangle) and, where
-# the window fits it, the pairs' shared noise after them (or `held`), as the
-# product of each condition's density given those before it: the LDL'
-# decomposition of each direction's covariance, each conditional variance
-# floored at the procedures' floor. At two conditions the second's term is
-# HDL.L()'s llfun.gcov.part.2.
+# the window fits it, the pairs' shared noise after them (or `held`): the
+# "joint" likelihood (.h2Scoring()), each condition's density given those
+# before it through the LDL' decomposition of each direction's covariance
+# (block by block on several references), each conditional variance floored
+# at the procedures' floor. At two conditions the second's term is the
+# pair's own, the "cross" likelihood's.
 # @noRd
 .rgJointLl <- function(theta, joint, held) {
-    .rgJointRows(theta, joint, held)$ll
-}
-
-# The decomposition .rgJointLl() reads: each condition's innovations `e` and
-# conditional variances `D` (blocks of them on several references,
-# .rgMixedRows()), and the log-likelihood `ll`.
-# @noRd
-.rgJointRows <- function(theta, joint, held) {
-    if (isTRUE(joint$mixed)) {
-        return(.rgMixedRows(theta, joint, held))
-    }
-    cov <- .rgJointCovariances(theta, joint, held)
-    reduce(
-        seq_len(joint$P),
-        .rgJointRow,
-        .init = list(L = list(), D = list(), e = list(), ll = 0),
-        joint = joint,
-        G = cov$G,
-        C = cov$C
-    )
-}
-
-# The genetic covariances G at canonical partial correlations
-# theta[1:nPairs] and the noise each pair shares C, on the statistics' scale:
-# fitted after them where the window fits it, else `held` (less the
-# covariance for tied noise).
-# @noRd
-.rgJointCovariances <- function(theta, joint, held) {
-    R <- tcrossprod(.rgCpcFactor(theta[seq_len(joint$nPairs)], joint$P))
-    G <- R * sqrt(tcrossprod(joint$h2))
-    shared <- if (length(theta) > joint$nPairs) {
-        .rgPairMatrix(theta[-seq_len(joint$nPairs)], joint$P)
-    } else {
-        held - joint$tied * G
-    }
-    list(G = G, C = shared * joint$crossScale)
-}
-
-# The joint fit's log-likelihood as .h2Scoring() reads it, `data` the joint
-# data, the held shared noise (NULL where fitted) and the parameters' bounds:
-# its score and information from each condition's conditional terms, whose
-# innovations and variances carry their derivatives through the
-# decomposition (.rgJointScored()); on several references, differenced in
-# each parameter (.rgJointDifference()).
-# @noRd
-.rgJointObjective <- function(theta, data, scoring) {
-    if (!scoring) {
-        return(list(value = .rgJointLl(theta, data$joint, data$held)))
-    }
-    if (isTRUE(data$joint$mixed)) {
-        return(.rgMixedObjective(theta, data))
-    }
-    rows <- .rgJointScored(theta, data)
-    e <- list_c(rows$e)
-    .h2ConditionalScoring(
-        rows$ll,
-        list_c(rows$D),
-        exec(rbind, !!!rows$dD),
-        e^2,
-        e,
-        exec(rbind, !!!rows$de)
-    )
-}
-
-# The decomposition with every piece's derivative in each parameter (terms x
-# parameters): the covariances' derivatives differenced within the bounds
-# (.rgJointCovarianceStep()), carried through each row's loadings, variance
-# and innovations (.rgJointScoredRow()).
-# @noRd
-.rgJointScored <- function(theta, data) {
-    joint <- data$joint
-    K <- length(joint$lam)
-    p <- length(theta)
-    steps <- map(
-        seq_len(p),
-        .rgJointCovarianceStep,
-        theta = theta,
-        data = data
-    )
-    reduce(
-        seq_len(joint$P),
-        .rgJointScoredRow,
-        .init = list(
-            L = list(),
-            D = list(),
-            dD = list(),
-            e = list(),
-            de = list(),
-            ll = 0
-        ),
-        joint = joint,
-        cov = .rgJointCovariances(theta, joint, data$held),
-        dG = array(unlist(map(steps, "G")), c(joint$P, joint$P, p)),
-        dC = array(unlist(map(steps, "C")), c(joint$P, joint$P, p)),
-        zero = matrix(0, K, p)
-    )
-}
-
-# The covariances' derivative in parameter j, differenced a little either way
-# within its bounds.
-# @noRd
-.rgJointCovarianceStep <- function(j, theta, data) {
-    h <- 1e-5 * max(1, abs(theta[[j]]))
-    up <- min(theta[[j]] + h, data$upper[[j]])
-    down <- max(theta[[j]] - h, data$lower[[j]])
-    hi <- .rgJointCovariances(replace(theta, j, up), data$joint, data$held)
-    lo <- .rgJointCovariances(replace(theta, j, down), data$joint, data$held)
-    list(G = (hi$G - lo$G) / (up - down), C = (hi$C - lo$C) / (up - down))
-}
-
-# Condition `k`'s row of .rgJointScored(), from the rows before it: its
-# loadings on them, conditional variance and innovations, each with its
-# derivatives (a conditional variance at the floor has none), and the
-# log-likelihood so far.
-# @noRd
-.rgJointScoredRow <- function(acc, k, joint, cov, dG, dC, zero) {
-    before <- seq_len(k - 1L)
-    sigma <- map(
-        before,
-        .rgJointScoredEntry,
-        k = k,
-        joint = joint,
-        cov = cov,
-        dG = dG,
-        dC = dC
-    )
-    L <- reduce(
-        before,
-        .rgJointScoredLoading,
-        .init = list(value = list(), d = list()),
-        sigma = sigma,
-        acc = acc
-    )
-    parts <- list(L$value, L$d, acc$D, acc$dD, acc$e, acc$de)
-    raw <- joint$v[, k] - reduce(pmap(parts, .rgJointExplained), `+`, .init = 0)
-    D <- pmax(raw, joint$floor)
-    dD <- -reduce(pmap(parts, .rgJointExplainedStep), `+`, .init = zero)
-    e <- joint$u[, k] - reduce(pmap(parts, .rgJointPredicted), `+`, .init = 0)
-    de <- -reduce(pmap(parts, .rgJointPredictedStep), `+`, .init = zero)
-    list(
-        L = c(acc$L, list(L)),
-        D = c(acc$D, list(D)),
-        dD = c(acc$dD, list(dD * (raw > joint$floor))),
-        e = c(acc$e, list(e)),
-        de = c(acc$de, list(de)),
-        ll = acc$ll - sum(log(D) + e^2 / D) / 2
-    )
-}
-
-# The covariance of conditions k and j along each direction, with its
-# derivatives.
-# @noRd
-.rgJointScoredEntry <- function(j, k, joint, cov, dG, dC) {
-    list(
-        value = cov$G[[k, j]] * joint$lam2M + cov$C[[k, j]] * joint$lam,
-        d = outer(joint$lam2M, dG[k, j, ]) + outer(joint$lam, dC[k, j, ])
-    )
-}
-
-# Row k's loading on row j, (sigma_kj - sum_m<j L_km L_jm D_m) / D_j, with
-# its derivatives, from its loadings on the rows before j.
-# @noRd
-.rgJointScoredLoading <- function(L, j, sigma, acc) {
-    m <- seq_len(j - 1L)
-    Lj <- acc$L[[j]]
-    terms <- pmap(
-        list(L$value[m], L$d[m], Lj$value, Lj$d, acc$D[m], acc$dD[m]),
-        .rgJointLoadingProduct
-    )
-    value <- (sigma[[j]]$value - reduce(map(terms, "value"), `+`, .init = 0)) /
-        acc$D[[j]]
-    d <- (sigma[[j]]$d -
-        reduce(map(terms, "d"), `+`, .init = 0) -
-        value * acc$dD[[j]]) /
-        acc$D[[j]]
-    list(value = c(L$value, list(value)), d = c(L$d, list(d)))
-}
-
-# One term L_km L_jm D_m of a loading, with its derivatives.
-# @noRd
-.rgJointLoadingProduct <- function(Lk, dLk, Lj, dLj, D, dD) {
-    list(
-        value = Lk * Lj * D,
-        d = (Lj * D) * dLk + (Lk * D) * dLj + (Lk * Lj) * dD
-    )
-}
-
-# What row j explains of a row's variance, L^2 D, and its derivatives.
-# @noRd
-.rgJointExplained <- function(L, dL, D, dD, e, de) {
-    L^2 * D
-}
-
-# @noRd
-.rgJointExplainedStep <- function(L, dL, D, dD, e, de) {
-    (2 * L * D) * dL + L^2 * dD
-}
-
-# What row j predicts of a row's statistics, L e, and its derivatives.
-# @noRd
-.rgJointPredicted <- function(L, dL, D, dD, e, de) {
-    L * e
-}
-
-# @noRd
-.rgJointPredictedStep <- function(L, dL, D, dD, e, de) {
-    e * dL + L * de
-}
-
-# The mixed decomposition's score and information (.rgMixedScoring()),
-# differenced in each parameter a profile leaves free (`data$free`; every one
-# where it leaves all), the rest's entries 0.
-# @noRd
-.rgMixedObjective <- function(theta, data) {
-    p <- length(theta)
-    free <- data$free %||% seq_len(p)
-    steps <- map(free, .rgJointDifference, theta = theta, data = data)
-    rows <- .rgJointRows(theta, data$joint, data$held)
-    scored <- .rgMixedScoring(rows, steps)
-    cells <- as.matrix(expand.grid(free, free))
-    list(
-        value = scored$value,
-        score = replace(numeric(p), free, scored$score),
-        information = replace(matrix(0, p, p), cells, scored$information)
-    )
-}
-
-# The decomposition at parameter j moved a little either way within its
-# bounds, and how far apart the two lie.
-# @noRd
-.rgJointDifference <- function(j, theta, data) {
-    h <- 1e-5 * max(1, abs(theta[[j]]))
-    up <- min(theta[[j]] + h, data$upper[[j]])
-    down <- max(theta[[j]] - h, data$lower[[j]])
-    list(
-        hi = .rgJointRows(replace(theta, j, up), data$joint, data$held),
-        lo = .rgJointRows(replace(theta, j, down), data$joint, data$held),
-        width = up - down
-    )
-}
-
-# Condition `k`'s row of the decomposition, from the rows before it: its
-# loadings on them, its conditional variance and its innovations, and the
-# log-likelihood so far.
-# @noRd
-.rgJointRow <- function(acc, k, joint, G, C) {
-    before <- seq_len(k - 1L)
-    sigma <- map(before, .rgJointEntry, k = k, joint = joint, G = G, C = C)
-    L <- reduce(
-        before,
-        .rgJointLoading,
-        .init = list(),
-        sigma = sigma,
-        acc = acc
-    )
-    explained <- reduce(map2(L, acc$D, .rgSquareTimes), `+`, .init = 0)
-    D <- pmax(joint$v[, k] - explained, joint$floor)
-    e <- joint$u[, k] - reduce(map2(L, acc$e, `*`), `+`, .init = 0)
-    list(
-        L = c(acc$L, list(L)),
-        D = c(acc$D, list(D)),
-        e = c(acc$e, list(e)),
-        ll = acc$ll - sum(log(D) + e^2 / D) / 2
-    )
-}
-
-# The covariance of conditions k and j along each direction.
-# @noRd
-.rgJointEntry <- function(j, k, joint, G, C) {
-    G[[k, j]] * joint$lam2M + C[[k, j]] * joint$lam
-}
-
-# Row k's loading on row j, from its loadings on the rows before j.
-# @noRd
-.rgJointLoading <- function(L, j, sigma, acc) {
-    terms <- map(
-        seq_len(j - 1L),
-        .rgJointLoadingTerm,
-        L = L,
-        Lj = acc$L[[j]],
-        D = acc$D
-    )
-    c(L, list((sigma[[j]] - reduce(terms, `+`, .init = 0)) / acc$D[[j]]))
-}
-
-# @noRd
-.rgJointLoadingTerm <- function(m, L, Lj, D) {
-    L[[m]] * Lj[[m]] * D[[m]]
-}
-
-# @noRd
-.rgSquareTimes <- function(L, D) {
-    L^2 * D
+    .h2Likelihood("joint", list(joint = joint, held = held), theta)$value
 }
 
 # ---- canonical partial correlations ------------------------------------------
@@ -1216,9 +900,9 @@ NULL
     .rgJointBest(param, ud, d, members, joint, "fallback", fallback)
 }
 
-# The best fit by Fisher scoring (.h2Scoring(), .rgJointObjective()) from the
-# pairs' own fits put together, from no covariance and from the null's own
-# fit (which nests in the full model, so a run from it ends no lower), that
+# The best fit by Fisher scoring (.h2Scoring(), the "joint" likelihood) from the
+# pairs' own fits put together, from no covariance and from the null's own fit
+# (which nests in the full model, so a run from it ends no lower), that
 # converges and, where the procedures say, beats no covariance; NULL when none
 # does, or when the null's refit does not converge.
 # @noRd
@@ -1244,7 +928,7 @@ NULL
     bounds <- .rgJointBounds(joint, proc, held)
     best <- .h2ScoringBest(
         .h2Scoring(
-            .rgJointObjective,
+            "joint",
             .rgJointScoringData(joint, held, bounds),
             c(starts, list(null$par)),
             bounds$lower,
@@ -1259,7 +943,9 @@ NULL
     list_assign(best, mode = mode, held = held, window = window)
 }
 
-# What .rgJointObjective() reads.
+# What the "joint" likelihood reads: the group's data, the held shared noise
+# (NULL where fitted) and the parameters' bounds, within which its
+# covariances' derivatives are differenced.
 # @noRd
 .rgJointScoringData <- function(joint, held, bounds) {
     list(
@@ -1270,11 +956,11 @@ NULL
     )
 }
 
-# The joint fit's start: every pair's own fit (HDL.L()'s step 2 on the two
+# The joint fit's start: every pair's own fit (its step 2 on the two
 # conditions), their correlations put together and moved to the nearest
 # correlation matrix shrunk a little inside the boundary, as canonical partial
-# correlations; and their shared noise, the statistics' correlation over |z| <
-# 8 for a pair whose own fit has none.
+# correlations; and their shared noise, the statistics' correlation over |z| < 8
+# for a pair whose own fit has none.
 # @noRd
 .rgJointStart <- function(param, ud, d, members, joint, held) {
     if (isTRUE(joint$mixed)) {
@@ -1402,23 +1088,16 @@ NULL
     }
     free <- setdiff(seq_along(theta), at)
     bounds <- .rgJointBounds(joint, proc, held)
-    wrapped <- list(
-        objective = .rgJointObjective,
-        inner = list_assign(
-            .rgJointScoringData(joint, held, bounds),
-            free = free
-        ),
-        full = fixed,
-        free = free
-    )
     best <- .h2ScoringBest(.h2Scoring(
-        .h2FixedObjective,
-        wrapped,
+        "joint",
+        .rgJointScoringData(joint, held, bounds),
         list(fixed[free]),
         bounds$lower[free],
         bounds$upper[free],
         proc@maxit,
-        valueOnly = TRUE
+        valueOnly = TRUE,
+        full = fixed,
+        free = free
     ))
     if (is.null(best)) {
         return(NULL)
@@ -1559,10 +1238,10 @@ NULL
 
 # ---- the regressions: the cross-products on the model's columns -------------
 
-# A pair's fit by the eigen regression: each condition's whitened squares
-# u^2 / lambda on (lambda / M, 1 / n) as estimateLocalH2()'s eigen regression
-# fits them, then the whitened cross-products u1 u2 / lambda on (lambda / M,
-# 1 / sqrt(n1 n2)). No cross term for the reference's noise, as HDL.L() has
+# A pair's fit by the eigen regression: each condition's whitened squares u^2 /
+# lambda on (lambda / M, 1 / n) as estimateLocalH2()'s eigen regression fits
+# them, then the whitened cross-products u1 u2 / lambda on (lambda / M, 1 /
+# sqrt(n1 n2)). No cross term for the reference's noise, as the likelihood has
 # none.
 # @noRd
 .rgEigenRegression <- function(param, ud) {
@@ -1679,7 +1358,7 @@ NULL
         wLd = 1 / w,
         M = length(l),
         hsqScale = 1,
-        weights = "ldsc",
+        weights = "ldScore",
         index = seq_along(y)
     )
 }
@@ -2056,7 +1735,7 @@ NULL
 # Condition `k`'s statistics' covariance (n_k h / M) R W R + c R.
 # @noRd
 .rgOwnModelS <- function(k, model, coef) {
-    .gldscS(
+    .h2GlsS(
         model$lds[[k]],
         model$weights[[k]] %||% rep(1, model$M),
         model$n[[k]] * coef[[1L]] / model$M,
@@ -2065,14 +1744,14 @@ NULL
 }
 
 # The statistics' cross-covariance (sqrt(n1 n2) g / M) R1 W12 R2 + c12 N, `coef`
-# the cross-products' (g, c12): through .gldscS() on one reference, formed
+# the cross-products' (g, c12): through .h2GlsS() on one reference, formed
 # from the two references' matrices on two.
 # @noRd
 .rgCrossModelS <- function(model, coef) {
     scale <- sqrt(model$n[[1L]] * model$n[[2L]]) * coef[[1L]] / model$M
     shared <- rep_len(model$shared, model$M)
     if (identical(model$lds[[1L]], model$lds[[2L]])) {
-        return(.gldscS(model$lds[[1L]], shared, scale, coef[[2L]]))
+        return(.h2GlsS(model$lds[[1L]], shared, scale, coef[[2L]]))
     }
     R1 <- .ldSourceMatrix(model$lds[[1L]])
     R2 <- .ldSourceMatrix(model$lds[[2L]])
@@ -2143,10 +1822,10 @@ NULL
     )
 }
 
-# ---- the variant GLS: g-LDSC's with the cross-trait weight -------------------
+# ---- the variant GLS with the cross-trait weight -----------------------------
 
 # A pair's fit by the variant GLS: each condition's n r^2 - 1 on (1, l) as
-# estimateLocalH2()'s g-LDSC fit takes them, weighted by S o S with S = t R^2
+# estimateLocalH2()'s variant GLS takes them, weighted by S o S with S = t R^2
 # + R and t its first pass, then the cross-products sqrt(n1 n2) r1 r2 on (1,
 # l), weighted by their covariance under the model, S11 o S22 + S12 o S12,
 # with S12 = t12 R^2 + c12 R at the cross-products' own first pass. The
@@ -2196,13 +1875,13 @@ NULL
     n <- map_dbl(ud$nVariant, .h2SampleSize, how = param@sampleSize)
     r <- map2(ud$z, ud$nVariant, .zToCor)
     weights <- .h2SourceWeights(param, ud$ld) %||% rep(1, M)
-    R <- .gldscS(ud$ld, rep(1, M), 0)
+    R <- .h2GlsS(ud$ld, rep(1, M), 0)
     list(
         y = list(n[[1L]] * r[[1L]]^2 - 1, n[[2L]] * r[[2L]]^2 - 1),
         y12 = sqrt(n[[1L]] * n[[2L]]) * r[[1L]] * r[[2L]],
         l = .h2WindowLdScores(param, ud$ld, M),
         R = R,
-        R2 = .gldscS(ud$ld, weights, 1) - R,
+        R2 = .h2GlsS(ud$ld, weights, 1) - R,
         weights = weights,
         n = n,
         M = M,
@@ -2221,7 +1900,7 @@ NULL
     free <- is.na(held[[k]])
     y <- g$y[[k]] - (if (free) 0 else held[[k]] - 1)
     t <- sum(y) / sum(g$l)
-    om <- .gldscOmegaEigen(
+    om <- .h2GlsOmegaEigen(
         g$ld,
         matrix(g$weights, g$M, 1L),
         t,
@@ -2499,11 +2178,17 @@ NULL
 .rgMomentsSigma <- function(param, ud, d, delta) {
     K <- length(d$lam)
     phi <- if (identical(param@referenceNoise, "overlapFactor")) {
-        .lavaPhi(d$n, ud$ld$nSamples, ud$overlap)
+        .h2OverlapFactor(d$n, ud$ld$nSamples, ud$overlap)
     } else {
         rep(1, length(d$n))
     }
-    noise <- .rgMomentsOwn(colSums(delta^2), K, d$n, phi)$noise
+    noise <- .rgMomentsOwn(
+        colSums(delta^2),
+        K,
+        d$n,
+        phi,
+        .rgMomentsIntercepts(ud)
+    )$noise
     shared <- switch(
         param@crossNoise,
         supplied = ud$noiseCorrelation * sqrt(tcrossprod(noise)),
@@ -2515,12 +2200,22 @@ NULL
 
 # Each condition's heritability K Omega_kk from its own components' sum of
 # squares `dtd` on K components, and its noise per component tied to it,
-# (1 - h2 + h2 phi) / (n - 1), with the overlap factor phi (1 without it).
+# (c + h2 (phi - 1)) / (n - 1), LAVA's (1 - h2 + h2 phi) / (n - 1) at c = 1:
+# the null intercept c (`intercept`: 1, or a GWAS side's genome-wide
+# intercept where it is held) and the overlap factor phi (1 without it).
 # @noRd
-.rgMomentsOwn <- function(dtd, K, n, phi) {
+.rgMomentsOwn <- function(dtd, K, n, phi, intercept) {
     m <- K / (n - 1)
-    h2 <- (dtd - m) / (1 + m * (phi - 1))
-    list(h2 = h2, noise = pmax((1 - h2 + h2 * phi) / (n - 1), 0))
+    h2 <- (dtd - m * intercept) / (1 + m * (phi - 1))
+    list(h2 = h2, noise = pmax((intercept + h2 * (phi - 1)) / (n - 1), 0))
+}
+
+# Each condition's null intercept for the moments: a GWAS side's genome-wide
+# intercept where `gwasH2Estimate` holds it, 1 otherwise.
+# @noRd
+.rgMomentsIntercepts <- function(ud) {
+    held <- ud$heldIntercept %||% rep(NA_real_, length(ud$z))
+    replace(held, is.na(held), 1)
 }
 
 # Tied shared noise: per component, the phenotypes' covariance less the part
@@ -3059,8 +2754,9 @@ setMethod(
 }
 
 # The settings the pairs are fitted under: `param`, or the provisional default
-# (HDL-L's with the shared noise fitted in the window), refused where a pair
-# cannot be fitted under them; `individual` for a QtlDataset's pairs.
+# (the eigen likelihood with the shared noise fitted in the window), refused
+# where a pair cannot be fitted under them; `individual` for a QtlDataset's
+# pairs.
 # @noRd
 .rgParam <- function(
     param,
@@ -3148,12 +2844,6 @@ setMethod(
     }
     if (!is.null(gwasH2Estimate) && is.null(gwas)) {
         return("`gwasH2Estimate` holds a GWAS's intercept, so it needs `gwas`")
-    }
-    if (!is.null(gwasH2Estimate) && identical(settings@criterion, "moments")) {
-        return(str_c(
-            "the moments tie each condition's noise to its heritability, so ",
-            "they take no GWAS intercept"
-        ))
     }
     NULL
 }
@@ -3873,13 +3563,12 @@ setMethod(
 
 # ---- the likelihood on two references ----------------------------------------
 
-# A pair's likelihood on two references: each side's heritability and
-# intercept from its own likelihood on its own reference (step 1, HDL-L's),
-# then the covariance. With no shared noise, from the reduced likelihood
-# (.rgReduce()) fitted as on one reference, where it is HDL.L()'s step 2;
-# with shared noise, which on two references takes the
-# shape (R1 + R2) / 2, from the Gaussian of both sides' statistics at once,
-# fitted as a group of two (.rgMixedLikelihood()).
+# A pair's likelihood on two references: each side's heritability and intercept
+# from its own likelihood on its own reference (step 1), then the covariance.
+# With no shared noise, from the reduced likelihood (.rgReduce()) fitted as a
+# pair's step 2 on one reference; with shared noise, which on two references
+# takes the shape (R1 + R2) / 2, from the Gaussian of both sides' statistics at
+# once, fitted as a group of two (.rgMixedLikelihood()).
 # @noRd
 .rgTwoLdLikelihood <- function(param, ud) {
     if (!identical(param@crossNoise, "zero")) {
@@ -3913,7 +3602,7 @@ setMethod(
     }
     v <- pmap(
         list(h2 = h2, data = members, intercept = intercepts),
-        .hdlLocusVar
+        .h2WindowVariance
     )
     reduced <- .rgReduce(sides, v, floor, sqrt(prod(h2)))
     .rgReducedResult(param, reduced, base)
@@ -3989,7 +3678,7 @@ setMethod(
 # unpaired coordinates', do not move with g.
 # @noRd
 .rgReducedLl <- function(g, red) {
-    .rgReducedObjective(g, red, FALSE)$value
+    .h2Likelihood("reduced", red, g)$value
 }
 
 # The reduced pairs' log-likelihood at covariance g as a point of its profile
@@ -3997,28 +3686,6 @@ setMethod(
 # @noRd
 .rgReducedRefit <- function(g, start, red) {
     list(value = .rgReducedLl(g, red), par = numeric(0))
-}
-
-# The reduced pairs' log-likelihood at covariance g, as .h2Scoring() reads
-# it: b given a, with mean g s a and variance 1 - (g s)^2 floored.
-# @noRd
-.rgReducedObjective <- function(theta, data, scoring) {
-    gs <- theta * data$s
-    e <- data$b - gs * data$a
-    raw <- 1 - gs^2
-    cv <- pmax(raw, data$floor)
-    value <- -sum(log(cv) + e^2 / cv) / 2
-    if (!scoring) {
-        return(list(value = value))
-    }
-    .h2ConditionalScoring(
-        value,
-        cv,
-        cbind(-2 * theta * data$s^2 * (raw > data$floor)),
-        e^2,
-        e,
-        cbind(-data$s * data$a)
-    )
 }
 
 # ---- a group on several references at once -----------------------------------
@@ -4039,7 +3706,7 @@ setMethod(
 # condition's statistics rotated onto its reference's and its step-1 fit
 # there (.rgMixedStep1()), then the correlation matrix fitted at once as on
 # one reference (.rgJointFit()), the log-likelihood the Gaussian of every
-# condition's rotated statistics together (.rgMixedLl()), the pairs' shared
+# condition's rotated statistics together (.rgJointLl()), the pairs' shared
 # noise as the settings take it.
 # @noRd
 .rgMixedLikelihood <- function(param, ud) {
@@ -4182,7 +3849,7 @@ setMethod(
                 data = step1$members,
                 intercept = step1$intercepts
             ),
-            .hdlLocusVar
+            .h2WindowVariance
         ),
         basisOf = basisOf,
         B = matrix(
@@ -4214,177 +3881,6 @@ setMethod(
     pieces$genetic *
         tcrossprod(sqrt(bases[[a]]$lam), sqrt(bases[[b]]$lam)) /
         M
-}
-
-# The Gaussian log-likelihood of every condition's rotated statistics at
-# canonical partial correlations theta[1:nPairs] and, where the window fits
-# it, the pairs' shared noise after them (or `held`, less the covariance for
-# tied noise): each condition's own variances on its diagonal block and G_kl
-# B_ab + c_kl N_ab between conditions k and l. It is the product of each
-# condition's density given those before it, the block LDL' decomposition of
-# the covariance, each conditional covariance's eigenvalues floored at the
-# procedures' floor; on one reference every block is diagonal, and the floor
-# is .rgJointLl()'s along each direction.
-# @noRd
-.rgMixedRows <- function(theta, joint, held) {
-    cov <- .rgJointCovariances(theta, joint, held)
-    reduce(
-        seq_len(joint$P),
-        .rgMixedLdlRow,
-        .init = list(L = list(), D = list(), e = list(), ll = 0),
-        joint = joint,
-        G = cov$G,
-        C = cov$C
-    )
-}
-
-# The score and information of the block decomposition (.rgMixedRows()):
-# each condition's innovations r ~ N(0, V) given those before it add
-# -dr' V^-1 r + (r' V^-1 dV V^-1 r - tr(V^-1 dV)) / 2 to the score and dr_j'
-# V^-1 dr_l + tr(V^-1 dV_j V^-1 dV_l) / 2 to the information.
-# @noRd
-.rgMixedScoring <- function(rows, steps) {
-    blocks <- map(
-        seq_along(rows$e),
-        .rgMixedBlockScoring,
-        rows = rows,
-        steps = steps
-    )
-    list(
-        value = rows$ll,
-        score = reduce(map(blocks, "score"), `+`),
-        information = reduce(map(blocks, "information"), `+`)
-    )
-}
-
-# Condition k's block of .rgMixedScoring().
-# @noRd
-.rgMixedBlockScoring <- function(k, rows, steps) {
-    Vinv <- rows$D[[k]]$inverse
-    a <- as.vector(Vinv %*% rows$e[[k]])
-    dr <- map(steps, .rgMixedStepResidual, k = k)
-    W <- map(steps, .rgMixedStepBlock, k = k, Vinv = Vinv)
-    score <- map2_dbl(dr, W, .rgMixedBlockScore, a = a, r = rows$e[[k]])
-    information <- exec(
-        rbind,
-        !!!map(seq_along(dr), .rgMixedInfoRow, dr = dr, W = W, Vinv = Vinv)
-    )
-    list(score = score, information = information)
-}
-
-# @noRd
-.rgMixedStepResidual <- function(step, k) {
-    (step$hi$e[[k]] - step$lo$e[[k]]) / step$width
-}
-
-# V^-1 dV for one difference.
-# @noRd
-.rgMixedStepBlock <- function(step, k, Vinv) {
-    Vinv %*% ((step$hi$D[[k]]$matrix - step$lo$D[[k]]$matrix) / step$width)
-}
-
-# One parameter's score from a block, `a` = V^-1 r and W = V^-1 dV:
-# -dr' a + (a' dV a - tr(W)) / 2, a' dV a being r' W a (W is not symmetric
-# where the blocks are not diagonal, as on references that differ).
-# @noRd
-.rgMixedBlockScore <- function(dr, W, a, r) {
-    -sum(dr * a) + (sum(r * (W %*% a)) - sum(diag(W))) / 2
-}
-
-# Row j of a block's information.
-# @noRd
-.rgMixedInfoRow <- function(j, dr, W, Vinv) {
-    map_dbl(
-        seq_along(dr),
-        .rgMixedInfoEntry,
-        j = j,
-        dr = dr,
-        W = W,
-        Vinv = Vinv
-    )
-}
-
-# @noRd
-.rgMixedInfoEntry <- function(l, j, dr, W, Vinv) {
-    sum(dr[[j]] * (Vinv %*% dr[[l]])) + sum(W[[j]] * t(W[[l]])) / 2
-}
-
-# Condition k's block row of the decomposition, from the rows before it: its
-# loadings L_kj on them, its conditional covariance D_k (floored), its
-# innovations, and the log-likelihood so far.
-# @noRd
-.rgMixedLdlRow <- function(acc, k, joint, G, C) {
-    before <- seq_len(k - 1L)
-    sigma <- map(before, .rgMixedBlock, k = k, joint = joint, G = G, C = C)
-    L <- reduce(
-        before,
-        .rgMixedLoading,
-        .init = list(),
-        sigma = sigma,
-        acc = acc
-    )
-    explained <- reduce(map2(L, acc$D, .rgMixedExplained), `+`, .init = 0)
-    D <- .rgFlooredBlock(diag(joint$v[[k]]) - explained, joint$floor)
-    e <- joint$u[[k]] - reduce(map2(L, acc$e, `%*%`), `+`, .init = 0)
-    list(
-        L = c(acc$L, list(L)),
-        D = c(acc$D, list(D)),
-        e = c(acc$e, list(as.vector(e))),
-        ll = acc$ll - (D$logDet + sum(e * (D$inverse %*% e))) / 2
-    )
-}
-
-# Row k's loading on row j, (Sigma_kj - sum_m<j L_km D_m L_jm') D_j^-1.
-# @noRd
-.rgMixedLoading <- function(L, j, sigma, acc) {
-    terms <- map(
-        seq_len(j - 1L),
-        .rgMixedLoadingTerm,
-        L = L,
-        Lj = acc$L[[j]],
-        D = acc$D
-    )
-    numerator <- sigma[[j]] - reduce(terms, `+`, .init = 0)
-    c(L, list(numerator %*% acc$D[[j]]$inverse))
-}
-
-# @noRd
-.rgMixedLoadingTerm <- function(m, L, Lj, D) {
-    L[[m]] %*% tcrossprod(D[[m]]$matrix, Lj[[m]])
-}
-
-# @noRd
-.rgMixedExplained <- function(L, D) {
-    L %*% tcrossprod(D$matrix, L)
-}
-
-# A conditional covariance block as the decomposition reads it: itself where
-# its Cholesky pivots clear the floor, else its eigenvalues floored; its log
-# determinant and inverse.
-# @noRd
-.rgFlooredBlock <- function(S, floor) {
-    U <- try_fetch(chol(S), error = .rgSolveFailed)
-    if (!is.null(U) && min(diag(U))^2 >= floor) {
-        return(list(
-            matrix = S,
-            logDet = 2 * sum(log(diag(U))),
-            inverse = chol2inv(U)
-        ))
-    }
-    dec <- eigen((S + t(S)) / 2, symmetric = TRUE)
-    values <- pmax(dec$values, floor)
-    list(
-        matrix = dec$vectors %*% (values * t(dec$vectors)),
-        logDet = sum(log(values)),
-        inverse = dec$vectors %*% (t(dec$vectors) / values)
-    )
-}
-
-# @noRd
-.rgMixedBlock <- function(l, k, joint, G, C) {
-    a <- joint$basisOf[[k]]
-    b <- joint$basisOf[[l]]
-    G[[k, l]] * joint$B[[a, b]] + C[[k, l]] * joint$N[[a, b]]
 }
 
 # The joint fit's start on several references: every pair's own fit on the
@@ -5286,7 +4782,11 @@ setMethod(
 # settings' shared noise, its tie and their effects.
 # @noRd
 .rgMomentsGroupOf <- function(param, ud, sides, bases) {
-    own <- map2(sides, ud$overlap, .rgSideMoments, param = param)
+    own <- pmap(
+        list(sides, ud$overlap, .rgMomentsIntercepts(ud)),
+        .rgSideMoments,
+        param = param
+    )
     shapes <- .rgMixedMomentShapes(bases, param@effects)
     sigma <- .rgMixedSigma(param, ud, own, shapes)
     list_assign(
@@ -5362,17 +4862,18 @@ setMethod(
     )
 }
 
-# A side's components, heritability and noise per component.
+# A side's components, heritability and noise per component, at its null
+# intercept (.rgMomentsIntercepts()).
 # @noRd
-.rgSideMoments <- function(side, overlap, param) {
+.rgSideMoments <- function(side, overlap, intercept, param) {
     K <- length(side$lam)
     delta <- side$u / sqrt(side$lam)
     phi <- if (identical(param@referenceNoise, "overlapFactor")) {
-        .lavaPhi(side$n, side$ld$nSamples, overlap)
+        .h2OverlapFactor(side$n, side$ld$nSamples, overlap)
     } else {
         1
     }
-    own <- .rgMomentsOwn(sum(delta^2), K, side$n, phi)
+    own <- .rgMomentsOwn(sum(delta^2), K, side$n, phi, intercept)
     list(
         delta = delta,
         lam = side$lam,
@@ -5672,7 +5173,7 @@ setMethod(
 .rgReducedResult <- function(param, red, base) {
     bound <- red$bound
     fit <- .h2ScoringBest(.h2Scoring(
-        .rgReducedObjective,
+        "reduced",
         red,
         as.list(c(0, -bound / 2, bound / 2)),
         -bound,

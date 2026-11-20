@@ -126,7 +126,8 @@ Remotes:
     xinhe-lab/multigroup_ctwas,
 LinkingTo:
     cpp11,
-    cpp11armadillo
+    cpp11armadillo,
+    dlib
 NeedsCompilation: yes
 VignetteBuilder: knitr
 Config/roxygen2/version: 8.1.0

@@ -4,6 +4,7 @@
 \alias{estimateLocalH2}
 \alias{estimateLocalH2,QtlSumStats-method}
 \alias{estimateLocalH2,QtlDataset-method}
+\alias{estimateLocalH2,MultiStudyQtlDataset-method}
 \title{Estimate Each Trait's Local SNP Heritability}
 \usage{
 estimateLocalH2(data, param = NULL, ...)
@@ -29,11 +30,24 @@ estimateLocalH2(data, param = NULL, ...)
   residualizationParam = ResidualizationParam(),
   phenotypeFilterParam = PhenotypeFilterParam()
 )
+
+\S4method{estimateLocalH2}{MultiStudyQtlDataset}(
+  data,
+  param = NULL,
+  contexts = NULL,
+  traitId = NULL,
+  region = NULL,
+  cisWindow = NULL,
+  genotypeFilterParam = GenotypeFilterParam(),
+  residualizationParam = ResidualizationParam(),
+  phenotypeFilterParam = PhenotypeFilterParam(),
+  referenceOverlap = 0
+)
 }
 \arguments{
 \item{data}{A \code{QtlSumStats} that has been through
-\code{\link{summaryStatsQc}}, each row with an LD reference; or a
-\code{QtlDataset}.}
+\code{\link{summaryStatsQc}}, each row with an LD reference; a
+\code{QtlDataset}; or a \code{MultiStudyQtlDataset}.}
 
 \item{param}{An \code{\link{H2EstimateParam}}; \code{NULL} (the default)
 uses its defaults, HDL-L's settings.}
@@ -57,21 +71,24 @@ For a \code{QtlSumStats}, every selected row then needs a
 the selected rows, each row's estimate on one worker. Default
 \code{SerialParam()}.}
 
-\item{referenceOverlap}{For a \code{QtlSumStats}: the share of the study's
-samples that are in the LD reference, from 0 to 1, one value or one per
-selected row. Default 0. Usually unknown, and with a reference of
+\item{referenceOverlap}{For a \code{QtlSumStats} (and a
+\code{MultiStudyQtlDataset}'s summary statistics): the share of the
+study's samples that are in the LD reference, from 0 to 1, one value or
+one per selected row. Default 0. Usually unknown, and with a reference of
 thousands it hardly matters (see Details): set it when the LD came from
 the study's own samples or a small cohort holding them, 1 if it holds
 them all. Only the overlap factor (\code{referenceNoise =
 "overlapFactor"}) reads it, and its estimates record it in
 \code{reference_overlap}.}
 
-\item{region}{For a \code{QtlDataset}: optionally, one region that every
+\item{region}{For a \code{QtlDataset} (each study of a
+\code{MultiStudyQtlDataset}): optionally, one region that every
 selected trait is analysed over, as \code{\link{twasWeightsPipeline}}
 takes it; otherwise each trait's own window (see \code{cisWindow}).}
 
 \item{genotypeFilterParam, residualizationParam, phenotypeFilterParam}{For a
-\code{QtlDataset}: the genotype filters, the covariate residualization
+\code{QtlDataset} (each study of a \code{MultiStudyQtlDataset}): the
+genotype filters, the covariate residualization
 and the phenotype filters, as \code{\link{twasWeightsPipeline}} takes
 them, so that each estimate is on the genotypes and phenotype that the
 trait's TWAS fits are on.}
@@ -195,6 +212,14 @@ Every setting reads a row's \code{z} as the t statistic of a
   on the genotypes' components. Each trait is estimated on the window,
   samples, filters and residualized, scaled genotypes and phenotype that
   \code{\link{twasWeightsPipeline}} fits it on.
+
+  From a \code{MultiStudyQtlDataset}, each study's traits are estimated as
+  a \code{QtlDataset}'s, on its own donors and genotypes, and each
+  selected row of its summary statistics as a \code{QtlSumStats}'s, on its
+  own reference, all in one \code{H2Estimate}. Contexts and traits given
+  by name select within the studies that hold them. One set of settings
+  serves every study, so where the selection keeps summary-statistic rows
+  it cannot use the phenotype statistic.
 }
 \examples{
 if (requireNamespace("PlinkMatrix", quietly = TRUE)) {

@@ -16,6 +16,14 @@ dentistIterativeImputeFactor <- function(factorR, nSample, zScoreR, pValueThresh
   .Call(`_pecotmr_dentistIterativeImputeFactor`, factorR, nSample, zScoreR, pValueThreshold, propSVD, gcControl, nIter, gPvalueThreshold, numThreads, correctChenEtAlBug, verbose, seed)
 }
 
+eigenLikelihoodCpp <- function(model, data, thetaR, scoring) {
+  .Call(`_pecotmr_eigenLikelihoodCpp`, model, data, thetaR, scoring)
+}
+
+eigenLikelihoodFitCpp <- function(model, data, starts, lowerR, upperR, fullR, freeR, maxit, valueOnly) {
+  .Call(`_pecotmr_eigenLikelihoodFitCpp`, model, data, starts, lowerR, upperR, fullR, freeR, maxit, valueOnly)
+}
+
 ldThresholdComponents <- function(standardized, threshold, stripe) {
   .Call(`_pecotmr_ldThresholdComponents`, standardized, threshold, stripe)
 }
