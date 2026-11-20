@@ -3369,9 +3369,10 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
 }
 
 # cTWAS tells groups apart by their names, so distinct (study, group context,
-# type) must not read the same: the underscores of a result's label cannot be split
-# back. And its EM finds a group's context and type by splitting the name on the
-# "|" between them (.ctwasEntryGroup()), so none of the three may hold one.
+# type) must not read the same: the underscores of a result's label cannot be
+# split back. And its EM finds a group's context and type by splitting the
+# name on the "|" between them (.ctwasEntryGroup()), so none of the three may
+# hold one.
 # @noRd
 .ctwasRequireDistinctGroups <- function(prepared) {
     metas <- map(prepared, "meta")
@@ -3735,16 +3736,13 @@ asCtwasResult <- function(finemapResult, keepSnps = FALSE) {
             "{str_flatten(head(repeated, 5L), ', ')}."
         ))
     }
-    contexts <- unique(list_c(map(
-        unname(twasWeights),
-        function(tw) as.character(tw$context)
-    )))
-    if (!any(is_in(keys, contexts))) {
+    weightContexts <- unique(list_c(map(unname(twasWeights), contexts)))
+    if (!any(is_in(keys, weightContexts))) {
         abort(c(
             "`contextGroups` names none of the weights' contexts.",
             i = glue(
                 "The weights' contexts include ",
-                "{str_flatten(head(contexts, 3L), ', ')}."
+                "{str_flatten(head(weightContexts, 3L), ', ')}."
             )
         ))
     }

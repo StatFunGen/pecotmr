@@ -4,7 +4,8 @@
 # (test_rrLassosum.R, test_rrPrsCs.R, test_rrSdpr.R, test_rrPenalizedRss.R,
 # test_sumstatsQc.R for DENTIST, test_qtlEnrichmentPipeline.R,
 # test_ld.R for the pruning components, test_genotypeIo.R for the BGEN
-# decoder, test_GenotypeDosageSeed.R for VCF GT calls) or, for the solvers'
+# decoder, test_GenotypeDosageSeed.R for VCF GT calls,
+# test_h2EstimationWrappers.R for the eigen likelihood) or, for the solvers'
 # factor entry points, against their dense counterparts
 # (test_regularizedRegressionWrappers.R).
 #
@@ -20,6 +21,8 @@
     "bgenSampleIdsCpp",
     "dentistIterativeImpute",
     "dentistIterativeImputeFactor",
+    "eigenLikelihoodCpp",
+    "eigenLikelihoodFitCpp",
     "jointPrsCpp",
     "jointPrsFactorCpp",
     "ldThresholdComponents",

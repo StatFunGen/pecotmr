@@ -2116,7 +2116,8 @@ test_that("a gene's molecular type is what its weights record", {
 })
 
 test_that("contextGroups must name each context once, to a group", {
-    tw <- list(r1 = list(context = c("c1", "c2")))
+    # Both weight sources the pipeline places, each carrying context c1.
+    tw <- list(r1 = .ctp_makeTwasWeights(), r2 = .ctp_makeFmrWeightSource())
     check <- function(x) pecotmr:::.ctwasCheckContextGroups(x, tw)
     expect_null(check(NULL))
     expect_identical(check(c(c1 = "g", c9 = "g")), c(c1 = "g", c9 = "g"))

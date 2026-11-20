@@ -214,9 +214,10 @@ causalInferencePipeline <- function(
         # .cipChosenCells() has said why when it chose no TWAS weights and
         # there is no MR to run.
         if (nrow(cells) > 0L || length(mrTuples) > 0L) {
-            inform(
-                "causalInferencePipeline: no (qtl, gwas) tuple produced a result."
-            )
+            inform(glue(
+                "causalInferencePipeline: no (qtl, gwas) tuple produced ",
+                "a result."
+            ))
         }
         return(.cipEmptyResult())
     }
