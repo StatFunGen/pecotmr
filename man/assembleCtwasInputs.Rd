@@ -10,7 +10,8 @@ assembleCtwasInputs(
   twasZ = NULL,
   fineMappingResult = NULL,
   weightSelectionParam = WeightSelectionParam(),
-  variantPruningParam = VariantPruningParam()
+  variantPruningParam = VariantPruningParam(),
+  contextGroups = NULL
 )
 }
 \arguments{
@@ -81,6 +82,15 @@ matrix, built with \code{\link{VariantPruningParam}}:
 \code{maxVariants}. Handed whole to
 \code{\link{assembleCtwasInputs}}. The \code{csMinCor} /
 \code{pipRescue} rescues need a \code{fineMappingResult}.}
+
+\item{contextGroups}{Optional named character vector pooling contexts
+into one cTWAS group: each name is a weight context and its value the
+group it joins, e.g. \code{c(BM36_pQTL_chr1_G1_P1 = "BM36_pQTL",
+BM36_pQTL_chr1_G2_P2 = "BM36_pQTL")}. A context it does not name keeps a
+group of its own, and names no weights carry are ignored, so one map can
+serve every chromosome; one naming none of the weights' contexts is
+refused. Groups stay per study and molecular type (see Groups and
+molecular types). Default \code{NULL}: one group per context.}
 }
 \value{
 A list with elements \code{z_snp}, \code{z_gene} (NULL when no

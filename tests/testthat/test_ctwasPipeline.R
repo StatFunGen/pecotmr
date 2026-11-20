@@ -2115,9 +2115,53 @@ test_that("a gene's molecular type is what its weights record", {
     )
 })
 
+test_that("contextGroups must name each context once, to a group", {
+    tw <- list(r1 = list(context = c("c1", "c2")))
+    check <- function(x) pecotmr:::.ctwasCheckContextGroups(x, tw)
+    expect_null(check(NULL))
+    expect_identical(check(c(c1 = "g", c9 = "g")), c(c1 = "g", c9 = "g"))
+    expect_error(check(c("g", "g")), "named character vector")
+    expect_error(check(c(c1 = NA_character_)), "named character vector")
+    expect_error(check(c(c1 = "")), "named character vector")
+    expect_error(check(list(c1 = "g")), "named character vector")
+    expect_error(check(c(c1 = "g", c1 = "h")), "more than once: c1")
+    expect_error(check(c(c9 = "g")), "names none of the weights' contexts")
+})
+
+test_that("many groups of one gene each warn, pooled ones do not", {
+    prepared <- function(context, groupContext = context) {
+        list(
+            meta = list(
+                study = "s",
+                context = context,
+                groupContext = groupContext,
+                type = "QTL"
+            )
+        )
+    }
+    ctxs <- str_c("ctx", 1:11)
+    expect_warning(
+        pecotmr:::.ctwasWarnSingletonGroups(map(ctxs, prepared)),
+        "Each of the 11 cTWAS groups holds one gene"
+    )
+    expect_no_warning(
+        pecotmr:::.ctwasWarnSingletonGroups(map(ctxs, prepared, "pooled"))
+    )
+    expect_no_warning(
+        pecotmr:::.ctwasWarnSingletonGroups(map(ctxs[1:10], prepared))
+    )
+})
+
 test_that("groups whose names cTWAS could not tell apart are refused", {
     prepared <- function(study, context, type = "QTL") {
-        list(meta = list(study = study, context = context, type = type))
+        list(
+            meta = list(
+                study = study,
+                context = context,
+                groupContext = context,
+                type = type
+            )
+        )
     }
     expect_error(
         pecotmr:::.ctwasRequireDistinctGroups(list(
@@ -3301,6 +3345,7 @@ test_that("the three ctwas stages can each be called on their own", {
     estMinGroupSize = 1L,
     types = NULL,
     studies = NULL,
+    contextGroups = NULL,
     ...
 ) {
     data(gwasSumStatsS4Example, envir = environment())
@@ -3326,9 +3371,90 @@ test_that("the three ctwas stages can each be called on their own", {
                 min_p_single_effect = 0
             )
         ),
-        weightSelectionParam = WeightSelectionParam(methods = "susie")
+        weightSelectionParam = WeightSelectionParam(methods = "susie"),
+        contextGroups = contextGroups
     )
 }
+
+test_that("contextGroups pools contexts into one group, and only the group", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("ctwas")
+    # Contexts that name the trait, as released pQTL weights' do.
+    spec <- data.frame(
+        context = c("pQTL_geneA", "pQTL_geneB", "pQTL_geneC", "liver", "liver"),
+        trait = c("geneA", "geneB", "geneC", "geneB", "geneD"),
+        first = c(1L, 2L, 9L, 2L, 10L)
+    )
+    pooled <- c(
+        pQTL_geneA = "pQTL",
+        pQTL_geneB = "pQTL",
+        pQTL_geneC = "pQTL",
+        unused_context = "pQTL"
+    )
+    res <- suppressMessages(suppressWarnings(
+        .ctp_contextRun(spec, contextGroups = pooled)
+    ))
+    priors <- ctwasGroupPriors(res)
+    expect_setequal(
+        priors$group,
+        c("study1_pQTL_QTL", "study1_liver_QTL", "SNP")
+    )
+    sizes <- setNames(priors$group_size, priors$group)
+    expect_equal(sizes[["study1_pQTL_QTL"]], 3)
+    expect_equal(sizes[["study1_liver_QTL"]], 2)
+    expect_setequal(
+        priors$group_context[priors$group == "study1_pQTL_QTL"],
+        "pQTL"
+    )
+    # The results keep each gene's own context.
+    expect_setequal(contexts(res), unique(spec$context))
+    fm <- S4Vectors::mcols(ctwasPosteriors(res))
+    expect_true(all(
+        fm$context[fm$group == "study1_pQTL_QTL"] %in%
+            c("pQTL_geneA", "pQTL_geneB", "pQTL_geneC")
+    ))
+    expect_true(all(fm$molecular_id[fm$context == "pQTL_geneA"] == "geneA"))
+})
+
+test_that("assembleCtwasInputs: contextGroups changes the group, not the ids", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("ctwas")
+    data(gwasSumStatsS4Example, envir = environment())
+    data(qtlDatasetExample, envir = environment())
+    spec <- data.frame(
+        context = c("pQTL_geneA", "pQTL_geneB", "liver"),
+        trait = c("geneA", "geneB", "geneD"),
+        first = c(1L, 2L, 10L)
+    )
+    assemble <- function(contextGroups = NULL) {
+        suppressMessages(suppressWarnings(assembleCtwasInputs(
+            gwasSumStats = .ctp_twoBlockGwas(gwasSumStatsS4Example),
+            twasWeights = .ctp_contextWeights(
+                spec,
+                pecotmr:::.qtlGenotypeSe(qtlDatasetExample)
+            ),
+            weightSelectionParam = WeightSelectionParam(methods = "susie"),
+            contextGroups = contextGroups
+        )))
+    }
+    own <- assemble()
+    pooled <- assemble(c(pQTL_geneA = "pQTL", pQTL_geneB = "pQTL"))
+    expect_identical(names(pooled$weights), names(own$weights))
+    ctx <- function(x) unname(map_chr(x$weights, "context"))
+    expect_setequal(ctx(pooled), c("study1_pQTL", "study1_liver"))
+    expect_identical(
+        unname(map_chr(pooled$weights, "qtl_context")),
+        unname(map_chr(own$weights, "qtl_context"))
+    )
+    expect_identical(
+        unname(map_chr(pooled$weights, "weight_name")),
+        unname(map_chr(own$weights, "weight_name"))
+    )
+    expect_error(
+        assemble(c(brain = "pooled")),
+        "names none of the weights' contexts"
+    )
+})
 
 test_that("ctwasPipeline fits contexts that hold different genes", {
     skip_if_not_installed("PlinkMatrix")
