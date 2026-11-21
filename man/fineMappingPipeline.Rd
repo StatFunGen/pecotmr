@@ -275,7 +275,7 @@ present are not refit.}
   off. \code{covariateScope} sets whose covariates a joint fit takes
   where its outcomes span contexts: by default each outcome's phenotypes
   its own context's, and the genotypes they share the genotype covariates
-  alone.
+  and the phenotype covariates every context shares.
 
   Only meaningful for \code{QtlDataset} / \code{MultiStudyQtlDataset}
   input. A \code{QtlSumStats} / \code{GwasSumStats} run has no covariates

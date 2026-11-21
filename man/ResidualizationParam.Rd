@@ -99,15 +99,18 @@ What is regressed out of the phenotype and genotype before
   regressed on its context's covariates and the genotype covariates, over
   that context's samples: the residuals a fit of that outcome alone
   takes, and so the data behind its own statistics, such as those a mash
-  prior is trained on. The genotypes the outcomes share are regressed on
-  the genotype covariates alone, over the samples every context has. They
-  are not adjusted for any one context's covariates, which shrinks an
-  outcome's standardized effects against its own statistics by about
+  prior is trained on. The genotypes the outcomes share are regressed,
+  over the samples every context has, on the genotype covariates and on
+  the covariates of the study: those \code{phenotypeCovariates} selects
+  in every context under the same name and that take the same values
+  there, as sex or age do. Those are removed from the shared genotypes as
+  from each outcome. A context's own covariates, such as its principal
+  components, differ between contexts even when named alike, and the
+  shared genotypes are not adjusted for them. That shrinks an outcome's
+  standardized effects against its own statistics by about
   \eqn{k / (2n)} for \eqn{k} such covariates on \eqn{n} samples (its
   per-allele effects by about \eqn{k / n}), when the covariates are
-  unrelated to the genotypes. A covariate every context records, such as
-  sex or age, reaches the shared genotypes only when it is held with the
-  genotype covariates.
+  unrelated to the genotypes.
 
   Under \code{covariateScope = "union"}, every outcome's phenotypes and the
   genotypes they share are all regressed on the covariates of all the

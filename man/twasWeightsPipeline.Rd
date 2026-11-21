@@ -384,7 +384,7 @@ the individual-level studies.}
   off. \code{covariateScope} sets whose covariates a joint fit takes
   where its outcomes span contexts: by default each outcome's phenotypes
   its own context's, and the genotypes they share the genotype covariates
-  alone.
+  and the phenotype covariates every context shares.
 
   \code{QtlDataset} / \code{MultiStudyQtlDataset} input only. A
   \code{QtlSumStats} run has no covariates to regress out, so the bundle
