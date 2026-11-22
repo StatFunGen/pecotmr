@@ -2,49 +2,66 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{enetWeights}
 \alias{enetWeights}
-\title{Compute TWAS weights via elastic net (glmnet)}
+\title{Compute TWAS weights via elastic net}
 \usage{
 enetWeights(
   X,
   y,
   alpha = 0.5,
+  backend = NULL,
   fitRetention = c("none", "slim", "full"),
   retainX = FALSE,
-  methodArgs = GlmnetOptions()
+  methodArgs = NULL
 )
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
-\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}, or
+a matrix with a column per condition (see Details).}
 
 \item{alpha}{Elastic-net mixing in \code{[0, 1]}: the L1 share of the
-penalty. Default 0.5.}
+penalty. Default 0.5. grpreg needs it above 0, and across conditions it
+scales the two shares of a variant's penalty differently from glmnet,
+so the same \code{alpha} is not the same penalty on the two backends.}
+
+\item{backend}{The engine: \code{"glmnet"} (the default for \code{NULL})
+or \code{"grpreg"}.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{lambda} and cross-validated error there (\code{cvm},
-\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-every \code{lambda}'s coefficients but without the copy of \code{X} its
-stored calls would hold. Each names the variants it was fitted on.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, \code{lambda} and the
+cross-validated error there (\code{cvm} and \code{cvsd} on glmnet,
+\code{cve} and \code{cvse} on grpreg); \code{"full"} the whole
+\code{cv.glmnet} or \code{cv.grpreg} object, with every
+\code{lambda}'s coefficients but without its copies of the data. Each
+names the variants it was fitted on.}
 
-\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
-(default \code{FALSE}). An error at any other \code{fitRetention}.}
+\item{retainX}{Logical. Keep the fit's copy of \code{X} in a
+\code{"full"} fit (default \code{FALSE}): glmnet's stored calls hold
+it, and on grpreg it is grpreg's standardized design (its
+\code{returnX}). An error at any other \code{fitRetention}.}
 
-\item{methodArgs}{Additional arguments forwarded to
-\code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
-list is refused, since it cannot be checked against the engine's formals.}
+\item{methodArgs}{Options for the backend's engine, built with its
+constructor: \code{\link{GlmnetOptions}} for glmnet,
+\code{\link{GrpregOptions}} for grpreg. \code{NULL} (the default)
+keeps the engine's defaults. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be silently
+ignored.}
 }
 \value{
-Numeric vector of length \code{ncol(X)} of per-variant weights,
-  with the fit attached as attribute \code{"fit"} unless
+Numeric vector of length \code{ncol(X)} of per-variant weights, or
+  for a matrix \code{y} a matrix of them with a column per condition, with
+  the fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
-Convenience wrapper for \code{\link{glmnetWeights}} at a mixing between the
-lasso and ridge, \code{alpha = 0.5} unless set.
+The elastic net at a mixing between the lasso and ridge, \code{alpha =
+0.5} unless set, on glmnet (\code{\link{glmnetWeights}}, the default) or
+on grpreg. A matrix \code{y}, a column per condition, is fitted across
+the conditions at once, as \code{\link{lassoWeights}} describes.
 }
 \examples{
 data(eqtlRegionExample)

@@ -225,6 +225,26 @@ off a fine-mapping fit across its studies; on summary statistics that fit
 holds each study on its own LD reference, and a variant a study lacks has
 weight 0 in it.
 
+On individual-level data the penalized methods also fit each such group at
+once, alongside their fits of each condition alone, on the engine `backend`
+puts them on. A group penalty puts each variant's effects across the group's
+conditions under one penalty, so a variant is in every condition's weights
+or in none: glmnet's `"mgaussian"` family (`lasso`, `enet`) for a study's
+contexts or traits on its samples, and grpreg's group penalties (`lasso`,
+`enet`, `mcp` and `scad` on `"grpreg"`) and abess's best subset (`l0learn`
+on `"abess"`) for any group, including those across a
+`MultiStudyQtlDataset`'s studies, each condition on its own samples. `ridge`
+fits each condition at one penalty level chosen across them. ncvreg and
+L0Learn, the default engines of `mcp`, `scad` and `l0learn`, have no group
+penalty, so unless you name a `backend` those methods take their group fits
+on grpreg and abess. Without a `jointSpecification` the default groups are
+fitted the same way by the methods that can; with one, a method you name in
+`methods` that cannot fit its groups is an error. Within a study a group
+keeps every sample any of its conditions observes, each condition fitted on
+its own; `completeSamples = TRUE` keeps only the samples observed in all of
+them, which the engines that take no missing phenotype (glmnet's
+`"mgaussian"`, fSuSiE, and mr.mash without `missing_y_method`) do anyway.
+
 ```{r joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.
 twasWeightsPipeline(
@@ -237,37 +257,51 @@ twasWeightsPipeline(
 )
 ```
 
-The study axis also fits `lasso`, `enet`, `ridge` and `l0learn` across the
-studies, beside their per-study fits. Each study's effects are pulled
-towards the others' by a penalty on their difference, as PROSPER couples
-ancestries, at the strengths given by `studyCoupling` (default
-`c(0.01, 0.1, 1, 10)`, from nearly separate fits to nearly one pooled fit).
-Each study keeps the coupling strength and penalty level its own held-out
-samples score best. These rows carry `jointStudies`, so
-`WeightSelectionParam(jointAxes = "study")` picks them out downstream, and
-`studyCoupling = NULL` turns them off. `mcp` and `scad` stay per study.
+`coupling` names the axes along which a group's conditions are coupled:
+each condition's effects are pulled towards the others' by a penalty on
+their difference, as PROSPER couples ancestries. The default,
+`list(study = c(0.01, 0.1, 1, 10))`, couples studies, from nearly separate
+fits to nearly one pooled fit; `list(context = c(0.1, 1))` couples a study's
+contexts, and several axes make a grid of every combination of their
+strengths. Each condition keeps the coupling strength and penalty level its
+own held-out samples score best, on folds that hold a sample out of every
+condition at once. Where the engine has a group penalty the coupled fit
+takes it too. These rows carry the group's joint columns, so
+`WeightSelectionParam(jointAxes = "study")` picks the coupled studies' rows
+out downstream, and `coupling = NULL` turns coupling off. ncvreg and grpreg
+rescale their columns, the coupling among them, so on those engines the
+penalty is approximate on a coupled group, which a warning says.
 
 `bayesC` and `bayesN` on BGLR (`backend = c(bayesC = "bglr")`) fit each group
 a `jointSpecification` makes jointly too, beside their fits one condition at
 a time: BGLR's `Multitrait()` gives `bayesC` a spike and slab whose slab is
 correlated across the group's conditions and `bayesN` a Gaussian prior with
 a covariance across them, and draws a condition's missing phenotypes within
-its sampler. That serves a study's contexts or traits, and on the study axis
-the individual-level studies, whose residuals are taken as independent.
+its sampler. That serves a study's contexts or traits, on the study axis the
+individual-level studies, whose residuals are taken as independent, and both
+together, where BGLR's recursive (`REC`) residual structure leaves a study's
+contexts or traits correlated and the studies independent.
 `BglrOptions(Cov = )` sets the structure and prior of the effects'
 covariance across conditions (`list(type = "UN")` by default), and
 `BglrOptions(resCov = )` the residual covariance's within a study.
 
 On summary statistics, a `QtlSumStats` holding several studies or the
-summary-statistic studies of a `MultiStudyQtlDataset`, the study axis
-couples the penalized RSS methods the same way, `mcp` and `scad` included.
-Each study is fitted against its own LD reference, over the union of the
-studies' variants, and keeps the shrinkage, penalty level and coupling
-strength its own held-out statistics score best. `prsCs` is fitted across
-the studies as JointPRS fits ancestries: they share PRS-CS's continuous
-shrinkage prior, as PRS-CSx shares it, and the correlation of their effects
-is learned. In one cis window that correlation is only weakly informed by
-a sparse signal, so most of the coupling comes from the shared prior.
+summary-statistic studies of a `MultiStudyQtlDataset`, `coupling` couples
+the penalized RSS methods the same way, `mcp` and `scad` included, along
+whichever axes it names. Each study is fitted against its own LD reference,
+over the union of the studies' variants, and keeps the shrinkage, penalty
+level and coupling strength its own held-out statistics score best. On
+summary statistics the penalized methods also take the group penalty across
+a group's conditions on pecotmr's solver, the default groups across contexts
+included, and a trait group spans the union of its genes' variants where
+their statistics cover different ones. Where conditions share samples, their
+held-out splits are drawn correlated by `residualCorrelation`, or by a
+`mashPrior`'s residual correlation, and independently without either.
+`prsCs` is fitted across the studies as JointPRS fits ancestries: they share
+PRS-CS's continuous shrinkage prior, as PRS-CSx shares it, and the
+correlation of their effects is learned. In one cis window that correlation
+is only weakly informed by a sparse signal, so most of the coupling comes
+from the shared prior.
 `dprGibbs` is fitted across the studies as SDPRX fits ancestries: each
 non-null component of SDPR's mixture carries a variant's effects in a set
 of the studies, correlated. `SdprOptions(sharing = )` picks the sets: each

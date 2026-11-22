@@ -2,44 +2,78 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{lassoWeights}
 \alias{lassoWeights}
-\title{Compute TWAS weights via lasso (glmnet, alpha = 1)}
+\title{Compute TWAS weights via the lasso}
 \usage{
 lassoWeights(
   X,
   y,
+  backend = NULL,
   fitRetention = c("none", "slim", "full"),
   retainX = FALSE,
-  methodArgs = GlmnetOptions()
+  methodArgs = NULL
 )
 }
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
-\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}, or
+a matrix with a column per condition (see Details).}
+
+\item{backend}{The engine: \code{"glmnet"} (the default for \code{NULL})
+or \code{"grpreg"}.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{lambda} and cross-validated error there (\code{cvm},
-\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-every \code{lambda}'s coefficients but without the copy of \code{X} its
-stored calls would hold. Each names the variants it was fitted on.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, \code{lambda} and the
+cross-validated error there (\code{cvm} and \code{cvsd} on glmnet,
+\code{cve} and \code{cvse} on grpreg); \code{"full"} the whole
+\code{cv.glmnet} or \code{cv.grpreg} object, with every
+\code{lambda}'s coefficients but without its copies of the data. Each
+names the variants it was fitted on.}
 
-\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
-(default \code{FALSE}). An error at any other \code{fitRetention}.}
+\item{retainX}{Logical. Keep the fit's copy of \code{X} in a
+\code{"full"} fit (default \code{FALSE}): glmnet's stored calls hold
+it, and on grpreg it is grpreg's standardized design (its
+\code{returnX}). An error at any other \code{fitRetention}.}
 
-\item{methodArgs}{Additional arguments forwarded to
-\code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
-list is refused, since it cannot be checked against the engine's formals.}
+\item{methodArgs}{Options for the backend's engine, built with its
+constructor: \code{\link{GlmnetOptions}} for glmnet,
+\code{\link{GrpregOptions}} for grpreg. \code{NULL} (the default)
+keeps the engine's defaults. A bare list is refused: it cannot be
+checked against the engine, so a misspelled option would be silently
+ignored.}
 }
 \value{
-Numeric vector of length \code{ncol(X)} of per-variant weights,
-  with the fit attached as attribute \code{"fit"} unless
+Numeric vector of length \code{ncol(X)} of per-variant weights, or
+  for a matrix \code{y} a matrix of them with a column per condition, with
+  the fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
-Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 1}.
+The lasso, on glmnet (\code{\link{glmnetWeights}} at \code{alpha = 1}, the
+default) or on grpreg (\code{backend = "grpreg"}), whose group lasso with
+each variant its own group is the lasso. grpreg always standardizes the
+columns of \code{X}, where glmnet here fits them as given.
+}
+\details{
+Given a matrix \code{y}, a column per condition, it fits the conditions
+at once: each variant's effects across them form one group under the
+penalty, so a variant is in the model for every condition or for none,
+each condition with its own effect, fitted on its own samples. The loss is
+each condition's mean squared error on its phenotype scaled to unit
+variance, summed over the conditions, and one \code{lambda} serves them
+all: the one with the lowest cross-validated error summed over them, on
+folds that hold each sample out of every condition it is in. Weights come
+back on each condition's own scale. glmnet fits conditions measured on
+the same samples (its \code{"mgaussian"} family). grpreg also fits
+conditions measured on samples of their own, as several studies' are,
+their phenotypes missing on the others' samples: each condition's rows
+hold its own samples, centred within them, against its own copy of the
+variants, and a variant's copies form its group. That design is dense,
+\eqn{8 N C p} bytes for \eqn{N} rows in all, \eqn{C} conditions and
+\eqn{p} variants.
 }
 \examples{
 data(eqtlRegionExample)

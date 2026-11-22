@@ -184,8 +184,9 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
 # Mock individual-level weight methods to return zero vectors quickly.
 .tp_mockIndividualWeights <- function() {
     list(
-        lassoWeights = function(X, y, ...) rep(0, ncol(X)),
-        enetWeights = function(X, y, ...) rep(0, ncol(X)),
+        # A column per condition, as the wrappers fit a matrix y.
+        lassoWeights = function(X, y, ...) matrix(0, ncol(X), NCOL(y)),
+        enetWeights = function(X, y, ...) matrix(0, ncol(X), NCOL(y)),
         susieWeights = function(
             X = NULL,
             y = NULL,
@@ -217,7 +218,15 @@ test_that("twasWeightsPipeline reads each window once and shares its X", {
         seed = 1L
     ))
     expect_s4_class(run$result, "TwasWeights")
-    expect_equal(nrow(run$result), 6L)
+    # Each tuple alone, and each context's traits together, as the lasso fits
+    # the traits of a window by default.
+    joint <- !is.na(run$result$jointTraits)
+    expect_equal(sum(!joint), 6L)
+    expect_equal(sum(joint), 6L)
+    expect_equal(
+        unique(as.character(run$result$jointTraits[joint])),
+        "g1;g2;g3"
+    )
     # One read across 2 contexts and 3 traits, of only the samples they observe.
     expect_equal(run$reads, 1L)
     expect_equal(run$samples[[1L]], 1:30)
@@ -225,7 +234,7 @@ test_that("twasWeightsPipeline reads each window once and shares its X", {
     expect_equal(run$builds, 4L)
     # Row order does not depend on how the fits were grouped.
     expect_equal(
-        as.character(S4Vectors::mcols(run$result)$trait),
+        as.character(S4Vectors::mcols(run$result)$trait[!joint]),
         rep(c("g1", "g2", "g3"), times = 2L)
     )
 })
@@ -319,31 +328,36 @@ test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
         )
     )
     expect_s4_class(res, "TwasWeights")
-    # 1 context x 2 traits = 2 genes, each with 2 methods.
-    expect_equal(nrow(res), 2L)
-    expect_equal(nrow(.twasCells(res)), 4L)
+    # 1 context x 2 traits = 2 genes, each with 2 methods; and each method's
+    # fit of the two traits together, which the lasso and elastic net make
+    # of a window's traits by default, in two more rows.
+    joint <- !is.na(res$jointTraits)
+    expect_equal(sum(!joint), 2L)
+    expect_equal(sum(joint), 2L)
+    expect_equal(nrow(.twasCells(res)), 8L)
     expect_setequal(methodNames(res), c("lasso", "enet"))
     expect_setequal(traitNames(res), c("ENSG_A", "ENSG_B"))
     # Provenance, aligned per row (.tp_makeSe: ENSG_A -> chr1:1000-1499,
     # ENSG_B -> chr1:2000-2499). traitPos = the bare trait position (no
     # cis-window).
-    reg <- genomicRegion(res)
-    tp <- traitPosition(res)
+    reg <- genomicRegion(res)[!joint]
+    tp <- traitPosition(res)[!joint]
+    trait <- res$trait[!joint]
     expect_s4_class(reg, "GRanges")
     expect_s4_class(tp, "GRanges")
     expect_equal(length(reg), 2L)
     expect_equal(length(tp), 2L)
     # traitPos: the trait's own coordinates.
-    expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_A"] == 1000L))
-    expect_true(all(GenomicRanges::end(tp)[res$trait == "ENSG_A"] == 1499L))
-    expect_true(all(GenomicRanges::start(tp)[res$trait == "ENSG_B"] == 2000L))
+    expect_true(all(GenomicRanges::start(tp)[trait == "ENSG_A"] == 1000L))
+    expect_true(all(GenomicRanges::end(tp)[trait == "ENSG_A"] == 1499L))
+    expect_true(all(GenomicRanges::start(tp)[trait == "ENSG_B"] == 2000L))
     # region: the REALIZED variant span now, not traitPos +/- cisWindow. The
     # nominal window is gone (no correct update rule under subsetting); the
     # span is in sync with the variants and still sits inside that window.
-    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_A"] >= 1L))
-    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_A"] <= 2499L))
-    expect_true(all(GenomicRanges::start(reg)[res$trait == "ENSG_B"] >= 1000L))
-    expect_true(all(GenomicRanges::end(reg)[res$trait == "ENSG_B"] <= 3499L))
+    expect_true(all(GenomicRanges::start(reg)[trait == "ENSG_A"] >= 1L))
+    expect_true(all(GenomicRanges::end(reg)[trait == "ENSG_A"] <= 2499L))
+    expect_true(all(GenomicRanges::start(reg)[trait == "ENSG_B"] >= 1000L))
+    expect_true(all(GenomicRanges::end(reg)[trait == "ENSG_B"] <= 3499L))
 })
 
 test_that("twasWeightsPipeline hands each method the backend it names", {
@@ -400,8 +414,8 @@ test_that("twasWeightsPipeline refuses a backend it cannot honour", {
         "not being run: bayesC"
     )
     expect_error(
-        run(methods = "lasso", backend = c(lasso = "glmnet")),
-        "lasso has one implementation"
+        run(methods = "ridge", backend = c(ridge = "glmnet")),
+        "ridge has one implementation"
     )
     expect_error(
         run(methods = "bayesR", backend = c(bayesR = "bglr")),
@@ -425,13 +439,13 @@ test_that("twasWeightsPipeline refuses a backend it cannot honour", {
         run(methods = list(bayesR = list(backend = "bglr"))),
         "backend = c\\(bayesR = \"qgg\"\\)"
     )
-    # Refused even though glmnet's `...` leaves lasso's other names
+    # Refused even though glmnet's `...` leaves ridge's other names
     # unchecked.
     expect_error(
-        run(methods = list(lasso = list(backend = "glmnet"))),
+        run(methods = list(ridge = list(backend = "glmnet"))),
         str_c(
-            "unknown argument\\(s\\) backend for lasso on QtlDataset\\. ",
-            "`backend` is twasWeightsPipeline\\(\\)'s own argument, and lasso ",
+            "unknown argument\\(s\\) backend for ridge on QtlDataset\\. ",
+            "`backend` is twasWeightsPipeline\\(\\)'s own argument, and ridge ",
             "has one implementation on QtlDataset"
         )
     )
@@ -1448,6 +1462,121 @@ test_that("mr.mash TWAS keeps its fit parts in the fits slot", {
         qcOptions = list(step1 = "ok")
     )
 }
+
+test_that("summary statistics fit a study's contexts with the group penalty", {
+    ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
+    local_mocked_bindings(.handleDosage = .tp_mockExtractor())
+    tw <- withr::with_seed(
+        1L,
+        suppressWarnings(suppressMessages(
+            twasWeightsPipeline(ss, methods = c("lasso", "mcp"), verbose = 0)
+        ))
+    )
+    joint <- !is.na(tw$jointContexts)
+    # Each context alone and the two together, by default, each row holding
+    # both methods.
+    expect_equal(sum(joint), 2L)
+    expect_equal(sum(!joint), 2L)
+    for (method in c("lasso", "mcp")) {
+        expect_true(is_in(
+            method,
+            as.character(S4Vectors::mcols(tw)$methods[[which(joint)[[1L]]]])
+        ))
+    }
+    expect_equal(unique(as.character(tw$jointContexts[joint])), "c1;c2")
+    # Every context takes the one grid point the group scores best on.
+    chosen <- methodFits(
+        pecotmr:::.twrCellParts(tw, which(joint)[[1L]], "lasso")
+    )$selection
+    expect_equal(chosen$lambda[[1L]], chosen$lambda[[2L]])
+})
+
+test_that("summary statistics fit a context's genes over their windows", {
+    local_mocked_bindings(.handleDosage = .tp_mockExtractor())
+    ids <- sprintf("chr1:%d:A:G", 100L * (1:12))
+    entry <- function(at) {
+        .tp_makeSumstatsEntry(snp_ids = ids[at], positions = 100L * at)
+    }
+    sumStats <- function(atA, atB) {
+        QtlSumStats(
+            studyName = c("s1", "s1"),
+            context = c("c1", "c1"),
+            trait = c("t1", "t2"),
+            entry = list(entry(atA), entry(atB)),
+            genome = "hg19",
+            ldReference = .tp_makeHandle(snp_n = 20L),
+            qcOptions = list(step1 = "ok"),
+            traitPos = GenomicRanges::GRanges(
+                "chr1",
+                IRanges::IRanges(c(300L, 900L), width = 1L)
+            )
+        )
+    }
+    run <- function(ss, cisWindow) {
+        withr::with_seed(
+            1L,
+            suppressWarnings(suppressMessages(
+                twasWeightsPipeline(
+                    ss,
+                    methods = "lasso",
+                    jointSpecification = "trait",
+                    cisWindow = cisWindow,
+                    verbose = 0
+                )
+            ))
+        )
+    }
+    # Each gene's window holds variants 1-5 or 7-11; with statistics at all
+    # twelve, the group spans both windows, every gene over all of it.
+    tw <- run(sumStats(1:12, 1:12), 250L)
+    joint <- which(!is.na(tw$jointTraits))
+    expect_length(joint, 2L)
+    for (r in joint) {
+        expect_setequal(
+            variantIds(pecotmr:::.twrCellParts(tw, r, "lasso")),
+            ids[1:11]
+        )
+    }
+    # A gene with no statistics at some of the span stops the group: a
+    # missing statistic is not read as a null effect.
+    expect_error(
+        run(sumStats(1:12, 5:12), 250L),
+        "must hold statistics at the same variants"
+    )
+})
+
+test_that("a residual correlation draws coupled contexts' splits together", {
+    local_mocked_bindings(.handleDosage = .tp_mockExtractor())
+    ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
+    keys <- c("s1:c1:t1", "s1:c2:t1")
+    residual <- matrix(c(1, 0.5, 0.5, 1), 2L, dimnames = list(keys, keys))
+    run <- function(residualCorrelation) {
+        withr::with_seed(
+            1L,
+            suppressWarnings(suppressMessages(
+                twasWeightsPipeline(
+                    ss,
+                    methods = "lasso",
+                    coupling = list(context = c(0.1, 1)),
+                    residualCorrelation = residualCorrelation,
+                    verbose = 0
+                )
+            ))
+        )
+    }
+    tw <- run(residual)
+    expect_equal(sum(!is.na(tw$jointContexts)), 2L)
+    # A matrix lacking a condition, or not a correlation, is refused.
+    expect_error(
+        run(residual[1L, 1L, drop = FALSE]),
+        "has no row for s1:c2:t1"
+    )
+    expect_error(run(2 * residual), "must be a correlation matrix")
+    expect_warning(
+        pecotmr:::.twasWarnResidualOverride(list(), residual),
+        "overrides the `mashPrior`"
+    )
+})
 
 test_that("sumstat mvsusie TWAS returns one row per context", {
     ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
@@ -4069,6 +4198,34 @@ test_that("sumstat multivariate mr.mash returns a column per context", {
     expect_equal(nrow(res), 2L) # one row per context
 })
 
+test_that("sumstat joint mr.mash starts from the run's h2", {
+    # The joint fits' settings were built apart from the coupled ones', and
+    # left the run's h2 out, so mr.mash never saw it.
+    ss <- .tp_makeQtlSumStats(n_entries = 2L)
+    seen <- list()
+    mockArgs <- c(
+        list(
+            .handleDosage = .tp_mockExtractor(),
+            mrmashRssWeights = function(stat, ldReference, ...) {
+                seen <<- c(seen, list(stat$h2))
+                ids <- stat$variantNames
+                matrix(0, length(ids), ncol(stat$z), dimnames = list(ids, NULL))
+            }
+        ),
+        .tp_mockSumstatWeights(),
+        list(.package = "pecotmr")
+    )
+    exec(local_mocked_bindings, !!!mockArgs)
+    suppressMessages(suppressWarnings(twasWeightsPipeline(
+        ss,
+        methods = "mrmash",
+        h2Estimate = 0.3,
+        verbose = 0
+    )))
+    expect_length(seen, 1L)
+    expect_equal(seen[[1L]], c(0.3, 0.3))
+})
+
 test_that("sumstat TWAS errors on an FM method absent from the FM result", {
     ss <- .tp_makeQtlSumStats(n_entries = 2L)
     # A fine-mapping result that does NOT contain an mvsusie fit (only susie).
@@ -4745,14 +4902,14 @@ test_that("a fit across other studies than the run's group stops the run", {
 test_that("a study-axis spec fits lasso across the studies and in each", {
     skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("glmnet")
-    run <- function(studyCoupling) {
+    run <- function(strengths) {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
             .fm_disjointStudies(),
             methods = "lasso",
             jointSpecification = "study",
             cisWindow = 50000L,
             crossValidationParam = CrossValidationParam(folds = 3),
-            studyCoupling = studyCoupling,
+            coupling = if (!is.null(strengths)) list(study = strengths),
             verbose = 0,
             seed = 1L
         )))
@@ -4893,6 +5050,185 @@ test_that("bayesN on BGLR fits the individual-level studies jointly", {
     expect_equal(kept$jointStudies, rep("study1;study2", 2L))
 })
 
+test_that("lasso fits each group of a study's contexts with a group penalty", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("glmnet")
+    run <- function(jointSpecification) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = "lasso",
+            jointSpecification = jointSpecification,
+            region = .fitSamplesWindow(),
+            traitId = "g1",
+            crossValidationParam = CrossValidationParam(folds = 2),
+            fitRetention = "slim",
+            seed = 1L
+        )))
+    }
+    for (tw in list(run("context"), run(NULL))) {
+        joint <- !is.na(tw$jointContexts)
+        # The trait's two contexts one at a time, and the two together,
+        # with or without a specification.
+        expect_equal(sum(joint), 2L)
+        expect_equal(sum(!joint), 2L)
+        expect_equal(
+            unique(as.character(tw$jointContexts[joint])),
+            "brain;liver"
+        )
+        cells <- map(
+            which(joint),
+            function(r) pecotmr:::.twrCellParts(tw, r, "lasso")
+        )
+        # glmnet's mgaussian fit, one column per context; a variant is in
+        # both contexts' weights or in neither.
+        expect_equal(ncol(methodFits(cells[[1L]])$coef), 2L)
+        expect_identical(
+            weights(cells[[1L]]) != 0,
+            weights(cells[[2L]]) != 0
+        )
+    }
+})
+
+test_that("mcp fits a study's contexts coupled, or grouped on grpreg", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("ncvreg")
+    run <- function(jointSpecification, coupling, backend = NULL) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            .fitSamplesDataset(),
+            methods = "mcp",
+            backend = backend,
+            jointSpecification = jointSpecification,
+            region = .fitSamplesWindow(),
+            traitId = "g1",
+            crossValidationParam = CrossValidationParam(folds = 2),
+            coupling = coupling,
+            fitRetention = "slim",
+            seed = 1L
+        )))
+    }
+    byContext <- list(context = c(0.1, 1))
+    for (tw in list(run("context", byContext), run(NULL, byContext))) {
+        joint <- !is.na(tw$jointContexts)
+        expect_equal(sum(joint), 2L)
+        expect_equal(sum(!joint), 2L)
+        fit <- methodFits(pecotmr:::.twrCellParts(
+            tw,
+            which(joint)[[1L]],
+            "mcp"
+        ))
+        expect_equal(dimnames(fit$strength)[[2L]], "context")
+    }
+    # Uncoupled and with no backend named, the group fit runs on grpreg.
+    grouped <- run(NULL, NULL)
+    joint <- which(!is.na(grouped$jointContexts))
+    expect_length(joint, 2L)
+    expect_equal(
+        ncol(
+            methodFits(pecotmr:::.twrCellParts(
+                grouped,
+                joint[[1L]],
+                "mcp"
+            ))$coef
+        ),
+        2L
+    )
+    # On ncvreg, named, there is no group fit: the default groups leave mcp
+    # to its fits one context at a time, and a specification naming it stops.
+    onNcvreg <- c(mcp = "ncvreg")
+    expect_true(all(is.na(run(NULL, NULL, onNcvreg)$jointContexts)))
+    expect_error(
+        run("context", NULL, onNcvreg),
+        "which mcp cannot fit on the engine the run puts it on"
+    )
+})
+
+test_that("contexts on different donors fit on every donor unless asked", {
+    skip_if_not_installed("pgenlibr")
+    skip_if_not_installed("grpreg")
+    skip_if_not_installed("glmnet")
+    # Liver measured on fewer donors for g1.
+    differ <- .fitSamplesDataset(editLiver = function(y) {
+        `[<-`(y, "g1", 6:12, NA)
+    })
+    run <- function(methods, completeSamples) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            differ,
+            methods = methods,
+            region = .fitSamplesWindow(),
+            traitId = "g1",
+            completeSamples = completeSamples,
+            crossValidationParam = CrossValidationParam(folds = 2),
+            fitRetention = "slim",
+            seed = 1L
+        )))
+    }
+    # grpreg fits each context on its own donors, glmnet on those both share;
+    # either way the group is fitted, under either setting.
+    for (completeSamples in c(FALSE, TRUE)) {
+        tw <- run(c("mcp", "lasso"), completeSamples)
+        joint <- !is.na(tw$jointContexts)
+        expect_equal(sum(joint), 2L, info = completeSamples)
+    }
+    expect_error(run("lasso", NA), "completeSamples")
+})
+
+test_that("a preset's methods that fit no group are left out of it", {
+    marker <- new(
+        "TwasJointPipeline",
+        config = list(engines = list(mcp = "ncvreg"))
+    )
+    norm <- list(tokens = c("mcp", "lasso"))
+    spec <- list(list(axes = "context", scope = NULL))
+    expect_null(pecotmr:::.twasAssertSpecFits(spec, "default", norm, marker))
+    expect_error(
+        pecotmr:::.twasAssertSpecFits(spec, c("mcp", "lasso"), norm, marker),
+        "which mcp cannot fit"
+    )
+})
+
+test_that("on grpreg and abess the studies take the group penalty", {
+    skip_if_not_installed("PlinkMatrix")
+    skip_if_not_installed("grpreg")
+    skip_if_not_installed("abess")
+    run <- function(coupling) {
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            .fm_disjointStudies(),
+            methods = c("mcp", "l0learn"),
+            backend = c(mcp = "grpreg", l0learn = "abess"),
+            jointSpecification = "study",
+            cisWindow = 50000L,
+            crossValidationParam = CrossValidationParam(folds = 3),
+            coupling = coupling,
+            fitRetention = "slim",
+            seed = 1L
+        )))
+    }
+    fits <- function(tw, method) {
+        joint <- which(!is.na(tw$jointStudies))
+        expect_length(joint, 2L)
+        expect_equal(
+            unique(as.character(tw$jointStudies[joint])),
+            "study1;study2"
+        )
+        cell <- pecotmr:::.twrCellParts(tw, joint[[1L]], method)
+        expect_true(is.finite(cvResult(cell)$metrics[["rsq"]]))
+        methodFits(cell)
+    }
+    # Uncoupled: the group penalty alone, one fit of both studies.
+    alone <- run(NULL)
+    expect_equal(ncol(fits(alone, "mcp")$coef), 2L)
+    expect_true(is_in("supportSize", names(fits(alone, "l0learn"))))
+    # Coupled: the group penalty with the coupling, each study at its own
+    # strength and grid point.
+    coupled <- run(list(study = c(0.1, 1)))
+    for (method in c("mcp", "l0learn")) {
+        fit <- fits(coupled, method)
+        expect_equal(dimnames(fit$strength)[[2L]], "study")
+        expect_true(all(fit$strength %in% c(0.1, 1)))
+    }
+    expect_true(is_in("supportSize", names(fits(coupled, "l0learn"))))
+})
+
 test_that("a collection's joint fits read its backend choices", {
     norm <- pecotmr:::.twasNormWithBackends(
         TwasWeightsMethodsParam(
@@ -4922,7 +5258,7 @@ test_that("a collection's joint fits read its backend choices", {
 test_that("the ensemble across studies stacks each study's own fits", {
     skip_if_not_installed("PlinkMatrix")
     skip_if_not_installed("glmnet")
-    run <- function(studyCoupling, transferScale = "perSd") {
+    run <- function(strengths, transferScale = "perSd") {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
             .fm_disjointStudies(),
             methods = c("lasso", "enet"),
@@ -4934,7 +5270,7 @@ test_that("the ensemble across studies stacks each study's own fits", {
                 acrossStudies = TRUE,
                 transferScale = transferScale
             ),
-            studyCoupling = studyCoupling,
+            coupling = if (!is.null(strengths)) list(study = strengths),
             verbose = 0,
             seed = 1L
         )))
@@ -4983,14 +5319,23 @@ test_that("EnsembleParam stacks within a study, per SD, by default", {
     expect_error(EnsembleParam(acrossStudies = NA), "acrossStudies")
 })
 
-test_that("studyCoupling takes non-negative, distinct strengths", {
+test_that("coupling names axes, each with distinct non-negative strengths", {
+    studies <- .fm_disjointStudies()
     expect_error(
-        twasWeightsPipeline(.fm_disjointStudies(), studyCoupling = c(1, 1)),
-        "studyCoupling"
+        twasWeightsPipeline(studies, coupling = list(study = c(1, 1))),
+        "strengths"
     )
     expect_error(
-        twasWeightsPipeline(.fm_disjointStudies(), studyCoupling = -0.1),
-        "studyCoupling"
+        twasWeightsPipeline(studies, coupling = list(study = -0.1)),
+        "strengths"
+    )
+    expect_error(
+        twasWeightsPipeline(studies, coupling = list(tissue = 1)),
+        "coupling"
+    )
+    expect_error(
+        twasWeightsPipeline(studies, coupling = c(0.1, 1)),
+        "coupling"
     )
 })
 
@@ -5223,7 +5568,7 @@ test_that("sumstat TWAS errors on mismatched SNP order in a joint group", {
             methods = "mrmash",
             verbose = 0
         )),
-        "identical SNP order"
+        "statistics at the same variants"
     )
 })
 
@@ -5813,7 +6158,7 @@ test_that("an entry must come from that method's constructor for that path", {
     )
     expect_error(
         TwasWeightsMethodsParam(qtlDatasetMethods = list(lasso = QggOptions())),
-        "uses the 'glmnet' constructor"
+        "uses the 'glmnet' or 'grpreg' constructor"
     )
     # A method with several backends takes any of their constructors.
     expect_error(
@@ -5906,7 +6251,12 @@ test_that("both kinds of method run together with no joint spec", {
     # One read of the window serves both kinds of fit.
     expect_equal(run$reads, 1L)
     both <- S4Vectors::mcols(run$result)
-    expect_equal(nrow(run$result), nrow(lasso) + nrow(mrmash))
+    # The lasso's fits of the traits together share their rows with
+    # mr.mash's, so the methods' weight sets add up rather than the rows.
+    expect_equal(
+        nrow(pecotmr:::.twasCells(run$result)),
+        nrow(pecotmr:::.twasCells(lasso)) + nrow(pecotmr:::.twasCells(mrmash))
+    )
     # Each method's fits are what asking for it alone gives.
     weightsAt <- function(res, method, context, trait) {
         weights(
@@ -7374,14 +7724,14 @@ test_that("a collection holding summary statistics refuses REML's settings", {
 
 test_that("a study-axis spec fits lasso across summary-statistics studies", {
     ss <- .tp_twoStudySumStats()
-    run <- function(studyCoupling, methods = "lasso") {
+    run <- function(strengths, methods = "lasso") {
         withr::with_seed(
             1L,
             suppressMessages(twasWeightsPipeline(
                 ss,
                 methods = methods,
                 jointSpecification = "study",
-                studyCoupling = studyCoupling,
+                coupling = if (!is.null(strengths)) list(study = strengths),
                 verbose = 0
             ))
         )
@@ -7405,8 +7755,29 @@ test_that("a study-axis spec fits lasso across summary-statistics studies", {
         pecotmr:::.rowLdRef(tw, which(tw$study == "A" & joint)),
         pecotmr:::.rowLdRef(tw, which(tw$study == "B" & joint))
     ))
+    # Uncoupled, the studies take the group penalty alone, both at one grid
+    # point, each variant in both studies' weights or in neither.
     alone <- run(NULL)
-    expect_false("jointStudies" %in% pecotmr:::.tupleColumnNames(alone))
+    grouped <- which(!is.na(alone$jointStudies))
+    expect_length(grouped, 2L)
+    chosen <- methodFits(
+        pecotmr:::.twrCellParts(alone, grouped[[1L]], "lasso")
+    )$selection
+    expect_equal(nrow(chosen), 2L)
+    expect_equal(chosen$lambda[[1L]], chosen$lambda[[2L]])
+    expect_equal(chosen$s[[1L]], chosen$s[[2L]])
+    cells <- map(grouped, function(r) {
+        pecotmr:::.twrCellParts(alone, r, "lasso")
+    })
+    # Over the variants both studies carry: study B lacks `lacked`.
+    shared <- setdiff(
+        intersect(variantIds(cells[[1L]]), variantIds(cells[[2L]])),
+        lacked
+    )
+    expect_identical(
+        weights(cells[[1L]])[match(shared, variantIds(cells[[1L]]))] != 0,
+        weights(cells[[2L]])[match(shared, variantIds(cells[[2L]]))] != 0
+    )
 })
 
 test_that("studies on their own LD stack their z-scores over the union", {
@@ -7568,14 +7939,14 @@ test_that("summary statistics stack their methods on held-out splits", {
 
 test_that("the ensemble across summary-statistics studies stacks each study", {
     ss <- .tp_twoStudySumStats()
-    run <- function(studyCoupling, transferScale = "perSd") {
+    run <- function(strengths, transferScale = "perSd") {
         withr::with_seed(
             1L,
             suppressMessages(twasWeightsPipeline(
                 ss,
                 methods = c("lasso", "enet"),
                 jointSpecification = "study",
-                studyCoupling = studyCoupling,
+                coupling = if (!is.null(strengths)) list(study = strengths),
                 ensembleParam = EnsembleParam(
                     enabled = TRUE,
                     acrossStudies = TRUE,

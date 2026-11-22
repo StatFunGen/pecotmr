@@ -3,18 +3,20 @@
 # of those: what a fit's samples are differs from the panel's and between
 # traits. Each context draws its own phenotypes: identical ones would make a
 # joint fit's residual covariance singular, and mr.mash's result on it depends
-# on the platform's rounding.
+# on the platform's rounding. `editLiver` changes the liver phenotypes (traits
+# x samples) before they are stored.
 .fitSamplesDataset <- function(
     panel = readGenotypes(
         plink2Prefix = file.path(test_path("test_data"), "test_variants")
-    )
+    ),
+    editLiver = identity
 ) {
     samples <- colnames(panel)[1:30]
     traits <- c("g1", "g2", "g3")
     set.seed(1)
     brain <- .fitSamplesExpression(traits, samples)
     age <- rnorm(length(samples))
-    liver <- .fitSamplesExpression(traits, samples)
+    liver <- editLiver(.fitSamplesExpression(traits, samples))
     at <- GenomicRanges::start(SummarizedExperiment::rowRanges(panel))[[100L]]
     se <- SummarizedExperiment::SummarizedExperiment(
         assays = list(expression = brain),

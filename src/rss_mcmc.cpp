@@ -216,6 +216,7 @@ private:
     std::vector<double> gap0_;
     std::vector<arma::vec> beta_mean_;  // the conditional means, for Rao-Blackwell
     double eta_beta = 1.0;  // eta when beta was drawn
+    NoiseCoupling coupling_;  // the conditions sharing samples
     SdprEstimates est_;
 
     size_t kind_of(size_t t) const { return (t - 1) / (M - 1); }
@@ -250,6 +251,14 @@ private:
     void spanning_probs(arma::uword u, size_t j, StudySet o, size_t lo, size_t hi,
                         const arma::fvec &cvar, const arma::fvec &log_p_fvec,
                         arma::fvec &prob) const;
+    bool shares_samples(StudySet o) const;
+    void coupled_probs(arma::uword u, size_t j, StudySet o, size_t lo, size_t hi,
+                       const arma::fvec &cvar, const arma::fvec &log_p_fvec,
+                       arma::fvec &prob) const;
+    void check_shared_layouts() const;
+    void add_shared_blocks(size_t j, const std::vector<arma::uvec> &causal,
+                           const std::vector<arma::uword> &offset, arma::vec &A_vec,
+                           arma::mat &B_gamma, arma::mat &B_eta) const;
     void update_suffstats();
     void sample_kind_weights();
     void sample_V();
@@ -274,7 +283,8 @@ SdprChain<LdBlock>::SdprChain(
     : blocks_(blocks), union_idx_(union_idx), K_(blocks.size()),
       n_blocks_(blocks[0].size()), n_union_(n_union), M(M),
       n_kinds_(sharing.kinds.size()), T_(1 + sharing.kinds.size() * (M - 1)),
-      a0k(a0k), b0k(b0k), r(seed), rho_(sharing.rho), opts_(opts), gap0_(gap0) {
+      a0k(a0k), b0k(b0k), r(seed), rho_(sharing.rho), opts_(opts), gap0_(gap0),
+      coupling_(sharing.coupling) {
     for (size_t k = 0; k < K_; k++) {
         layouts_.emplace_back(block_sizes(blocks[k]));
         arma::uword p_k = union_idx[k].n_elem;
@@ -313,6 +323,15 @@ SdprChain<LdBlock>::SdprChain(
 
     cluster_var.assign(T_, 0.0);
     kind_weight_.assign(n_kinds_, 1.0 / n_kinds_);
+    if (sharing.kind_weight.n_elem == n_kinds_) {
+        arma::vec w = sharing.kind_weight / arma::accu(sharing.kind_weight);
+        kind_weight_ = arma::conv_to<std::vector<double>>::from(w);
+    }
+    if (coupling_.Q.n_elem == 0) {
+        coupling_.Q = arma::mat(K_, K_, arma::fill::eye);
+        coupling_.n = arma::vec(K_, arma::fill::ones);
+    }
+    check_shared_layouts();
     suff_stats.assign(T_, 0);
     n_effects.assign(T_, 0);
     sumsq.assign(T_, 0.0);
@@ -475,6 +494,8 @@ void SdprChain<LdBlock>::sample_assignment(size_t j) {
             int n_o = set_size(o);
             if (n_o == 0) {
                 prob.subvec(lo, hi) = log_p_fvec.subvec(lo, hi);
+            } else if (shares_samples(present_[u])) {
+                coupled_probs(u, j, o, lo, hi, cvar, log_p_fvec, prob);
             } else if (n_o == 1) {
                 arma::uword k = set_first(o);
                 arma::uword i = local_(u, k);
@@ -544,6 +565,120 @@ void SdprChain<LdBlock>::spanning_probs(arma::uword u, size_t j, StudySet o,
         quad += static_cast<float>(square(g(a))) * cv / t;
     }
     prob.subvec(lo, hi) = log_p_fvec.subvec(lo, hi) - 0.5f * logdet + 0.5f * quad;
+}
+
+// Whether any of the studies `o` shares samples with another (coupling_).
+template <class LdBlock>
+bool SdprChain<LdBlock>::shares_samples(StudySet o) const {
+    for (arma::uword k : set_studies(o)) {
+        if (coupling_.shared(k)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// spanning_probs() where conditions carrying union variant u share samples:
+// its likelihood over its effects x in the studies `o` (the rest zero) is
+// -x'Lx / 2 + x'h with
+//   L_ab = eta^2 N w(k_a, k_b) B_{k_b, ii},
+//   h_a = N sum_l w(k_a, l) b_l(i) over the conditions l carrying u,
+// w the kernel's weight (NoiseCoupling::weight()); at Q = I, L is
+// spanning_probs()' diagonal D and h its h. One study of `o` takes Sigma = 1.
+template <class LdBlock>
+void SdprChain<LdBlock>::coupled_probs(arma::uword u, size_t j, StudySet o,
+                                       size_t lo, size_t hi,
+                                       const arma::fvec &cvar,
+                                       const arma::fvec &log_p_fvec,
+                                       arma::fvec &prob) const {
+    arma::uvec st = set_studies(o);
+    arma::uvec carriers = set_studies(present_[u]);
+    arma::uword n_o = st.n_elem;
+    arma::mat root = n_o == 1 ? arma::mat(1, 1, arma::fill::ones) : corr_.at(o).root;
+    arma::mat L(n_o, n_o);
+    arma::vec h(n_o, arma::fill::zeros);
+    for (arma::uword a = 0; a < n_o; a++) {
+        arma::uword k = st(a);
+        for (arma::uword b = 0; b < n_o; b++) {
+            arma::uword l = st(b);
+            arma::uword i = local_(u, l);
+            L(a, b) = eta * eta * N * coupling_.weight(k, l) *
+                      blocks_[l][j].B.diag()(i - layouts_[l].start(j));
+        }
+        for (arma::uword l : carriers) {
+            h(a) += N * coupling_.weight(k, l) * b_[l](local_(u, l));
+        }
+    }
+    arma::vec lambda;
+    arma::mat Q;
+    arma::eig_sym(lambda, Q, arma::mat(arma::symmatu(root * (0.5 * (L + L.t())) * root)));
+    arma::vec g = Q.t() * (root * h);
+    arma::fvec cv = cvar.subvec(lo, hi);
+    arma::fvec logdet(cv.n_elem, arma::fill::zeros);
+    arma::fvec quad(cv.n_elem, arma::fill::zeros);
+    for (arma::uword a = 0; a < n_o; a++) {
+        arma::fvec t = 1.0f + static_cast<float>(std::max(lambda(a), 0.0)) * cv;
+        logdet += arma::log(t);
+        quad += static_cast<float>(square(g(a))) * cv / t;
+    }
+    prob.subvec(lo, hi) = log_p_fvec.subvec(lo, hi) - 0.5f * logdet + 0.5f * quad;
+}
+
+// Conditions sharing samples are read against each other variant by variant,
+// so they must carry the same variants in the same blocks.
+template <class LdBlock>
+void SdprChain<LdBlock>::check_shared_layouts() const {
+    for (arma::uword k = 0; k < K_; k++) {
+        for (arma::uword l : coupling_.partners(k)) {
+            bool same = union_idx_[k].n_elem == union_idx_[l].n_elem &&
+                        arma::all(union_idx_[k] == union_idx_[l]);
+            for (size_t j = 0; same && j < n_blocks_; j++) {
+                same = layouts_[k].size(j) == layouts_[l].size(j);
+            }
+            if (!same) {
+                cpp11::stop("Conditions %d and %d share samples but not their "
+                            "variants and LD blocks.",
+                            (int)k + 1, (int)l + 1);
+            }
+        }
+    }
+}
+
+// The terms block j's joint draw takes from conditions sharing samples: each
+// condition's likelihood block scaled by Q_kk, the cross blocks
+// eta^2 N w(k, l) B_l over their causal variants, and each condition's
+// marginal term N eta sum_l w(k, l) (A' beta_mrg)_l. `offset` is each
+// condition's first place in the stacked draw.
+template <class LdBlock>
+void SdprChain<LdBlock>::add_shared_blocks(size_t j,
+                                           const std::vector<arma::uvec> &causal,
+                                           const std::vector<arma::uword> &offset,
+                                           arma::vec &A_vec, arma::mat &B_gamma,
+                                           arma::mat &B_eta) const {
+    double C_coeff = square(eta) * N;
+    for (size_t k = 0; k < K_; k++) {
+        if (causal[k].is_empty() || !coupling_.shared(k)) {
+            continue;
+        }
+        arma::span rows(offset[k], offset[k] + causal[k].n_elem - 1);
+        double qkk = coupling_.Q(k, k);
+        arma::mat own = C_coeff * blocks_[k][j].B.sub(causal[k]);
+        B_gamma(rows, rows) += (qkk - 1.0) * own;
+        own.diag() = C_coeff * blocks_[k][j].B.diag()(causal[k]);
+        B_eta(rows, rows) += (qkk - 1.0) * own;
+        A_vec(rows) *= qkk;
+        for (arma::uword l : coupling_.partners(k)) {
+            double w = coupling_.weight(k, l);
+            A_vec(rows) += N * eta * w * blocks_[l][j].calc_b_tmp(causal[k]);
+            if (causal[l].is_empty()) {
+                continue;
+            }
+            arma::span cols(offset[l], offset[l] + causal[l].n_elem - 1);
+            arma::mat cross = C_coeff * w * blocks_[l][j].B.sub(causal[k], causal[l]);
+            B_gamma(rows, cols) += cross;
+            B_eta(rows, cols) += cross;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -686,6 +821,8 @@ void SdprChain<LdBlock>::sample_alpha() {
 //   block diagonal over the studies, and a variant's effects in several
 //   studies have the prior precision Sigma^-1 / var_k between them.
 //
+// Conditions sharing samples add their cross terms (add_shared_blocks()).
+//
 // Original: mcmc.cpp lines 239-329. The original drew a lone causal SNP in
 // closed form from its b_j instead, which carries the residuals of the
 // previous effects of SNPs no longer causal, and took num = b_j beta_j,
@@ -733,11 +870,13 @@ void SdprChain<LdBlock>::sample_beta(size_t j) {
     arma::mat B_gamma(nc, nc, arma::fill::zeros);
     arma::mat B_eta(nc, nc, arma::fill::zeros);
     std::map<arma::uword, std::vector<arma::uword>> spanning;
+    std::vector<arma::uword> offset(K_, 0);
     arma::uword at = 0;
     for (size_t k = 0; k < K_; k++) {
         if (causal[k].is_empty()) {
             continue;
         }
+        offset[k] = at;
         const SdprBlock<LdBlock> &blk = blocks_[k][j];
         arma::span stacked(at, at + causal[k].n_elem - 1);
         A_vec(stacked) = N * eta * blk.calc_b_tmp(causal[k]);
@@ -763,6 +902,7 @@ void SdprChain<LdBlock>::sample_beta(size_t j) {
         arma::uvec places = arma::conv_to<arma::uvec>::from(entry.second);
         B_gamma.submat(places, places) += c.inv / cluster_var[t];
     }
+    add_shared_blocks(j, causal, offset, A_vec, B_gamma, B_eta);
 
     std::normal_distribution<double> dist(0.0, 1.0);
     arma::vec z = standard_normals(nc, dist, r);
@@ -1362,12 +1502,53 @@ std::vector<vec> study_effects(const list& bhatList) {
 	return out;
 }
 
+// The kernel of K conditions from R: NULL for none sharing samples, else Q,
+// symmetric and positive definite.
+NoiseCoupling noise_coupling(SEXP Q, const arma::vec& n) {
+	NoiseCoupling out;
+	out.n = n;
+	if (Q == R_NilValue) {
+		out.Q = arma::mat(n.n_elem, n.n_elem, arma::fill::eye);
+		return out;
+	}
+	mat value = as_Mat(doubles_matrix<>(Q));
+	if (value.n_rows != n.n_elem || value.n_cols != n.n_elem ||
+	    !value.is_symmetric() || eig_sym(value).min() <= 0.0) {
+		cpp11::stop("The conditions' noise precision must be a %d x %d symmetric "
+		            "positive-definite matrix.",
+		            (int)n.n_elem, (int)n.n_elem);
+	}
+	out.Q = value;
+	return out;
+}
+
+// The studies' correlations' start as R passes it: NULL for the identity,
+// else a K x K correlation matrix, symmetric with a unit diagonal and
+// positive definite; `learnRho` false holds it fixed.
+static RhoStart rho_start_from(sexp rho, bool learnRho, uword K) {
+	RhoStart start;
+	start.learn = learnRho;
+	if (rho == R_NilValue) {
+		return start;
+	}
+	mat value = as_Mat(doubles_matrix<>(rho));
+	if (value.n_rows != K || value.n_cols != K || !value.is_symmetric() ||
+	    any(abs(value.diag() - 1.0) > 1e-12) || eig_sym(value).min() <= 0.0) {
+		cpp11::stop("The studies' correlations must be a %d x %d positive-definite "
+		            "correlation matrix.",
+		            (int)K, (int)K);
+	}
+	start.value = value;
+	return start;
+}
+
 // Several studies' chain with the arguments as R passes them, each study's
 // effects and fitted correlations reported over the union, zero where it
 // lacks a variant.
 template <class LdBlock>
 cpp11::writable::list joint_prs_run(double a, double b, sexp phi,
-                                    const doubles& constraint,
+                                    const doubles& constraint, const RhoStart& rho_start,
+                                    SEXP noisePrecision,
                                     const std::vector<vec>& beta_mrg,
                                     const doubles& n,
                                     const std::vector<std::vector<LdBlock>>& blocks,
@@ -1383,7 +1564,8 @@ cpp11::writable::list joint_prs_run(double a, double b, sexp phi,
 	ChainSchedule schedule(nIter, nBurnin, thin);
 	PrsCsEstimates est = prs_cs_mcmc(
 	    a, b, learn_phi, phi_val, as_Col(constraint), beta_mrg, as_Col(n), blocks,
-	    union_idx, static_cast<uword>(nUnion), schedule, verbose, seed_from(seed), opts);
+	    union_idx, static_cast<uword>(nUnion), schedule, verbose, seed_from(seed), opts,
+	    rho_start, noise_coupling(noisePrecision, as_Col(n)));
 	mat beta(nUnion, beta_mrg.size(), fill::zeros);
 	mat corr(nUnion, beta_mrg.size(), fill::zeros);
 	for (uword k = 0; k < beta_mrg.size(); ++k) {
@@ -1398,6 +1580,7 @@ cpp11::writable::list joint_prs_run(double a, double b, sexp phi,
 		"sigmaEst"_nm = as_doubles(est.sigma),
 		"phiEst"_nm = cpp11::as_sexp(est.phi),
 		"rhoEst"_nm = as_doubles_matrix(est.rho),
+		"residualEst"_nm = as_doubles_matrix(est.residual),
 		"corrEst"_nm = as_doubles_matrix(corr),
 		"diverged"_nm = cpp11::as_sexp(est.diverged())
 	});
@@ -1481,6 +1664,7 @@ cpp11::writable::list prsCsFactorCpp(double a, double b, sexp phi,
  */
 [[cpp11::register]]
 cpp11::writable::list jointPrsCpp(double a, double b, sexp phi, doubles constraint,
+                                  sexp rho, bool learnRho, sexp noisePrecision,
                                   list bhatList, doubles n, list ldList,
                                   list unionIdxList, int nUnion, int nIter,
                                   int nBurnin, int thin, bool verbose, sexp seed,
@@ -1500,7 +1684,10 @@ cpp11::writable::list jointPrsCpp(double a, double b, sexp phi, doubles constrai
 		}
 		blocks[k].push_back(shrunk_dense_block(std::move(S), shrinkCorr));
 	}
-	return joint_prs_run(a, b, phi, constraint, beta_mrg, n, blocks, union_idx, nUnion,
+	return joint_prs_run(a, b, phi, constraint,
+	                     rho_start_from(rho, learnRho, beta_mrg.size()),
+	                     noisePrecision, beta_mrg,
+	                     n, blocks, union_idx, nUnion,
 	                     nIter, nBurnin, thin, verbose, seed,
 	                     chain_options(raoBlackwell, track));
 }
@@ -1514,7 +1701,9 @@ cpp11::writable::list jointPrsCpp(double a, double b, sexp phi, doubles constrai
  */
 [[cpp11::register]]
 cpp11::writable::list jointPrsFactorCpp(double a, double b, sexp phi,
-                                        doubles constraint, list bhatList, doubles n,
+                                        doubles constraint, sexp rho, bool learnRho,
+                                        sexp noisePrecision,
+                                        list bhatList, doubles n,
                                         list factorList, list unionIdxList, int nUnion,
                                         int nIter, int nBurnin, int thin, bool verbose,
                                         sexp seed, double shrinkCorr, bool raoBlackwell,
@@ -1532,7 +1721,10 @@ cpp11::writable::list jointPrsFactorCpp(double a, double b, sexp phi,
 		                   static_cast<R_xlen_t>(beta_mrg[k].n_elem)),
 		    shrinkCorr));
 	}
-	return joint_prs_run(a, b, phi, constraint, beta_mrg, n, blocks, union_idx, nUnion,
+	return joint_prs_run(a, b, phi, constraint,
+	                     rho_start_from(rho, learnRho, beta_mrg.size()),
+	                     noisePrecision, beta_mrg,
+	                     n, blocks, union_idx, nUnion,
 	                     nIter, nBurnin, thin, verbose, seed,
 	                     chain_options(raoBlackwell, track));
 }
@@ -1590,8 +1782,9 @@ cpp11::writable::list sdpr_one(const std::vector<std::vector<SdprBlock<LdBlock>>
 }
 
 // The kinds and rho as R passes them: each kind's 1-based studies, and rho a
-// K x K correlation matrix, or NULL to learn it starting from the identity.
-SdprSharing sdprx_sharing(const list& kinds, sexp rho, uword K) {
+// K x K correlation matrix, held fixed or with `learnRho` learned from it, or
+// NULL to learn it starting from the identity.
+SdprSharing sdprx_sharing(const list& kinds, sexp rho, bool learnRho, uword K) {
 	SdprSharing sharing;
 	std::vector<std::vector<uword>> seen;
 	for (R_xlen_t q = 0; q < kinds.size(); ++q) {
@@ -1617,6 +1810,7 @@ SdprSharing sdprx_sharing(const list& kinds, sexp rho, uword K) {
 		sharing.learn_rho = true;
 		return sharing;
 	}
+	sharing.learn_rho = learnRho;
 	sharing.rho = as_Mat(doubles_matrix<>(rho));
 	mat L;
 	if (sharing.rho.n_rows != K || sharing.rho.n_cols != K ||
@@ -1672,7 +1866,8 @@ struct SdprxInputs {
 
 SdprxInputs sdprx_inputs(const list& bhatList, const list& ldList, const integers& n,
                          const list& unionIdxList, int nUnion, const list& kinds,
-                         sexp rho) {
+                         sexp rho, bool learnRho, sexp kindWeights,
+                         sexp noisePrecision) {
 	SdprxInputs in;
 	in.beta_mrg = study_effects(bhatList);
 	in.union_idx = union_index(unionIdxList, in.beta_mrg, nUnion, "effects");
@@ -1685,7 +1880,15 @@ SdprxInputs sdprx_inputs(const list& bhatList, const list& ldList, const integer
 			cpp11::stop("Each study's sample size must be positive.");
 		}
 	}
-	in.sharing = sdprx_sharing(kinds, rho, K);
+	in.sharing = sdprx_sharing(kinds, rho, learnRho, K);
+	if (kindWeights != R_NilValue) {
+		in.sharing.kind_weight = as_Col(doubles(kindWeights));
+		if (in.sharing.kind_weight.n_elem != in.sharing.kinds.size() ||
+		    in.sharing.kind_weight.min() <= 0.0) {
+			cpp11::stop("The kinds' starting weights must be positive, one per kind.");
+		}
+	}
+	in.sharing.coupling = noise_coupling(noisePrecision, conv_to<vec>::from(as_Col(n)));
 	return in;
 }
 
@@ -1781,12 +1984,14 @@ cpp11::writable::list sdprFactorCpp(
  */
 [[cpp11::register]]
 cpp11::writable::list sdprxCpp(list bhatList, list ldList, integers n, list unionIdxList,
-                               int nUnion, list kinds, sexp rho, double a, double c,
+                               int nUnion, list kinds, sexp rho, bool learnRho,
+                               sexp kindWeights, sexp noisePrecision, double a, double c,
                                int M, double a0k, double b0k, int iter, int burn,
                                int thin, bool verbose, sexp seed, bool raoBlackwell,
                                bool track) {
 	ChainSchedule schedule(iter, burn, thin);
-	SdprxInputs in = sdprx_inputs(bhatList, ldList, n, unionIdxList, nUnion, kinds, rho);
+	SdprxInputs in = sdprx_inputs(bhatList, ldList, n, unionIdxList, nUnion, kinds, rho,
+	                              learnRho, kindWeights, noisePrecision);
 	std::vector<std::vector<SdprBlock<DenseLdBlock>>> blocks;
 	for (uword k = 0; k < in.beta_mrg.size(); ++k) {
 		R_xlen_t at = static_cast<R_xlen_t>(k);
@@ -1815,12 +2020,13 @@ cpp11::writable::list sdprxCpp(list bhatList, list ldList, integers n, list unio
 [[cpp11::register]]
 cpp11::writable::list sdprxFactorCpp(list bhatList, list factorList, integers n,
                                      list unionIdxList, int nUnion, list kinds, sexp rho,
-                                     double a, double c, int M, double a0k, double b0k,
+                                     bool learnRho, sexp kindWeights,
+                                     sexp noisePrecision, double a, double c, int M, double a0k, double b0k,
                                      int iter, int burn, int thin, bool verbose,
                                      sexp seed, bool raoBlackwell, bool track) {
 	ChainSchedule schedule(iter, burn, thin);
 	SdprxInputs in = sdprx_inputs(bhatList, factorList, n, unionIdxList, nUnion, kinds,
-	                              rho);
+	                              rho, learnRho, kindWeights, noisePrecision);
 	std::vector<std::vector<SdprBlock<FactorLdBlock>>> blocks;
 	for (uword k = 0; k < in.beta_mrg.size(); ++k) {
 		R_xlen_t at = static_cast<R_xlen_t>(k);

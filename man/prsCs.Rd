@@ -20,7 +20,8 @@ prsCs(
   seed = NULL,
   shrinkCorr = 1,
   raoBlackwell = FALSE,
-  nChains = 1
+  nChains = 1,
+  rho = NULL
 )
 }
 \arguments{
@@ -65,6 +66,14 @@ twice the squared marginal effects, a sign that it diverged. With more
 than one, a chain stops once a kept draw's squared effects do, and is
 dropped, and the rest are filtered and averaged as LDpred2's vignette
 does (see \code{\link{ldpred2AutoWeights}}). Default 1.}
+
+\item{rho}{Across conditions only (\code{\link{twasWeightsPipeline}}'s
+fits of a group on summary statistics, as JointPRS fits ancestries):
+the correlation of the conditions' effects. \code{NULL} (the default)
+learns each pair's on \eqn{[0, 0.99]} by JointPRS's Metropolis step; a
+number in \eqn{[0, 1)} fixes every pair at it; a \eqn{K \times K}
+positive-definite correlation matrix fixes each pair at its entry. One
+condition's fit has no pairs and ignores it.}
 }
 \value{
 A list containing the posterior estimates: - betaEst: Posterior

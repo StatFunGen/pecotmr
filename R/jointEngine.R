@@ -1304,9 +1304,10 @@ setMethod(
 
 # A TWAS method's arguments on one individual-level group: the caller's, with
 # a fine-mapping fit injected and h2 and spike-and-slab pi set as configured
-# (.jointTwasMethodArgs()), naming the implementation that fits the group
-# across studies under the coupling penalty (.jointTwasCoupled()) or through
-# BGLR's Multitrait() (.jointTwasMultitrait()) where the group calls for one.
+# (.jointTwasMethodArgs()), naming the implementation of the mode the group
+# fits it in (.jointTwasGroupMode()): BGLR's Multitrait()
+# (.jointTwasMultitrait()), the coupling penalty (.jointTwasCoupled()) or a
+# group penalty across the conditions (.jointTwasGrouped()).
 # @noRd
 .jointTwasGroupMethodArgs <- function(args, token, Xc, Yc, cond, cfg) {
     resolved <- .jointTwasMethodArgs(
@@ -1320,11 +1321,12 @@ setMethod(
         cfg,
         cfg$standardized %||% FALSE
     )
-    .jointTwasMultitrait(
-        .jointTwasCoupled(resolved, token, cond, cfg),
-        token,
-        cond,
-        cfg
+    switch(
+        .jointTwasGroupMode(token, cond, cfg, "individual") %||% "own",
+        multitrait = .jointTwasMultitrait(resolved, token, cond),
+        coupled = .jointTwasCoupled(resolved, token, cfg, cond),
+        grouped = .jointTwasGrouped(resolved, token, cfg),
+        resolved
     )
 }
 
@@ -1401,58 +1403,383 @@ setMethod(
     .jointTwasSpikeSlabPi(withFit, token, Xc, Yc, cond, cfg, stdz)
 }
 
-# The weight functions the univariate methods fit a group across studies
-# with, under the penalty on the difference between the studies' effects
-# (.lassoCoupledWeights() and its peers). mcp and scad have none: ncvreg takes
-# no sparse design, and the stacked one is mostly zeros.
+# ---- which methods fit a joint group, and how ------------------------------
+#
+# What sets the axes a jointSpecification joins apart is how a group's
+# conditions lay out their samples (.jointLayout()):
+#   "shared"    one study's contexts or traits, all on its samples;
+#   "disjoint"  one condition from each of several studies, whose samples do
+#               not meet;
+#   "mixed"     several studies, some holding several of the conditions.
+# A group of one condition, a per-tuple fit, is "single".
+#
+# A TWAS method fits a group of two or more conditions in one of these modes
+# (.twasJointModes()):
+#   multivariate  a joint method fitted on the group (mr.mash);
+#   fineMapped    a joint fine-mapping method, its weights read off the
+#                 fine-mapping fit of the group;
+#   multitrait    bayesC and bayesN on BGLR, whose Multitrait() fits the
+#                 group's conditions at once (.twasMultitraitTokens());
+#   coupled       a univariate method under the penalty on the difference
+#                 between its conditions' effects along the axes `coupling`
+#                 names, with its group penalty too where its engine has
+#                 one, by the implementation its capabilities name
+#                 (.twasCoupledImpl());
+#   grouped       a univariate method under a group penalty across its
+#                 conditions, each variant's effects one group, on the
+#                 engine the run puts it on (.twasGroupedLayouts());
+#   stacked       a univariate method whose own fit of each study the
+#                 ensemble across studies stacks (EnsembleParam(acrossStudies
+#                 = TRUE)), with no rows of its own.
+# .TWAS_JOINT_LAYOUTS names the layouts each mode fits, on each path, and
+# .groupedLayouts those of each method's group penalty on each engine; a
+# coupled fit takes a group of any layout along which a coupled axis varies.
+# Every input class hands the engine the methods with a mode
+# (.twasJointCandidates()); a spec keeps those its groups admit
+# (.jointSpecTokens()), and a group fits each in the first mode it admits
+# (.jointTwasGroupMode()), so a method coupled on a group is not fitted there
+# with the group penalty alone.
+
+# The layouts each mode fits, by path.
 # @noRd
-.TWAS_COUPLED_IMPL <- c(
-    lasso = ".lassoCoupledWeights",
-    enet = ".enetCoupledWeights",
-    ridge = ".ridgeCoupledWeights",
-    l0learn = ".l0learnCoupledWeights"
+.TWAS_JOINT_LAYOUTS <- list(
+    multivariate = list(
+        individual = c("shared", "disjoint", "mixed"),
+        sumstat = c("shared", "disjoint", "mixed")
+    ),
+    # Across individual-level studies, their weights are read off the fits
+    # with no genotype read (.twasDispatchStudySpecsIndividual()).
+    fineMapped = list(
+        individual = "shared",
+        sumstat = c("shared", "disjoint", "mixed")
+    ),
+    # BGLR's residual covariance is free within a study and zero across
+    # studies (.bglrStudyResiduals()).
+    multitrait = list(
+        individual = c("shared", "disjoint", "mixed"),
+        sumstat = character(0)
+    ),
+    stacked = list(individual = "disjoint", sumstat = "disjoint")
 )
 
-# A univariate method's arguments on a group across studies, in a run that
-# couples them (`studyCoupling` given): they name its coupled implementation,
-# which .resolveMethodFunction() reads, and carry the run's coupling
-# strengths. Any other group's, and each study's own fit for the ensemble
-# across studies (.twasStackEntries()), are left as they are.
+# The layouts each method's group penalty fits on each engine (mode
+# "grouped", individual data only), the first engine listed the one a run
+# that names none takes (.twasGroupEngine()): glmnet's mgaussian family needs
+# every condition on the same samples; grpreg and abess fit each condition on
+# its own samples (.groupedDesign()), and ridge's separate fits at one lambda
+# take any (.ridgeGroupedWeights()). MCP, SCAD and L0 have no group fit on
+# ncvreg and L0Learn.
 # @noRd
-.jointTwasCoupled <- function(ma, token, cond, cfg) {
-    impl <- .TWAS_COUPLED_IMPL[token]
-    if (
-        is.na(impl) ||
-            is.null(cfg$studyCoupling) ||
-            n_distinct(cond$study) < 2L
-    ) {
-        return(ma)
+.groupedLayouts <- list(
+    lasso = list(
+        glmnet = "shared",
+        grpreg = c("shared", "disjoint", "mixed")
+    ),
+    enet = list(
+        glmnet = "shared",
+        grpreg = c("shared", "disjoint", "mixed")
+    ),
+    mcp = list(grpreg = c("shared", "disjoint", "mixed")),
+    scad = list(grpreg = c("shared", "disjoint", "mixed")),
+    l0learn = list(abess = c("shared", "disjoint", "mixed")),
+    ridge = list(glmnet = c("shared", "disjoint", "mixed"))
+)
+
+# How the conditions table `cond` of a group lays out their samples:
+# "single", "shared", "disjoint" or "mixed".
+# @noRd
+.jointLayout <- function(cond) {
+    studies <- n_distinct(cond$study)
+    if (nrow(cond) < 2L) {
+        return("single")
     }
-    `attr<-`(
-        list_assign(ma, strengths = cfg$studyCoupling),
-        "impl",
-        unname(impl)
+    if (studies == 1L) {
+        return("shared")
+    }
+    if (studies == nrow(cond)) "disjoint" else "mixed"
+}
+
+# The layout of the groups a spec joining `axes` makes: the study axis alone
+# takes one condition from each study, the other axes stay within a study,
+# and the study composed with others does both.
+# @noRd
+.jointSpecLayout <- function(axes) {
+    if (!is_in("study", axes)) {
+        return("shared")
+    }
+    if (length(axes) == 1L) "disjoint" else "mixed"
+}
+
+# The axes along which the conditions `cond` of a group differ.
+# @noRd
+.jointVaryingAxes <- function(cond) {
+    keep(c("study", "context", "trait"), .jointAxisVaries, cond = cond)
+}
+
+# @noRd
+.jointAxisVaries <- function(axis, cond) {
+    n_distinct(cond[[axis]]) > 1L
+}
+
+# The modes `token` fits a joint group in on `path` ("individual" or
+# "sumstat"), in a run whose pipeline settings are `cfg`: its own kind of
+# joint fit, if it has one, then those the run switches on for it.
+# @noRd
+.twasJointModes <- function(token, path, cfg) {
+    c(
+        .twasOwnJointMode(token),
+        if (is_in(token, cfg$multitraitTokens)) "multitrait",
+        if (.twasCouples(token, path, cfg)) "coupled",
+        if (.twasGroups(token, path, cfg)) "grouped",
+        if (is_in(token, cfg$ensembleParam$stackTokens)) "stacked"
     )
 }
 
-# A Bayesian alphabet method's arguments on a group of two or more
-# conditions, in a run that fits it jointly there (`multitraitTokens`: bayesC
-# and bayesN on BGLR, under a jointSpecification): they name the whole-Y
-# implementation that fits the group's conditions at once through BGLR's
-# Multitrait() (.bglrJointWeights()), and say whether the group spans
-# studies, whose residuals are independent. A one-condition group's, and
-# each study's own fit for the ensemble across studies (.twasStackEntries()),
-# are left as they are.
+# A joint method's own mode: "fineMapped" for one whose weights are read off
+# its fine-mapping fit, else "multivariate"; NULL for a univariate method.
 # @noRd
-.jointTwasMultitrait <- function(ma, token, cond, cfg) {
-    if (!is_in(token, cfg$multitraitTokens) || nrow(cond) < 2L) {
-        return(ma)
+.twasOwnJointMode <- function(token) {
+    if (!.twasIsMultivariateToken(token)) {
+        return(NULL)
     }
+    if (is.null(.twasFineMappingMethodAdapters[[token]])) {
+        "multivariate"
+    } else {
+        "fineMapped"
+    }
+}
+
+# Whether a run couples `token` on `path`: it couples some axis, and the
+# method has a coupled implementation there.
+# @noRd
+.twasCouples <- function(token, path, cfg) {
+    !is.null(cfg$coupling) && !is.null(.twasCoupledImpl(token, path))
+}
+
+# Whether a run fits `token` across conditions with a group penalty on
+# `path`: on individual-level data where its engine has such a fit, and on
+# summary statistics where pecotmr's own solver fits it
+# (.twasGroupsSumstat()).
+# @noRd
+.twasGroups <- function(token, path, cfg) {
+    if (identical(path, "sumstat")) {
+        return(.twasGroupsSumstat(token, cfg))
+    }
+    !is.null(.twasGroupedLayouts(token, cfg))
+}
+
+# A penalized method on summary statistics takes the group penalty on
+# pecotmr's solver, its default engine there: not on another the run's
+# `backend` names (lasso's bigsnpr), nor in a run that leaves engines out (a
+# study's own fits the ensemble across studies stacks).
+# @noRd
+.twasGroupsSumstat <- function(token, cfg) {
+    !is.null(cfg$engines) &&
+        !is.null(.twasCoupledImpl(token, "sumstat")$penalty) &&
+        identical(cfg$engines[[token]] %||% "pecotmr", "pecotmr")
+}
+
+# The layouts `token` is fitted on with a group penalty, those of its engine
+# for the fit (.twasGroupEngine()), from .groupedLayouts; NULL for none, and
+# in a run that leaves engines out (a study's own fits the ensemble across
+# studies stacks).
+# @noRd
+.twasGroupedLayouts <- function(token, cfg) {
+    if (is.null(cfg$engines) || is.null(.groupedLayouts[[token]])) {
+        return(NULL)
+    }
+    .groupedLayouts[[token]][[.twasGroupEngine(token, cfg)]]
+}
+
+# The engine `token`'s group fits run on: the one the run's `backend` names
+# (`cfg$engines`), else the first of the method's with a group penalty --
+# glmnet for lasso, enet and ridge, grpreg for mcp and scad, abess for
+# l0learn, whose default engines have none.
+# @noRd
+.twasGroupEngine <- function(token, cfg) {
+    cfg$engines[[token]] %||% names(.groupedLayouts[[token]])[[1L]]
+}
+
+# @noRd
+.twasGroupsOn <- function(token, layout, cfg) {
+    is_in(layout, .twasGroupedLayouts(token, cfg))
+}
+
+# Whether `token` fits a group of layout `layout`, varying along `axes`, on
+# `path` in one of its modes other than `exclude`.
+# @noRd
+.twasJointAdmits <- function(token, layout, axes, path, cfg, exclude = NULL) {
+    modes <- setdiff(.twasJointModes(token, path, cfg), exclude)
+    any(map_lgl(
+        modes,
+        .twasTokenModeFits,
+        token = token,
+        group = list(layout = layout, axes = axes),
+        path = path,
+        cfg = cfg
+    ))
+}
+
+# Whether `token`'s mode `mode` fits a group (its `layout` and the `axes` it
+# varies along) on `path`: a coupled fit where a coupled axis varies, a group
+# penalty on its engine's layouts, any other mode on its own.
+# @noRd
+.twasTokenModeFits <- function(mode, token, group, path, cfg) {
+    switch(
+        mode,
+        coupled = any(is_in(group$axes, names(cfg$coupling))),
+        grouped = identical(path, "sumstat") ||
+            .twasGroupsOn(token, group$layout, cfg),
+        .twasModeFits(mode, group$layout, path)
+    )
+}
+
+# @noRd
+.twasModeFits <- function(mode, layout, path) {
+    is_in(layout, .TWAS_JOINT_LAYOUTS[[mode]][[path]])
+}
+
+# The methods among `tokens` a run fits on joint groups, in some mode, on
+# `path`: those every input class hands the engine for its joint specs.
+# @noRd
+.twasJointCandidates <- function(tokens, path, cfg) {
+    keep(tokens, .twasHasJointMode, path = path, cfg = cfg)
+}
+
+# @noRd
+.twasHasJointMode <- function(token, path, cfg) {
+    length(.twasJointModes(token, path, cfg)) > 0L
+}
+
+# The methods fitted on the groups of a spec joining `axes`, on `dataForm`
+# data: TWAS's, those of `tokens` the spec's groups admit; fine-mapping's,
+# every one.
+# @noRd
+.jointSpecTokens <- function(tokens, axes, pipeline, dataForm) {
+    if (!is(pipeline, "TwasJointPipeline")) {
+        return(tokens)
+    }
+    path <- if (identical(dataForm, "sumstats")) "sumstat" else "individual"
+    keep(
+        tokens,
+        .twasJointAdmits,
+        layout = .jointSpecLayout(axes),
+        axes = axes,
+        path = path,
+        cfg = .jpConfig(pipeline)
+    )
+}
+
+# The mode a univariate method fits the group of conditions `cond` in on
+# `path`, the first its modes list that the group admits: "multitrait",
+# "coupled" or "grouped". NULL for its own fit, one condition at a time, as
+# on a group of one condition and in each study's own fit the ensemble
+# across studies stacks (.twasStackEntries()).
+# @noRd
+.jointTwasGroupMode <- function(token, cond, cfg, path) {
+    modes <- intersect(
+        .twasJointModes(token, path, cfg),
+        c("multitrait", "coupled", "grouped")
+    )
+    pluck(
+        keep(
+            modes,
+            .twasTokenModeFits,
+            token = token,
+            group = list(
+                layout = .jointLayout(cond),
+                axes = .jointVaryingAxes(cond)
+            ),
+            path = path,
+            cfg = cfg
+        ),
+        1L
+    )
+}
+
+# A univariate method's arguments on a group it fits coupled: they name its
+# coupled implementation (.lassoCoupledWeights() and its peers), which
+# .resolveMethodFunction() reads, and carry the group's coupling
+# (.jointCouplingSpec()).
+# @noRd
+.jointTwasCoupled <- function(ma, token, cfg, cond) {
+    `attr<-`(
+        list_assign(ma, coupling = .jointCouplingSpec(cond, cfg$coupling)),
+        "impl",
+        .twasCoupledImpl(token, "individual")
+    )
+}
+
+# The coupling of the conditions `cond` of a group (.coupledSpec()): each
+# pair differing along one coupled axis alone is coupled along it, at that
+# axis's strengths in `coupling`. The conditions alike along every coupled
+# axis form a unit, and those alike along the others share a column, the
+# layout glmnet's mgaussian family fits the group penalty on.
+# @noRd
+#' @importFrom vctrs vec_group_id
+.jointCouplingSpec <- function(cond, coupling) {
+    axes <- intersect(.jointVaryingAxes(cond), names(coupling))
+    labels <- as.data.frame(
+        map(cond[c("study", "context", "trait")], as.character)
+    )
+    K <- nrow(cond)
+    at <- expand_grid(col = seq_len(K), row = seq_len(K))
+    pairs <- map2_chr(
+        at$row,
+        at$col,
+        .jointPairAxis,
+        labels = labels,
+        coupled = axes
+    )
+    others <- setdiff(names(labels), axes)
+    list(
+        pairs = matrix(pairs, K, K),
+        grids = coupling[axes],
+        unit = as.integer(vec_group_id(labels[axes])),
+        column = as.integer(vec_group_id(labels[others]))
+    )
+}
+
+# The axis conditions `row` and `col` are coupled along: the one they differ
+# along, when they differ along that coupled axis alone; NA otherwise.
+# @noRd
+.jointPairAxis <- function(row, col, labels, coupled) {
+    differ <- names(labels)[
+        as.character(labels[row, ]) != as.character(labels[col, ])
+    ]
+    if (length(differ) == 1L && is_in(differ, coupled)) {
+        differ
+    } else {
+        NA_character_
+    }
+}
+
+# A univariate method's arguments on a group it fits with a group penalty
+# across the conditions: they name its implementation of that fit
+# (.lassoGroupedWeights() and its peers), which .resolveMethodFunction() reads,
+# and, for a method with several engines, the one its group fits run on
+# (.twasGroupEngine()).
+# @noRd
+.jointTwasGrouped <- function(ma, token, cfg) {
+    withEngine <- if (.methodHasBackends(token, "individual")) {
+        list_assign(ma, backend = ma$backend %||% .twasGroupEngine(token, cfg))
+    } else {
+        ma
+    }
+    `attr<-`(withEngine, "impl", .twasMethodCapabilities[[token]]$grouped)
+}
+
+# A Bayesian alphabet method's arguments on a group BGLR's Multitrait() fits:
+# they name the whole-Y implementation (.bglrJointWeights()) and each
+# condition's study, which sets the residuals' structure
+# (.bglrStudyResiduals()).
+# @noRd
+.jointTwasMultitrait <- function(ma, token, cond) {
     `attr<-`(
         list_assign(
             ma,
             method = token,
-            acrossStudies = n_distinct(cond$study) >= 2L
+            studies = as.character(cond$study)
         ),
         "impl",
         ".bglrJointWeights"
@@ -1816,7 +2143,8 @@ setMethod(
 # @noRd
 #' @importFrom rlang try_fetch
 .jointTwasRssWeights <- function(group, cfg, args, token) {
-    coupled <- .jointTwasIsCoupledRss(group, cfg, token)
+    mode <- .jointTwasGroupMode(token, .jgConditions(group), cfg, "sumstat")
+    coupled <- is_in(mode %||% "own", c("coupled", "grouped"))
     if (!coupled && !is_in(token, c("mrmash", .fmMvsusieTokens()))) {
         # Refused before the fit, which only warns: a group of studies on
         # their own references is no group for a fit taking one LD matrix.
@@ -1825,7 +2153,7 @@ setMethod(
     }
     try_fetch(
         if (coupled) {
-            .jointTwasCoupledRss(group, cfg, args, token)
+            .jointTwasCoupledRss(group, cfg, args, token, mode)
         } else {
             .jointTwasRssFit(group, cfg, args, token)
         },
@@ -1866,57 +2194,18 @@ setMethod(
     exec(adapter$rssWeightFn, !!!callArgs)
 }
 
-# The penalties the summary-statistics methods fit a group across studies
-# with, under the penalty on the difference between the studies' effects
-# (.rssCoupledWeights()), from each method's own settings.
-# @noRd
-.TWAS_COUPLED_RSS <- c(
-    lasso = "lasso",
-    enet = "enet",
-    ridge = "ridge",
-    mcp = "MCP",
-    scad = "SCAD",
-    l0learn = "L0"
-)
-
-# The samplers fitted across studies, each by the function fitting it:
-# PRS-CS as JointPRS fits ancestries, SDPR as SDPRX fits them.
-# @noRd
-.TWAS_COUPLED_MCMC <- c(
-    prsCs = ".prsCsCoupledWeights",
-    dprGibbs = ".sdprCoupledWeights"
-)
-
-# The summary-statistics methods fitted across studies: the penalized ones,
-# under the penalty on the difference between the studies' effects, and the
-# samplers.
-# @noRd
-.TWAS_COUPLED_SUMSTATS <- c(
-    names(.TWAS_COUPLED_RSS),
-    names(.TWAS_COUPLED_MCMC)
-)
-
 # The path options a PenalizedRssOptions holds, which a penalized method's
 # settings carry flattened.
 # @noRd
 .RSS_PATH_OPTIONS <- c("lambda", "thr", "maxiter", "strategy")
 
-# Whether `token` is fitted across `group`'s studies: a method fitted across
-# studies, on a group of two or more studies, in a run that fits them
-# (`studyCoupling` given).
+# A method's weights across `group`'s conditions, in `mode`: each
+# condition's z-scores over the variants it carries, against its LD
+# reference, a sampler's by its chain across them and a penalized method's
+# under its own penalty, shrinkage grid and path options
+# (.rssCoupledWeights()), as its capabilities name (.twasCoupledImpl()).
 # @noRd
-.jointTwasIsCoupledRss <- function(group, cfg, token) {
-    is_in(token, .TWAS_COUPLED_SUMSTATS) &&
-        !is.null(cfg$studyCoupling) &&
-        n_distinct(.jgConditions(group)$study) >= 2L
-}
-
-# A method's weights across `group`'s studies: each study's z-scores over the
-# variants it carries, against its own LD reference, a sampler's by its chain
-# across studies (.TWAS_COUPLED_MCMC) and a penalized method's under its own
-# penalty, shrinkage grid and path options (.rssCoupledWeights()).
-# @noRd
-.jointTwasCoupledRss <- function(group, cfg, args, token) {
+.jointTwasCoupledRss <- function(group, cfg, args, token, mode = "coupled") {
     Z <- .jgZ(group)
     .jointCoupledFit(
         map(seq_len(ncol(Z)), .jointCoupledStat, Z = Z, N = .jgN(group)),
@@ -1924,27 +2213,44 @@ setMethod(
         cfg,
         args,
         token,
-        .jointRetentionLevel(cfg, token)
+        .jointRetentionLevel(cfg, token),
+        mode
     )
 }
 
-# `token`'s weights across the studies whose statistics are `stats`, each on
-# its condition's LD reference in `group`, at retention `retention`.
+# `token`'s weights across the conditions whose statistics are `stats`, each
+# on its LD reference in `group`, at retention `retention`. A penalized
+# method takes the group penalty across them: with the coupling `cfg` sets
+# along the group's axes, each condition at its own grid point
+# (`mode = "coupled"`), or alone, every condition at one ("grouped").
 # @noRd
-.jointCoupledFit <- function(stats, group, cfg, args, token, retention) {
+.jointCoupledFit <- function(
+    stats,
+    group,
+    cfg,
+    args,
+    token,
+    retention,
+    mode = "coupled"
+) {
     user <- .twasUserArgs(args$methodArgs, token)
-    label <- glue("{token} across studies")
+    label <- glue("{token} across coupled conditions")
     Z <- .jgZ(group)
     refs <- map(seq_len(ncol(Z)), .jgLdRefAt, g = group)
-    if (is_in(token, names(.TWAS_COUPLED_MCMC))) {
+    sampler <- .twasCoupledImpl(token, "sumstat")$sampler
+    if (!is.null(sampler)) {
         return(exec(
-            .TWAS_COUPLED_MCMC[[token]],
+            sampler,
             stats,
             refs,
             rownames(Z),
             user,
             retention,
-            label
+            label,
+            shared = list(
+                residual = .jointRssResidual(group, cfg, args),
+                seed = .jointSamplerSeed(group, cfg, args)
+            )
         ))
     }
     .coupledRssRefuseSelection(user$selection, label)
@@ -1952,13 +2258,99 @@ setMethod(
         stats,
         refs,
         rownames(Z),
-        .coupledRssSpec(token, user, label),
+        .coupledRssSpec(token, user),
         user$s %||% c(0.2, 0.5, 0.9, 1.0),
-        cfg$studyCoupling,
+        .jointRssCoupling(group, cfg, mode),
         user[intersect(names(user), .RSS_PATH_OPTIONS)],
         retention,
-        label
+        label,
+        grouped = TRUE,
+        choose = if (identical(mode, "grouped")) "pooled" else "own",
+        residual = .jointRssResidual(group, cfg, args)
     )
+}
+
+# A MashPrior's prior over the group's conditions, which a sampler starts
+# from (.samplerSeedRho(), .sdprSeedKindWeights()): its covariances on them
+# and its weights, from the one prior over the spec's axes holding them; NULL
+# without a MashPrior or such a prior.
+# @noRd
+.jointSamplerSeed <- function(group, cfg, args) {
+    priors <- cfg$samplerPriors
+    if (is.null(priors) || is.null(args$axes)) {
+        return(NULL)
+    }
+    cond <- .jgConditions(group)
+    rows <- compact(map(priors, .mashPriorRows, cond = cond, axes = args$axes))
+    if (length(rows) != 1L) {
+        return(NULL)
+    }
+    prior <- priors[[names(rows)]]
+    list(
+        U = map(prior$U, .jointSeedOnGroup, rows = rows[[1L]]),
+        w = prior$w
+    )
+}
+
+# @noRd
+.jointSeedOnGroup <- function(U, rows) {
+    unname(U[rows, rows, drop = FALSE])
+}
+
+# The residual correlation of a summary-statistics group's conditions, which
+# their held-out splits are drawn with: the run's `residualCorrelation` on
+# them, else the MashPrior's for their spec's axes (`args$axes`), else NULL.
+# @noRd
+.jointRssResidual <- function(group, cfg, args) {
+    cond <- .jgConditions(group)
+    if (!is.null(cfg$residualCorrelation)) {
+        return(.residualOnGroup(cfg$residualCorrelation, cond))
+    }
+    if (is.null(cfg$residualPriors) || is.null(args$axes)) {
+        return(NULL)
+    }
+    .mashResidualForGroup(cfg$residualPriors, cond, args$axes)
+}
+
+# A residual correlation named by condition ("study:context:trait") on the
+# group's conditions, in their order; an error naming any it lacks.
+# @noRd
+.residualOnGroup <- function(residual, cond) {
+    keys <- str_c(cond$study, cond$context, cond$trait, sep = ":")
+    missing <- setdiff(keys, rownames(residual))
+    if (length(missing) > 0L) {
+        abort(glue(
+            "`residualCorrelation` has no row for {str_flatten(missing, ', ')}."
+        ))
+    }
+    unname(residual[keys, keys, drop = FALSE])
+}
+
+# The residual correlation of the one MashPrior prior over `axes` that holds
+# the group's conditions, on them; NULL when none or several do, or it has
+# none.
+# @noRd
+.mashResidualForGroup <- function(priors, cond, axes) {
+    rows <- compact(map(priors, .mashPriorRows, cond = cond, axes = axes))
+    if (length(rows) != 1L) {
+        return(NULL)
+    }
+    residual <- priors[[names(rows)]]$residualCorrelation
+    if (is.null(residual)) {
+        return(NULL)
+    }
+    unname(residual[rows[[1L]], rows[[1L]], drop = FALSE])
+}
+
+# The coupling of a summary-statistics group in `mode`: the run's along its
+# axes when coupled, none when it takes the group penalty alone.
+# @noRd
+.jointRssCoupling <- function(group, cfg, mode) {
+    cond <- .jgConditions(group)
+    if (identical(mode, "grouped")) {
+        return(.coupledNone(nrow(cond)))
+    }
+    .jointCouplingSpec(cond, cfg$coupling)
 }
 
 # Study `k`'s statistics: its z-scores and sample size over the variants it
@@ -1973,12 +2365,13 @@ setMethod(
     )
 }
 
-# The penalty a method fits across studies with: its own, from its settings
-# (enet's alpha, mcp's and scad's gamma and alpha). l0learn fits the L0
-# penalty alone, as the individual-level coupled fit does.
+# The penalty a method fits across studies with: the one its capabilities
+# name (.twasCoupledImpl()), from its settings (enet's alpha, mcp's and
+# scad's gamma and alpha). l0learn fits the L0 penalty alone, as the
+# individual-level coupled fit does.
 # @noRd
-.coupledRssSpec <- function(token, user, label) {
-    penalty <- .TWAS_COUPLED_RSS[[token]]
+.coupledRssSpec <- function(token, user) {
+    penalty <- .twasCoupledImpl(token, "sumstat")$penalty
     if (identical(penalty, "L0") && !is.null(user$penalty)) {
         .coupledRequireL0(user$penalty)
     }
@@ -2005,7 +2398,7 @@ setMethod(
             "study picks its grid point on its own held-out statistics."
         ),
         i = str_c(
-            "Leave `selection` unset, or pass studyCoupling = NULL to fit ",
+            "Leave `selection` unset, or pass coupling = NULL to fit ",
             "each study on its own."
         )
     ))
@@ -2085,7 +2478,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         verbose,
         "jointCrossContext",
         args$residualizationParam,
-        args$phenotypeFilter
+        args$phenotypeFilter,
+        isTRUE(args$completeSamples)
     )
     if (is.null(planned)) {
         return(NULL)
@@ -2288,7 +2682,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         verbose,
         "jointCrossTrait",
         args$residualizationParam,
-        args$phenotypeFilter
+        args$phenotypeFilter,
+        isTRUE(args$completeSamples)
     )
     if (is.null(planned)) {
         return(NULL)
@@ -2307,7 +2702,13 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # One context's cross-trait group on `X`, or NULL when it has no usable (X, Y).
 # @noRd
 .enumCrossTraitGroupFor <- function(cx, studyName, planned, X) {
-    xy <- .crossTraitAssemble(X, planned$allY, planned$traitsHere, planned$se)
+    xy <- .crossTraitAssemble(
+        X,
+        planned$allY,
+        planned$traitsHere,
+        planned$se,
+        planned$completeSamples
+    )
     if (is.null(xy)) {
         return(NULL)
     }
@@ -2394,7 +2795,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ldReference <- .jointRowsLdRef(data, tupleRows, label)
     trNames <- traitCol[tupleRows]
     jz <- .buildJointSumstatZMatrix(
-        data,
+        .crossTraitSource(data, tupleRows, args$unwindowed),
         tupleRows,
         trNames,
         errorLabel = label,
@@ -2407,6 +2808,26 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         Z = jz$Z,
         ldReference = ldReference,
         N = jz$nVec
+    )
+}
+
+# The data a cross-trait group's z-scores are read from: under a
+# `cisWindow`, its rows' statistics before it (`unwindowed`), each clipped to
+# the span of the group's windows, so every trait is fitted over the union of
+# their windows as on individual-level data; the run's data otherwise. A
+# trait whose statistics miss a variant of that span stops the group
+# (.jointCheckSnpOrder()): a missing statistic is not read as a null effect.
+# @noRd
+.crossTraitSource <- function(data, tupleRows, unwindowed) {
+    if (is.null(unwindowed)) {
+        return(data)
+    }
+    span <- range(.rowRegions(data)$region[tupleRows])
+    clipped <- map(as.list(unwindowed)[tupleRows], .withinWindow, win = span)
+    .rtlRebuild(
+        data,
+        replace(as.list(data), tupleRows, clipped),
+        seq_len(nrow(data))
     )
 }
 
@@ -2957,7 +3378,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 
 # Study `st`'s part of a composed cross-study unit, before any genotype is
 # read: its tuples' phenotypes, residualized as its own fits residualize
-# them, on the samples observed for all of them, and the genotypes they are
+# them, on the samples observed for any of them (all, under
+# `completeSamples`), and the genotypes they are
 # to be read on (the window of their traits). NULL when no tuple has a
 # phenotype on two or more such samples.
 # @noRd
@@ -2978,7 +3400,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     } else {
         resid
     }
-    shared <- reduce(map(YresList, rownames), intersect)
+    shared <- .jointSamples(
+        map(YresList, rownames),
+        isTRUE(args$completeSamples)
+    )
     cols <- map(
         map2(rows$trait, rows$context, .composedTuple),
         .composedYCol,
@@ -2999,25 +3424,26 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 }
 
 # A composed cross-study plan from a study's present tuples `rows` and their
-# phenotype columns `Y`, kept on the samples observing all of them; NULL when
-# fewer than two remain.
+# phenotype columns `Y`, kept on the samples observing any of them, or all of
+# them under `completeSamples` (.jointKeptRows()); NULL when fewer than two
+# remain.
 # @noRd
 .xsComposedPlanOf <- function(st, qd, rows, Y, args) {
-    complete <- stats::complete.cases(Y)
-    if (sum(complete) < 2L) {
+    kept <- .jointKeptRows(Y, isTRUE(args$completeSamples))
+    if (sum(kept) < 2L) {
         return(NULL)
     }
     labels <- .xsConditionLabels(rows, args$axes)
     list(
         study = st,
         dataset = qd,
-        Y = `colnames<-`(Y[complete, , drop = FALSE], labels),
+        Y = `colnames<-`(Y[kept, , drop = FALSE], labels),
         conditions = rows,
         labels = labels,
         spec = .qtlFitSpec(
             .fmGenoWindow(qd, unique(rows$trait), args$region, args$cisWindow),
             unique(rows$context),
-            rownames(Y)[complete]
+            rownames(Y)[kept]
         )
     )
 }
@@ -3064,7 +3490,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         verbose,
         "composed",
         args$residualizationParam,
-        args$phenotypeFilter
+        args$phenotypeFilter,
+        isTRUE(args$completeSamples)
     )
     if (is.null(planned)) {
         return(list())
@@ -3084,7 +3511,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 .enumComposedIndividualGroup <- function(studyName, planned, X) {
     xy <- .composedAlignXy(
         list(X = X, YresList = planned$YresList),
-        planned$tuples
+        planned$tuples,
+        planned$completeSamples
     )
     if (is.null(xy)) {
         return(NULL)
@@ -3887,7 +4315,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     block = NULL
 ) {
     grp <- .jointGroupProvenance(g, data, args)
-    rowTokens <- .jointRowTokens(tokens, pipeline, grp$cond)
+    rowTokens <- .jointRowTokens(tokens, pipeline, g)
     fitArgs <- .jointGroupFitArgs(g, pipeline, args, block, rowTokens)
     perTokenEntries <- .jointRowEntries(
         rowTokens,
@@ -3904,7 +4332,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         grp = grp,
         data = data
     ))
-    stacking <- .twasStacksGroup(pipeline, grp$cond)
+    stacking <- .twasStacksGroup(pipeline, g, tokens)
     if (!doEnsemble || (length(perTokenEntries) < 2L && !stacking)) {
         return(tokenRecords)
     }
@@ -3944,36 +4372,69 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     ))
 }
 
-# The tokens whose fits of a group become its rows. A run stacking across
-# studies (EnsembleParam(acrossStudies = TRUE)) also hands a group across
-# studies the methods it only stacks, fitted there one study at a time
-# (.twasStackEntries()); those make no rows of their own, as each study's
-# own run has them. The methods it fits across the studies, coupled or
-# jointly (mr.mash, `multitraitTokens`), do.
+# The tokens whose fits of group `g` become its rows: all but those a group
+# of two or more conditions holds only to stack them across studies
+# (EnsembleParam(acrossStudies = TRUE)), which are fitted there one study at
+# a time (.twasStackEntries()) and make no rows, as each study's own run has
+# them.
 # @noRd
-.jointRowTokens <- function(tokens, pipeline, cond) {
-    if (!.twasStacksGroup(pipeline, cond)) {
+.jointRowTokens <- function(tokens, pipeline, g) {
+    cond <- .jgConditions(g)
+    if (!is(pipeline, "TwasJointPipeline") || nrow(cond) < 2L) {
         return(tokens)
     }
-    cfg <- .jpConfig(pipeline)
-    coupled <- if (is.null(cfg$studyCoupling)) {
-        character(0)
-    } else {
-        union(names(.TWAS_COUPLED_IMPL), .TWAS_COUPLED_SUMSTATS)
-    }
-    intersect(tokens, union(coupled, c("mrmash", cfg$multitraitTokens)))
+    discard(
+        tokens,
+        .twasOnlyStacked,
+        cond = cond,
+        path = .jointGroupPath(g),
+        cfg = .jpConfig(pipeline)
+    )
 }
 
-# Whether a run stacks across the studies of a group: its ensemble is on and
-# across studies, and the group spans two or more.
+# Whether the group of conditions `cond` holds `token` only to stack it: the
+# ensemble across studies stacks it there, and no mode of its own fits it.
 # @noRd
-.twasStacksGroup <- function(pipeline, cond) {
-    ens <- if (is(pipeline, "TwasJointPipeline")) {
-        .jpConfig(pipeline)$ensembleParam
+.twasOnlyStacked <- function(token, cond, path, cfg) {
+    layout <- .jointLayout(cond)
+    .twasStacksOn(token, layout, path, cfg) &&
+        !.twasJointAdmits(
+            token,
+            layout,
+            .jointVaryingAxes(cond),
+            path,
+            cfg,
+            exclude = "stacked"
+        )
+}
+
+# The path a group's fits take: "sumstat" for summary statistics, else
+# "individual".
+# @noRd
+.jointGroupPath <- function(g) {
+    if (is(g, "SumStatsJointGroup")) "sumstat" else "individual"
+}
+
+# Whether a run stacks across the studies of group `g`: one of the methods
+# handed to it, `tokens`, is stacked on a group of its layout.
+# @noRd
+.twasStacksGroup <- function(pipeline, g, tokens) {
+    if (!is(pipeline, "TwasJointPipeline")) {
+        return(FALSE)
     }
-    isTRUE(ens$enabled) &&
-        isTRUE(ens$acrossStudies) &&
-        n_distinct(cond$study) >= 2L
+    any(map_lgl(
+        tokens,
+        .twasStacksOn,
+        layout = .jointLayout(.jgConditions(g)),
+        path = .jointGroupPath(g),
+        cfg = .jpConfig(pipeline)
+    ))
+}
+
+# @noRd
+.twasStacksOn <- function(token, layout, path, cfg) {
+    is_in("stacked", .twasJointModes(token, path, cfg)) &&
+        .twasModeFits("stacked", layout, path)
 }
 
 # A group's ensemble entries, per condition: its methods' out-of-fold
@@ -3997,10 +4458,33 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         if (!stacking) {
             return(list())
         }
-        return(.twasSumstatEnsembleLayer(g, perTokenEntries, cfg, args))
+        return(.twasSumstatEnsembleLayer(
+            g,
+            .twasCoupledEntries(perTokenEntries, g, cfg),
+            cfg,
+            args
+        ))
     }
     stack <- if (stacking) .twasStackEntries(g, pipeline, args, block)
     .twasEnsembleLayer(g, perTokenEntries, cfg, stack %||% list())
+}
+
+# The entries of the methods a summary-statistics group's ensemble across
+# studies refits on its held-out splits (.twasCoupledStackMethod()): those
+# fitted coupled on the group.
+# @noRd
+.twasCoupledEntries <- function(perTokenEntries, g, cfg) {
+    perTokenEntries[map_lgl(
+        names(perTokenEntries),
+        .twasFitsCoupled,
+        cond = .jgConditions(g),
+        cfg = cfg
+    )]
+}
+
+# @noRd
+.twasFitsCoupled <- function(token, cond, cfg) {
+    identical(.jointTwasGroupMode(token, cond, cfg, "sumstat"), "coupled")
 }
 
 # Each study's own fit of every method a group across studies stacks, as
@@ -4015,8 +4499,9 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         "TwasJointPipeline",
         config = list_assign(
             .jpConfig(pipeline),
-            studyCoupling = NULL,
-            multitraitTokens = NULL
+            coupling = NULL,
+            multitraitTokens = NULL,
+            engines = NULL
         )
     )
     fitArgs <- .jointGroupFitArgs(g, uncoupled, args, block, tokens)
@@ -5057,10 +5542,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     reduce(results, if (isFm) .rbindFineMappingResult else .rbindTwasWeights)
 }
 
-# Plan all joint methods for ONE spec: resolve its scope (optionally
-# region-restricting the traits), pick the joint cell, and plan it
-# (.jointCellWork(), with ALL methods so the twas ensemble layer can combine a
-# group's per-method fits).
+# Plan all joint methods for ONE spec: those its layout admits
+# (.jointSpecTokens()), none planned when there are none. Resolve its scope
+# (optionally region-restricting the traits), pick the joint cell, and plan
+# it (.jointCellWork(), with ALL of them so the twas ensemble layer can
+# combine a group's per-method fits).
 # @noRd
 .jointSpecWork <- function(
     spec,
@@ -5072,6 +5558,10 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     traitIds,
     args
 ) {
+    tokens <- .jointSpecTokens(jointMethods, spec$axes, pipeline, dataForm)
+    if (length(tokens) == 0L) {
+        return(.qtlWorkValue(NULL))
+    }
     scope <- .jointSpecScope(
         spec,
         data,
@@ -5082,7 +5572,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
     cell <- .lookupJointCell(.jointSpecPattern(spec$axes), dataForm)
     spArgs <- c(args, list(axes = spec$axes))
-    .jointCellWork(cell, pipeline, data, scope, jointMethods, spArgs)
+    .jointCellWork(cell, pipeline, data, scope, tokens, spArgs)
 }
 
 # The dispatch pattern of a spec's axes: its one axis, or "composed" for

@@ -79,7 +79,7 @@ than one, combined as \code{\link{prsCs}}'s are. Default 1.}
 
 \item{sharing}{Across studies only: the \code{dprGibbs} method fitted
 across the studies a \code{"study"} \code{jointSpecification} joins
-(\code{studyCoupling} set in \code{\link{twasWeightsPipeline}}), as
+(\code{coupling} set in \code{\link{twasWeightsPipeline}}), as
 SDPRX fits ancestries. Which sets of the studies a non-null
 component's effects lie in: \code{"eachOrAll"} (the default), each
 study alone or all of them together; \code{"everySubset"}, every

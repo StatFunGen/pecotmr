@@ -1041,9 +1041,15 @@ parseTraitIds <- function(traitId, data) {
     if (identical(got, want)) {
         return(invisible(NULL))
     }
-    abort(glue(
-        "{errorLabel}: every entry in a joint group must share an ",
-        "identical SNP order after summaryStatsQc()."
+    abort(c(
+        glue(
+            "{errorLabel}: every entry in a joint group must hold statistics ",
+            "at the same variants, in one order, after summaryStatsQc()."
+        ),
+        i = str_c(
+            "A joint fit does not read a missing statistic as a null ",
+            "effect; give every entry the group's variants."
+        )
     ))
 }
 
@@ -1103,20 +1109,45 @@ parseTraitIds <- function(traitId, data) {
     NULL
 }
 
-# The samples a cross-context fit is on: every context's Y holds them and none
-# is missing a value. NULL, with a message, when fewer than two remain.
+# The samples a cross-context fit is on (.jointSamples(), .jointKeptRows()):
+# those any context observes, or under `complete` those every context does.
+# NULL, with a message, when fewer than two remain.
 # @noRd
-.crossContextFitSamples <- function(Yres, perTraitContexts, report) {
-    shared <- reduce(map(Yres, rownames), intersect)
+.crossContextFitSamples <- function(Yres, perTraitContexts, report, complete) {
+    shared <- .jointSamples(map(Yres, rownames), complete)
     if (length(shared) < 2L) {
         return(.crossContextSkip("shared samples across contexts", report))
     }
     Y <- .crossContextY(Yres, perTraitContexts, shared)
-    keep <- stats::complete.cases(Y)
+    keep <- .jointKeptRows(Y, complete)
     if (sum(keep) < 2L) {
-        return(.crossContextSkip("complete-Y subjects", report))
+        return(.crossContextSkip("observed subjects", report))
     }
     shared[keep]
+}
+
+# The samples a group draws on from its conditions' sample sets `sets`: any
+# condition's, or under `complete` only those every condition has.
+# @noRd
+.jointSamples <- function(sets, complete) {
+    reduce(sets, if (isTRUE(complete)) intersect else union)
+}
+
+# The rows of a group's phenotypes `Y` it is fitted on: those observing some
+# condition, or under `complete` those observing every one. An engine that
+# needs complete rows keeps those itself.
+# @noRd
+.jointKeptRows <- function(Y, complete) {
+    if (isTRUE(complete)) {
+        return(stats::complete.cases(Y))
+    }
+    rowSums(!is.na(Y)) > 0L
+}
+
+# The rows of `m` for `samples`, missing for a sample `m` lacks.
+# @noRd
+.jointRowsOf <- function(m, samples) {
+    `rownames<-`(m[match(samples, rownames(m)), , drop = FALSE], samples)
 }
 
 # X and the response matrix on the fit's samples that X holds.
@@ -1152,7 +1183,8 @@ parseTraitIds <- function(traitId, data) {
     verbose,
     label,
     residualizationParam,
-    phenotypeFilter = NULL
+    phenotypeFilter = NULL,
+    completeSamples = FALSE
 ) {
     perTraitContexts <- .crossContextPerTrait(
         data,
@@ -1172,7 +1204,12 @@ parseTraitIds <- function(traitId, data) {
         residualizationParam = residualizationParam
     )
     report <- list(verbose = verbose, label = label, tid = tid)
-    fitSamples <- .crossContextFitSamples(Yres, perTraitContexts, report)
+    fitSamples <- .crossContextFitSamples(
+        Yres,
+        perTraitContexts,
+        report,
+        completeSamples
+    )
     if (is.null(fitSamples)) {
         return(NULL)
     }
@@ -1229,7 +1266,8 @@ parseTraitIds <- function(traitId, data) {
     verbose,
     label,
     residualizationParam,
-    phenotypeFilter = NULL
+    phenotypeFilter = NULL,
+    completeSamples = FALSE
 ) {
     se <- .qtlContextSe(data, context = cx)
     # scopedTraits is already region-restricted upstream (.runJointSpecs) when
@@ -1245,8 +1283,9 @@ parseTraitIds <- function(traitId, data) {
         phenotypeFilter = phenotypeFilter,
         residualizationParam = residualizationParam
     )
-    # The samples observed for every trait, which are the ones the fit is on.
-    fitSamples <- rownames(allY)[stats::complete.cases(allY)]
+    # The samples observed for some trait, or for every one under
+    # `completeSamples`, which are the ones the fit is on.
+    fitSamples <- rownames(allY)[.jointKeptRows(allY, completeSamples)]
     if (length(fitSamples) < 2L) {
         return(NULL)
     }
@@ -1254,21 +1293,29 @@ parseTraitIds <- function(traitId, data) {
         se = se,
         traitsHere = traitsHere,
         allY = allY,
-        fitSamples = fitSamples
+        fitSamples = fitSamples,
+        completeSamples = completeSamples
     )
 }
 
-# The cross-trait X / Y on the samples they share, keeping only the samples
-# observed for every trait; NULL when fewer than two remain at either step.
+# The cross-trait X / Y on the samples they share, keeping those observed for
+# some trait, or for every one under `completeSamples`; NULL when fewer than
+# two remain at either step.
 # @noRd
-.crossTraitAssemble <- function(allX, allY, traitsHere, se) {
+.crossTraitAssemble <- function(
+    allX,
+    allY,
+    traitsHere,
+    se,
+    completeSamples = FALSE
+) {
     common <- intersect(rownames(allX), rownames(allY))
     if (length(common) < 2L) {
         return(NULL)
     }
     X <- allX[common, , drop = FALSE]
     Y <- allY[common, , drop = FALSE]
-    keep <- stats::complete.cases(Y)
+    keep <- .jointKeptRows(Y, completeSamples)
     if (sum(keep) < 2L) {
         return(NULL)
     }
@@ -1331,7 +1378,7 @@ parseTraitIds <- function(traitId, data) {
         return(NULL)
     }
     `colnames<-`(
-        ym[commonSamples, t$trait, drop = FALSE],
+        .jointRowsOf(ym[, t$trait, drop = FALSE], commonSamples),
         str_c(t$context, t$trait, sep = ":")
     )
 }
@@ -1349,18 +1396,19 @@ parseTraitIds <- function(traitId, data) {
     exec(cbind, !!!yCols)
 }
 
-# The samples a composed fit is on: every context's Y holds them and no tuple's
-# column misses them. Empty when the tuples cannot be fit together.
+# The samples a composed fit is on: those some tuple observes, or under
+# `complete` those every context's Y holds and no tuple's column misses. Empty
+# when the tuples cannot be fit together.
 # @noRd
-.composedFitSamples <- function(YresList, tuples) {
-    shared <- reduce(map(YresList, rownames), intersect)
+.composedFitSamples <- function(YresList, tuples, complete) {
+    shared <- .jointSamples(map(YresList, rownames), complete)
     Y <- if (length(shared) >= 2L) {
         .composedYCols(YresList, tuples, shared)
     }
     if (is.null(Y)) {
         return(character(0))
     }
-    shared[stats::complete.cases(Y)]
+    shared[.jointKeptRows(Y, complete)]
 }
 
 # A composed-axes (context, trait) fit on an individual-level QtlDataset, before
@@ -1375,7 +1423,8 @@ parseTraitIds <- function(traitId, data) {
     verbose,
     label,
     residualizationParam,
-    phenotypeFilter = NULL
+    phenotypeFilter = NULL,
+    completeSamples = FALSE
 ) {
     tuples <- .composedTuples(data, scope, studyName, verbose, label)
     if (is.null(tuples)) {
@@ -1396,7 +1445,7 @@ parseTraitIds <- function(traitId, data) {
     } else {
         resid
     }
-    fitSamples <- .composedFitSamples(YresList, tuples)
+    fitSamples <- .composedFitSamples(YresList, tuples, completeSamples)
     if (length(fitSamples) < 2L) {
         return(NULL)
     }
@@ -1405,17 +1454,19 @@ parseTraitIds <- function(traitId, data) {
         allContexts = allContexts,
         allTraits = allTraits,
         YresList = YresList,
-        fitSamples = fitSamples
+        fitSamples = fitSamples,
+        completeSamples = completeSamples
     )
 }
 
 # X and the tuples' Y columns on the samples both sides share, without the
-# samples any Y column misses; NULL when fewer than two samples remain.
+# samples no Y column observes, or under `completeSamples` any column misses;
+# NULL when fewer than two samples remain.
 # @noRd
-.composedAlignXy <- function(sides, tuples) {
-    commonSamples <- reduce(
-        c(list(rownames(sides$X)), map(sides$YresList, rownames)),
-        intersect
+.composedAlignXy <- function(sides, tuples, completeSamples = FALSE) {
+    commonSamples <- intersect(
+        rownames(sides$X),
+        .jointSamples(map(sides$YresList, rownames), completeSamples)
     )
     if (length(commonSamples) < 2L) {
         return(NULL)
@@ -1425,7 +1476,7 @@ parseTraitIds <- function(traitId, data) {
     if (is.null(Y)) {
         return(NULL)
     }
-    keep <- stats::complete.cases(Y)
+    keep <- .jointKeptRows(Y, completeSamples)
     if (sum(keep) < 2L) {
         return(NULL)
     }
@@ -1852,7 +1903,8 @@ parseTraitIds <- function(traitId, data) {
         cache = cfg$fineMappingResult,
         residualizationParam = cfg$residualizationParam,
         genotypeFilter = cfg$genotypeFilter,
-        phenotypeFilter = cfg$phenotypeFilter
+        phenotypeFilter = cfg$phenotypeFilter,
+        completeSamples = cfg$completeSamples
     )
 }
 
@@ -1880,6 +1932,7 @@ parseTraitIds <- function(traitId, data) {
             methodArgs = methodArgs,
             verbose = cfg$verbose,
             cache = cfg$fineMappingResult,
+            unwindowed = cfg$unwindowed,
             cutoffs = .panelCutoffs(
                 cfg$panelFilterParam %||% PanelFilterParam()
             )
@@ -2254,9 +2307,8 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # .twasDispatchJointSpecsQtlDataset()'s fits, planned, for a run with others to
-# fit alongside: the joint methods' (.twasJointTokens()), and those of the
-# methods also fitted jointly on a group of two or more conditions
-# (`multitraitTokens`, .twasMultitraitTokens()).
+# fit alongside: those of every method fitted on joint groups
+# (.twasJointCandidates()), each spec fitting those its layout admits.
 # @noRd
 .twasJointSpecsWork <- function(
     parsedJointSpec,
@@ -2269,7 +2321,7 @@ parseTraitIds <- function(traitId, data) {
     .jointRejectStudyOnIndividual(parsedJointSpec)
     .twasJointSpecGridWork(
         parsedJointSpec,
-        union(.twasJointTokens(tokens), .jpConfig(marker)$multitraitTokens),
+        .twasJointCandidates(tokens, "individual", .jpConfig(marker)),
         contexts,
         traitIds,
         marker,
@@ -2277,8 +2329,12 @@ parseTraitIds <- function(traitId, data) {
     )
 }
 
-# Joint specs on a QtlSumStats collection: mr.mash RSS fitted on each group,
-# mvsusie read off its fine-mapping fit of the group. `cfg` is the
+# Joint specs on a QtlSumStats collection, in one run of the engine: mr.mash
+# RSS fitted on each group and mvsusie read off its fine-mapping fit of the
+# group, and on groups across studies the methods coupled there
+# (.jointTwasCoupledRss()) and the ensemble stacking the studies' own fits
+# (EnsembleParam(acrossStudies = TRUE), .twasSumstatEnsembleLayer()); those
+# methods' per-study fits run with the per-tuple ones. `cfg` is the
 # summary-statistics joint record, or a MultiStudy record with the collection
 # as its data; `methodArgs` are the summary-statistics path's per-method
 # options.
@@ -2289,55 +2345,41 @@ parseTraitIds <- function(traitId, data) {
     methodArgs,
     cfg
 ) {
-    pipeline <- new(
-        "TwasJointPipeline",
-        config = list(
-            crossValidationParam = .cvResolve(CrossValidationParam()),
-            fitRetention = cfg$fitRetention,
-            standardized = TRUE,
-            verbose = cfg$verbose,
-            seed = cfg$seed,
-            studyCoupling = cfg$studyCoupling
-        )
-    )
-    args <- list(
-        methodArgs = methodArgs,
-        mashPriors = cfg$mashPriors,
-        verbose = cfg$verbose,
-        fineMappingResult = cfg$fineMappingResult,
-        cache = cfg$twasWeights,
-        cutoffs = .panelCutoffs(cfg$panelFilterParam %||% PanelFilterParam())
-    )
-    joint <- .runJointSpecs(
+    pipeline <- .twasQssJointPipeline(tokens, cfg)
+    .runJointSpecs(
         parsedJointSpec,
         cfg$data,
         dataForm = "sumstats",
         pipeline = pipeline,
-        jointMethods = .twasJointTokens(tokens),
+        jointMethods = .twasJointCandidates(
+            tokens,
+            "sumstat",
+            .jpConfig(pipeline)
+        ),
         contexts = cfg$contexts,
         traitIds = cfg$traitId,
-        args = args
-    )
-    .msFoldStudyResults(
-        list(joint, .twasCoupledSumStats(parsedJointSpec, tokens, cfg, args)),
-        .rbindTwasWeights
+        args = list(
+            methodArgs = methodArgs,
+            mashPriors = cfg$mashPriors,
+            verbose = cfg$verbose,
+            fineMappingResult = cfg$fineMappingResult,
+            cache = cfg$twasWeights,
+            unwindowed = cfg$unwindowed,
+            cutoffs = .panelCutoffs(
+                cfg$panelFilterParam %||% PanelFilterParam()
+            )
+        )
     )
 }
 
-# The methods fitted across the summary-statistics studies
-# (.jointTwasCoupledRss()) -- the penalized ones under the penalty on the
-# difference between their effects, PRS-CS as JointPRS and SDPR as SDPRX fit
-# ancestries -- and the ensemble stacking the studies' own fits
-# (EnsembleParam(acrossStudies = TRUE), .twasSumstatEnsembleLayer()), on the
-# specs with the study axis alone; their per-study fits run with the
-# per-tuple ones. NULL when none applies.
+# The pipeline a summary-statistics run's joint fits are made under, from its
+# record `cfg`: there are no samples to hold out, and the settings every
+# group's methods read -- the coupling strengths, the ensemble with the
+# methods it stacks across studies, and the run's settled `h2`
+# (.jointMrmashRssWeights()).
 # @noRd
-.twasCoupledSumStats <- function(parsedJointSpec, tokens, cfg, args) {
-    studySpecs <- .twasCoupledSpecs(parsedJointSpec, tokens, cfg)
-    if (length(studySpecs) == 0L) {
-        return(NULL)
-    }
-    pipeline <- new(
+.twasQssJointPipeline <- function(tokens, cfg) {
+    new(
         "TwasJointPipeline",
         config = list(
             crossValidationParam = .cvResolve(CrossValidationParam()),
@@ -2345,7 +2387,22 @@ parseTraitIds <- function(traitId, data) {
             standardized = TRUE,
             verbose = cfg$verbose,
             seed = cfg$seed,
-            studyCoupling = cfg$studyCoupling,
+            coupling = cfg$coupling,
+            # The engine `backend` names for each method on this path
+            # (.twasGroupsSumstat()).
+            engines = .twasSumstatEngines(tokens, cfg$backend),
+            # The residual correlation the held-out splits of a fit across
+            # conditions are drawn with (.jointRssResidual()).
+            residualCorrelation = cfg$residualCorrelation,
+            residualPriors = .twasResidualPriors(
+                cfg$mashPrior,
+                cfg$residualCorrelation
+            ),
+            # The priors the samplers across conditions start from
+            # (.jointSamplerSeed()).
+            samplerPriors = if (!is.null(cfg$mashPrior)) {
+                .unpackMashPrior(cfg$mashPrior)$priors$full
+            },
             ensembleParam = list_assign(
                 .ensembleResolve(cfg$ensemble),
                 stackTokens = .twasStackTokens(tokens, cfg$ensemble, "sumstat")
@@ -2353,37 +2410,6 @@ parseTraitIds <- function(traitId, data) {
             h2 = cfg$h2Spec
         )
     )
-    .runJointSpecs(
-        studySpecs,
-        cfg$data,
-        dataForm = "sumstats",
-        pipeline = pipeline,
-        jointMethods = .twasAcrossStudyTokens(tokens, cfg),
-        contexts = cfg$contexts,
-        traitIds = cfg$traitId,
-        args = args
-    )
-}
-
-# The specs a run fits methods across studies on: those with the study axis
-# alone, when it couples a method across studies or stacks the studies' own
-# fits.
-# @noRd
-.twasCoupledSpecs <- function(parsedJointSpec, tokens, cfg) {
-    if (length(.twasAcrossStudyTokens(tokens, cfg)) == 0L) {
-        return(list())
-    }
-    keep(.fmSplitStudyAxisSpecs(parsedJointSpec)$study, .jsIsStudyAxisOnly)
-}
-
-# The summary-statistics methods a run fits across studies: those it couples
-# (`studyCoupling` given) and those its ensemble stacks across them.
-# @noRd
-.twasAcrossStudyTokens <- function(tokens, cfg) {
-    coupled <- if (!is.null(cfg$studyCoupling)) {
-        intersect(tokens, .TWAS_COUPLED_SUMSTATS)
-    }
-    union(coupled, .twasStackTokens(tokens, cfg$ensemble, "sumstat"))
 }
 
 # Joint dispatch for a MultiStudyQtlDataset, mirroring
@@ -2392,8 +2418,8 @@ parseTraitIds <- function(traitId, data) {
 # run would use (.twasJointSetup() on the component, its genotype-filter
 # overrides applied); a spec with a `study` axis, alone or composed with
 # others, reads mvsusie off the fits across the individual-level studies
-# (.twasDispatchStudySpecsIndividual()) and fits the methods fitted across
-# them (.twasDispatchStudySpecsCoupled()); every spec runs on the
+# (.twasDispatchStudySpecsIndividual()) and fits the methods fitted on its
+# groups (.twasDispatchStudySpecsJoint()); every spec runs on the
 # summary-statistics component. `cfg` is .twasJointCfg()'s record plus the
 # collection, `genotypeFilterParam` and `panelFilterParam`; `methods` is the
 # translated methods record.
@@ -2422,7 +2448,7 @@ parseTraitIds <- function(traitId, data) {
     acrossStudies <- .msFoldStudyResults(
         list(
             .twasDispatchStudySpecsIndividual(specs$study, tokens, cfg),
-            .twasDispatchStudySpecsCoupled(specs$study, tokens, methods, cfg)
+            .twasDispatchStudySpecsJoint(specs$study, tokens, methods, cfg)
         ),
         .rbindTwasWeights
     )
@@ -2445,7 +2471,7 @@ parseTraitIds <- function(traitId, data) {
 # NULL when no spec applies, fewer than two individual-level studies are
 # present, or no mvSuSiE method is asked for: fsusie has no fit across
 # studies, and mr.mash is fitted on the groups here
-# (.twasDispatchStudySpecsCoupled()).
+# (.twasDispatchStudySpecsJoint()).
 # @noRd
 .twasDispatchStudySpecsIndividual <- function(studySpecs, tokens, cfg) {
     mvTokens <- intersect(tokens, .fmMvsusieTokens())
@@ -2471,27 +2497,21 @@ parseTraitIds <- function(traitId, data) {
 }
 
 # The study-axis specs on a MultiStudyQtlDataset's individual-level studies,
-# for the methods fitted on their groups across studies: their samples stacked
-# as fineMappingPipeline() stacks them, per region block, each study read with
-# its genotype-filter overrides applied. A spec with the study axis alone
-# (one group per (context, trait) two or more studies carry;
-# .enumCrossStudyIndividual()) fits the univariate methods under the penalty
-# on the difference between the studies' effects (lasso, enet, ridge,
-# l0learn; .lassoCoupledWeights()), the ensemble across studies
-# (EnsembleParam(acrossStudies = TRUE)), which stacks each study's own fits of
-# the methods it names (.twasStackTokens()), and the methods fitted across
-# the studies jointly: mr.mash, and bayesC and bayesN on BGLR
-# (.twasAcrossStudyJointTokens()). A composed spec including the study
-# (.enumComposedCrossStudyIndividual()) fits mr.mash alone: its groups hold
-# several conditions per study, sharing that study's samples, which the
-# coupling and the ensemble across studies would take as studies of their
-# own, and whose residual correlation BGLR's diagonal residual covariance
-# across studies (.bglrStudyResiduals()) would drop; mr.mash estimates it
-# within each study. The methods' per-study fits run as well, in the
-# per-component recursion. NULL when no spec applies, fewer than two studies
-# are present, or none of these methods is asked for.
+# for the methods fitted on their groups: their samples stacked as
+# fineMappingPipeline() stacks them, per region block, each study read with
+# its genotype-filter overrides applied. Each spec fits those its groups'
+# layout admits (.jointSpecTokens()): the study axis alone, one condition from
+# each study (.enumCrossStudyIndividual()), fits mr.mash, bayesC and bayesN on
+# BGLR, the univariate methods coupled across the studies
+# (.lassoCoupledWeights()) and the ensemble across studies, which stacks each
+# study's own fits (.twasStackTokens()); the study composed with other axes
+# (.enumComposedCrossStudyIndividual()) holds several conditions per study,
+# sharing that study's samples, and fits mr.mash alone, which estimates their
+# residual correlation within each study. The methods' per-study fits run as
+# well, in the per-component recursion. NULL when no spec applies, fewer than
+# two studies are present, or none of these methods is asked for.
 # @noRd
-.twasDispatchStudySpecsCoupled <- function(studySpecs, tokens, methods, cfg) {
+.twasDispatchStudySpecsJoint <- function(studySpecs, tokens, methods, cfg) {
     if (length(studySpecs) == 0L || length(cfg$data) < 2L) {
         return(NULL)
     }
@@ -2502,71 +2522,15 @@ parseTraitIds <- function(traitId, data) {
             keepSamples = cfg$genotypeFilter$keepSamples
         )
     )
-    .msFoldStudyResults(
-        list(
-            .twasStudyAxisFits(
-                keep(studySpecs, .jsIsStudyAxisOnly),
-                .twasStudyOnlyTokens(tokens, cfg),
-                methods,
-                cfg,
-                studies
-            ),
-            .twasStudyAxisFits(
-                discard(studySpecs, .jsIsStudyAxisOnly),
-                intersect(tokens, "mrmash"),
-                methods,
-                .twasComposedStudyCfg(cfg),
-                studies
-            )
-        ),
-        .rbindTwasWeights
-    )
+    .twasStudyAxisFits(studySpecs, tokens, methods, cfg, studies)
 }
 
-# The methods fitted on the groups the study axis alone makes across studies:
-# the coupled ones (under `studyCoupling`), those the ensemble stacks across
-# studies, and the joint ones.
+# The fits of the methods among `tokens` fitted on joint groups
+# (.twasJointCandidates()) on the groups `specs` make across `studies`; NULL
+# when no spec or method applies.
 # @noRd
-.twasStudyOnlyTokens <- function(tokens, cfg) {
-    coupled <- if (!is.null(cfg$studyCoupling)) {
-        intersect(tokens, names(.TWAS_COUPLED_IMPL))
-    }
-    union(
-        union(
-            coupled,
-            .twasStackTokens(tokens, cfg$ensembleParam, "individual")
-        ),
-        .twasAcrossStudyJointTokens(tokens, cfg$backend)
-    )
-}
-
-# The methods fitted jointly on a group across studies: mr.mash, whose
-# missing-value fit takes each study's conditions on its own rows, and bayesC
-# and bayesN on BGLR (.twasMultitraitTokens()).
-# @noRd
-.twasAcrossStudyJointTokens <- function(tokens, backend) {
-    union(intersect(tokens, "mrmash"), .twasMultitraitTokens(tokens, backend))
-}
-
-# The run's settings for a composed spec including the study: neither coupled
-# nor stacked across studies.
-# @noRd
-.twasComposedStudyCfg <- function(cfg) {
-    list_assign(
-        cfg,
-        studyCoupling = zap(),
-        ensembleParam = list_assign(
-            .ensembleResolve(cfg$ensembleParam),
-            acrossStudies = FALSE
-        )
-    )
-}
-
-# The fits of `fitted` on the groups `specs` make across `studies`; NULL when
-# no spec or method applies.
-# @noRd
-.twasStudyAxisFits <- function(specs, fitted, methods, cfg, studies) {
-    if (length(specs) == 0L || length(fitted) == 0L) {
+.twasStudyAxisFits <- function(specs, tokens, methods, cfg, studies) {
+    if (length(specs) == 0L) {
         return(NULL)
     }
     setup <- .twasJointSetup(
@@ -2575,12 +2539,20 @@ parseTraitIds <- function(traitId, data) {
         list_assign(
             cfg,
             stackTokens = .twasStackTokens(
-                fitted,
+                tokens,
                 cfg$ensembleParam,
                 "individual"
             )
         )
     )
+    fitted <- .twasJointCandidates(
+        tokens,
+        "individual",
+        .jpConfig(setup$marker)
+    )
+    if (length(fitted) == 0L) {
+        return(NULL)
+    }
     .qtlRunWork(
         .twasJointSpecGridWork(
             specs,
@@ -2694,10 +2666,11 @@ parseTraitIds <- function(traitId, data) {
     .parseOneJointSpec(jointSpecification[[i]], i, data)
 }
 
-# One context's response column on the shared samples, named by the context.
+# One context's response column on the group's samples, missing where the
+# context lacks one, named by the context.
 # @noRd
 .crossContextYCol <- function(cx, Yres, commonSamples) {
-    `colnames<-`(Yres[[cx]][commonSamples, , drop = FALSE], cx)
+    `colnames<-`(.jointRowsOf(Yres[[cx]], commonSamples), cx)
 }
 
 # TRUE when sumstats row `i`'s (study, context, trait) is entirely in scope.

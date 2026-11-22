@@ -3662,9 +3662,20 @@ fitFsusie <- function(
         min_purity = minPurity
     ))
     user <- as.list(methodArgs)
+    # fSuSiE takes no missing phenotype: it is fitted on the samples
+    # observing every position.
+    rows <- .completeRows(as.matrix(Y), "fitFsusie", "mvsusie")
     # Quiet unless `methodArgs` asks, as fitMvsusie() is.
     callArgs <- list_modify(
-        c(list(X = X, Y = Y, pos = pos, verbose = FALSE), owned),
+        c(
+            list(
+                X = X[rows, , drop = FALSE],
+                Y = Y[rows, , drop = FALSE],
+                pos = pos,
+                verbose = FALSE
+            ),
+            owned
+        ),
         !!!user
     )
     exec(fsusieR::susiF, !!!callArgs)

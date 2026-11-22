@@ -35,6 +35,8 @@ twasWeightsPipeline(data, ...)
   residualizationParam = ResidualizationParam(),
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
+  coupling = list(study = c(0.01, 0.1, 1, 10)),
+  completeSamples = FALSE,
   seed = NULL
 )
 
@@ -56,7 +58,8 @@ twasWeightsPipeline(data, ...)
   panelFilterParam = PanelFilterParam(),
   crossValidationParam = CrossValidationParam(),
   ensembleParam = EnsembleParam(),
-  studyCoupling = c(0.01, 0.1, 1, 10)
+  coupling = list(study = c(0.01, 0.1, 1, 10)),
+  residualCorrelation = NULL
 )
 
 \S4method{twasWeightsPipeline}{MultiStudyQtlDataset}(
@@ -86,7 +89,9 @@ twasWeightsPipeline(data, ...)
   residualizationParam = ResidualizationParam(),
   crossValidationParam = CrossValidationParam(),
   ensembleParam = EnsembleParam(),
-  studyCoupling = c(0.01, 0.1, 1, 10),
+  coupling = list(study = c(0.01, 0.1, 1, 10)),
+  completeSamples = FALSE,
+  residualCorrelation = NULL,
   seed = NULL
 )
 }
@@ -125,8 +130,13 @@ methods have several (see \code{\link{bayesAlphabetWeights}} and
 \code{\link{bayesAlphabetRssWeights}}; \code{bayesB} has one on summary
 statistics), and on summary statistics so does \code{lasso}
 (\code{"pecotmr"} or \code{"bigsnpr"}, which is slow: see
-\code{\link{lassosumRssWeights}}). On individual-level data,
-\code{bayesC} and \code{bayesN} on \code{"bglr"} also fit each group a
+\code{\link{lassosumRssWeights}}). On individual-level data
+\code{lasso} and \code{enet} run on \code{"glmnet"} (the default) or
+\code{"grpreg"}, \code{mcp} and \code{scad} on \code{"ncvreg"} (the
+default) or \code{"grpreg"}, and \code{l0learn} on \code{"l0learn"}
+(the default) or \code{"abess"}; each also fits groups of conditions
+with a group penalty on glmnet, grpreg and abess, and \code{bayesC} and
+\code{bayesN} on \code{"bglr"} fit each group a
 \code{jointSpecification} makes jointly (see there). Naming a
 method that is not being run, one with a single implementation, or an
 engine the method lacks on the input is an error, and so is a
@@ -211,13 +221,12 @@ including \code{"study"} one group per value of the axes it leaves out
 the mvSuSiE methods off the fine-mapping fits (no genotype is read) and
 fits
 \code{mrmash}, each condition on its own samples (mr.mash's
-\code{missing_y_method = "approximate"}); on the study axis alone it
-also fits \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
-across the studies under the penalty on the difference between their
-effects (see \code{studyCoupling}). The summary-statistics studies are
-fitted as well. On summary statistics the study axis also fits the
-penalized methods across the studies under that penalty, each study
-against its own LD reference, and \code{mrmash} and the mvSuSiE methods
+\code{missing_y_method = "approximate"}); the penalized methods fit
+them as described below. The summary-statistics studies are fitted as
+well. On summary statistics a group along a coupled axis also fits the
+penalized methods under the penalty on the difference between their
+effects (see \code{coupling}), each condition against its study's LD
+reference, and \code{mrmash} and the mvSuSiE methods
 take each study's own reference too (see \code{\link{mrmashRssWeights}}
 and \code{\link{mvsusieRssWeights}}).
 On individual-level data, \code{bayesC} and \code{bayesN} on
@@ -229,10 +238,44 @@ an unstructured residual covariance unless
 \code{BglrOptions(resCov = )} sets another, and on a
 \code{MultiStudyQtlDataset} the individual-level studies on the study
 axis alone, stacked as for the coupled methods, where the residual
-covariance is diagonal: their samples are disjoint. A composed spec
-including \code{"study"} does not fit them, as a diagonal residual
-covariance would drop the correlation of a study's contexts or traits.
-Without a specification they run one tuple at a time only.}
+covariance is diagonal: their samples are disjoint. On a composed spec
+including \code{"study"} the residual covariance is BGLR's recursive
+(\code{REC}) structure, free among a study's contexts or traits and zero
+across studies, with that structure's own prior. Without a
+specification they run one tuple at a time only.
+On individual-level data the penalized methods (\code{lasso},
+\code{enet}, \code{ridge}, \code{mcp}, \code{scad}, \code{l0learn})
+also fit each group of two or more conditions at once, alongside their
+fits of one tuple at a time, with or without a specification (in the
+groups it would make by default), on the engine \code{backend} puts
+them on. A group along an axis \code{coupling} names is fitted under
+the penalty on the difference between the conditions' effects, with
+the engine's group penalty as well where it has one; any other group
+under the group penalty alone: each variant's effects across the
+conditions are one group, so a variant is in every condition's weights
+or in none (see \code{\link{lassoWeights}}). The group penalty is
+glmnet's \code{"mgaussian"} family (\code{lasso}, \code{enet}) for a
+study's contexts or traits on its samples, grpreg's group penalties
+(\code{backend = "grpreg"}: \code{lasso}, \code{enet}, \code{mcp},
+\code{scad}) and abess's best subset of groups (\code{"abess"}:
+\code{l0learn}) for any group, each condition on its own samples; ridge
+has none, and fits each condition at one lambda chosen across them.
+ncvreg and L0Learn, the default engines of \code{mcp}, \code{scad} and
+\code{l0learn}, have no group penalty, so with no \code{backend} named
+those methods take their group fits on grpreg and abess, and their
+coupled ones on ncvreg and L0Learn; named \code{"ncvreg"} or
+\code{"l0learn"}, they fit a group only when it is coupled. Without a
+specification a method that fits the default groups neither way runs
+one tuple at a time; with one, a method named in \code{methods} that
+cannot fit its groups is an error. On summary statistics every
+penalized method fits each group, the default ones across contexts
+included, under the group penalty on pecotmr's own solver (not
+\code{lasso} on \code{backend = "bigsnpr"}), every condition at one
+grid point; a coupled group takes it with the coupling. A trait group
+there is fitted over the union of its genes' variants where their
+statistics differ, each gene's weights reaching as far as its
+statistics do. Within a study the groups keep every sample some
+condition observes unless \code{completeSamples = TRUE}.}
 
 \item{fineMappingResult}{Optional \code{QtlFineMappingResult}. When supplied,
 its SuSiE / SuSiE-inf / SuSiE-ash trimmed fits for the matching (study,
@@ -405,6 +448,69 @@ its phenotypes under it.}
 \item{verbose}{Verbosity (0 silent, 1 default, 2 includes external package
 messages).}
 
+\item{coupling}{The axes along which the penalized methods couple a
+group's conditions, each with its grid of strengths \eqn{c}: a named
+list with any of \code{study}, \code{context} and \code{trait}, e.g.
+\code{list(study = c(0.01, 0.1, 1, 10), context = c(0.1, 1))}.
+Coupled conditions are fitted under the penalty
+\eqn{(c/2) \sum (b_{jk} - b_{jk'})^2} on the difference between their
+per-SD effects, as PROSPER couples ancestries: a pair of a group's
+conditions differing along one coupled axis alone takes that axis's
+\eqn{c}, any other pair none, and several coupled axes make a grid of
+every combination of their strengths. Each condition's loss is its own
+mean squared error, and each condition takes the grid point its own
+held-out data score best: on individual-level data, \eqn{(\lambda, c)}
+on folds that hold a sample out of every condition at once; on summary
+statistics, \eqn{(s, \lambda, c)} on held-out statistics drawn from
+each condition's own LD, every condition fitted against its study's LD
+reference (the draws are made for each condition apart, as if no two
+shared samples). \eqn{c = 0} gives the conditions' separate fits and a
+large \eqn{c} one pooled fit. The default couples studies only, at
+\code{c(0.01, 0.1, 1, 10)}, which spans nearly separate to nearly
+pooled; \code{NULL} couples nothing. Coupled on individual-level data:
+\code{lasso}, \code{enet} and \code{ridge} on glmnet, with the group
+penalty of glmnet's \code{"mgaussian"} family as well on the conditions
+of a group that share samples and are not coupled to one another;
+\code{mcp} and \code{scad} on ncvreg; \code{l0learn} on L0Learn; and
+on grpreg and abess every method with its group penalty as well.
+ncvreg and grpreg rescale their columns, the coupling among them, so
+their penalty is approximate on a coupled group (MCP's exact when every
+variant has the same coupling), which a warning says once a session;
+their designs are dense. On summary statistics those methods are
+fitted by pecotmr's own solver whatever their \code{backend}, with the
+group penalty across the conditions as well (the L0 family swapping
+whole groups, as L0Learn swaps single variants).
+\code{l0learn} coupled takes \code{penalty = "L0"} only. The methods'
+fits of one condition at a time run too; the coupled ones are told
+apart by their joint columns (\code{\link{WeightSelectionParam}}'s
+\code{jointAxes} selects them). On summary statistics \code{prsCs}
+and \code{dprGibbs} are fitted across a coupled group too, as JointPRS
+and SDPRX fit ancestries; \eqn{c} does not apply to them, though
+\code{NULL} turns them off as well. Under \code{prsCs} the conditions
+share PRS-CS's continuous shrinkage prior, as PRS-CSx shares it, and
+their effects on a variant are correlated, the correlation learned on
+\eqn{[0, 0.99]} (or fixed by \code{PrsCsOptions(rho = )}); its weights
+stay standardized, so \code{maf} is refused there. A \code{mashPrior}
+gives both samplers their starting correlation, its covariances averaged
+over their weights, and \code{dprGibbs} its kinds' starting weights,
+each covariance's weight to the kind holding the conditions it covers.
+Under \code{dprGibbs} each non-null component of SDPR's
+Dirichlet process mixture carries a variant's effects in a set of the
+conditions, correlated: \code{\link{SdprOptions}}' \code{sharing} sets
+which sets, and \code{rho} the correlation (learned by default). Its
+\code{perVariantSampleSize}, \code{array} and \code{optLlk = 2}
+describe one condition, so they are refused there.}
+
+\item{completeSamples}{Logical (length 1). Individual-level data only:
+whether a joint group within a study (a study's contexts or traits, or
+each study's share of a group across studies) is fitted only on the
+samples observed in every one of its conditions. \code{FALSE}, the
+default, keeps every sample observed in some condition, each condition
+fitted on its own samples. An engine that takes no missing phenotype
+(glmnet's \code{"mgaussian"} group fit, fSuSiE, and mr.mash where the
+installed mr.mashr has no \code{missing_y_method}) still fits on the
+samples observing every condition itself.}
+
 \item{seed}{Integer or \code{NULL}. When supplied (\code{QtlDataset} path),
 seeds both the main-process RNG and the parallel method-fitting /
 cross-validation RNG (\code{BiocParallel} \code{RNGseed}) for
@@ -418,40 +524,24 @@ built with
 \code{\link{PanelFilterParam}}. See \emph{Panel filters on the RSS path}
 above.}
 
-\item{studyCoupling}{For a \code{MultiStudyQtlDataset}, or a
-\code{QtlSumStats} holding several studies: the strengths \eqn{c} of
-the penalty \eqn{(c/2) \sum (b_{jk} - b_{jk'})^2} on the difference
-between studies' per-SD effects that the penalized methods are fitted
-with across the studies a \code{"study"} \code{jointSpecification}
-joins, as PROSPER couples ancestries. Each study's loss is its own mean
-squared error, and each study takes the grid point its own held-out
-data score best: on individual-level studies, \eqn{(\lambda, c)} on
-folds drawn within each study; on summary statistics, \eqn{(s,
-\lambda, c)} on held-out statistics drawn from each study's own LD,
-every study fitted against its own LD reference. \eqn{c = 0} gives the
-studies' separate fits and a large \eqn{c} one pooled fit. The
-default, \code{c(0.01, 0.1, 1, 10)}, spans nearly separate to nearly
-pooled. The methods' per-study fits run too; the coupled ones are told
-apart by their \code{jointStudies}
-(\code{\link{WeightSelectionParam}}'s \code{jointAxes = "study"}
-selects them). \code{NULL} fits none. Coupled on individual-level
-studies: \code{lasso}, \code{enet}, \code{ridge} and \code{l0learn}
-(\code{mcp} and \code{scad} stay per study, as ncvreg takes no sparse
-design); on summary statistics those and \code{mcp} and \code{scad},
-each fitted by pecotmr's own solver whatever its \code{backend}.
-\code{l0learn} across studies takes \code{penalty = "L0"} only. On
-summary statistics \code{prsCs} and \code{dprGibbs} are fitted across
-the studies too, as JointPRS and SDPRX fit ancestries; \eqn{c} does
-not apply to them, though \code{NULL} turns them off as well. Under
-\code{prsCs} the studies share PRS-CS's continuous shrinkage prior, as
-PRS-CSx shares it, and their effects on a variant are correlated, the
-correlation learned on \eqn{[0, 0.99]}; its weights stay standardized,
-so \code{maf} is refused there. Under \code{dprGibbs} each non-null
-component of SDPR's Dirichlet process mixture carries a variant's
-effects in a set of the studies, correlated: \code{\link{SdprOptions}}'
-\code{sharing} sets which sets, and \code{rho} the correlation (learned
-by default). Its \code{perVariantSampleSize}, \code{array} and
-\code{optLlk = 2} describe one study, so they are refused there.}
+\item{residualCorrelation}{Summary statistics only: the correlation of
+the conditions' z-scores under the null, which carries their residual
+correlation and their samples' overlap (what
+\code{\link{mashResidualCorrelation}} estimates), a matrix whose rows
+and columns are named by condition, \code{"study:context:trait"}.
+Conditions on one LD reference over the same variants are read as
+sharing samples by it: the penalized methods draw their held-out splits
+correlated by it, and \code{prsCs} and \code{dprGibbs} fitted across
+them correlate their noise in their likelihood: \code{dprGibbs} by it,
+and \code{prsCs} by its conditions' residual covariance, learned with
+it standing for their phenotypes' cross-products (exact where they share
+every sample; the residual correlation is reported as
+\code{residualEst}). Without it, the residual
+correlation of a \code{mashPrior}'s prior over the group's axes is used;
+given with a \code{mashPrior}, it overrides that one, with a warning.
+\code{NULL} (the default) with no \code{mashPrior} reads every
+condition's noise as independent, which favours stronger sharing where
+the conditions share samples.}
 }
 \value{
 A \code{\link{TwasWeights}} collection with one row per gene --

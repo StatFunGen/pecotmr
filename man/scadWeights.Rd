@@ -8,43 +8,62 @@ scadWeights(
   X,
   y,
   nfolds = 5,
+  backend = NULL,
   fitRetention = c("none", "slim", "full"),
   retainX = FALSE,
-  methodArgs = NcvregOptions()
+  methodArgs = NULL
 )
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
 
-\item{y}{A numeric response vector.}
+\item{y}{A numeric response vector, or on grpreg a matrix with a column
+per condition.}
 
 \item{nfolds}{Number of cross-validation folds. Default is 5.}
+
+\item{backend}{The engine: \code{"ncvreg"} (the default for \code{NULL})
+or \code{"grpreg"}.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{lambda} and cross-validated error there (\code{cve},
-\code{cvse}); \code{"full"} the whole \code{cv.ncvreg} object, with
-every \code{lambda}'s coefficients but without its copy of \code{X}.
-Each names the variants it was fitted on.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, \code{lambda} and cross-validated
+error there (\code{cve}, \code{cvse}); \code{"full"} the whole
+\code{cv.ncvreg} or \code{cv.grpreg} object, with every
+\code{lambda}'s coefficients but without its copies of the data. Each
+names the variants it was fitted on.}
 
-\item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
-(default \code{FALSE}). An error at any other \code{fitRetention}.}
+\item{retainX}{Logical. Keep the fit's copy of \code{X} in a
+\code{"full"} fit (default \code{FALSE}): ncvreg's, or on grpreg its
+standardized design (its \code{returnX}). An error at any other
+\code{fitRetention}.}
 
-\item{methodArgs}{Options forwarded to \code{ncvreg::cv.ncvreg}, built
-with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{methodArgs}{Options for the backend's engine, built with its
+constructor: \code{\link{NcvregOptions}} for ncvreg,
+\code{\link{GrpregOptions}} for grpreg. \code{NULL} (the default) keeps
+the engine's defaults. A bare list is refused: it cannot be checked
+against the engine, so a misspelled option would be silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights, with the
+A numeric vector of length `ncol(X)` of variant weights, or for a
+  matrix \code{y} a matrix of them with a column per condition, with the
   fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
-Fits a SCAD-penalized linear regression model via `ncvreg::cv.ncvreg` and
-returns the coefficient vector at `lambda.min`.
+Fits a SCAD-penalized linear regression and returns the coefficient vector
+at \code{lambda.min}: on ncvreg (\code{ncvreg::cv.ncvreg}, the default) or
+on grpreg (\code{backend = "grpreg"}), whose group SCAD with each variant
+its own group is SCAD. Both take \code{gamma = 3.7} unless
+\code{methodArgs} sets it (grpreg's own default would be 4).
+}
+\details{
+On grpreg a matrix \code{y}, a column per condition, is fitted across the
+conditions at once, each variant's effects across them one group under the
+penalty, as \code{\link{lassoWeights}} describes; ncvreg fits one
+phenotype.
 }
 \examples{
 data(eqtlRegionExample)

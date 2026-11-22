@@ -458,6 +458,9 @@ test_that("a diverged PRS-CS chain warns, and chains that all diverge error", {
         0.5,
         NULL,
         constraint,
+        NULL,
+        TRUE,
+        NULL,
         map(studies, "z"),
         map_dbl(studies, "n"),
         map(studies, "R"),
@@ -505,6 +508,9 @@ test_that("PRS-CS across one study is PRS-CS, draw for draw", {
         0.5,
         NULL,
         1,
+        NULL,
+        TRUE,
+        NULL,
         list(one[[1L]]$z),
         250,
         list(factor),
@@ -547,6 +553,9 @@ test_that("JointPRS's entry points refuse LD that does not fit the studies", {
             0.5,
             NULL,
             1,
+            NULL,
+            TRUE,
+            NULL,
             map(studies, "z"),
             c(250, 165),
             ld,
@@ -574,6 +583,48 @@ test_that("JointPRS's entry points refuse LD that does not fit the studies", {
         run(jointPrsFactorCpp, list(studies[[1L]]$X)),
         "There are 1 LD factors for 2 studies"
     )
+})
+
+test_that("a given rho holds the studies' correlation fixed", {
+    studies <- .rrwTwoStudies()
+    run <- function(rho, learnRho) {
+        jointPrsCpp(
+            1,
+            0.5,
+            NULL,
+            c(1, 1),
+            rho,
+            learnRho,
+            NULL,
+            map(studies, "z"),
+            c(250, 165),
+            map(studies, "R"),
+            list(1:30, 1:30),
+            30L,
+            200L,
+            100L,
+            5L,
+            FALSE,
+            11L,
+            1,
+            FALSE,
+            FALSE
+        )
+    }
+    fixed <- matrix(c(1, 0.6, 0.6, 1), 2L)
+    expect_equal(run(fixed, FALSE)$rhoEst, fixed)
+    # Given as a start and learned, it moves.
+    expect_false(isTRUE(all.equal(run(fixed, TRUE)$rhoEst, fixed)))
+    expect_error(
+        run(matrix(c(1, 2, 2, 1), 2L), FALSE),
+        "positive-definite correlation matrix"
+    )
+    # The option, as the pipeline passes it.
+    expect_equal(
+        pecotmr:::.sdprCoupledRho(0.3, 2L, "x"),
+        matrix(c(1, 0.3, 0.3, 1), 2L)
+    )
+    expect_true(is_in("rho", names(formals(prsCs))))
 })
 
 test_that("a constraint of 0 holds the studies' correlation at 0 (PRS-CSx)", {
@@ -651,4 +702,47 @@ test_that("PRS-CS weights across studies sit over the union of variants", {
         ),
         "the weights across studies stay standardized"
     )
+})
+
+test_that("conditions sharing samples learn their residuals' correlation", {
+    data(eqtlRegionExample, envir = environment())
+    X <- scale(eqtlRegionExample$X[, 301:340])
+    n <- nrow(X)
+    R <- crossprod(X) / (n - 1)
+    withr::local_seed(1L)
+    b <- replace(numeric(40L), c(5L, 25L), c(0.3, 0.25))
+    e <- matrix(stats::rnorm(2L * n), n) %*% chol(matrix(c(1, 0.8, 0.8, 1), 2L))
+    ys <- list(drop(X %*% b) + e[, 1L], e[, 2L])
+    bh <- map(ys, function(y) drop(crossprod(X, scale(y))) / (n - 1))
+    # The null z-scores' correlation: the phenotypes', below the residuals'.
+    E <- stats::cor(ys[[1L]], ys[[2L]])
+    run <- function(noise) {
+        jointPrsCpp(
+            1,
+            0.5,
+            NULL,
+            c(1, 1),
+            diag(2L),
+            FALSE,
+            noise,
+            bh,
+            c(n, n) + 0,
+            list(R, R),
+            list(1:40, 1:40),
+            40L,
+            600L,
+            200L,
+            5L,
+            FALSE,
+            3L,
+            1,
+            FALSE,
+            FALSE
+        )
+    }
+    shared <- run(solve(matrix(c(1, E, E, 1), 2L)))
+    expect_gt(shared$residualEst[1L, 2L], E)
+    expect_lt(abs(shared$residualEst[1L, 2L] - 0.8), 0.1)
+    # Conditions on samples of their own keep the identity.
+    expect_equal(run(NULL)$residualEst, diag(2L))
 })

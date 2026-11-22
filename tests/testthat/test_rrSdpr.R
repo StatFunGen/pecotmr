@@ -386,6 +386,9 @@ test_that("sdprWeights on one study ignores the settings across studies", {
         30L,
         kinds,
         rho,
+        FALSE,
+        NULL,
+        NULL,
         0.1,
         1,
         50L,
@@ -436,6 +439,9 @@ test_that("SDPR across one study is SDPR, draw for draw", {
         list(1:30),
         30L,
         list(1L),
+        NULL,
+        FALSE,
+        NULL,
         NULL,
         0.1,
         1,
@@ -674,6 +680,9 @@ test_that("SDPR's entry points refuse inputs that do not fit together", {
             nUnion,
             kinds,
             NULL,
+            FALSE,
+            NULL,
+            NULL,
             0.1,
             1,
             20L,
@@ -756,6 +765,9 @@ test_that("SDPR across three studies learns each pair a kind spans", {
             30L,
             kinds,
             NULL,
+            FALSE,
+            NULL,
+            NULL,
             0.1,
             1,
             20L,
@@ -777,4 +789,119 @@ test_that("SDPR across three studies learns each pair a kind spans", {
     partial <- run(list(1L, 2L, 3L, 1:2))
     expect_equal(partial$rhoEst[1L, 3L], 0)
     expect_equal(partial$rhoEst[2L, 3L], 0)
+})
+
+test_that("samplers read conditions on shared samples through their noise", {
+    studies <- .rrwTwoStudies()
+    bh <- map(studies, "z")
+    R <- studies[[1L]]$R
+    E <- matrix(c(1, 0.8, 0.8, 1), 2L)
+    sdprx <- function(noise) {
+        sdprxCpp(
+            bh,
+            list(R, R),
+            c(250L, 250L),
+            list(1:30, 1:30),
+            30L,
+            list(1L, 2L, 1:2),
+            diag(2L),
+            FALSE,
+            NULL,
+            noise,
+            0.1,
+            1,
+            20L,
+            0.5,
+            0.5,
+            200L,
+            50L,
+            5L,
+            FALSE,
+            3L,
+            FALSE,
+            FALSE
+        )$betaEst
+    }
+    prs <- function(noise) {
+        jointPrsCpp(
+            1,
+            0.5,
+            NULL,
+            c(1, 1),
+            diag(2L),
+            FALSE,
+            noise,
+            bh,
+            c(250, 250),
+            list(R, R),
+            list(1:30, 1:30),
+            30L,
+            200L,
+            50L,
+            5L,
+            FALSE,
+            3L,
+            1,
+            FALSE,
+            FALSE
+        )$betaEst
+    }
+    # The identity is no sharing: the independent chains, draw for draw.
+    expect_identical(sdprx(diag(2L)), sdprx(NULL))
+    expect_identical(prs(diag(2L)), prs(NULL))
+    expect_false(identical(sdprx(solve(E)), sdprx(NULL)))
+    expect_false(identical(prs(solve(E)), prs(NULL)))
+    # Conditions sharing samples must hold the same variants.
+    expect_error(
+        jointPrsCpp(
+            1,
+            0.5,
+            NULL,
+            c(1, 1),
+            diag(2L),
+            FALSE,
+            solve(E),
+            list(bh[[1L]], bh[[2L]][1:29]),
+            c(250, 250),
+            list(R, R[1:29, 1:29]),
+            list(1:30, 1:29),
+            30L,
+            20L,
+            5L,
+            5L,
+            FALSE,
+            3L,
+            1,
+            FALSE,
+            FALSE
+        ),
+        "share samples but not their variants"
+    )
+})
+
+test_that("the noise precision and a MashPrior seed reach the samplers", {
+    refs <- list("A", "A", "B")
+    stats <- rep(list(list(variantNames = c("v1", "v2"))), 3L)
+    E <- matrix(c(1, 0.5, 0.2, 0.5, 1, 0.1, 0.2, 0.1, 1), 3L)
+    Q <- pecotmr:::.samplerNoisePrecision(E, refs, stats)
+    # Only conditions on one reference and variants share samples.
+    expect_equal(Q[1:2, 3L], c(0, 0))
+    expect_equal(Q[1:2, 1:2], solve(E[1:2, 1:2]))
+    expect_null(pecotmr:::.samplerNoisePrecision(diag(3L), refs, stats))
+    expect_null(pecotmr:::.samplerNoisePrecision(NULL, refs, stats))
+    seed <- list(
+        U = list(
+            c1 = diag(c(1, 0)),
+            c2 = diag(c(0, 1)),
+            all = matrix(c(1, 0.6, 0.6, 1), 2L)
+        ),
+        w = c(c1 = 0.2, c2 = 0.2, all = 0.6)
+    )
+    rho <- pecotmr:::.samplerSeedRho(seed)
+    expect_equal(rho[1L, 2L], 0.36 / 0.8)
+    expect_equal(
+        pecotmr:::.sdprSeedKindWeights(seed, list(1L, 2L, 1:2)),
+        c(0.2, 0.2, 0.6)
+    )
+    expect_null(pecotmr:::.samplerSeedRho(NULL))
 })

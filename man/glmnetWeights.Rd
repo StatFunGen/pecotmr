@@ -16,7 +16,8 @@ glmnetWeights(
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
-\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}, or
+a matrix with a column per condition (see Details).}
 
 \item{alpha}{Elastic-net mixing parameter in \code{[0, 1]}: \code{1} = lasso,
 \code{0} = ridge, \code{0.5} = elastic net.}
@@ -24,11 +25,13 @@ glmnetWeights(
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{lambda} and cross-validated error there (\code{cvm},
-\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-every \code{lambda}'s coefficients but without the copy of \code{X} its
-stored calls would hold. Each names the variants it was fitted on.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, \code{lambda} and cross-validated
+error there (\code{cvm}, \code{cvsd}); \code{"full"} the whole
+\code{cv.glmnet} object, with every \code{lambda}'s coefficients but
+without the copy of \code{X} its stored calls would hold, fitted for a
+matrix \code{y} on the scaled phenotypes. Each names the variants it
+was fitted on.}
 
 \item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
 (default \code{FALSE}). An error at any other \code{fitRetention}.}
@@ -38,13 +41,27 @@ stored calls would hold. Each names the variants it was fitted on.}
 list is refused, since it cannot be checked against the engine's formals.}
 }
 \value{
-Numeric vector of length \code{ncol(X)} of per-variant weights,
-  with the fit attached as attribute \code{"fit"} unless
+Numeric vector of length \code{ncol(X)} of per-variant weights, or
+  for a matrix \code{y} a matrix of them with a column per condition, with
+  the fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
 Fit a cross-validated elastic-net / lasso model with \code{glmnet::cv.glmnet}
 and return the per-variant coefficient vector at \code{lambda.min}.
+}
+\details{
+Given a matrix \code{y}, a column per condition measured on the same
+samples, it fits the conditions at once with glmnet's \code{"mgaussian"}
+family: each variant's effects across them form one group under the
+penalty, so a variant is in the model for every condition or for none,
+each condition with its own effect. Each phenotype is scaled to unit
+variance for the fit and its weights are returned on its own scale. One
+\code{lambda} serves every condition, the one with the lowest
+cross-validated error summed over them. At \code{alpha = 0} the
+conditions are separate ridge fits sharing that \code{lambda}. A missing
+phenotype is an error: conditions measured on samples of their own take
+\code{backend = "grpreg"} (see \code{\link{lassoWeights}}).
 }
 \examples{
 data(eqtlRegionExample)

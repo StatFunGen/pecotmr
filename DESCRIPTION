@@ -65,6 +65,7 @@ Imports:
     withr,
     yaml
 Suggests:
+    abess,
     arrow,
     aSPU,
     BGLR,
@@ -82,6 +83,7 @@ Suggests:
     GDSArray,
     gdsfmt,
     glmnet,
+    grpreg,
     harmonicmeanp,
     hibayes,
     igraph,

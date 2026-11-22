@@ -2,52 +2,79 @@
 % Please edit documentation in R/regularizedRegressionWrappers.R
 \name{l0learnWeights}
 \alias{l0learnWeights}
-\title{Compute Weights Using L0Learn}
+\title{Compute Weights Using an L0 Penalty}
 \usage{
 l0learnWeights(
   X,
   y,
   penalty = "L0",
   nFolds = 5,
+  backend = NULL,
   fitRetention = c("none", "slim", "full"),
-  methodArgs = L0learnOptions()
+  methodArgs = NULL
 )
 }
 \arguments{
 \item{X}{A numeric matrix of predictors.}
 
-\item{y}{A numeric response vector.}
+\item{y}{A numeric response vector, or on abess a matrix with a column per
+condition.}
 
-\item{penalty}{Type of regularization: "L0", "L0L1", or "L0L2". Default is
-"L0".}
+\item{penalty}{Type of regularization: "L0", "L0L1", or "L0L2" on L0Learn;
+"L0" on abess. Default is "L0".}
 
 \item{nFolds}{Number of cross-validation folds. Default is 5.}
+
+\item{backend}{The engine: \code{"l0learn"} (the default for \code{NULL})
+or \code{"abess"}.}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{gamma}, \code{lambda} and cross-validated error there
-(\code{cvMean}, \code{cvSd}); \code{"full"} the whole
-\code{L0Learn.cvfit} object, with every candidate's coefficients.
-Either names the variants it was fitted on, in \code{variantIds}.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, and on L0Learn \code{gamma},
+\code{lambda} and the cross-validated error there (\code{cvMean},
+\code{cvSd}), on abess the support size (\code{supportSize}) and the
+cross-validated error there (\code{cvMean}); \code{"full"} the whole
+\code{L0Learn.cvfit} or \code{abess} object, with every candidate's
+coefficients. Either names the variants it was fitted on, in
+\code{variantIds}.}
 
-\item{methodArgs}{Options forwarded to \code{L0Learn::L0Learn.cvfit}, built
-with \code{\link{L0learnOptions}}. A bare list is refused: it cannot be
-checked against the engine, so a misspelled option would be
-silently ignored.}
+\item{methodArgs}{Options for the backend's engine, built with its
+constructor: \code{\link{L0learnOptions}} for L0Learn,
+\code{\link{AbessOptions}} for abess. \code{NULL} (the default) keeps
+the engine's defaults. A bare list is refused: it cannot be checked
+against the engine, so a misspelled option would be silently ignored.}
 }
 \value{
-A numeric vector of length `ncol(X)` of variant weights, with the
+A numeric vector of length `ncol(X)` of variant weights, or for a
+  matrix \code{y} a matrix of them with a column per condition, with the
   fit attached as attribute \code{"fit"} unless
   \code{fitRetention = "none"}.
 }
 \description{
-Fits an L0-regularized linear regression model via `L0Learn::L0Learn.cvfit`
-and returns the coefficient vector at the (lambda, gamma) pair minimizing the
-cross-validation error. Default penalty is "L0"; the user can switch to
-"L0L1" or "L0L2" (and tune the corresponding gamma grid) by passing the
-relevant arguments through `...`.
+Fits an L0-regularized linear regression, a best subset of the variants,
+and returns the coefficient vector of the fit minimizing the
+cross-validation error: on L0Learn (\code{L0Learn::L0Learn.cvfit}, the
+default), at the (lambda, gamma) pair minimizing it, or on abess
+(\code{backend = "abess"}), at the support size minimizing it. The default
+penalty is "L0"; on L0Learn it can be "L0L1" or "L0L2" instead (with the
+gamma grid tuned through \code{methodArgs}), and abess fits "L0" alone.
+}
+\details{
+On abess a matrix \code{y}, a column per condition, is fitted across the
+conditions at once: a best subset of variants, each in the model for every
+condition or for none, each condition with its own effects, on its
+phenotype scaled to unit variance and fitted on its own samples. One
+support size serves every condition, the one with the lowest
+cross-validated error summed over them, on folds that hold each sample out
+of every condition it is in. Conditions measured on the same samples run
+abess's \code{"mgaussian"} family. Conditions measured on samples of their
+own, a phenotype missing wherever a condition was not measured, run a best
+subset of groups on a sparse design in which each condition's rows hold
+its own samples against its own copy of the variants (see
+\code{\link{lassoWeights}}). abess runs on one thread here, and R's random
+number generator, which abess reseeds as it returns, is restored.
 }
 \examples{
 data(eqtlRegionExample)

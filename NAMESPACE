@@ -15,6 +15,7 @@ S3method(postprocessFinemappingFit,susieRss)
 export("af<-")
 export("maf<-")
 export("sampleSize<-")
+export(AbessOptions)
 export(AnnotationMatrix)
 export(AspuOptions)
 export(BglrOptions)
@@ -60,6 +61,7 @@ export(GenotypeFilterParam)
 export(GenotypeMixture)
 export(GlmnetOptions)
 export(GremlOptions)
+export(GrpregOptions)
 export(GwasFineMappingParam)
 export(GwasFineMappingResult)
 export(GwasSumStats)
@@ -966,6 +968,7 @@ importFrom(tictoc,
   toc
 )
 importFrom(tidyr,
+  expand_grid,
   replace_na,
   separate
 )
