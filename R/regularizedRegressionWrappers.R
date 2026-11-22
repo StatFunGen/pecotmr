@@ -11160,9 +11160,9 @@ bglrWeights <- function(
 #' Compute Weights Using Dirichlet Process Regression (RcppDPR)
 #'
 #' Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
-#' returns the per-variant weights, computed as `beta + alpha` (matching
-#' RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new
-#' + pheno_mean`).
+#' returns its per-variant effects `beta` as the weights. Without a kinship
+#' rotation, `fit_model`'s `alpha` is not a genetic effect (it maps the
+#' in-sample residual back onto the genotypes), so it is left out.
 #'
 #' By default the variational Bayes (`VB`) fitting method is used, which is fast
 #' and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs` for
@@ -11225,7 +11225,7 @@ dprWeights <- function(
         !!!user
     )
     fit <- exec(RcppDPR::fit_model, !!!callArgs)
-    eff.wgt <- replace(zeros, keep, as.numeric(fit$beta + fit$alpha))
+    eff.wgt <- replace(zeros, keep, as.numeric(fit$beta))
     if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }

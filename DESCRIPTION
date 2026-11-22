@@ -119,8 +119,6 @@ Suggests:
     VariantAnnotation,
     wavethresh
 Remotes:
-    danielnachun/mr.mashr@multi-ancestry,
-    danielnachun/mvsusieR@multi-ancestry,
     kkdey/CorShrink,
     stephenslab/fsusieR,
     stephenslab/susieR,
