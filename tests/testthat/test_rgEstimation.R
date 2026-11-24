@@ -2466,9 +2466,14 @@ test_that("tied noise ties a two-study group's pairs that share donors", {
     skip_if_not_installed("PlinkMatrix")
     ms <- .twoStudyFixture()
     tied <- function(param) methods::initialize(param, crossNoise = "tied")
+    # The joint fit keeps at most 0.3 n directions per reference (24, not
+    # 51): its profile walks are most of this test's time, and the noise
+    # routing checked here does not depend on them.
+    joint <- tied(.rgJointSettings())
+    capped <- methods::initialize(joint@truncation, maxPerSample = 0.3)
     fits <- list(
         pairs = list(tied(H2EstimateParam()), FALSE),
-        joint = list(tied(.rgJointSettings()), FALSE),
+        joint = list(methods::initialize(joint, truncation = capped), FALSE),
         given = list(tied(.rgSettings()$moments), TRUE)
     )
     for (name in names(fits)) {

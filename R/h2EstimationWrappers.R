@@ -1282,6 +1282,27 @@ NULL
     eigenLikelihoodCpp(model, data, as.double(theta), scoring)
 }
 
+# The start among `starts`, each kept within [lower, upper], where `model`'s
+# log-likelihood is highest, the first where none is finite: a start moved
+# far from its fit (one extrapolated past a jump between modes) can sit where
+# the conditional variances are floored, where scoring crawls.
+# @noRd
+.h2BestStart <- function(model, data, starts, lower, upper) {
+    boxed <- map(starts, .h2Boxed, lower = lower, upper = upper)
+    values <- map_dbl(boxed, .h2LikelihoodValue, model = model, data = data)
+    boxed[[which.max(replace(values, !is.finite(values), -Inf))]]
+}
+
+# @noRd
+.h2Boxed <- function(x, lower, upper) {
+    pmin(pmax(x, lower), upper)
+}
+
+# @noRd
+.h2LikelihoodValue <- function(theta, model, data) {
+    .h2Likelihood(model, data, theta)$value
+}
+
 # The best of `fits` that converged with a value no worse than `nullValue`,
 # within rounding (a fit at the null's boundary is the null); NULL when none
 # does.

@@ -607,23 +607,25 @@ class MixedLikelihood : public GroupLikelihood {
                 const uvec& free) const override {
     const uword P = P_;
     const Covariances cov = covariances(theta);
-    std::vector<std::vector<mat>> L(P);
+    std::vector<std::vector<mat>> L(P), LD(P);
     std::vector<Block> D(P);
     std::vector<vec> e(P);
     double ll = 0.0;
     for (uword k = 0; k < P; ++k) {
       L[k].resize(k);
+      LD[k].resize(k);
       for (uword j = 0; j < k; ++j) {
         mat num = covariance(cov.G, cov.C, k, j);
         for (uword m = 0; m < j; ++m) {
-          num -= L[k][m] * D[m].matrix * L[j][m].t();
+          num -= LD[k][m] * L[j][m].t();
         }
         L[k][j] = num * D[j].inverse;
+        LD[k][j] = L[k][j] * D[j].matrix;
       }
       mat S = diagmat(v_[k]);
       vec predicted(u_[k].n_elem, fill::zeros);
       for (uword j = 0; j < k; ++j) {
-        S -= L[k][j] * D[j].matrix * L[k][j].t();
+        S -= LD[k][j] * L[k][j].t();
         predicted += L[k][j] * e[j];
       }
       D[k] = flooredBlock((S + S.t()) / 2.0, floor_);
@@ -631,7 +633,7 @@ class MixedLikelihood : public GroupLikelihood {
       ll -= (D[k].logDet + dot(e[k], D[k].inverse * e[k])) / 2.0;
     }
     Evaluation out{ll, vec(), mat()};
-    if (scoring) score(out, theta, free, L, D, e);
+    if (scoring) score(out, theta, free, L, LD, D, e);
     return out;
   }
 
@@ -646,6 +648,7 @@ class MixedLikelihood : public GroupLikelihood {
   // decomposition one parameter at a time.
   void score(Evaluation& out, const vec& theta, const uvec& free,
              const std::vector<std::vector<mat>>& L,
+             const std::vector<std::vector<mat>>& LD,
              const std::vector<Block>& D, const std::vector<vec>& e) const {
     const uword P = P_, q = free.n_elem;
     cube dG, dC;
@@ -660,18 +663,17 @@ class MixedLikelihood : public GroupLikelihood {
           mat num = covariance(dG.slice(t), dC.slice(t), k, j) -
                     L[k][j] * dD[t][j];
           for (uword m = 0; m < j; ++m) {
-            num -= dL[k][m] * D[m].matrix * L[j][m].t() +
+            num -= dL[k][m] * LD[j][m].t() +
                    L[k][m] * dD[t][m] * L[j][m].t() +
-                   L[k][m] * D[m].matrix * dL[j][m].t();
+                   LD[k][m] * dL[j][m].t();
           }
           dL[k][j] = num * D[j].inverse;
         }
         mat dS(u_[k].n_elem, u_[k].n_elem, fill::zeros);
         vec dek(u_[k].n_elem, fill::zeros);
         for (uword j = 0; j < k; ++j) {
-          dS -= dL[k][j] * D[j].matrix * L[k][j].t() +
-                L[k][j] * dD[t][j] * L[k][j].t() +
-                L[k][j] * D[j].matrix * dL[k][j].t();
+          const mat A = dL[k][j] * LD[k][j].t();
+          dS -= A + A.t() + L[k][j] * dD[t][j] * L[k][j].t();
           dek -= dL[k][j] * e[j] + L[k][j] * de[t][j];
         }
         dD[t][k] = flooredStep(D[k], (dS + dS.t()) / 2.0, floor_);
@@ -683,13 +685,17 @@ class MixedLikelihood : public GroupLikelihood {
     for (uword k = 0; k < P; ++k) {
       const vec a = D[k].inverse * e[k];
       std::vector<mat> W(q);
-      for (uword t = 0; t < q; ++t) W[t] = D[k].inverse * dD[t][k];
+      std::vector<vec> Ide(q);
+      for (uword t = 0; t < q; ++t) {
+        W[t] = D[k].inverse * dD[t][k];
+        Ide[t] = D[k].inverse * de[t][k];
+      }
       for (uword t = 0; t < q; ++t) {
         out.score[t] += -dot(de[t][k], a) +
                         (dot(e[k], W[t] * a) - trace(W[t])) / 2.0;
         for (uword l = 0; l <= t; ++l) {
           const double entry =
-              dot(de[t][k], D[k].inverse * de[l][k]) +
+              dot(de[t][k], Ide[l]) +
               accu(W[t] % W[l].t()) / 2.0;
           out.information(t, l) += entry;
           if (l != t) out.information(l, t) += entry;

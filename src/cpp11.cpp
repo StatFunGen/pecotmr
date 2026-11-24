@@ -89,6 +89,20 @@ extern "C" SEXP _pecotmr_qtlEnrichmentCpp(SEXP rGwasPip, SEXP rQtlSusieFit, SEXP
     return cpp11::as_sexp(qtlEnrichmentCpp(cpp11::as_cpp<cpp11::decay_t<SEXP>>(rGwasPip), cpp11::as_cpp<cpp11::decay_t<SEXP>>(rQtlSusieFit), cpp11::as_cpp<cpp11::decay_t<double>>(piGwas), cpp11::as_cpp<cpp11::decay_t<double>>(piQtl), cpp11::as_cpp<cpp11::decay_t<double>>(totalVariants), cpp11::as_cpp<cpp11::decay_t<int>>(ImpN), cpp11::as_cpp<cpp11::decay_t<double>>(shrinkageLambda), cpp11::as_cpp<cpp11::decay_t<bool>>(doubleShrinkage), cpp11::as_cpp<cpp11::decay_t<bool>>(besselCorrection), cpp11::as_cpp<cpp11::decay_t<int>>(numThreads), cpp11::as_cpp<cpp11::decay_t<cpp11::sexp>>(seed)));
   END_CPP11
 }
+// rg_draws.cpp
+cpp11::writable::doubles rgPartialDrawPCpp(const doubles_matrix<>& topR, const doubles_matrix<>& noiseR, const doubles& gramR, const doubles_matrix<>& sigmaR, double K, const integers& CR, int f, const doubles& BR, double tau2, double observedR);
+extern "C" SEXP _pecotmr_rgPartialDrawPCpp(SEXP topR, SEXP noiseR, SEXP gramR, SEXP sigmaR, SEXP K, SEXP CR, SEXP f, SEXP BR, SEXP tau2, SEXP observedR) {
+  BEGIN_CPP11
+    return cpp11::as_sexp(rgPartialDrawPCpp(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(topR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(noiseR), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(gramR), cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(sigmaR), cpp11::as_cpp<cpp11::decay_t<double>>(K), cpp11::as_cpp<cpp11::decay_t<const integers&>>(CR), cpp11::as_cpp<cpp11::decay_t<int>>(f), cpp11::as_cpp<cpp11::decay_t<const doubles&>>(BR), cpp11::as_cpp<cpp11::decay_t<double>>(tau2), cpp11::as_cpp<cpp11::decay_t<double>>(observedR)));
+  END_CPP11
+}
+// rg_draws.cpp
+cpp11::writable::list rgMixedDrawPairsCpp(const doubles_matrix<>& cellsR, int P, int i, int j, const integers& restR);
+extern "C" SEXP _pecotmr_rgMixedDrawPairsCpp(SEXP cellsR, SEXP P, SEXP i, SEXP j, SEXP restR) {
+  BEGIN_CPP11
+    return cpp11::as_sexp(rgMixedDrawPairsCpp(cpp11::as_cpp<cpp11::decay_t<const doubles_matrix<>&>>(cellsR), cpp11::as_cpp<cpp11::decay_t<int>>(P), cpp11::as_cpp<cpp11::decay_t<int>>(i), cpp11::as_cpp<cpp11::decay_t<int>>(j), cpp11::as_cpp<cpp11::decay_t<const integers&>>(restR)));
+  END_CPP11
+}
 // rss_mcmc.cpp
 cpp11::writable::list prsCsCpp(double a, double b, sexp phi, doubles bhat, sexp maf, int n, list ldBlk, int nIter, int nBurnin, int thin, bool verbose, sexp seed, double shrinkCorr, bool raoBlackwell, bool track);
 extern "C" SEXP _pecotmr_prsCsCpp(SEXP a, SEXP b, SEXP phi, SEXP bhat, SEXP maf, SEXP n, SEXP ldBlk, SEXP nIter, SEXP nBurnin, SEXP thin, SEXP verbose, SEXP seed, SEXP shrinkCorr, SEXP raoBlackwell, SEXP track) {
@@ -171,6 +185,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_pecotmr_prsCsCpp",                     (DL_FUNC) &_pecotmr_prsCsCpp,                     15},
     {"_pecotmr_prsCsFactorCpp",               (DL_FUNC) &_pecotmr_prsCsFactorCpp,               15},
     {"_pecotmr_qtlEnrichmentCpp",             (DL_FUNC) &_pecotmr_qtlEnrichmentCpp,             11},
+    {"_pecotmr_rgMixedDrawPairsCpp",          (DL_FUNC) &_pecotmr_rgMixedDrawPairsCpp,           5},
+    {"_pecotmr_rgPartialDrawPCpp",            (DL_FUNC) &_pecotmr_rgPartialDrawPCpp,            10},
     {"_pecotmr_sdprCpp",                      (DL_FUNC) &_pecotmr_sdprCpp,                      18},
     {"_pecotmr_sdprFactorCpp",                (DL_FUNC) &_pecotmr_sdprFactorCpp,                18},
     {"_pecotmr_sdprxCpp",                     (DL_FUNC) &_pecotmr_sdprxCpp,                     22},

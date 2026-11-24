@@ -48,6 +48,14 @@ qtlEnrichmentCpp <- function(rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariant
   .Call(`_pecotmr_qtlEnrichmentCpp`, rGwasPip, rQtlSusieFit, piGwas, piQtl, totalVariants, ImpN, shrinkageLambda, doubleShrinkage, besselCorrection, numThreads, seed)
 }
 
+rgPartialDrawPCpp <- function(topR, noiseR, gramR, sigmaR, K, CR, f, BR, tau2, observedR) {
+  .Call(`_pecotmr_rgPartialDrawPCpp`, topR, noiseR, gramR, sigmaR, K, CR, f, BR, tau2, observedR)
+}
+
+rgMixedDrawPairsCpp <- function(cellsR, P, i, j, restR) {
+  .Call(`_pecotmr_rgMixedDrawPairsCpp`, cellsR, P, i, j, restR)
+}
+
 prsCsCpp <- function(a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track) {
   .Call(`_pecotmr_prsCsCpp`, a, b, phi, bhat, maf, n, ldBlk, nIter, nBurnin, thin, verbose, seed, shrinkCorr, raoBlackwell, track)
 }
