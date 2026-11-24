@@ -33,6 +33,8 @@
     "prsCsCpp",
     "prsCsFactorCpp",
     "qtlEnrichmentCpp",
+    "rgMixedDrawPairsCpp",
+    "rgPartialDrawPCpp",
     "sdprCpp",
     "sdprFactorCpp",
     "sdprxCpp",

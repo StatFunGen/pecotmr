@@ -39,6 +39,7 @@ requirements:
     - bioconductor-seqarray
     - bioconductor-summarizedexperiment
     - bioconductor-variantannotation
+    - r-abess
     - r-archive
     - r-arrow
     - r-aspu
@@ -62,6 +63,7 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-glue
+    - r-grpreg
     - r-harmonicmeanp
     - r-hibayes
     - r-igraph
@@ -118,6 +120,7 @@ requirements:
     - bioconductor-seqarray
     - bioconductor-summarizedexperiment
     - bioconductor-variantannotation
+    - r-abess
     - r-archive
     - r-arrow
     - r-aspu
@@ -141,6 +144,7 @@ requirements:
     - r-gbj
     - r-glmnet
     - r-glue
+    - r-grpreg
     - r-harmonicmeanp
     - r-hibayes
     - r-igraph

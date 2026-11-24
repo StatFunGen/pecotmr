@@ -297,6 +297,13 @@ mrashRssWeights <- function(
 #'   than one, a chain stops once a kept draw's squared effects do, and is
 #'   dropped, and the rest are filtered and averaged as LDpred2's vignette
 #'   does (see \code{\link{ldpred2AutoWeights}}). Default 1.
+#' @param rho Across conditions only (\code{\link{twasWeightsPipeline}}'s
+#'   fits of a group on summary statistics, as JointPRS fits ancestries):
+#'   the correlation of the conditions' effects. \code{NULL} (the default)
+#'   learns each pair's on \eqn{[0, 0.99]} by JointPRS's Metropolis step; a
+#'   number in \eqn{[0, 1)} fixes every pair at it; a \eqn{K \times K}
+#'   positive-definite correlation matrix fixes each pair at its entry. One
+#'   condition's fit has no pairs and ignores it.
 #'
 #' @return A list containing the posterior estimates: - betaEst: Posterior
 #'   estimates of SNP effect sizes. - psiEst: Posterior estimates of psi
@@ -321,7 +328,8 @@ prsCs <- function(
     seed = NULL,
     shrinkCorr = 1,
     raoBlackwell = FALSE,
-    nChains = 1
+    nChains = 1,
+    rho = NULL
 ) {
     .rssValidateInputs(bhat, R, n)
     .prsCsRun(
@@ -548,7 +556,7 @@ prsCsWeights <- function(
 #'   than one, combined as \code{\link{prsCs}}'s are. Default 1.
 #' @param sharing Across studies only: the \code{dprGibbs} method fitted
 #'   across the studies a \code{"study"} \code{jointSpecification} joins
-#'   (\code{studyCoupling} set in \code{\link{twasWeightsPipeline}}), as
+#'   (\code{coupling} set in \code{\link{twasWeightsPipeline}}), as
 #'   SDPRX fits ancestries. Which sets of the studies a non-null
 #'   component's effects lie in: \code{"eachOrAll"} (the default), each
 #'   study alone or all of them together; \code{"everySubset"}, every
@@ -882,10 +890,11 @@ mrmashWeights <- function(
         split <- .mrmashSplitPriorArgs(as.list(methodArgs))
         priorArgs <- split$prior
         optionArgs <- split$rest
+        rows <- .mrmashRows(Y)
         mrmashFit <- exec(
             mrmashWrapper,
-            X,
-            Y,
+            X[rows, , drop = FALSE],
+            Y[rows, , drop = FALSE],
             dataDrivenPriorMatrices = dataDrivenPriorMatrices,
             prior = exec(MrmashPriorParam, !!!priorArgs),
             methodArgs = exec(MrmashOptions, !!!optionArgs)
@@ -904,6 +913,28 @@ mrmashWeights <- function(
     )
 }
 
+
+# The samples mr.mash is fitted on: every one, where the installed mr.mashr
+# fits each condition on its own (`missing_y_method`), else those observing
+# every condition.
+# @noRd
+.mrmashRows <- function(Y) {
+    if (!anyNA(Y) || .mrmashTakesMissingY()) {
+        return(seq_len(nrow(Y)))
+    }
+    .completeRows(
+        Y,
+        "mrmashWeights",
+        "a mr.mashr with `missing_y_method`"
+    )
+}
+
+# Whether the installed mr.mashr fits a condition on the samples it is
+# observed in (its `missing_y_method`).
+# @noRd
+.mrmashTakesMissingY <- function() {
+    is_in("missing_y_method", names(formals(mr.mashr::mr.mash)))
+}
 
 # Attach the mvSuSiE-prior reconstruction payload as the "fit" attribute,
 # shared by mrmashWeights (individual) and mrmashRssWeights (summary stats):
@@ -1471,6 +1502,20 @@ mrmashRssWeights <- function(
 #'   The glasso and univariate-glmnet \code{mr.mash} initialisations are
 #'   single-threaded for the same reason.
 #'
+#'   \code{GrpregOptions} and \code{AbessOptions} configure the
+#'   \code{"grpreg"} and \code{"abess"} backends: grpreg's lasso, elastic
+#'   net, MCP and SCAD for \code{lassoWeights}, \code{enetWeights},
+#'   \code{mcpWeights} and \code{scadWeights}, and abess's best subset for
+#'   \code{l0learnWeights}. Each is checked against its engine's named
+#'   arguments (\code{cv.grpreg}'s and \code{grpreg}'s together, and
+#'   \code{abess}'s), and each refuses the folds, the grouping and the
+#'   family, which the wrappers set. \code{AbessOptions} also refuses
+#'   \code{num.threads} (abess runs on one thread, for the reason
+#'   \code{parallel} is refused above), \code{weight} (abess scales a sparse
+#'   design's rows by the weights but its phenotype by their square roots)
+#'   and \code{init.active.set} (abess replaces it with an index of its
+#'   own).
+#'
 #'   \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
 #'   \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the
 #'   path is walked (\code{"strongRule"} or \code{"gradientRanked"}; see
@@ -1506,7 +1551,7 @@ mrmashRssWeights <- function(
 #'
 #'   \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
 #'   only when \code{dprGibbs} is fitted across studies as SDPRX fits
-#'   ancestries (\code{\link{twasWeightsPipeline}}'s \code{studyCoupling}):
+#'   ancestries (\code{\link{twasWeightsPipeline}}'s \code{coupling}):
 #'   which sets of the studies a component's effects lie in, and their
 #'   correlation (see \code{\link{sdpr}}). A single study ignores them.
 #' @param ... Arguments for the engine, under its own names.
@@ -1779,6 +1824,44 @@ NcvregOptions <- function(...) {
 
 #' @rdname twasEngineOptions
 #' @export
+GrpregOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseOwned(
+        extra,
+        c(
+            X = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline",
+            group = str_c(
+                "the wrapper: one group per variant, or a variant's effects ",
+                "across conditions"
+            ),
+            penalty = str_c(
+                "the calling wrapper (lassoWeights, enetWeights, mcpWeights, ",
+                "scadWeights)"
+            ),
+            family = "the wrapper, which fits quantitative phenotypes",
+            nfolds = str_c(
+                "the wrapper's `nfolds` (mcpWeights, scadWeights; ",
+                "lassoWeights and enetWeights use 5)"
+            ),
+            fold = "the wrapper, which deals each sample into a fold",
+            seed = "R's random number generator, which deals the folds",
+            returnX = "the wrapper's `retainX`"
+        ),
+        "GrpregOptions"
+    )
+    .newMethodOptions(
+        c("grpreg::cv.grpreg", "grpreg::grpreg"),
+        defaults = list(),
+        extra = extra,
+        label = "GrpregOptions",
+        engine = "grpreg",
+        filtered = TRUE
+    )
+}
+
+#' @rdname twasEngineOptions
+#' @export
 L0learnOptions <- function(...) {
     extra <- list(...)
     .configRefuseOwned(
@@ -1797,6 +1880,57 @@ L0learnOptions <- function(...) {
         extra = list(...),
         label = "L0learnOptions",
         engine = "l0learn"
+    )
+}
+
+#' @rdname twasEngineOptions
+#' @export
+AbessOptions <- function(...) {
+    extra <- list(...)
+    .configRefuseUnavailable(
+        extra,
+        c(
+            num.threads = str_c(
+                "abess runs on one thread, as weight fitting already runs ",
+                "inside BiocParallel workers; abess's own default takes every ",
+                "core"
+            ),
+            weight = str_c(
+                "abess scales a sparse design's rows by the weights but its ",
+                "phenotype by their square roots, and a fit across conditions ",
+                "on their own samples is sparse"
+            ),
+            init.active.set = str_c(
+                "abess replaces it with an index of its own before fitting"
+            )
+        ),
+        "AbessOptions"
+    )
+    .configRefuseOwned(
+        extra,
+        c(
+            x = "supplied from the data by the pipeline",
+            y = "supplied from the data by the pipeline",
+            family = "the wrapper, from the number of conditions",
+            group.index = "the wrapper: a variant's effects across conditions",
+            tune.type = str_c(
+                "the wrapper, which picks the support size by ",
+                "cross-validation"
+            ),
+            nfolds = "the wrapper's `nFolds` (l0learnWeights)",
+            foldid = "the wrapper, which deals each sample into a fold",
+            seed = "R's random number generator, which deals the folds",
+            fit.intercept = "the wrapper, which centres each condition"
+        ),
+        "AbessOptions"
+    )
+    .newMethodOptions(
+        "abess::abess.default",
+        defaults = list(),
+        extra = extra,
+        label = "AbessOptions",
+        engine = "abess",
+        filtered = TRUE
     )
 }
 
@@ -2224,25 +2358,41 @@ fitGlmnetCv <- function(
 #' Fit a cross-validated elastic-net / lasso model with \code{glmnet::cv.glmnet}
 #' and return the per-variant coefficient vector at \code{lambda.min}.
 #'
+#' Given a matrix \code{y}, a column per condition measured on the same
+#' samples, it fits the conditions at once with glmnet's \code{"mgaussian"}
+#' family: each variant's effects across them form one group under the
+#' penalty, so a variant is in the model for every condition or for none,
+#' each condition with its own effect. Each phenotype is scaled to unit
+#' variance for the fit and its weights are returned on its own scale. One
+#' \code{lambda} serves every condition, the one with the lowest
+#' cross-validated error summed over them. At \code{alpha = 0} the
+#' conditions are separate ridge fits sharing that \code{lambda}. A missing
+#' phenotype is an error: conditions measured on samples of their own take
+#' \code{backend = "grpreg"} (see \code{\link{lassoWeights}}).
+#'
 #' @param X Numeric genotype / design matrix (samples x variants).
-#' @param y Numeric response (phenotype) vector of length \code{nrow(X)}.
+#' @param y Numeric response (phenotype) vector of length \code{nrow(X)}, or
+#'   a matrix with a column per condition (see Details).
 #' @param alpha Elastic-net mixing parameter in \code{[0, 1]}: \code{1} = lasso,
 #'   \code{0} = ridge, \code{0.5} = elastic net.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing; \code{"slim"} the selected fit, as a list of its coefficients
-#'   (\code{coef}, over the variants fitted), \code{intercept},
-#'   \code{lambda} and cross-validated error there (\code{cvm},
-#'   \code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-#'   every \code{lambda}'s coefficients but without the copy of \code{X} its
-#'   stored calls would hold. Each names the variants it was fitted on.
+#'   (\code{coef}, over the variants fitted, a column per condition for a
+#'   matrix \code{y}), \code{intercept}, \code{lambda} and cross-validated
+#'   error there (\code{cvm}, \code{cvsd}); \code{"full"} the whole
+#'   \code{cv.glmnet} object, with every \code{lambda}'s coefficients but
+#'   without the copy of \code{X} its stored calls would hold, fitted for a
+#'   matrix \code{y} on the scaled phenotypes. Each names the variants it
+#'   was fitted on.
 #' @param retainX Logical. Keep that copy of \code{X} in a \code{"full"} fit
 #'   (default \code{FALSE}). An error at any other \code{fitRetention}.
 #' @param methodArgs Additional arguments forwarded to
 #'   \code{glmnet::cv.glmnet}, built with \code{\link{GlmnetOptions}}. A bare
 #'   list is refused, since it cannot be checked against the engine's formals.
-#' @return Numeric vector of length \code{ncol(X)} of per-variant weights,
-#'   with the fit attached as attribute \code{"fit"} unless
+#' @return Numeric vector of length \code{ncol(X)} of per-variant weights, or
+#'   for a matrix \code{y} a matrix of them with a column per condition, with
+#'   the fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @importFrom stats coef
 #' @examples
@@ -2261,6 +2411,16 @@ glmnetWeights <- function(
 ) {
     fitRetention <- arg_match(fitRetention)
     .assertRetainX(retainX, fitRetention)
+    if (.isConditionMatrix(y)) {
+        return(.glmnetGroupedWeights(
+            X,
+            y,
+            alpha,
+            fitRetention,
+            retainX,
+            methodArgs
+        ))
+    }
     eff.wgt <- matrix(0, ncol = 1, nrow = ncol(X))
     keep <- .dropZeroVariance(X, "glmnetWeights")
     # `alpha` is the wrapper's own dial and is refused by GlmnetOptions()
@@ -2283,7 +2443,7 @@ glmnetWeights <- function(
     }
     fit <- switch(
         fitRetention,
-        slim = .glmnetSlimFit(enet, coefs),
+        slim = .glmnetSlimFit(enet, coefs[-1L], coefs[[1L]]),
         full = if (retainX) enet else .glmnetWithoutData(enet)
     )
     `attr<-`(weights, "fit", .withFitVariantIds(fit, colnames(X)[keep]))
@@ -2321,29 +2481,81 @@ glmnetWeights <- function(
     invisible(NULL)
 }
 
-# The fit cv.glmnet selected: its coefficients over the variants fitted, the
-# intercept, its lambda and the cross-validated error there.
+# The fit cv.glmnet selected: its coefficients over the variants fitted (a
+# column per condition for several), the intercept, its lambda and the
+# cross-validated error there.
 # @noRd
-.glmnetSlimFit <- function(cvFit, coefs) {
+.glmnetSlimFit <- function(cvFit, coef, intercept) {
     at <- match(cvFit$lambda.min, cvFit$lambda)
     list(
-        coef = coefs[-1L],
-        intercept = coefs[[1L]],
+        coef = coef,
+        intercept = intercept,
         lambda = cvFit$lambda.min,
         cvm = cvFit$cvm[[at]],
         cvsd = cvFit$cvsd[[at]]
     )
 }
 
-#' Compute TWAS weights via elastic net (glmnet)
+# glmnet's fit of several conditions (glmnetWeights()): its "mgaussian"
+# family, which takes no missing phenotype, on the samples observing every
+# condition (.completeRows()), each condition's phenotype scaled to unit
+# variance and its weights put back on its own scale.
+# @noRd
+.glmnetGroupedWeights <- function(X, Y, alpha, retention, retainX, methodArgs) {
+    rows <- .completeRows(Y, "glmnetWeights", "backend = \"grpreg\"")
+    observed <- Y[rows, , drop = FALSE]
+    keep <- .dropZeroVariance(X[rows, , drop = FALSE], "glmnetWeights")
+    scales <- .groupedScales(observed)
+    cvFit <- fitGlmnetCv(
+        x = X[rows, keep, drop = FALSE],
+        y = .groupedScaled(observed, scales),
+        alpha = alpha,
+        family = "mgaussian",
+        standardize = FALSE,
+        intercept = TRUE,
+        nfolds = 5,
+        methodArgs = methodArgs
+    )
+    coefs <- .glmnetGroupedCoef(cvFit, scales)
+    fitted <- list(
+        coef = coefs$coef,
+        slim = .glmnetSlimFit(cvFit, coefs$coef, coefs$intercept),
+        object = cvFit
+    )
+    .engineWeights(fitted, keep, X, Y, retention, .glmnetFullFit(retainX))
+}
+
+# An mgaussian fit's weights at lambda.min, a column per condition, and each
+# condition's intercept, back on the scale of its phenotype.
+# @noRd
+.glmnetGroupedCoef <- function(cvFit, scales) {
+    B <- do.call(cbind, map(coef(cvFit, s = "lambda.min"), as.numeric))
+    list(
+        coef = sweep(B[-1L, , drop = FALSE], 2L, scales$spread, "*"),
+        intercept = scales$center + scales$spread * B[1L, ]
+    )
+}
+
+# How a "full" glmnet fit is kept: whole, or without its copies of the data.
+# @noRd
+.glmnetFullFit <- function(retainX) {
+    if (retainX) identity else .glmnetWithoutData
+}
+
+#' Compute TWAS weights via elastic net
 #'
-#' Convenience wrapper for \code{\link{glmnetWeights}} at a mixing between the
-#' lasso and ridge, \code{alpha = 0.5} unless set.
+#' The elastic net at a mixing between the lasso and ridge, \code{alpha =
+#' 0.5} unless set, on glmnet (\code{\link{glmnetWeights}}, the default) or
+#' on grpreg. A matrix \code{y}, a column per condition, is fitted across
+#' the conditions at once, as \code{\link{lassoWeights}} describes.
 #' @param alpha Elastic-net mixing in \code{[0, 1]}: the L1 share of the
-#'   penalty. Default 0.5.
-#' @inheritParams glmnetWeights
-#' @return Numeric vector of length \code{ncol(X)} of per-variant weights,
-#'   with the fit attached as attribute \code{"fit"} unless
+#'   penalty. Default 0.5. grpreg needs it above 0, and across conditions it
+#'   scales the two shares of a variant's penalty differently from glmnet,
+#'   so the same \code{alpha} is not the same penalty on the two backends.
+#' @inheritParams lassoWeights
+#' @return Numeric vector of length \code{ncol(X)} of per-variant weights, or
+#'   for a matrix \code{y} a matrix of them with a column per condition, with
+#'   the fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2358,19 +2570,21 @@ enetWeights <- function(
     X,
     y,
     alpha = 0.5,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
     retainX = FALSE,
-    methodArgs = GlmnetOptions()
+    methodArgs = NULL
 ) {
-    .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
     assertNumber(alpha, lower = 0, upper = 1)
-    glmnetWeights(
+    .enetFamilyWeights(
         X,
         y,
         alpha,
-        fitRetention = arg_match(fitRetention),
-        retainX = retainX,
-        methodArgs = methodArgs
+        "enet",
+        backend,
+        arg_match(fitRetention),
+        retainX,
+        methodArgs
     )
 }
 
@@ -2405,12 +2619,55 @@ ridgeWeights <- function(
     )
 }
 
-#' Compute TWAS weights via lasso (glmnet, alpha = 1)
+#' Compute TWAS weights via the lasso
 #'
-#' Convenience wrapper for \code{\link{glmnetWeights}} with \code{alpha = 1}.
+#' The lasso, on glmnet (\code{\link{glmnetWeights}} at \code{alpha = 1}, the
+#' default) or on grpreg (\code{backend = "grpreg"}), whose group lasso with
+#' each variant its own group is the lasso. grpreg always standardizes the
+#' columns of \code{X}, where glmnet here fits them as given.
+#'
+#' Given a matrix \code{y}, a column per condition, it fits the conditions
+#' at once: each variant's effects across them form one group under the
+#' penalty, so a variant is in the model for every condition or for none,
+#' each condition with its own effect, fitted on its own samples. The loss is
+#' each condition's mean squared error on its phenotype scaled to unit
+#' variance, summed over the conditions, and one \code{lambda} serves them
+#' all: the one with the lowest cross-validated error summed over them, on
+#' folds that hold each sample out of every condition it is in. Weights come
+#' back on each condition's own scale. glmnet fits conditions measured on
+#' the same samples (its \code{"mgaussian"} family). grpreg also fits
+#' conditions measured on samples of their own, as several studies' are,
+#' their phenotypes missing on the others' samples: each condition's rows
+#' hold its own samples, centred within them, against its own copy of the
+#' variants, and a variant's copies form its group. That design is dense,
+#' \eqn{8 N C p} bytes for \eqn{N} rows in all, \eqn{C} conditions and
+#' \eqn{p} variants.
+#' @param backend The engine: \code{"glmnet"} (the default for \code{NULL})
+#'   or \code{"grpreg"}.
+#' @param methodArgs Options for the backend's engine, built with its
+#'   constructor: \code{\link{GlmnetOptions}} for glmnet,
+#'   \code{\link{GrpregOptions}} for grpreg. \code{NULL} (the default)
+#'   keeps the engine's defaults. A bare list is refused: it cannot be
+#'   checked against the engine, so a misspelled option would be silently
+#'   ignored.
+#' @param retainX Logical. Keep the fit's copy of \code{X} in a
+#'   \code{"full"} fit (default \code{FALSE}): glmnet's stored calls hold
+#'   it, and on grpreg it is grpreg's standardized design (its
+#'   \code{returnX}). An error at any other \code{fitRetention}.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing; \code{"slim"} the selected fit, as a list of its coefficients
+#'   (\code{coef}, over the variants fitted, a column per condition for a
+#'   matrix \code{y}), \code{intercept}, \code{lambda} and the
+#'   cross-validated error there (\code{cvm} and \code{cvsd} on glmnet,
+#'   \code{cve} and \code{cvse} on grpreg); \code{"full"} the whole
+#'   \code{cv.glmnet} or \code{cv.grpreg} object, with every
+#'   \code{lambda}'s coefficients but without its copies of the data. Each
+#'   names the variants it was fitted on.
 #' @inheritParams glmnetWeights
-#' @return Numeric vector of length \code{ncol(X)} of per-variant weights,
-#'   with the fit attached as attribute \code{"fit"} unless
+#' @return Numeric vector of length \code{ncol(X)} of per-variant weights, or
+#'   for a matrix \code{y} a matrix of them with a column per condition, with
+#'   the fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @examples
 #' data(eqtlRegionExample)
@@ -2421,19 +2678,72 @@ ridgeWeights <- function(
 lassoWeights <- function(
     X,
     y,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
     retainX = FALSE,
-    methodArgs = GlmnetOptions()
+    methodArgs = NULL
 ) {
-    .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
-    glmnetWeights(
+    .enetFamilyWeights(
         X,
         y,
         1,
-        fitRetention = arg_match(fitRetention),
-        retainX = retainX,
-        methodArgs = methodArgs
+        "lasso",
+        backend,
+        arg_match(fitRetention),
+        retainX,
+        methodArgs
     )
+}
+
+# The lasso or elastic net (`method`) on its backend: glmnet
+# (glmnetWeights()), or grpreg's group lasso (grpregWeights()), one group per
+# variant for one phenotype.
+# @noRd
+.enetFamilyWeights <- function(
+    X,
+    y,
+    alpha,
+    method,
+    backend,
+    retention,
+    retainX,
+    methodArgs
+) {
+    engine <- .methodBackend(method, backend, "individual")
+    options <- .backendOptions(
+        methodArgs,
+        .methodBackends$individual[[method]][[engine]],
+        engine
+    )
+    if (identical(engine, "glmnet")) {
+        return(glmnetWeights(X, y, alpha, retention, retainX, options))
+    }
+    .grpregAssertAlpha(options, alpha)
+    grpregWeights(
+        X,
+        y,
+        "grLasso",
+        alpha = alpha,
+        fitRetention = retention,
+        retainX = retainX,
+        methodArgs = options
+    )
+}
+
+# The lasso and elastic net take their mixing from the wrapper on grpreg as
+# on glmnet, and grpreg's penalties need some of the lasso in them.
+# @noRd
+.grpregAssertAlpha <- function(methodArgs, alpha) {
+    if (is_in("alpha", names(methodArgs))) {
+        abort(str_c(
+            "GrpregOptions(alpha=) does not apply here: enetWeights takes its ",
+            "own `alpha`, and lassoWeights fixes it at 1."
+        ))
+    }
+    if (alpha <= 0) {
+        abort("grpreg needs `alpha` > 0: it has no ridge fit.")
+    }
+    invisible(NULL)
 }
 
 #' Compute Weights Using mr.ash Shrinkage
@@ -2568,13 +2878,24 @@ mrashWeights <- function(
 )
 
 # The engines of every method with a `backend` on a data path: the Bayesian
-# alphabet (.alphabetBackends), and on summary statistics the lasso. Each
-# engine maps to its Options constructor; the first is the default. A method
-# with one engine there (bayesB on summary statistics) leaves nothing to
-# choose (.methodHasBackends()).
+# alphabet (.alphabetBackends); on individual-level data the lasso, elastic
+# net, MCP and SCAD, which also run on grpreg, and L0Learn's best subset,
+# which also runs on abess; and on summary statistics the lasso. Each engine
+# maps to its Options constructor; the first is the default. A method with
+# one engine there (bayesB on summary statistics) leaves nothing to choose
+# (.methodHasBackends()).
 # @noRd
 .methodBackends <- list(
-    individual = .alphabetBackends$individual,
+    individual = c(
+        .alphabetBackends$individual,
+        list(
+            lasso = c(glmnet = "GlmnetOptions", grpreg = "GrpregOptions"),
+            enet = c(glmnet = "GlmnetOptions", grpreg = "GrpregOptions"),
+            mcp = c(ncvreg = "NcvregOptions", grpreg = "GrpregOptions"),
+            scad = c(ncvreg = "NcvregOptions", grpreg = "GrpregOptions"),
+            l0learn = c(l0learn = "L0learnOptions", abess = "AbessOptions")
+        )
+    ),
     sumstat = c(
         .alphabetBackends$sumstat,
         list(
@@ -7259,18 +7580,43 @@ ncvregWeights <- function(
 
 #' Compute Weights Using SCAD-Penalized Regression
 #'
-#' Fits a SCAD-penalized linear regression model via `ncvreg::cv.ncvreg` and
-#' returns the coefficient vector at `lambda.min`.
+#' Fits a SCAD-penalized linear regression and returns the coefficient vector
+#' at \code{lambda.min}: on ncvreg (\code{ncvreg::cv.ncvreg}, the default) or
+#' on grpreg (\code{backend = "grpreg"}), whose group SCAD with each variant
+#' its own group is SCAD. Both take \code{gamma = 3.7} unless
+#' \code{methodArgs} sets it (grpreg's own default would be 4).
+#'
+#' On grpreg a matrix \code{y}, a column per condition, is fitted across the
+#' conditions at once, each variant's effects across them one group under the
+#' penalty, as \code{\link{lassoWeights}} describes; ncvreg fits one
+#' phenotype.
 #'
 #' @param X A numeric matrix of predictors.
-#' @param y A numeric response vector.
+#' @param y A numeric response vector, or on grpreg a matrix with a column
+#'   per condition.
 #' @param nfolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
-#'   with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
-#'   checked against the engine, so a misspelled option would be
-#'   silently ignored.
-#' @inheritParams ncvregWeights
-#' @return A numeric vector of length `ncol(X)` of variant weights, with the
+#' @param backend The engine: \code{"ncvreg"} (the default for \code{NULL})
+#'   or \code{"grpreg"}.
+#' @param fitRetention How much of the fit is kept as the \code{"fit"}
+#'   attribute of the returned weights: \code{"none"} (default) attaches
+#'   nothing; \code{"slim"} the selected fit, as a list of its coefficients
+#'   (\code{coef}, over the variants fitted, a column per condition for a
+#'   matrix \code{y}), \code{intercept}, \code{lambda} and cross-validated
+#'   error there (\code{cve}, \code{cvse}); \code{"full"} the whole
+#'   \code{cv.ncvreg} or \code{cv.grpreg} object, with every
+#'   \code{lambda}'s coefficients but without its copies of the data. Each
+#'   names the variants it was fitted on.
+#' @param retainX Logical. Keep the fit's copy of \code{X} in a
+#'   \code{"full"} fit (default \code{FALSE}): ncvreg's, or on grpreg its
+#'   standardized design (its \code{returnX}). An error at any other
+#'   \code{fitRetention}.
+#' @param methodArgs Options for the backend's engine, built with its
+#'   constructor: \code{\link{NcvregOptions}} for ncvreg,
+#'   \code{\link{GrpregOptions}} for grpreg. \code{NULL} (the default) keeps
+#'   the engine's defaults. A bare list is refused: it cannot be checked
+#'   against the engine, so a misspelled option would be silently ignored.
+#' @return A numeric vector of length `ncol(X)` of variant weights, or for a
+#'   matrix \code{y} a matrix of them with a column per condition, with the
 #'   fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @examples
@@ -7283,36 +7629,39 @@ scadWeights <- function(
     X,
     y,
     nfolds = 5,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
     retainX = FALSE,
-    methodArgs = NcvregOptions()
+    methodArgs = NULL
 ) {
-    .assertMethodOptions(methodArgs, "NcvregOptions", "methodArgs")
-    ncvregWeights(
+    .ncvFamilyWeights(
         X,
         y,
-        penalty = "SCAD",
-        nfolds = nfolds,
-        fitRetention = arg_match(fitRetention),
-        retainX = retainX,
-        methodArgs = methodArgs
+        "SCAD",
+        "scad",
+        nfolds,
+        backend,
+        arg_match(fitRetention),
+        retainX,
+        methodArgs
     )
 }
 
 #' Compute Weights Using MCP-Penalized Regression
 #'
-#' Fits an MCP-penalized linear regression model via `ncvreg::cv.ncvreg` and
-#' returns the coefficient vector at `lambda.min`.
+#' Fits an MCP-penalized linear regression and returns the coefficient vector
+#' at \code{lambda.min}: on ncvreg (\code{ncvreg::cv.ncvreg}, the default) or
+#' on grpreg (\code{backend = "grpreg"}), whose group MCP with each variant
+#' its own group is MCP.
 #'
-#' @param X A numeric matrix of predictors.
-#' @param y A numeric response vector.
-#' @param nfolds Number of cross-validation folds. Default is 5.
-#' @param methodArgs Options forwarded to \code{ncvreg::cv.ncvreg}, built
-#'   with \code{\link{NcvregOptions}}. A bare list is refused: it cannot be
-#'   checked against the engine, so a misspelled option would be
-#'   silently ignored.
-#' @inheritParams ncvregWeights
-#' @return A numeric vector of length `ncol(X)` of variant weights, with the
+#' On grpreg a matrix \code{y}, a column per condition, is fitted across the
+#' conditions at once, each variant's effects across them one group under the
+#' penalty, as \code{\link{lassoWeights}} describes; ncvreg fits one
+#' phenotype.
+#'
+#' @inheritParams scadWeights
+#' @return A numeric vector of length `ncol(X)` of variant weights, or for a
+#'   matrix \code{y} a matrix of them with a column per condition, with the
 #'   fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @examples
@@ -7325,48 +7674,123 @@ mcpWeights <- function(
     X,
     y,
     nfolds = 5,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
     retainX = FALSE,
-    methodArgs = NcvregOptions()
+    methodArgs = NULL
 ) {
-    .assertMethodOptions(methodArgs, "NcvregOptions", "methodArgs")
-    ncvregWeights(
+    .ncvFamilyWeights(
         X,
         y,
-        penalty = "MCP",
-        nfolds = nfolds,
-        fitRetention = arg_match(fitRetention),
-        retainX = retainX,
-        methodArgs = methodArgs
+        "MCP",
+        "mcp",
+        nfolds,
+        backend,
+        arg_match(fitRetention),
+        retainX,
+        methodArgs
     )
 }
 
-#' Compute Weights Using L0Learn
+# MCP or SCAD (`penalty`, method `method`) on its backend: ncvreg
+# (ncvregWeights()), or grpreg's group penalty (grpregWeights()), one group
+# per variant for one phenotype.
+# @noRd
+.ncvFamilyWeights <- function(
+    X,
+    y,
+    penalty,
+    method,
+    nfolds,
+    backend,
+    retention,
+    retainX,
+    methodArgs
+) {
+    engine <- .methodBackend(method, backend, "individual")
+    options <- .backendOptions(
+        methodArgs,
+        .methodBackends$individual[[method]][[engine]],
+        engine
+    )
+    if (identical(engine, "grpreg")) {
+        return(grpregWeights(
+            X,
+            y,
+            str_c("gr", penalty),
+            nfolds = nfolds,
+            fitRetention = retention,
+            retainX = retainX,
+            methodArgs = options
+        ))
+    }
+    .assertOnePhenotype(y, "ncvreg", "grpreg")
+    ncvregWeights(X, y, penalty, nfolds, retention, retainX, options)
+}
+
+# Refuse several conditions' phenotypes on an engine that fits one, naming
+# the backend that fits them together.
+# @noRd
+.assertOnePhenotype <- function(y, engine, alternative) {
+    if (.isConditionMatrix(y)) {
+        abort(glue(
+            "{engine} fits one phenotype at a time; a matrix `y`, a column ",
+            "per condition, takes backend = \"{alternative}\"."
+        ))
+    }
+    invisible(NULL)
+}
+
+#' Compute Weights Using an L0 Penalty
 #'
-#' Fits an L0-regularized linear regression model via `L0Learn::L0Learn.cvfit`
-#' and returns the coefficient vector at the (lambda, gamma) pair minimizing the
-#' cross-validation error. Default penalty is "L0"; the user can switch to
-#' "L0L1" or "L0L2" (and tune the corresponding gamma grid) by passing the
-#' relevant arguments through `...`.
+#' Fits an L0-regularized linear regression, a best subset of the variants,
+#' and returns the coefficient vector of the fit minimizing the
+#' cross-validation error: on L0Learn (\code{L0Learn::L0Learn.cvfit}, the
+#' default), at the (lambda, gamma) pair minimizing it, or on abess
+#' (\code{backend = "abess"}), at the support size minimizing it. The default
+#' penalty is "L0"; on L0Learn it can be "L0L1" or "L0L2" instead (with the
+#' gamma grid tuned through \code{methodArgs}), and abess fits "L0" alone.
+#'
+#' On abess a matrix \code{y}, a column per condition, is fitted across the
+#' conditions at once: a best subset of variants, each in the model for every
+#' condition or for none, each condition with its own effects, on its
+#' phenotype scaled to unit variance and fitted on its own samples. One
+#' support size serves every condition, the one with the lowest
+#' cross-validated error summed over them, on folds that hold each sample out
+#' of every condition it is in. Conditions measured on the same samples run
+#' abess's \code{"mgaussian"} family. Conditions measured on samples of their
+#' own, a phenotype missing wherever a condition was not measured, run a best
+#' subset of groups on a sparse design in which each condition's rows hold
+#' its own samples against its own copy of the variants (see
+#' \code{\link{lassoWeights}}). abess runs on one thread here, and R's random
+#' number generator, which abess reseeds as it returns, is restored.
 #'
 #' @param X A numeric matrix of predictors.
-#' @param y A numeric response vector.
-#' @param penalty Type of regularization: "L0", "L0L1", or "L0L2". Default is
-#'   "L0".
+#' @param y A numeric response vector, or on abess a matrix with a column per
+#'   condition.
+#' @param penalty Type of regularization: "L0", "L0L1", or "L0L2" on L0Learn;
+#'   "L0" on abess. Default is "L0".
 #' @param nFolds Number of cross-validation folds. Default is 5.
+#' @param backend The engine: \code{"l0learn"} (the default for \code{NULL})
+#'   or \code{"abess"}.
 #' @param fitRetention How much of the fit is kept as the \code{"fit"}
 #'   attribute of the returned weights: \code{"none"} (default) attaches
 #'   nothing; \code{"slim"} the selected fit, as a list of its coefficients
-#'   (\code{coef}, over the variants fitted), \code{intercept},
-#'   \code{gamma}, \code{lambda} and cross-validated error there
-#'   (\code{cvMean}, \code{cvSd}); \code{"full"} the whole
-#'   \code{L0Learn.cvfit} object, with every candidate's coefficients.
-#'   Either names the variants it was fitted on, in \code{variantIds}.
-#' @param methodArgs Options forwarded to \code{L0Learn::L0Learn.cvfit}, built
-#'   with \code{\link{L0learnOptions}}. A bare list is refused: it cannot be
-#'   checked against the engine, so a misspelled option would be
-#'   silently ignored.
-#' @return A numeric vector of length `ncol(X)` of variant weights, with the
+#'   (\code{coef}, over the variants fitted, a column per condition for a
+#'   matrix \code{y}), \code{intercept}, and on L0Learn \code{gamma},
+#'   \code{lambda} and the cross-validated error there (\code{cvMean},
+#'   \code{cvSd}), on abess the support size (\code{supportSize}) and the
+#'   cross-validated error there (\code{cvMean}); \code{"full"} the whole
+#'   \code{L0Learn.cvfit} or \code{abess} object, with every candidate's
+#'   coefficients. Either names the variants it was fitted on, in
+#'   \code{variantIds}.
+#' @param methodArgs Options for the backend's engine, built with its
+#'   constructor: \code{\link{L0learnOptions}} for L0Learn,
+#'   \code{\link{AbessOptions}} for abess. \code{NULL} (the default) keeps
+#'   the engine's defaults. A bare list is refused: it cannot be checked
+#'   against the engine, so a misspelled option would be silently ignored.
+#' @return A numeric vector of length `ncol(X)` of variant weights, or for a
+#'   matrix \code{y} a matrix of them with a column per condition, with the
 #'   fit attached as attribute \code{"fit"} unless
 #'   \code{fitRetention = "none"}.
 #' @examples
@@ -7380,11 +7804,41 @@ l0learnWeights <- function(
     y,
     penalty = "L0",
     nFolds = 5,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
-    methodArgs = L0learnOptions()
+    methodArgs = NULL
 ) {
-    .assertMethodOptions(methodArgs, "L0learnOptions", "methodArgs")
-    fitRetention <- arg_match(fitRetention)
+    retention <- arg_match(fitRetention)
+    engine <- .methodBackend("l0learn", backend, "individual")
+    options <- .backendOptions(
+        methodArgs,
+        .methodBackends$individual$l0learn[[engine]],
+        engine
+    )
+    if (identical(engine, "abess")) {
+        .abessRequireL0(penalty)
+        return(abessWeights(X, y, nFolds, retention, options))
+    }
+    .assertOnePhenotype(y, "L0Learn", "abess")
+    .l0learnFit(X, y, penalty, nFolds, retention, options)
+}
+
+# abess fits the L0 penalty alone.
+# @noRd
+.abessRequireL0 <- function(penalty) {
+    if (!identical(penalty, "L0")) {
+        abort(glue(
+            "abess fits the L0 penalty alone, not {penalty}; L0L1 and L0L2 ",
+            "take backend = \"l0learn\"."
+        ))
+    }
+    invisible(NULL)
+}
+
+# L0Learn's cross-validated fit (l0learnWeights()): the coefficients at the
+# (gamma, lambda) pair minimizing the cross-validation error.
+# @noRd
+.l0learnFit <- function(X, y, penalty, nFolds, retention, methodArgs) {
     if (!requireNamespace("L0Learn", quietly = TRUE)) {
         abort("Package 'L0Learn' is required for this function.")
     }
@@ -7407,10 +7861,10 @@ l0learnWeights <- function(
     hasIntercept <- length(raw) == sum(keep) + 1L
     coefs <- if (hasIntercept) raw[-1L] else raw
     weights <- replace(eff.wgt, keep, coefs)
-    if (identical(fitRetention, "none")) {
+    if (identical(retention, "none")) {
         return(weights)
     }
-    kept <- if (identical(fitRetention, "full")) {
+    kept <- if (identical(retention, "full")) {
         fit
     } else {
         c(
@@ -7436,120 +7890,1024 @@ l0learnWeights <- function(
     )
 }
 
-# ---- Fits across studies (difference penalty) ------------------------------
+# ---- Fits across conditions (a group penalty) ------------------------------
 #
-# A study-axis group of a MultiStudyQtlDataset stacks its studies' samples
-# (.xsStack()): X holds every study's rows over the union of their variants,
-# zero where a study lacks one, and Y one column per study, missing outside
-# the study's own rows. lasso, elastic net, ridge and L0Learn fit such a group
-# with a penalty on the difference between the studies' per-SD effects, the
+# A matrix `y` holds a column per condition, missing wherever a condition was
+# not measured. Fitted across them, each variant's effects in the conditions
+# are one group under the penalty, so a variant is in the model for every
+# condition or for none, each condition with its own effect:
+#
+#   sum_c RSS_c / (2 n_c) + lambda sum_j P(b_j1, ..., b_jC)
+#
+# Each condition's loss is its own mean squared error, on its phenotype
+# scaled to unit variance and fitted on its own samples. glmnet's mgaussian
+# family fits conditions measured on the same samples
+# (.glmnetGroupedWeights()); grpreg and abess fit any, through the group
+# design (.groupedDesign()). One lambda, or for abess one support size, serves
+# every condition: the one with the lowest cross-validated error summed over
+# them, on folds that hold a sample out of every condition it is in.
+
+#' Compute Weights Using grpreg
+#'
+#' The engine behind the \code{"grpreg"} backend of
+#' \code{\link{lassoWeights}}, \code{\link{enetWeights}},
+#' \code{\link{mcpWeights}} and \code{\link{scadWeights}}: fits
+#' \code{grpreg::cv.grpreg} and returns the coefficients at
+#' \code{lambda.min}. For a vector \code{y} each variant is its own group,
+#' which makes grpreg's group lasso, MCP and SCAD the lasso, MCP and SCAD on
+#' standardized columns. For a matrix \code{y}, a column per condition, each
+#' variant's effects across the conditions form one group on the group
+#' design, so a condition may be missing on some samples.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector, or a matrix with a column per
+#'   condition, missing where a condition was not measured.
+#' @param penalty grpreg's penalty: \code{"grLasso"}, \code{"grMCP"} or
+#'   \code{"grSCAD"}.
+#' @param alpha grpreg's mixing of its penalty with ridge, in (0, 1].
+#'   Default 1; \code{methodArgs} may set it for MCP and SCAD.
+#' @param nfolds Number of cross-validation folds. Default is 5.
+#' @param methodArgs Options forwarded to \code{grpreg::cv.grpreg} and
+#'   \code{grpreg::grpreg}, built with \code{\link{GrpregOptions}}.
+#' @inheritParams scadWeights
+#' @return A numeric matrix of variant weights, a row per column of \code{X}
+#'   and a column per condition, with the fit attached as attribute
+#'   \code{"fit"} unless \code{fitRetention = "none"}.
+#' @importFrom checkmate assertCount
+#' @keywords internal
+grpregWeights <- function(
+    X,
+    y,
+    penalty,
+    alpha = 1,
+    nfolds = 5,
+    fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
+    methodArgs = GrpregOptions()
+) {
+    .assertMethodOptions(methodArgs, "GrpregOptions", "methodArgs")
+    assertCount(nfolds, positive = TRUE)
+    retention <- arg_match(fitRetention)
+    .assertRetainX(retainX, retention)
+    if (!requireNamespace("grpreg", quietly = TRUE)) {
+        abort("Package 'grpreg' is required for this function.")
+    }
+    keep <- .dropZeroVariance(X, "grpregWeights")
+    run <- list(
+        penalty = penalty,
+        alpha = alpha,
+        nfolds = nfolds,
+        retainX = retainX,
+        user = as.list(methodArgs)
+    )
+    fitted <- if (.isConditionMatrix(y)) {
+        .grpregGroupedFit(X[, keep, drop = FALSE], y, run)
+    } else {
+        .grpregFit(X[, keep, drop = FALSE], y, run)
+    }
+    .engineWeights(fitted, keep, X, y, retention, .grpregWithoutData)
+}
+
+# grpreg's fit of one phenotype, each variant its own group.
+# @noRd
+.grpregFit <- function(X, y, run) {
+    cvFit <- .grpregCv(
+        list(X = X, y = y, group = seq_len(ncol(X)), nfolds = run$nfolds),
+        run
+    )
+    coefs <- as.numeric(coef(cvFit))
+    list(
+        coef = coefs[-1L],
+        slim = .grpregSlimFit(cvFit, coefs[-1L], coefs[[1L]]),
+        object = cvFit
+    )
+}
+
+# grpreg's fit across conditions on the group design, a variant's copies one
+# group (.groupedDesign()).
+# @noRd
+.grpregGroupedFit <- function(X, Y, run) {
+    design <- .groupedDesign(X, Y, run$nfolds, sparse = FALSE)
+    cvFit <- .grpregCv(
+        list(
+            X = design$X,
+            y = design$y,
+            group = design$group,
+            fold = design$fold
+        ),
+        run
+    )
+    coefs <- .groupedCoef(as.numeric(coef(cvFit))[-1L], design)
+    list(
+        coef = coefs$coef,
+        slim = .grpregSlimFit(cvFit, coefs$coef, coefs$intercept),
+        object = cvFit
+    )
+}
+
+# cv.grpreg on `data` (design, phenotype, groups and folds) at the run's
+# penalty and mixing, keeping grpreg's standardized design only for
+# `retainX`; the caller's options win over the mixing, which only MCP and
+# SCAD leave them (.grpregAssertAlpha()), and over SCAD's concavity, which
+# defaults to ncvreg's so a method's fits agree across its engines.
+# @noRd
+.grpregCv <- function(data, run) {
+    callArgs <- list_modify(
+        c(
+            data,
+            list(
+                penalty = run$penalty,
+                alpha = run$alpha,
+                returnX = run$retainX
+            ),
+            .grpregDefaultGamma(run$penalty)
+        ),
+        !!!run$user
+    )
+    exec(grpreg::cv.grpreg, !!!callArgs)
+}
+
+# grpreg's concavity where it differs from ncvreg's: SCAD's 3.7, where
+# grpreg's own is 4. MCP's is 3 on both.
+# @noRd
+.grpregDefaultGamma <- function(penalty) {
+    if (identical(penalty, "grSCAD")) list(gamma = .ncvregGamma[["SCAD"]])
+}
+
+# The fit cv.grpreg selected: its coefficients over the variants fitted (a
+# column per condition for several), the intercept, its lambda and the
+# cross-validated error there.
+# @noRd
+.grpregSlimFit <- function(cvFit, coef, intercept) {
+    list(
+        coef = coef,
+        intercept = intercept,
+        lambda = cvFit$lambda.min,
+        cve = cvFit$cve[[cvFit$min]],
+        cvse = cvFit$cvse[[cvFit$min]]
+    )
+}
+
+# cv.grpreg's whole object without its fit's copies of the data: the
+# phenotype and the linear predictors at every lambda.
+# @noRd
+.grpregWithoutData <- function(cvFit) {
+    `[[<-`(
+        cvFit,
+        "fit",
+        value = .withoutFields(cvFit$fit, c("y", "linear.predictors"))
+    )
+}
+
+#' Compute Weights Using abess
+#'
+#' The engine behind the \code{"abess"} backend of
+#' \code{\link{l0learnWeights}}: fits \code{abess::abess}, a best subset of
+#' the variants, picking the support size by cross-validation, and returns
+#' the coefficients at that size. For a matrix \code{y}, a column per
+#' condition, the subset is one of variants each in the model for every
+#' condition or none: abess's \code{"mgaussian"} family when every condition
+#' was measured on every sample, otherwise a best subset of groups on the
+#' sparse group design.
+#'
+#' @param X A numeric matrix of predictors.
+#' @param y A numeric response vector, or a matrix with a column per
+#'   condition, missing where a condition was not measured.
+#' @param nfolds Number of cross-validation folds. Default is 5.
+#' @param methodArgs Options forwarded to \code{abess::abess}, built with
+#'   \code{\link{AbessOptions}}.
+#' @inheritParams l0learnWeights
+#' @return A numeric matrix of variant weights, a row per column of \code{X}
+#'   and a column per condition, with the fit attached as attribute
+#'   \code{"fit"} unless \code{fitRetention = "none"}.
+#' @importFrom checkmate assertCount
+#' @keywords internal
+abessWeights <- function(
+    X,
+    y,
+    nfolds = 5,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = AbessOptions()
+) {
+    .assertMethodOptions(methodArgs, "AbessOptions", "methodArgs")
+    assertCount(nfolds, positive = TRUE)
+    retention <- arg_match(fitRetention)
+    if (!requireNamespace("abess", quietly = TRUE)) {
+        abort("Package 'abess' is required for this function.")
+    }
+    keep <- .dropZeroVariance(X, "abessWeights")
+    fitted <- .abessFitFor(
+        X[, keep, drop = FALSE],
+        y,
+        nfolds,
+        as.list(methodArgs)
+    )
+    .engineWeights(fitted, keep, X, y, retention, .abessWithoutData)
+}
+
+# abess's fit of one phenotype, of conditions measured on the same samples
+# (its mgaussian family), or of conditions on samples of their own (a best
+# subset of groups on the sparse group design, .groupedDesign()).
+# @noRd
+.abessFitFor <- function(X, y, nfolds, user) {
+    if (!.isConditionMatrix(y)) {
+        return(.abessGaussianFit(X, y, nfolds, user))
+    }
+    if (!anyNA(y)) {
+        return(.abessMgaussianFit(X, y, nfolds, user))
+    }
+    .abessGroupedFit(.groupedDesign(X, y, nfolds, sparse = TRUE), user)
+}
+
+# abess's best subset of one phenotype's variants.
+# @noRd
+.abessGaussianFit <- function(X, y, nfolds, user) {
+    fit <- .abessCall(
+        list(
+            x = X,
+            y = y,
+            family = "gaussian",
+            foldid = .coupledFoldIds(seq_len(nrow(X)), nfolds)
+        ),
+        user
+    )
+    coefs <- .abessBestCoef(fit)
+    list(
+        coef = coefs[-1L],
+        slim = .abessSlimFit(fit, coefs[-1L], coefs[[1L]]),
+        object = fit
+    )
+}
+
+# abess's best subset shared by conditions measured on the same samples (its
+# mgaussian family, which stops on a phenotype matrix without column names),
+# each phenotype scaled to unit variance and its weights put back on its own
+# scale.
+# @noRd
+.abessMgaussianFit <- function(X, Y, nfolds, user) {
+    scales <- .groupedScales(Y)
+    fit <- .abessCall(
+        list(
+            x = X,
+            y = `colnames<-`(
+                .groupedScaled(Y, scales),
+                str_c("condition", seq_len(ncol(Y)))
+            ),
+            family = "mgaussian",
+            foldid = .coupledFoldIds(seq_len(nrow(X)), nfolds)
+        ),
+        user
+    )
+    B <- unname(as.matrix(coef(fit, support.size = fit$best.size)[[1L]]))
+    weights <- sweep(B[-1L, , drop = FALSE], 2L, scales$spread, "*")
+    list(
+        coef = weights,
+        slim = .abessSlimFit(
+            fit,
+            weights,
+            scales$center + scales$spread * B[1L, ]
+        ),
+        object = fit
+    )
+}
+
+# abess's best subset of groups on the sparse group design, which it never
+# normalizes and which is centred within each condition already.
+# @noRd
+.abessGroupedFit <- function(design, user) {
+    fit <- .abessCall(
+        list(
+            x = design$X,
+            y = design$y,
+            family = "gaussian",
+            group.index = design$group,
+            foldid = design$fold,
+            fit.intercept = FALSE
+        ),
+        user
+    )
+    coefs <- .groupedCoef(.abessBestCoef(fit)[-1L], design)
+    list(
+        coef = coefs$coef,
+        slim = .abessSlimFit(fit, coefs$coef, coefs$intercept),
+        object = fit
+    )
+}
+
+# abess on `args`, picking the support size by cross-validation, on one
+# thread, with the caller's options. abess reseeds R's random number
+# generator as it returns, so the session's state is restored around it.
+# @noRd
+.abessCall <- function(args, user) {
+    callArgs <- list_modify(
+        c(args, list(tune.type = "cv", num.threads = 1L)),
+        !!!user
+    )
+    withr::with_preserve_seed(exec(abess::abess, !!!callArgs))
+}
+
+# The intercept and coefficients of abess's fit at the support size its
+# cross-validation picked.
+# @noRd
+.abessBestCoef <- function(fit) {
+    as.numeric(coef(fit, support.size = fit$best.size))
+}
+
+# The fit abess selected: its coefficients over the variants fitted (a
+# column per condition for several), the intercept, its support size and the
+# cross-validated error there.
+# @noRd
+.abessSlimFit <- function(fit, coef, intercept) {
+    list(
+        coef = coef,
+        intercept = intercept,
+        supportSize = fit$best.size,
+        cvMean = fit$tune.value[[match(fit$best.size, fit$support.size)]]
+    )
+}
+
+# abess's whole object without the data its stored call holds.
+# @noRd
+.abessWithoutData <- function(fit) {
+    `[[<-`(fit, "call", value = .callWithoutData(fit$call))
+}
+
+# Weights over every column of X from an engine's fit over the kept ones
+# (`keep`), with the fit kept as `retention` asks. `fitted` holds the
+# coefficients (`coef`, a column per condition for several), the selected
+# fit (`slim`) and the engine's object (`object`), which `withoutData`
+# strips of its copies of the data.
+# @noRd
+.engineWeights <- function(fitted, keep, X, y, retention, withoutData) {
+    weights <- if (is.matrix(fitted$coef)) {
+        .weightsOnColumns(fitted$coef, keep, colnames(X), colnames(y))
+    } else {
+        replace(matrix(0, nrow = ncol(X), ncol = 1L), keep, fitted$coef)
+    }
+    if (identical(retention, "none")) {
+        return(weights)
+    }
+    kept <- if (identical(retention, "slim")) {
+        fitted$slim
+    } else {
+        withoutData(fitted$object)
+    }
+    `attr<-`(weights, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
+}
+
+# The rows of `Y` observing every condition, for an engine that takes no
+# missing phenotype; an error, naming the engine (`label`) and one that does
+# (`instead`), when fewer than two remain.
+# @noRd
+.completeRows <- function(Y, label, instead) {
+    rows <- which(stats::complete.cases(Y))
+    if (length(rows) < 2L) {
+        abort(c(
+            glue(
+                "{label}: fewer than two samples observe every condition, ",
+                "and this engine takes no missing phenotype."
+            ),
+            i = glue("Conditions on samples of their own take {instead}.")
+        ))
+    }
+    rows
+}
+
+# Whether `y` holds several conditions' phenotypes: a matrix with a column
+# per condition.
+# @noRd
+.isConditionMatrix <- function(y) {
+    is.matrix(y) && ncol(y) > 1L
+}
+
+# The group design of a fit across the conditions of `Y`: condition c's rows
+# hold its own samples, X centred within them, against its own copy of the
+# variants, ordered so each variant's copies sit together as its group (as
+# abess's group.index needs); its phenotype is scaled to unit variance; and
+# its rows are weighted by sqrt(N / (C n_c)), for N rows in all and C
+# conditions, so its loss is its own mean squared error. A copy that does not
+# vary in its condition's samples is left out. Each sample is dealt into one
+# fold (.groupedFolds()), which its rows take in every condition.
+# @noRd
+.groupedDesign <- function(X, Y, nfolds, sparse) {
+    rows <- map(seq_len(ncol(Y)), .coupledStudyRows, Y = Y)
+    scales <- .groupedScales(Y)
+    blocks <- pmap(
+        list(
+            seq_len(ncol(Y)),
+            rows,
+            sqrt(sum(lengths(rows)) / (ncol(Y) * lengths(rows)))
+        ),
+        .groupedBlock,
+        X = X,
+        Y = Y,
+        scales = scales
+    )
+    cells <- cbind(
+        variant = list_c(map(blocks, "variants")),
+        condition = rep(seq_along(blocks), lengths(map(blocks, "variants")))
+    )
+    byVariant <- order(cells[, "variant"], cells[, "condition"])
+    design <- bdiag(map(blocks, "X"))[, byVariant, drop = FALSE]
+    list(
+        X = if (sparse) design else as.matrix(design),
+        y = list_c(map(blocks, "y")),
+        group = cells[byVariant, "variant"],
+        cells = cells[byVariant, , drop = FALSE],
+        fold = .groupedFolds(Y, nfolds)[list_c(rows)],
+        means = do.call(cbind, map(blocks, "means")),
+        scales = scales
+    )
+}
+
+# Condition k's block of the group design: its samples' genotypes centred
+# within them and weighted, over the variants that vary there, and its
+# phenotype scaled and weighted.
+# @noRd
+#' @importFrom matrixStats colSds
+.groupedBlock <- function(k, rows, weight, X, Y, scales) {
+    Xk <- X[rows, , drop = FALSE]
+    means <- colMeans(Xk)
+    sds <- colSds(Xk)
+    varies <- !is.na(sds) & sds > 0
+    list(
+        X = weight * sweep(Xk[, varies, drop = FALSE], 2L, means[varies]),
+        y = weight * (Y[rows, k] - scales$center[[k]]) / scales$spread[[k]],
+        variants = which(varies),
+        means = means
+    )
+}
+
+# Each condition's phenotype centre and spread, on the samples observing it.
+# @noRd
+#' @importFrom matrixStats colSds
+.groupedScales <- function(Y) {
+    spread <- colSds(Y, na.rm = TRUE)
+    flat <- which(is.na(spread) | spread == 0)
+    if (length(flat) > 0L) {
+        msg <- glue(
+            "A fit across conditions needs each one's phenotype to vary, ",
+            "but condition(s) {str_flatten(flat, ', ')} do not."
+        )
+        abort(msg)
+    }
+    list(center = colMeans(Y, na.rm = TRUE), spread = spread)
+}
+
+# `Y` with each condition's phenotype centred and scaled (.groupedScales()).
+# @noRd
+.groupedScaled <- function(Y, scales) {
+    sweep(sweep(Y, 2L, scales$center), 2L, scales$spread, "/")
+}
+
+# Each sample's fold, dealt at random among the samples observing the same
+# conditions, so every fold holds out a share of each condition's samples.
+# @noRd
+.groupedFolds <- function(Y, nfolds) {
+    strata <- split(
+        seq_len(nrow(Y)),
+        vec_group_id(as.data.frame(!is.na(Y)))
+    )
+    replace(
+        integer(nrow(Y)),
+        list_c(strata),
+        list_c(map(strata, .coupledFoldIds, nfolds = nfolds))
+    )
+}
+
+# A group fit's coefficients (`beta`, over the design's columns) as weights on
+# each condition's own scale, a row per variant and a column per condition,
+# and each condition's intercept there.
+# @noRd
+.groupedCoef <- function(beta, design) {
+    B <- replace(
+        matrix(0, nrow(design$means), ncol(design$means)),
+        design$cells,
+        beta
+    )
+    list(
+        coef = sweep(B, 2L, design$scales$spread, "*"),
+        intercept = design$scales$center -
+            design$scales$spread * colSums(design$means * B)
+    )
+}
+
+# ---- Fits across a joint group's conditions --------------------------------
+#
+# The implementations the pipeline names for a method fitted across a group's
+# conditions at once (.jointTwasGrouped()). Each takes `Y`, which sends the
+# pipeline's fits, and each cross-validation fold's, down the whole-Y path
+# (.twasFitsWholeY()), and hands it to the method's own wrapper on the run's
+# backend.
+
+# @noRd
+.lassoGroupedWeights <- function(
+    X,
+    Y,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
+    methodArgs = NULL
+) {
+    lassoWeights(
+        X,
+        Y,
+        backend = backend,
+        fitRetention = arg_match(fitRetention),
+        retainX = retainX,
+        methodArgs = methodArgs
+    )
+}
+
+# @noRd
+.enetGroupedWeights <- function(
+    X,
+    Y,
+    alpha = 0.5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
+    methodArgs = NULL
+) {
+    enetWeights(
+        X,
+        Y,
+        alpha = alpha,
+        backend = backend,
+        fitRetention = arg_match(fitRetention),
+        retainX = retainX,
+        methodArgs = methodArgs
+    )
+}
+
+# @noRd
+.mcpGroupedWeights <- function(
+    X,
+    Y,
+    nfolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
+    methodArgs = NULL
+) {
+    mcpWeights(
+        X,
+        Y,
+        nfolds = nfolds,
+        backend = backend,
+        fitRetention = arg_match(fitRetention),
+        retainX = retainX,
+        methodArgs = methodArgs
+    )
+}
+
+# @noRd
+.scadGroupedWeights <- function(
+    X,
+    Y,
+    nfolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    retainX = FALSE,
+    methodArgs = NULL
+) {
+    scadWeights(
+        X,
+        Y,
+        nfolds = nfolds,
+        backend = backend,
+        fitRetention = arg_match(fitRetention),
+        retainX = retainX,
+        methodArgs = methodArgs
+    )
+}
+
+# @noRd
+.l0learnGroupedWeights <- function(
+    X,
+    Y,
+    penalty = "L0",
+    nFolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = NULL
+) {
+    l0learnWeights(
+        X,
+        Y,
+        penalty = penalty,
+        nFolds = nFolds,
+        backend = backend,
+        fitRetention = arg_match(fitRetention),
+        methodArgs = methodArgs
+    )
+}
+
+# ---- Fits across coupled conditions (difference penalty) -------------------
+#
+# A group of conditions -- studies, contexts or traits -- holds X over the
+# union of their variants and Y one column per condition, missing outside the
+# condition's own samples; the conditions of one study share its samples.
+# lasso, elastic net, ridge, MCP, SCAD and L0 fit such a group with a penalty
+# on the difference between coupled conditions' per-SD effects, the
 # individual-level analogue of PROSPER:
 #
 #   sum_k [RSS_k / (2 n_k) + lambda P(b_k)]
-#       + (c / 2) sum_j sum_{k < k'} (s_jk b_jk - s_jk' b_jk')^2
+#       + sum_j sum_{k < k'} (c_kk' / 2) (s_jk b_jk - s_jk' b_jk')^2
 #
-# Each study's loss is its own mean squared error, on its phenotype scaled to
-# unit variance, and s_jk is variant j's SD in study k. The engines solve it
-# as one augmented least-squares problem (.coupledDesign()). Each study takes
-# the (lambda, c) its own held-out rows score best, on folds drawn within each
-# study with the pseudo-rows always training (.coupledFit()). At c = 0 the fit
-# is the studies' separate fits; as c grows it becomes one pooled fit.
+# Each condition's loss is its own mean squared error, on its phenotype
+# scaled to unit variance, and s_jk is variant j's SD in condition k's
+# samples. A pair differing along one coupled axis alone takes that axis's
+# strength c, any other pair none (.coupledSpec()); several coupled axes give
+# a grid of every combination of their strengths. The engines solve it as one
+# augmented least-squares problem (.coupledDesign()), each condition on its
+# own copy of the variants. An engine with a group penalty adds it, each
+# variant's copies one group: grpreg and abess over every condition's copy,
+# glmnet's mgaussian family over the conditions that share samples and are
+# not coupled to one another (.coupledUnitsHold()). Each condition takes the
+# grid point its own held-out samples score best, on folds that hold a sample
+# out of every condition at once, the pseudo-rows always training
+# (.coupledFit()). At c = 0 the fit is the conditions' separate fits (or
+# their group fit); as c grows it becomes one pooled fit.
+#
+# ncvreg and grpreg always standardize their columns, and the pseudo-rows
+# enter each column's scale. The weights on their columns put the lasso part
+# of the penalty on the per-SD effects (.coupledNcvregPath()); MCP's
+# concavity is then exact only where every column has the same coupling, and
+# SCAD's, and grpreg's group norm, only at c = 0 (.coupledWarnApproximate()).
 
-# lasso across a group's studies (.glmnetCoupledWeights()).
+# lasso across a group's coupled conditions, on glmnet or grpreg
+# (.penalizedCoupledWeights()). `coupling` is the group's coupling
+# (.coupledSpec()), or a grid of strengths coupling every pair.
 # @noRd
 .lassoCoupledWeights <- function(
     X,
     Y,
-    strengths,
+    coupling,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
-    methodArgs = GlmnetOptions()
+    methodArgs = NULL
 ) {
-    .glmnetCoupledWeights(
-        X,
-        Y,
-        1,
-        strengths,
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(token = "lasso", alpha = 1, backend = backend),
         arg_match(fitRetention),
         methodArgs
     )
 }
 
-# The elastic net across a group's studies, at the mixing `alpha` enetWeights()
-# takes (.glmnetCoupledWeights()).
+# The elastic net across a group's coupled conditions, at the mixing `alpha`
+# enetWeights() takes.
 # @noRd
 .enetCoupledWeights <- function(
     X,
     Y,
-    strengths,
+    coupling,
     alpha = 0.5,
+    backend = NULL,
     fitRetention = c("none", "slim", "full"),
-    methodArgs = GlmnetOptions()
+    methodArgs = NULL
 ) {
     assertNumber(alpha, lower = 0, upper = 1)
-    .glmnetCoupledWeights(
-        X,
-        Y,
-        alpha,
-        strengths,
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(token = "enet", alpha = alpha, backend = backend),
         arg_match(fitRetention),
         methodArgs
     )
 }
 
-# Ridge across a group's studies (.glmnetCoupledWeights()).
+# Ridge across a group's coupled conditions, on glmnet.
 # @noRd
 .ridgeCoupledWeights <- function(
     X,
     Y,
-    strengths,
+    coupling,
     fitRetention = c("none", "slim", "full"),
     methodArgs = GlmnetOptions()
 ) {
-    .glmnetCoupledWeights(
-        X,
-        Y,
-        0,
-        strengths,
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(token = "ridge", alpha = 0),
         arg_match(fitRetention),
         methodArgs
     )
 }
 
-# glmnet's fit of a group across its studies: the weights (variants x
-# studies) each study's own best (lambda, c) gives it, zero for a variant the
-# study does not carry. lambda is on each study's own scale: at c = 0, study
-# k's weights are glmnetWeights()' at lambda times its phenotype's SD.
+# Ridge across a group's conditions with no coupling: each condition's own
+# ridge, all at the one lambda whose cross-validated error, averaged over the
+# conditions, is least. Ridge has no group penalty, its penalty being separate
+# for each condition; sharing lambda is what joins them.
 # @noRd
-.glmnetCoupledWeights <- function(
+.ridgeGroupedWeights <- function(
     X,
     Y,
-    alpha,
-    strengths,
-    fitRetention,
-    methodArgs
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = GlmnetOptions()
 ) {
-    if (!requireNamespace("glmnet", quietly = TRUE)) {
-        abort("Package 'glmnet' is required for this function.")
-    }
-    .assertMethodOptions(methodArgs, "GlmnetOptions", "methodArgs")
-    opts <- .coupledGlmnetOptions(methodArgs)
-    studies <- .coupledStudies(X, Y, strengths)
-    engine <- list(
-        path = .coupledGlmnetPath,
-        alpha = alpha,
-        lambda = opts$lambda %||% .coupledGlmnetLambda(studies, alpha, opts),
-        args = opts$engine
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = .coupledNone(ncol(Y))),
+        list(token = "ridge", alpha = 0),
+        arg_match(fitRetention),
+        methodArgs,
+        choose = "pooled"
     )
-    .coupledFit(studies, engine, opts$nfolds, fitRetention)
 }
 
-# The GlmnetOptions a fit across studies honours: its folds' count
-# (`nfolds`), its lambda grid (`lambda`, `nlambda`, `lambda.min.ratio`) and
-# glmnet's tolerances. The rest set up what this fit does not do --
-# cv.glmnet's own folds, or a per-variant layout the stacked design lacks.
+# MCP across a group's coupled conditions, on ncvreg (the coupling alone) or
+# grpreg (with the group penalty).
 # @noRd
-.coupledGlmnetOptions <- function(methodArgs) {
-    user <- as.list(methodArgs)
+.mcpCoupledWeights <- function(
+    X,
+    Y,
+    coupling,
+    nfolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = NULL
+) {
+    assertCount(nfolds, positive = TRUE)
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(
+            token = "mcp",
+            penalty = "MCP",
+            nfolds = nfolds,
+            backend = backend
+        ),
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# SCAD across a group's coupled conditions, as .mcpCoupledWeights().
+# @noRd
+.scadCoupledWeights <- function(
+    X,
+    Y,
+    coupling,
+    nfolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = NULL
+) {
+    assertCount(nfolds, positive = TRUE)
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(
+            token = "scad",
+            penalty = "SCAD",
+            nfolds = nfolds,
+            backend = backend
+        ),
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# L0 across a group's coupled conditions, on L0Learn (the coupling alone) or
+# abess (a best subset of groups as well). The L0 penalty alone: its lambda
+# reads the same at every c, where the L1 and L2 terms' would not, as they
+# see L0Learn's own rescaling of the columns, which the pseudo-rows change.
+# @noRd
+.l0learnCoupledWeights <- function(
+    X,
+    Y,
+    coupling,
+    penalty = "L0",
+    nFolds = 5,
+    backend = NULL,
+    fitRetention = c("none", "slim", "full"),
+    methodArgs = NULL
+) {
+    .coupledRequireL0(penalty)
+    assertCount(nFolds, positive = TRUE)
+    .penalizedCoupledWeights(
+        list(X = X, Y = Y, coupling = coupling),
+        list(token = "l0learn", nfolds = nFolds, backend = backend),
+        arg_match(fitRetention),
+        methodArgs
+    )
+}
+
+# @noRd
+.coupledRequireL0 <- function(penalty) {
+    if (identical(penalty, "L0")) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        glue(
+            "l0learn across coupled conditions fits penalty = \"L0\" only, ",
+            "not \"{penalty}\": the L1 and L2 terms see the engine's own ",
+            "rescaling of the columns, which the coupling changes."
+        ),
+        i = str_c(
+            "Use penalty = \"L0\", or pass coupling = NULL to fit each ",
+            "condition on its own."
+        )
+    ))
+}
+
+# A penalized method's fit across the coupled conditions of `data` (X, Y and
+# `coupling`), on the engine its backend names (`method`: the token, its
+# backend and settings), each condition at its own grid point or, for
+# `choose = "pooled"`, all at one.
+# @noRd
+.penalizedCoupledWeights <- function(
+    data,
+    method,
+    retention,
+    methodArgs,
+    choose = "own"
+) {
+    backend <- .coupledBackend(method)
+    options <- .backendOptions(
+        methodArgs,
+        .coupledCtorName(method$token, backend),
+        backend
+    )
+    .coupledRequirePackage(backend)
+    conds <- .coupledConditions(data$X, data$Y, data$coupling)
+    engine <- .coupledEngine(backend, method, as.list(options), conds)
+    .coupledWarnApproximate(backend, method, conds)
+    .coupledFit(conds, engine, retention, choose)
+}
+
+# The engine a coupled fit runs on: ridge's is glmnet's, the others' the
+# backend chosen for the method.
+# @noRd
+.coupledBackend <- function(method) {
+    if (identical(method$token, "ridge")) {
+        return("glmnet")
+    }
+    .methodBackend(method$token, method$backend, "individual")
+}
+
+# @noRd
+.coupledCtorName <- function(token, backend) {
+    if (identical(token, "ridge")) {
+        return("GlmnetOptions")
+    }
+    .methodBackends$individual[[token]][[backend]]
+}
+
+# @noRd
+.coupledRequirePackage <- function(backend) {
+    package <- .coupledPackages[[backend]]
+    if (!requireNamespace(package, quietly = TRUE)) {
+        abort(glue("Package '{package}' is required for this function."))
+    }
+    invisible(NULL)
+}
+
+# The package each coupled engine is.
+# @noRd
+.coupledPackages <- c(
+    glmnet = "glmnet",
+    l0learn = "L0Learn",
+    ncvreg = "ncvreg",
+    grpreg = "grpreg",
+    abess = "abess"
+)
+
+# The engine's path function, grid and settings for a coupled fit
+# (`method`'s, with the caller's engine options `user`).
+# @noRd
+.coupledEngine <- function(backend, method, user, conds) {
+    switch(
+        backend,
+        glmnet = .coupledGlmnetEngine(method, user, conds),
+        l0learn = .coupledL0learnEngine(method, user, conds),
+        ncvreg = .coupledNcvregEngine(method, user, conds),
+        grpreg = .coupledGrpregEngine(method, user, conds),
+        abess = .coupledAbessEngine(method, user, conds)
+    )
+}
+
+# The coupling of a group of K conditions: which axis each pair is coupled
+# along (`pairs`, K x K, NA for a pair not coupled), each coupled axis's grid
+# of strengths (`grids`), and the conditions' units and columns, which
+# glmnet's mgaussian family fits together (`unit`, `column`). A numeric
+# `coupling` is a grid coupling every pair, each condition its own unit.
+# @noRd
+#' @importFrom checkmate assertNumeric assertList assertMatrix
+.coupledSpec <- function(coupling, K) {
+    if (is.numeric(coupling)) {
+        .coupledAssertGrid(coupling)
+        return(list(
+            pairs = .coupledAllPairs(K),
+            grids = list(strength = coupling),
+            unit = seq_len(K),
+            column = rep(1L, K)
+        ))
+    }
+    assertList(coupling)
+    assertMatrix(coupling$pairs, nrows = K, ncols = K)
+    walk(coupling$grids, .coupledAssertGrid)
+    list_modify(.coupledNone(K), !!!coupling)
+}
+
+# @noRd
+.coupledAssertGrid <- function(strengths) {
+    assertNumeric(
+        strengths,
+        lower = 0,
+        finite = TRUE,
+        any.missing = FALSE,
+        min.len = 1L
+    )
+}
+
+# Every pair of K conditions coupled along one axis, "strength".
+# @noRd
+.coupledAllPairs <- function(K) {
+    `diag<-`(matrix("strength", K, K), NA_character_)
+}
+
+# A group of K conditions with no coupling.
+# @noRd
+.coupledNone <- function(K) {
+    list(
+        pairs = matrix(NA_character_, K, K),
+        grids = list(),
+        unit = seq_len(K),
+        column = rep(1L, K)
+    )
+}
+
+# The conditions of a coupled fit: X, Y, each condition's rows (those holding
+# its phenotype), its coupling and the grid's cells, one row per combination
+# of the coupled axes' strengths.
+# @noRd
+#' @importFrom tidyr expand_grid
+.coupledConditions <- function(X, Y, coupling) {
+    spec <- .coupledSpec(coupling, ncol(Y))
+    list(
+        X = X,
+        Y = Y,
+        rows = map(seq_len(ncol(Y)), .coupledStudyRows, Y = Y),
+        spec = spec,
+        cells = expand_grid(!!!spec$grids)
+    )
+}
+
+# @noRd
+.coupledStudyRows <- function(k, Y) {
+    which(!is.na(Y[, k]))
+}
+
+# The strengths of every pair of conditions in cell `i` (K x K, zero for a
+# pair not coupled).
+# @noRd
+.coupledStrength <- function(i, conds) {
+    .coupledPairStrengths(c(numeric(0), unlist(conds$cells[i, ])), conds)
+}
+
+# The weakest coupling of the grid, each axis at its least strength: where a
+# grid that serves every cell is set.
+# @noRd
+.coupledWeakest <- function(conds) {
+    .coupledPairStrengths(map_dbl(conds$spec$grids, min), conds)
+}
+
+# The pairs' strengths (K x K) at the axes' strengths `values`, named by
+# axis: a pair's is its axis's, zero for a pair not coupled.
+# @noRd
+.coupledPairStrengths <- function(values, conds) {
+    axes <- conds$spec$pairs
+    W <- matrix(unname(values[axes]), nrow(axes), ncol(axes))
+    replace(W, is.na(W), 0)
+}
+
+# ---- engines of a coupled fit ----
+
+# glmnet: the coupling alone, or for lasso and the elastic net with
+# mgaussian's group penalty over the conditions of each unit, where the
+# conditions fall into units (.coupledUnitsHold()).
+# @noRd
+.coupledGlmnetEngine <- function(method, user, conds) {
+    opts <- .coupledGlmnetOptions(user)
+    grouped <- !identical(method$token, "ridge") && .coupledUnitsHold(conds)
+    engine <- list(
+        path = .coupledGlmnetPath,
+        alpha = method$alpha,
+        args = opts$engine,
+        layout = if (grouped) "units" else "conditions",
+        nfolds = opts$nfolds,
+        gridName = "lambda"
+    )
+    list_assign(
+        engine,
+        grid = opts$lambda %||% .coupledGlmnetLambda(conds, engine, opts)
+    )
+}
+
+# The GlmnetOptions a coupled fit honours: its folds' count (`nfolds`), its
+# lambda grid (`lambda`, `nlambda`, `lambda.min.ratio`) and glmnet's
+# tolerances. The rest set up what this fit does not do -- cv.glmnet's own
+# folds, or a per-variant layout the augmented design lacks.
+# @noRd
+.coupledGlmnetOptions <- function(user) {
     honoured <- c(
         "nfolds",
         "lambda",
@@ -7570,20 +8928,20 @@ l0learnWeights <- function(
     )
 }
 
-# A fit across studies picks its grid point by mean squared error, which is
-# what cv.glmnet's "mse" and, for a gaussian response, "deviance" measure.
+# A coupled fit picks its grid point by mean squared error, which is what
+# cv.glmnet's "mse" and, for a gaussian response, "deviance" measure.
 # @noRd
 .coupledRefuseMeasure <- function(measure) {
     if (is.null(measure) || is_in(measure, c("default", "mse", "deviance"))) {
         return(invisible(NULL))
     }
     abort(glue(
-        "GlmnetOptions(type.measure = \"{measure}\"): a fit across studies ",
-        "chooses its (lambda, c) by mean squared error."
+        "GlmnetOptions(type.measure = \"{measure}\"): a fit across coupled ",
+        "conditions chooses its grid point by mean squared error."
     ))
 }
 
-# Engine options that have no meaning for a fit across studies.
+# Engine options that have no meaning for a coupled fit.
 # @noRd
 .coupledRefuseOptions <- function(unsupported, label) {
     if (length(unsupported) == 0L) {
@@ -7592,113 +8950,79 @@ l0learnWeights <- function(
     abort(c(
         glue(
             "{label}({str_flatten(unsupported, ', ')}) does not apply to a ",
-            "fit across studies, whose folds, grid and columns are its own."
+            "fit across coupled conditions, whose folds, grid and columns are ",
+            "its own."
         ),
         i = str_c(
-            "Leave it unset, or pass studyCoupling = NULL to fit each study ",
+            "Leave it unset, or pass coupling = NULL to fit each condition ",
             "on its own."
         )
     ))
 }
 
-# glmnet's lambda grid: from the largest any study's own fit starts at, where
+# glmnet's lambda grid: from the largest any unit's own fit starts at, where
 # every effect is zero, down by `ratio`. The pseudo-rows add nothing to the
 # gradient at zero, so one grid serves every c.
 # @noRd
-.coupledGlmnetLambda <- function(studies, alpha, opts) {
-    top <- max(map2_dbl(
-        seq_along(studies$rows),
-        studies$rows,
-        .coupledLambdaMax,
-        studies = studies,
-        alpha = alpha
-    ))
+.coupledGlmnetLambda <- function(conds, engine, opts) {
+    copies <- .coupledCopies(conds, conds$rows, engine$layout)
+    top <- max(map_dbl(copies, .coupledLambdaMax, alpha = engine$alpha))
     exp(seq(log(top), log(top * opts$ratio), length.out = opts$nlambda))
 }
 
-# Study `k`'s own largest lambda: glmnet's, which takes a ridge's from
+# A copy's own largest lambda: glmnet's, the largest norm of a variant's
+# correlations with the copy's phenotypes, which takes a ridge's from
 # alpha = 0.001.
 # @noRd
-.coupledLambdaMax <- function(k, rows, studies, alpha) {
-    block <- .coupledBlock(k, rows, studies)
-    max(abs(crossprod(block$X, block$y))) / (length(rows) * max(alpha, 1e-3))
+.coupledLambdaMax <- function(copy, alpha) {
+    norms <- sqrt(rowSums(crossprod(copy$X, copy$Y)^2))
+    max(norms) / (copy$n * max(alpha, 1e-3))
 }
 
 # One glmnet path on `design`, its coefficients over the grid (columns),
 # padded with the last fit where glmnet stopped early, its deviance no longer
-# moving. The design's loss is the studies' mean, so lambda is divided by K.
+# moving: gaussian on one phenotype column, mgaussian on a unit's several,
+# their coefficients stacked a column after another. The design's loss is
+# the conditions' mean, so lambda is divided by K.
 # @noRd
 .coupledGlmnetPath <- function(design, engine) {
+    several <- is.matrix(design$y)
     fit <- exec(
         glmnet::glmnet,
         x = design$X,
         y = design$y,
-        family = "gaussian",
+        family = if (several) "mgaussian" else "gaussian",
         alpha = engine$alpha,
-        lambda = engine$lambda / design$K,
+        lambda = engine$grid / design$K,
         standardize = FALSE,
         intercept = FALSE,
-        !!!engine$args
+        !!!c(if (several) list(standardize.response = FALSE), engine$args)
     )
-    .coupledPadPath(as.matrix(fit$beta), length(engine$lambda))
+    beta <- if (several) map(fit$beta, as.matrix) else list(fit$beta)
+    .coupledPadPath(
+        as.matrix(exec(rbind, !!!beta)),
+        length(engine$grid)
+    )
 }
 
-# L0Learn across a group's studies, with the L0 penalty: its lambda reads the
-# same at every c, where the L1 and L2 terms' would not, as they see
-# L0Learn's own rescaling of the columns, which the pseudo-rows change.
+# L0Learn: the coupling alone, with the L0 penalty.
 # @noRd
-.l0learnCoupledWeights <- function(
-    X,
-    Y,
-    strengths,
-    penalty = "L0",
-    nFolds = 5,
-    fitRetention = c("none", "slim", "full"),
-    methodArgs = L0learnOptions()
-) {
-    if (!requireNamespace("L0Learn", quietly = TRUE)) {
-        abort("Package 'L0Learn' is required for this function.")
-    }
-    .assertMethodOptions(methodArgs, "L0learnOptions", "methodArgs")
-    .coupledRequireL0(penalty)
-    assertCount(nFolds, positive = TRUE)
-    studies <- .coupledStudies(X, Y, strengths)
+.coupledL0learnEngine <- function(method, user, conds) {
     engine <- list(
         path = .coupledL0learnPath,
-        args = .coupledL0learnOptions(methodArgs)
+        args = .coupledL0learnOptions(user),
+        layout = "conditions",
+        nfolds = method$nfolds,
+        gridName = "lambda"
     )
-    .coupledFit(
-        studies,
-        list_assign(engine, lambda = .coupledL0learnLambda(studies, engine)),
-        nFolds,
-        arg_match(fitRetention)
-    )
+    list_assign(engine, grid = .coupledL0learnLambda(conds, engine))
 }
 
+# The L0learnOptions a coupled fit honours: those of L0Learn's search and
+# grid. `seed` sets L0Learn.cvfit()'s folds, which this fit does not use; its
+# own folds follow the run's seed.
 # @noRd
-.coupledRequireL0 <- function(penalty) {
-    if (identical(penalty, "L0")) {
-        return(invisible(NULL))
-    }
-    abort(c(
-        glue(
-            "l0learn across studies fits penalty = \"L0\" only, not ",
-            "\"{penalty}\": the L1 and L2 terms see L0Learn's own rescaling ",
-            "of the columns, which the coupling changes."
-        ),
-        i = str_c(
-            "Use penalty = \"L0\", or pass studyCoupling = NULL to fit each ",
-            "study on its own."
-        )
-    ))
-}
-
-# The L0learnOptions a fit across studies honours: those of L0Learn's search
-# and grid. `seed` sets L0Learn.cvfit()'s folds, which this fit does not use;
-# its own folds follow the run's seed.
-# @noRd
-.coupledL0learnOptions <- function(methodArgs) {
-    user <- as.list(methodArgs)
+.coupledL0learnOptions <- function(user) {
     honoured <- c(
         "maxSuppSize",
         "nLambda",
@@ -7723,11 +9047,12 @@ l0learnWeights <- function(
 # lambda is relative to the phenotype's norm, which every design fixes, so the
 # grid reads the same at every c and in every fold.
 # @noRd
-.coupledL0learnLambda <- function(studies, engine) {
+.coupledL0learnLambda <- function(conds, engine) {
     design <- .coupledDesign(
-        studies,
-        studies$rows,
-        min(studies$strengths)
+        conds,
+        conds$rows,
+        .coupledWeakest(conds),
+        engine$layout
     )
     fit <- exec(
         L0Learn::L0Learn.fit,
@@ -7752,11 +9077,323 @@ l0learnWeights <- function(
         y = design$y,
         penalty = "L0",
         intercept = FALSE,
-        lambdaGrid = list(engine$lambda),
+        lambdaGrid = list(engine$grid),
         !!!gridArgs
     )
-    .coupledPadPath(as.matrix(fit$beta[[1L]]), length(engine$lambda))
+    .coupledPadPath(as.matrix(fit$beta[[1L]]), length(engine$grid))
 }
+
+# ncvreg: the coupling alone, MCP or SCAD on a dense design.
+# @noRd
+.coupledNcvregEngine <- function(method, user, conds) {
+    opts <- .coupledPerSdOptions(user, "NcvregOptions", "convex")
+    engine <- list(
+        path = .coupledNcvregPath,
+        penalty = method$penalty,
+        gamma = opts$gamma %||% .ncvregGamma[[method$penalty]],
+        args = opts$engine,
+        layout = "conditions",
+        nfolds = method$nfolds,
+        gridName = "lambda"
+    )
+    list_assign(
+        engine,
+        grid = opts$lambda %||% .coupledPerSdLambda(conds, opts)
+    )
+}
+
+# ncvreg's own concavity defaults.
+# @noRd
+.ncvregGamma <- c(MCP = 3, SCAD = 3.7)
+
+# The concavity of a coupled fit: the caller's, else ncvreg's for MCP and
+# SCAD, so a method's fits agree across its engines; none for the lasso.
+# @noRd
+.coupledGamma <- function(gamma, penalty) {
+    if (is.null(penalty)) {
+        return(gamma)
+    }
+    gamma %||% .ncvregGamma[[penalty]]
+}
+
+# The NcvregOptions or GrpregOptions (`label`) a coupled fit honours: the
+# concavity, the grid and the tolerances, plus `extra`. The mixing with ridge
+# (`alpha`) is refused: its ridge part sees the engine's rescaling of the
+# columns, which the coupling changes.
+# @noRd
+.coupledPerSdOptions <- function(user, label, extra) {
+    honoured <- c(
+        "gamma",
+        "nlambda",
+        "lambda.min",
+        "lambda",
+        "eps",
+        "max.iter",
+        "dfmax",
+        "warn",
+        extra
+    )
+    .coupledRefuseOptions(setdiff(names(user), honoured), label)
+    list(
+        gamma = user$gamma,
+        lambda = user$lambda,
+        nlambda = user$nlambda %||% 100L,
+        ratio = user$lambda.min,
+        engine = user[intersect(names(user), setdiff(honoured, .gridOptions))]
+    )
+}
+
+# The options setting the grid, which a coupled fit sets itself.
+# @noRd
+.gridOptions <- c("gamma", "nlambda", "lambda.min", "lambda")
+
+# A lambda grid on the per-SD scale: from the largest any condition's own
+# fit starts at, where every effect is zero, down by `lambda.min` (ncvreg's
+# default: 0.001 with more samples than variants, else 0.05).
+# @noRd
+.coupledPerSdLambda <- function(conds, opts) {
+    copies <- .coupledCopies(conds, conds$rows, "conditions")
+    top <- max(map_dbl(copies, .coupledPerSdMax))
+    few <- any(map_int(copies, "n") <= ncol(conds$X))
+    ratio <- opts$ratio %||% (if (few) 0.05 else 0.001)
+    exp(seq(log(top), log(top * ratio), length.out = opts$nlambda))
+}
+
+# @noRd
+.coupledPerSdMax <- function(copy) {
+    max(abs(crossprod(copy$X, copy$Y)) / copy$s) / copy$n
+}
+
+# One ncvreg path on `design`. ncvreg penalizes its standardized columns, the
+# pseudo-rows among them, so column j's coefficient is r_j b_j, r_j^2 =
+# s_j^2 (1 + C_j) / K, C_j the strengths summed over its coupled partners.
+# The weight sqrt(K / (1 + C_j)) on each column puts the lasso part of the
+# penalty on the per-SD effect s_j b_j at lambda / K, the design's loss being
+# the conditions' mean; MCP's concavity there is gamma (1 + C_j), exact when
+# C_j is the same for every column, and SCAD's is left at gamma.
+# @noRd
+.coupledNcvregPath <- function(design, engine) {
+    scale <- 1 + design$partners
+    gamma <- if (identical(engine$penalty, "MCP")) {
+        engine$gamma * stats::median(scale)
+    } else {
+        engine$gamma
+    }
+    fit <- exec(
+        ncvreg::ncvreg,
+        X = as.matrix(design$X),
+        y = design$y,
+        penalty = engine$penalty,
+        gamma = gamma,
+        lambda = engine$grid / design$K,
+        penalty.factor = sqrt(design$K / scale),
+        !!!engine$args
+    )
+    .coupledPadPath(
+        as.matrix(fit$beta)[-1L, , drop = FALSE],
+        length(engine$grid)
+    )
+}
+
+# grpreg: the coupling with the group penalty, each variant's copies one
+# group, on a dense design.
+# @noRd
+.coupledGrpregEngine <- function(method, user, conds) {
+    if (!is.null(method$alpha)) {
+        .grpregAssertAlpha(user, method$alpha)
+    }
+    opts <- .coupledPerSdOptions(
+        user,
+        "GrpregOptions",
+        c("tau", "gmax", "log.lambda")
+    )
+    engine <- list(
+        path = .coupledGrpregPath,
+        penalty = str_c("gr", method$penalty %||% "Lasso"),
+        alpha = method$alpha %||% 1,
+        args = c(
+            opts$engine,
+            compact(list(
+                gamma = .coupledGamma(opts$gamma, method$penalty)
+            ))
+        ),
+        layout = "groups",
+        nfolds = method$nfolds %||% 5L,
+        gridName = "lambda"
+    )
+    list_assign(
+        engine,
+        grid = opts$lambda %||% .coupledGrpregLambda(conds, engine, opts)
+    )
+}
+
+# grpreg's own lambda grid for the full data at the weakest coupling, which
+# then serves every c and fold.
+# @noRd
+.coupledGrpregLambda <- function(conds, engine, opts) {
+    design <- .coupledDesign(
+        conds,
+        conds$rows,
+        .coupledWeakest(conds),
+        engine$layout
+    )
+    fit <- exec(
+        grpreg::grpreg,
+        X = as.matrix(design$X),
+        y = design$y,
+        group = design$group,
+        penalty = engine$penalty,
+        alpha = engine$alpha,
+        nlambda = opts$nlambda,
+        !!!c(compact(list(lambda.min = opts$ratio)), engine$args)
+    )
+    fit$lambda
+}
+
+# One grpreg path on `design` over the grid, padded as glmnet's is.
+# @noRd
+.coupledGrpregPath <- function(design, engine) {
+    fit <- exec(
+        grpreg::grpreg,
+        X = as.matrix(design$X),
+        y = design$y,
+        group = design$group,
+        penalty = engine$penalty,
+        alpha = engine$alpha,
+        lambda = engine$grid,
+        !!!engine$args
+    )
+    .coupledPadPath(
+        as.matrix(fit$beta)[-1L, , drop = FALSE],
+        length(engine$grid)
+    )
+}
+
+# abess: the coupling with a best subset of groups, each variant's copies one
+# group, on a sparse design; its grid is the number of groups kept.
+# @noRd
+.coupledAbessEngine <- function(method, user, conds) {
+    honoured <- c(
+        "support.size",
+        "c.max",
+        "max.splicing.iter",
+        "warm.start",
+        "splicing.type",
+        "important.search"
+    )
+    .coupledRefuseOptions(setdiff(names(user), honoured), "AbessOptions")
+    engine <- list(
+        path = .coupledAbessPath,
+        args = user[intersect(names(user), setdiff(honoured, "support.size"))],
+        layout = "groups",
+        nfolds = method$nfolds,
+        gridName = "supportSize"
+    )
+    list_assign(
+        engine,
+        grid = user$support.size %||% .coupledAbessSizes(conds, engine)
+    )
+}
+
+# abess's own support sizes for the full data at the weakest coupling.
+# @noRd
+.coupledAbessSizes <- function(conds, engine) {
+    design <- .coupledDesign(
+        conds,
+        conds$rows,
+        .coupledWeakest(conds),
+        engine$layout
+    )
+    .coupledAbessCall(design, engine, NULL)$support.size
+}
+
+# One abess path on `design` over the support sizes of the grid.
+# @noRd
+.coupledAbessPath <- function(design, engine) {
+    fit <- .coupledAbessCall(design, engine, engine$grid)
+    as.matrix(fit$beta)
+}
+
+# abess on `design`'s groups at `sizes` (its own when NULL), on one thread,
+# the session's random number state restored around it (.abessCall()).
+# @noRd
+.coupledAbessCall <- function(design, engine, sizes) {
+    callArgs <- c(
+        list(
+            x = design$X,
+            y = design$y,
+            family = "gaussian",
+            group.index = design$group,
+            tune.type = "gic",
+            fit.intercept = FALSE,
+            num.threads = 1L
+        ),
+        compact(list(support.size = sizes)),
+        engine$args
+    )
+    withr::with_preserve_seed(exec(abess::abess, !!!callArgs))
+}
+
+# A warning, once a session for each, that ncvreg's or grpreg's
+# standardization leaves the penalty approximate on this group
+# (.coupledNcvregPath()): grpreg's group norm counts the coupling at any
+# c > 0, SCAD's concavity shrinks with it, and MCP's is exact only when
+# every column has the same coupling.
+# @noRd
+.coupledWarnApproximate <- function(backend, method, conds) {
+    if (!is_in(backend, c("ncvreg", "grpreg"))) {
+        return(invisible(NULL))
+    }
+    copies <- .coupledPlaced(
+        .coupledCopies(conds, conds$rows, "conditions"),
+        "conditions"
+    )
+    partners <- map(
+        seq_len(nrow(conds$cells)),
+        .coupledCellPartners,
+        conds = conds,
+        copies = copies
+    )
+    concaveOnly <- identical(backend, "ncvreg") &&
+        identical(method$token, "mcp")
+    exact <- all(map_lgl(
+        partners,
+        if (concaveOnly) .coupledEven else .coupledUncoupled
+    ))
+    if (!exact) {
+        warn(
+            glue(
+                "{method$token} on {backend} across coupled conditions: ",
+                "{backend} rescales its columns, the coupling's rows among ",
+                "them, so the penalty is approximate on this group."
+            ),
+            .frequency = "once",
+            .frequency_id = str_c("pecotmr_coupled_", backend, method$token)
+        )
+    }
+    invisible(NULL)
+}
+
+# The design columns' couplings at cell `i` (.coupledPartners()).
+# @noRd
+.coupledCellPartners <- function(i, conds, copies) {
+    .coupledPartners(
+        .coupledPairs(copies, .coupledStrength(i, conds)),
+        sum(map_int(copies, .coupledWidth))
+    )
+}
+
+# @noRd
+.coupledEven <- function(partners) {
+    diff(range(partners)) <= 1e-12
+}
+
+# @noRd
+.coupledUncoupled <- function(partners) {
+    all(partners == 0)
+}
+
+# ---- the coupled fit ----
 
 # A path's coefficients over `n` grid points: an engine that stopped early
 # has reached its last fit, which then stands for the rest.
@@ -7768,125 +9405,110 @@ l0learnWeights <- function(
     cbind(B, B[, rep(ncol(B), n - ncol(B)), drop = FALSE])
 }
 
-# The studies of a stacked group, with the coupling strengths to fit: each
-# study's rows, those holding its phenotype. A sample is in one study, so two
-# studies' rows must not meet.
+# The coupled fit of `conds` on `engine` (its path function, grid and
+# settings): every cell's full-data path, each condition's cross-validated
+# error over the grid and cells, and the weights of each condition's own best
+# point (`choose = "own"`) or of the one point best on average
+# ("pooled"), with the fit kept as `retention` asks.
 # @noRd
-#' @importFrom checkmate assertNumeric
-.coupledStudies <- function(X, Y, strengths) {
-    assertNumeric(
-        strengths,
-        lower = 0,
-        finite = TRUE,
-        any.missing = FALSE,
-        min.len = 1L
-    )
-    rows <- map(seq_len(ncol(Y)), .coupledStudyRows, Y = Y)
-    if (anyDuplicated(list_c(rows, ptype = integer())) > 0L) {
-        abort(str_c(
-            "A fit across studies needs each sample in one study, but some ",
-            "rows hold the phenotypes of several."
-        ))
-    }
-    list(X = X, Y = Y, rows = rows, strengths = strengths)
-}
-
-# @noRd
-.coupledStudyRows <- function(k, Y) {
-    which(!is.na(Y[, k]))
-}
-
-# The coupled fit of `studies` on `engine` (its path function, lambda grid and
-# engine arguments): every c's full-data path, each study's cross-validated
-# error over the (lambda, c) grid, and the weights of each study's own best
-# grid point, with the fit kept as `fitRetention` asks.
-# @noRd
-.coupledFit <- function(studies, engine, nfolds, fitRetention) {
-    folds <- map(studies$rows, .coupledFoldIds, nfolds = nfolds)
+.coupledFit <- function(conds, engine, retention, choose) {
+    folds <- .groupedFolds(conds$Y, engine$nfolds)
     full <- map(
-        studies$strengths,
+        seq_len(nrow(conds$cells)),
         .coupledFullPath,
-        studies = studies,
+        conds = conds,
         engine = engine
     )
-    cv <- .coupledCvError(studies, engine, folds, nfolds)
-    choice <- map(cv, .coupledChoice)
-    W <- .coupledWeightMatrix(studies, full, choice)
-    if (identical(fitRetention, "none")) {
+    cv <- .coupledCvError(conds, engine, folds)
+    choice <- .coupledChoices(cv, choose)
+    W <- .coupledWeightMatrix(conds, full, choice)
+    if (identical(retention, "none")) {
         return(W)
     }
-    fit <- .coupledFitRecord(studies, engine, full, cv, choice, fitRetention)
-    `attr<-`(W, "fit", .withFitVariantIds(fit, colnames(studies$X)))
+    fit <- .coupledFitRecord(conds, engine, full, cv, choice, retention)
+    `attr<-`(W, "fit", .withFitVariantIds(fit, colnames(conds$X)))
 }
 
-# A study's rows dealt into `nfolds` folds at random, so every fold holds out
-# a share of every study.
+# A sample's rows dealt into `nfolds` folds at random.
 # @noRd
 .coupledFoldIds <- function(rows, nfolds) {
     sample(rep_len(seq_len(nfolds), length(rows)))
 }
 
-# The full-data path at coupling `strength`, with the scales its coefficients
-# are on.
+# The full-data path at cell `i`, with the scales its coefficients are on.
 # @noRd
-.coupledFullPath <- function(strength, studies, engine) {
-    design <- .coupledDesign(studies, studies$rows, strength)
+.coupledFullPath <- function(i, conds, engine) {
+    design <- .coupledDesign(
+        conds,
+        conds$rows,
+        .coupledStrength(i, conds),
+        engine$layout
+    )
     list(blocks = design$blocks, beta = engine$path(design, engine))
 }
 
-# Each study's cross-validated error over the (lambda, c) grid: every fold
-# fitted at every c on the other folds' rows -- the pseudo-rows always among
-# them -- and scored on its own.
+# Each condition's cross-validated error over the grid and cells: every fold
+# fitted at every cell on the other folds' samples -- the pseudo-rows always
+# among them -- and scored on its own.
 # @noRd
-.coupledCvError <- function(studies, engine, folds, nfolds) {
+.coupledCvError <- function(conds, engine, folds) {
     perFold <- map(
-        seq_len(nfolds),
+        seq_len(engine$nfolds),
         .coupledFoldSse,
-        studies = studies,
+        conds = conds,
         engine = engine,
         folds = folds
     )
     map(
-        seq_along(studies$rows),
-        .coupledStudyCv,
+        seq_along(conds$rows),
+        .coupledConditionCv,
         perFold = perFold,
-        folds = folds,
-        nfolds = nfolds
+        held = map(conds$rows, .coupledHeldCounts, folds, engine$nfolds)
     )
 }
 
-# Fold `f`'s squared errors: per study, its held-out rows' summed squared
-# error at each grid point (rows: lambda; columns: c).
 # @noRd
-.coupledFoldSse <- function(f, studies, engine, folds) {
-    train <- map2(studies$rows, folds, .coupledRowsOut, f = f)
-    test <- map2(studies$rows, folds, .coupledRowsIn, f = f)
-    byStrength <- map(
-        studies$strengths,
-        .coupledStrengthSse,
-        studies = studies,
+.coupledHeldCounts <- function(rows, folds, nfolds) {
+    tabulate(folds[rows], nbins = nfolds)
+}
+
+# Fold `f`'s squared errors: per condition, its held-out rows' summed squared
+# error at each grid point (rows: grid; columns: cells).
+# @noRd
+.coupledFoldSse <- function(f, conds, engine, folds) {
+    train <- map(conds$rows, .coupledRowsOut, folds = folds, f = f)
+    test <- map(conds$rows, .coupledRowsIn, folds = folds, f = f)
+    byCell <- map(
+        seq_len(nrow(conds$cells)),
+        .coupledCellSse,
+        conds = conds,
         train = train,
         test = test,
         engine = engine
     )
-    map(seq_along(test), .coupledSseByStrength, byStrength = byStrength)
+    map(seq_along(test), .coupledSseByCell, byCell = byCell)
 }
 
 # @noRd
-.coupledRowsOut <- function(rows, ids, f) {
-    rows[ids != f]
+.coupledRowsOut <- function(rows, folds, f) {
+    rows[folds[rows] != f]
 }
 
 # @noRd
-.coupledRowsIn <- function(rows, ids, f) {
-    rows[ids == f]
+.coupledRowsIn <- function(rows, folds, f) {
+    rows[folds[rows] == f]
 }
 
-# Each study's held-out squared errors along the path fitted at coupling
-# `strength` on the rows `train`.
+# Each condition's held-out squared errors along the path fitted at cell `i`
+# on the rows `train`.
 # @noRd
-.coupledStrengthSse <- function(strength, studies, train, test, engine) {
-    design <- .coupledDesign(studies, train, strength)
+.coupledCellSse <- function(i, conds, train, test, engine) {
+    design <- .coupledDesign(
+        conds,
+        train,
+        .coupledStrength(i, conds),
+        engine$layout
+    )
     beta <- engine$path(design, engine)
     map2(
         seq_along(test),
@@ -7894,31 +9516,31 @@ l0learnWeights <- function(
         .coupledHeldOutSse,
         design = design,
         beta = beta,
-        studies = studies
+        conds = conds
     )
 }
 
 # @noRd
-.coupledSseByStrength <- function(k, byStrength) {
-    exec(cbind, !!!map(byStrength, k))
+.coupledSseByCell <- function(k, byCell) {
+    exec(cbind, !!!map(byCell, k))
 }
 
-# Study `k`'s held-out rows' summed squared error at each lambda.
+# Condition `k`'s held-out rows' summed squared error at each grid point.
 # @noRd
-.coupledHeldOutSse <- function(k, rows, design, beta, studies) {
+.coupledHeldOutSse <- function(k, rows, design, beta, conds) {
     if (length(rows) == 0L) {
         return(numeric(ncol(beta)))
     }
     pred <- .coupledPredict(
         design$blocks[[k]],
         beta,
-        studies$X[rows, , drop = FALSE]
+        conds$X[rows, , drop = FALSE]
     )
-    colSums((studies$Y[rows, k] - pred)^2)
+    colSums((conds$Y[rows, k] - pred)^2)
 }
 
-# Phenotype predictions for the rows of `X` from a study's coefficients along
-# a path `beta`, on the centring and scale its fit was made on.
+# Phenotype predictions for the rows of `X` from a condition's coefficients
+# along a path `beta`, on the centring and scale its fit was made on.
 # @noRd
 .coupledPredict <- function(block, beta, X) {
     Xc <- sweep(X[, block$carried, drop = FALSE], 2L, block$xMean)
@@ -7926,21 +9548,22 @@ l0learnWeights <- function(
     as.matrix(Xc %*% coefs) + block$yMean
 }
 
-# Study `k`'s cross-validated mean squared error over the grid, and its
-# standard error, computed from the folds' errors as cv.glmnet computes them.
+# Condition `k`'s cross-validated mean squared error over the grid and cells,
+# and its standard error, computed from the folds' errors as cv.glmnet
+# computes them; `held` is each condition's count of rows in each fold.
 # @noRd
-.coupledStudyCv <- function(k, perFold, folds, nfolds) {
+.coupledConditionCv <- function(k, perFold, held) {
     sse <- map(perFold, k)
-    held <- tabulate(folds[[k]], nbins = nfolds)
-    cvm <- reduce(sse, `+`) / sum(held)
-    used <- which(held > 0L)
+    counts <- held[[k]]
+    cvm <- reduce(sse, `+`) / sum(counts)
+    used <- which(counts > 0L)
     deviations <- map2(
         sse[used],
-        held[used],
+        counts[used],
         .coupledFoldDeviation,
         cvm = cvm
     )
-    weighted <- map2(deviations, held[used] / sum(held), `*`)
+    weighted <- map2(deviations, counts[used] / sum(counts), `*`)
     list(
         cvm = cvm,
         cvsd = sqrt(reduce(weighted, `+`) / max(length(used) - 1L, 1L))
@@ -7952,71 +9575,88 @@ l0learnWeights <- function(
     (sse / n - cvm)^2
 }
 
-# A study's best grid point: the (lambda, c) of its least cross-validated
-# error, the first of ties.
+# Each condition's grid point: its own best, or the one whose error averaged
+# over the conditions is least.
+# @noRd
+.coupledChoices <- function(cv, choose) {
+    if (identical(choose, "own")) {
+        return(map(cv, .coupledChoice))
+    }
+    pooled <- reduce(map(cv, "cvm"), `+`) / length(cv)
+    rep(list(.coupledChoice(list(cvm = pooled))), length(cv))
+}
+
+# A grid point of least cross-validated error, the first of ties: its place
+# in the grid and its cell.
 # @noRd
 .coupledChoice <- function(cv) {
     at <- arrayInd(which.min(cv$cvm), dim(cv$cvm))
-    list(lambda = at[[1L]], strength = at[[2L]])
+    list(grid = at[[1L]], cell = at[[2L]])
 }
 
-# The weights (variants x studies), each study's from the full-data path at
-# its own grid point.
+# The weights (variants x conditions), each condition's from the full-data
+# path at its grid point.
 # @noRd
-.coupledWeightMatrix <- function(studies, full, choice) {
+.coupledWeightMatrix <- function(conds, full, choice) {
     cols <- map2(
         seq_along(choice),
         choice,
-        .coupledStudyWeights,
+        .coupledConditionWeights,
         full = full,
-        nVariants = ncol(studies$X)
+        nVariants = ncol(conds$X)
     )
     `dimnames<-`(
         exec(cbind, !!!cols),
-        list(colnames(studies$X), colnames(studies$Y))
+        list(colnames(conds$X), colnames(conds$Y))
     )
 }
 
-# Study `k`'s weights, on its phenotype's own scale, zero for each variant it
-# does not carry.
+# Condition `k`'s weights, on its phenotype's own scale, zero for each variant
+# it does not carry.
 # @noRd
-.coupledStudyWeights <- function(k, pick, full, nVariants) {
-    path <- full[[pick$strength]]
+.coupledConditionWeights <- function(k, pick, full, nVariants) {
+    path <- full[[pick$cell]]
     block <- path$blocks[[k]]
     replace(
         numeric(nVariants),
         block$carried,
-        block$sigma * path$beta[block$cols, pick$lambda]
+        block$sigma * path$beta[block$cols, pick$grid]
     )
 }
 
-# The fit as `fitRetention` keeps it. "slim": each study's grid point (its c
-# and lambda) and the cross-validated error there. "full" adds the grid,
-# every c's full-data path (coefficients over each study's carried variants,
-# with their scales) and each study's errors over the whole grid.
+# The fit as `retention` keeps it. "slim": each condition's grid point (its
+# strengths, a column per coupled axis, and its lambda or support size) and
+# the cross-validated error there. "full" adds the grid, its cells, every
+# cell's full-data path (coefficients over each condition's carried variants,
+# with their scales) and each condition's errors over the whole grid.
 # @noRd
-.coupledFitRecord <- function(studies, engine, full, cv, choice, fitRetention) {
-    named <- colnames(studies$Y)
-    slim <- list(
-        strength = set_names(
-            studies$strengths[map_int(choice, "strength")],
-            named
-        ),
-        lambda = set_names(engine$lambda[map_int(choice, "lambda")], named),
-        cvm = set_names(map2_dbl(cv, choice, .coupledAt, field = "cvm"), named),
-        cvsd = set_names(
-            map2_dbl(cv, choice, .coupledAt, field = "cvsd"),
-            named
+.coupledFitRecord <- function(conds, engine, full, cv, choice, retention) {
+    named <- colnames(conds$Y)
+    at <- map_int(choice, "grid")
+    slim <- c(
+        compact(list(
+            strength = .coupledChosenStrengths(conds, choice, named)
+        )),
+        set_names(list(set_names(engine$grid[at], named)), engine$gridName),
+        list(
+            cvm = set_names(
+                map2_dbl(cv, choice, .coupledAt, field = "cvm"),
+                named
+            ),
+            cvsd = set_names(
+                map2_dbl(cv, choice, .coupledAt, field = "cvsd"),
+                named
+            )
         )
     )
-    if (identical(fitRetention, "slim")) {
+    if (identical(retention, "slim")) {
         return(slim)
     }
     c(
         slim,
+        set_names(list(engine$grid), str_c(engine$gridName, "Path")),
         list(
-            strengths = studies$strengths,
-            lambdaPath = engine$lambda,
+            cells = conds$cells,
             paths = map(full, .coupledSparsePath),
             cvmPath = set_names(map(cv, "cvm"), named),
             cvsdPath = set_names(map(cv, "cvsd"), named)
@@ -8024,9 +9664,20 @@ l0learnWeights <- function(
     )
 }
 
+# Each condition's chosen strengths, a row per condition and a column per
+# coupled axis; NULL when nothing is coupled.
+# @noRd
+.coupledChosenStrengths <- function(conds, choice, named) {
+    if (ncol(conds$cells) == 0L) {
+        return(NULL)
+    }
+    picked <- conds$cells[map_int(choice, "cell"), , drop = FALSE]
+    `dimnames<-`(as.matrix(picked), list(named, names(conds$cells)))
+}
+
 # @noRd
 .coupledAt <- function(cv, pick, field) {
-    cv[[field]][pick$lambda, pick$strength]
+    cv[[field]][pick$grid, pick$cell]
 }
 
 # @noRd
@@ -8035,111 +9686,251 @@ l0learnWeights <- function(
     list_assign(path, beta = Matrix(path$beta, sparse = TRUE))
 }
 
-# The augmented least-squares problem of the studies' rows `train` (one index
-# vector per study) at coupling `strength`. Each study's rows are centred, its
-# phenotype scaled to unit variance, and both scaled by sqrt(N / (K n_k)):
-# each study's loss is then its mean squared error, and the stacked phenotype
-# has unit variance, so glmnet's own rescaling of it changes nothing. For each
-# variant two studies carry, the pseudo-rows +/- sqrt(N c / (2 K)) (s_jk e_jk -
-# s_jk' e_jk') add (c / (2 K)) (s_jk b_jk - s_jk' b_jk')^2, the difference
-# penalty on the per-SD effects; in +/- pairs they leave every column's mean at
-# zero. Columns: each study's variants that vary in its rows.
+# ---- the augmented design ----
+
+# The augmented least-squares problem of the conditions' rows `train` (one
+# index vector per condition) at the pairs' strengths `W`, laid out as
+# `layout` asks: "conditions", each condition a copy of the variants with its
+# own columns; "groups", the same with each variant's copies side by side as
+# its group (as abess's group.index needs); "units", each unit's conditions
+# sharing one copy, a phenotype column each (.coupledCopies()). Each copy's
+# rows are centred, its phenotypes scaled to unit variance, and both scaled
+# by sqrt(N / (K n)) for K conditions: each condition's loss is then its mean
+# squared error. For each variant two coupled copies carry, the pseudo-rows
+# +/- sqrt(N c / (2 K)) (s_j e_j - s'_j e'_j) add (c / (2 K)) (s_j b_j -
+# s'_j b'_j)^2 for each phenotype column, the difference penalty on the
+# per-SD effects; in +/- pairs they leave every column's mean at zero.
 # @noRd
 #' @importFrom Matrix bdiag
-.coupledDesign <- function(studies, train, strength) {
-    blocks <- .coupledPlaced(map2(
-        seq_along(train),
-        train,
-        .coupledBlock,
-        studies = studies
-    ))
-    K <- length(blocks)
-    n <- map_int(train, length)
-    pairs <- if (strength > 0) .coupledPairs(blocks) else list()
+.coupledDesign <- function(conds, train, W, layout) {
+    copies <- .coupledPlaced(.coupledCopies(conds, train, layout), layout)
+    pairs <- .coupledPairs(copies, .coupledCopyStrength(W, copies))
+    K <- length(conds$rows)
     nPseudo <- 2L * sum(map_int(pairs, .coupledPairSize))
-    N <- sum(n) + nPseudo
-    a <- sqrt(N / (K * n))
-    data <- bdiag(map2(blocks, a, .coupledScaledX))
-    pseudo <- .coupledPseudo(
-        pairs,
-        blocks,
-        sqrt(N * strength / (2 * K)),
-        ncol(data)
-    )
+    N <- sum(map_int(copies, "n")) + nPseudo
+    a <- sqrt(N / (K * map_int(copies, "n")))
+    columns <- .coupledColumnOrder(copies, layout)
+    data <- bdiag(map2(copies, a, .coupledScaledX))[, columns, drop = FALSE]
+    pseudo <- .coupledPseudo(pairs, copies, N / (2 * K), ncol(data))
+    y <- exec(rbind, !!!map2(copies, a, .coupledScaledY))
     list(
         X = if (is.null(pseudo)) data else rbind(data, pseudo, -pseudo),
-        y = c(list_c(map2(blocks, a, .coupledScaledY)), numeric(nPseudo)),
-        blocks = map(blocks, .coupledBlockScales),
+        y = .coupledResponse(
+            rbind(y, matrix(0, nPseudo, ncol(y)))
+        ),
+        blocks = .coupledBlocks(copies),
+        group = .coupledGroups(copies, ncol(data)),
+        partners = .coupledPartners(pairs, ncol(data)),
         K = K
     )
 }
 
-# Study `k` on the rows `rows`: its centred genotypes over the variants that
-# vary there, their SDs, and its centred phenotype in units of its SD (one
-# that does not vary is left unscaled).
+# The phenotype column of a design with one, the matrix of a unit's several.
 # @noRd
-.coupledBlock <- function(k, rows, studies) {
-    Xk <- studies$X[rows, , drop = FALSE]
+.coupledResponse <- function(y) {
+    if (ncol(y) == 1L) y[, 1L] else y
+}
+
+# The copies of the variants a design fits: each condition's own, or under
+# "units" one per unit, its conditions' phenotypes in the order of their
+# columns.
+# @noRd
+.coupledCopies <- function(conds, train, layout) {
+    members <- if (identical(layout, "units")) {
+        .coupledUnitMembers(conds$spec)
+    } else {
+        as.list(seq_along(conds$rows))
+    }
+    map(members, .coupledCopy, train = train, conds = conds)
+}
+
+# Each unit's conditions, in the order of their columns.
+# @noRd
+.coupledUnitMembers <- function(spec) {
+    units <- split(seq_along(spec$unit), spec$unit)
+    map(unname(units), .coupledByColumn, column = spec$column)
+}
+
+# @noRd
+.coupledByColumn <- function(members, column) {
+    members[order(column[members])]
+}
+
+# The copy of the conditions `members` on their rows of `train`, the first's
+# (a unit's conditions share theirs): the centred genotypes over the variants
+# that vary there, their SDs, and the centred phenotypes in units of their SD
+# (one that does not vary is left unscaled).
+# @noRd
+.coupledCopy <- function(members, train, conds) {
+    rows <- train[[members[[1L]]]]
+    Xk <- conds$X[rows, , drop = FALSE]
     xMean <- colMeans(Xk)
     centred <- sweep(Xk, 2L, xMean)
     s <- sqrt(colMeans(centred^2))
     carried <- which(s > sqrt(.Machine$double.eps))
-    y <- studies$Y[rows, k]
-    yMean <- mean(y)
-    spread <- sqrt(mean((y - yMean)^2))
-    sigma <- if (spread > 0) spread else 1
+    Yk <- conds$Y[rows, members, drop = FALSE]
+    yMean <- colMeans(Yk)
+    spread <- sqrt(colMeans(sweep(Yk, 2L, yMean)^2))
+    sigma <- replace(spread, spread == 0, 1)
     list(
         X = centred[, carried, drop = FALSE],
-        y = (y - yMean) / sigma,
+        Y = sweep(sweep(Yk, 2L, yMean), 2L, sigma, "/"),
         carried = carried,
         xMean = xMean[carried],
         s = s[carried],
-        yMean = yMean,
-        sigma = sigma
+        yMean = unname(yMean),
+        sigma = unname(sigma),
+        members = members,
+        n = length(rows)
     )
 }
 
-# The blocks with their columns in the design, each study's after the last.
+# The pairs' strengths between copies: a unit's are its first condition's,
+# which every column of it shares.
 # @noRd
-.coupledPlaced <- function(blocks) {
-    widths <- map_int(blocks, .coupledWidth)
+.coupledCopyStrength <- function(W, copies) {
+    firsts <- map_int(copies, .coupledFirstMember)
+    W[firsts, firsts, drop = FALSE]
+}
+
+# @noRd
+.coupledFirstMember <- function(copy) {
+    copy$members[[1L]]
+}
+
+# The copies with their columns in the design (`cols`): copy after copy, or
+# under "groups" each variant's copies side by side.
+# @noRd
+.coupledPlaced <- function(copies, layout) {
+    widths <- map_int(copies, .coupledWidth)
     starts <- cumsum(c(0L, widths[-length(widths)]))
-    map2(blocks, starts, .coupledPlaceBlock)
+    stacked <- map2(starts, widths, .coupledStackedCols)
+    if (!identical(layout, "groups")) {
+        return(map2(copies, stacked, .coupledPlaceCopy))
+    }
+    byVariant <- .coupledVariantOrder(copies)
+    map2(
+        copies,
+        map(stacked, .coupledRank, byVariant = byVariant),
+        .coupledPlaceCopy
+    )
 }
 
 # @noRd
-.coupledWidth <- function(block) {
-    length(block$carried)
+.coupledWidth <- function(copy) {
+    length(copy$carried)
 }
 
 # @noRd
-.coupledPlaceBlock <- function(block, start) {
-    list_assign(block, cols = start + seq_along(block$carried))
+.coupledStackedCols <- function(start, width) {
+    start + seq_len(width)
 }
 
-# Each pair of studies with the variants both carry, as positions in each
-# one's block; a pair sharing none is dropped.
 # @noRd
-.coupledPairs <- function(blocks) {
+.coupledPlaceCopy <- function(copy, cols) {
+    list_assign(copy, cols = cols)
+}
+
+# @noRd
+.coupledRank <- function(cols, byVariant) {
+    match(cols, byVariant)
+}
+
+# The stacked columns in the order that puts each variant's copies side by
+# side, by variant then copy.
+# @noRd
+.coupledVariantOrder <- function(copies) {
+    variant <- list_c(map(copies, "carried"))
+    copy <- rep(seq_along(copies), map_int(copies, .coupledWidth))
+    order(variant, copy)
+}
+
+# The design's column order: the stacked one, or the variants' under
+# "groups".
+# @noRd
+.coupledColumnOrder <- function(copies, layout) {
+    stacked <- seq_len(sum(map_int(copies, .coupledWidth)))
+    if (!identical(layout, "groups")) {
+        return(stacked)
+    }
+    .coupledVariantOrder(copies)
+}
+
+# Each condition's block (.coupledPredict()): its copy's variants, columns
+# and centring, its phenotype column's scale and centre, and under a unit
+# the columns of its own phenotype.
+# @noRd
+.coupledBlocks <- function(copies) {
+    width <- sum(map_int(copies, .coupledWidth))
+    blocks <- list_flatten(map(copies, .coupledCopyBlocks, width = width))
+    members <- list_c(map(copies, "members"))
+    unname(blocks[order(members)])
+}
+
+# @noRd
+.coupledCopyBlocks <- function(copy, width) {
+    map(
+        seq_along(copy$members),
+        .coupledColumnBlock,
+        copy = copy,
+        width = width
+    )
+}
+
+# @noRd
+.coupledColumnBlock <- function(i, copy, width) {
+    list(
+        carried = copy$carried,
+        cols = (i - 1L) * width + copy$cols,
+        xMean = copy$xMean,
+        yMean = copy$yMean[[i]],
+        sigma = copy$sigma[[i]]
+    )
+}
+
+# Each design column's variant, the group grpreg and abess take.
+# @noRd
+.coupledGroups <- function(copies, width) {
+    replace(
+        integer(width),
+        list_c(map(copies, "cols")),
+        list_c(map(copies, "carried"))
+    )
+}
+
+# Each pair of coupled copies with the variants both carry, as positions in
+# each one's copy, and the pair's strength; a pair sharing none is dropped.
+# @noRd
+.coupledPairs <- function(copies, W) {
+    if (length(copies) < 2L) {
+        return(list())
+    }
     compact(map(
-        utils::combn(length(blocks), 2L, simplify = FALSE),
+        utils::combn(length(copies), 2L, simplify = FALSE),
         .coupledPair,
-        blocks = blocks
+        copies = copies,
+        W = W
     ))
 }
 
 # @noRd
-.coupledPair <- function(pair, blocks) {
-    first <- blocks[[pair[[1L]]]]$carried
-    second <- blocks[[pair[[2L]]]]$carried
+.coupledPair <- function(pair, copies, W) {
+    strength <- W[pair[[1L]], pair[[2L]]]
+    first <- copies[[pair[[1L]]]]$carried
+    second <- copies[[pair[[2L]]]]$carried
     shared <- intersect(first, second)
-    if (length(shared) == 0L) {
+    if (strength <= 0 || length(shared) == 0L) {
         return(NULL)
     }
+    at1 <- match(shared, first)
+    at2 <- match(shared, second)
     list(
-        studies = pair,
-        at1 = match(shared, first),
-        at2 = match(shared, second)
+        copies = pair,
+        strength = strength,
+        at1 = at1,
+        at2 = at2,
+        cols1 = copies[[pair[[1L]]]]$cols[at1],
+        cols2 = copies[[pair[[2L]]]]$cols[at2]
     )
 }
 
@@ -8148,10 +9939,10 @@ l0learnWeights <- function(
     length(pair$at1)
 }
 
-# The pseudo-rows of every pair of studies, before their negated copies; NULL
-# when nothing is coupled.
+# The pseudo-rows of every coupled pair, before their negated copies, each
+# scaled by sqrt(`unit` c); NULL when nothing is coupled.
 # @noRd
-.coupledPseudo <- function(pairs, blocks, scale, nCoef) {
+.coupledPseudo <- function(pairs, copies, unit, nCoef) {
     if (length(pairs) == 0L) {
         return(NULL)
     }
@@ -8160,21 +9951,22 @@ l0learnWeights <- function(
         !!!map(
             pairs,
             .coupledPairRows,
-            blocks = blocks,
-            scale = scale,
+            copies = copies,
+            unit = unit,
             nCoef = nCoef
         )
     )
 }
 
-# One pair's pseudo-rows: one per shared variant, `scale` times its SD in the
-# first study and minus its SD in the second.
+# One pair's pseudo-rows: one per shared variant, its scale times the
+# variant's SD in the first copy and minus its SD in the second.
 # @noRd
 #' @importFrom Matrix sparseMatrix
-.coupledPairRows <- function(pair, blocks, scale, nCoef) {
-    first <- blocks[[pair$studies[[1L]]]]
-    second <- blocks[[pair$studies[[2L]]]]
+.coupledPairRows <- function(pair, copies, unit, nCoef) {
+    first <- copies[[pair$copies[[1L]]]]
+    second <- copies[[pair$copies[[2L]]]]
     m <- length(pair$at1)
+    scale <- sqrt(unit * pair$strength)
     sparseMatrix(
         i = rep(seq_len(m), 2L),
         j = c(first$cols[pair$at1], second$cols[pair$at2]),
@@ -8183,47 +9975,99 @@ l0learnWeights <- function(
     )
 }
 
+# Each design column's coupling, its partners' strengths summed.
 # @noRd
-.coupledScaledX <- function(block, a) {
-    a * block$X
+.coupledPartners <- function(pairs, width) {
+    if (length(pairs) == 0L) {
+        return(numeric(width))
+    }
+    columns <- list_c(map(pairs, .coupledPairCols))
+    strengths <- list_c(map(pairs, .coupledPairRepeated))
+    unname(map_dbl(
+        split(strengths, factor(columns, levels = seq_len(width))),
+        sum
+    ))
 }
 
 # @noRd
-.coupledScaledY <- function(block, a) {
-    a * block$y
+.coupledPairCols <- function(pair) {
+    c(pair$cols1, pair$cols2)
 }
 
-# What predicting from and reading a block's coefficients needs: its variants,
-# columns and centring and phenotype scale.
 # @noRd
-.coupledBlockScales <- function(block) {
-    block[c("carried", "cols", "xMean", "yMean", "sigma")]
+.coupledPairRepeated <- function(pair) {
+    rep(pair$strength, 2L * length(pair$at1))
 }
 
-# ---- Penalized RSS across studies (difference penalty) ---------------------
+# @noRd
+.coupledScaledX <- function(copy, a) {
+    a * copy$X
+}
+
+# @noRd
+.coupledScaledY <- function(copy, a) {
+    a * copy$Y
+}
+
+# Whether glmnet's mgaussian family can fit the group penalty with the
+# coupling: the conditions fall into units -- those alike along every coupled
+# axis -- of two or more, every unit holding the same columns, those alike
+# along the other axes, and each unit's conditions measured on the same
+# samples.
+# @noRd
+.coupledUnitsHold <- function(conds) {
+    spec <- conds$spec
+    members <- .coupledUnitMembers(spec)
+    if (max(lengths(members)) < 2L) {
+        return(FALSE)
+    }
+    columns <- map(members, .coupledUnitColumns, column = spec$column)
+    all(map_lgl(columns, identical, columns[[1L]])) &&
+        all(map_lgl(members, .coupledSharesRows, rows = conds$rows))
+}
+
+# @noRd
+.coupledUnitColumns <- function(members, column) {
+    column[members]
+}
+
+# @noRd
+.coupledSharesRows <- function(members, rows) {
+    all(map_lgl(rows[members], identical, rows[[members[[1L]]]]))
+}
+
+# ---- Penalized RSS across coupled conditions (difference penalty) ----------
 #
-# A study-axis group of summary statistics (.enumCrossStudyGroup()) holds its
-# studies' z-scores over the union of their variants, NA where a study lacks
-# one, with each study's own LD reference. The penalized RSS methods fit it
-# under the penalty on the difference between the studies' per-SD effects,
-# PROSPER's coupling: penalizedRssCoupledCpp() solves
+# A group of summary statistics holds its conditions' z-scores over the union
+# of their variants, NA where a condition lacks one, each condition on its
+# study's LD reference. The penalized RSS methods fit it under the penalty on
+# the difference between coupled conditions' per-SD effects, PROSPER's
+# coupling: penalizedRssCoupledCpp() solves
 #
 #   sum_k [b_k'R_k,s b_k - 2 b_k'z_k + penalty(b_k)]
-#       + c sum_j sum_{k < k'} (b_jk - b_jk')^2,
+#       + sum_j sum_{k < k'} c_kk' (b_jk - b_jk')^2,
 #
-# twice the individual-level objective of .glmnetCoupledWeights() on
-# standardized data, so c means the same on either. Each study is fitted
-# against its own LD over the grid of shrinkage s, coupling c and the shared
-# lambda path, and takes the grid point its own held-out statistics score
-# best, by .rssSelectHeldOut()'s rule; each split refits the coupled grid on
-# every study's training part at once.
+# twice the individual-level objective of .penalizedCoupledWeights() on
+# standardized data, so c means the same on either; a pair's c is that of
+# the axis it differs along (.coupledSpec()). Each condition is fitted
+# against its own LD over the grid of shrinkage s, the coupling's cells and
+# the shared lambda path, and takes the grid point its own held-out
+# statistics score best, by .rssSelectHeldOut()'s rule; each split refits the
+# coupled grid on every condition's training part at once. The splits are
+# drawn for each condition apart, as if no two shared samples.
 
-# The weights (union variants `ids` x studies) each study's own best (s, c,
-# lambda) gives it, zero at a variant the study does not carry. `stats` holds
-# one statistics record per study (z or b with seb, n, and variantNames among
-# `ids`, in their spelling), `ldReferences` each study's reference, `spec` the
-# penalty (.rssPenalty()) and `options` the path options a
-# PenalizedRssOptions holds.
+# The weights (union variants `ids` x conditions) each condition's own best
+# (s, c, lambda) gives it, zero at a variant the condition does not carry.
+# `stats` holds one statistics record per condition (z or b with seb, n, and
+# variantNames among `ids`, in their spelling), `ldReferences` each
+# condition's reference, `spec` the penalty (.rssPenalty()), `coupling` the
+# group's coupling (.coupledSpec()) and `options` the path options a
+# PenalizedRssOptions holds. With `grouped`, each variant's effects across
+# the conditions are one group under the penalty as well; with `choose =
+# "pooled"` every condition takes the one grid point scoring best on
+# average over them. `residual`, the conditions' residual correlation (K x
+# K), correlates the held-out splits of conditions on one LD reference and
+# variants (.rssCoupledCorrelate()); NULL draws every condition's apart.
 # @noRd
 .rssCoupledWeights <- function(
     stats,
@@ -8231,12 +10075,15 @@ l0learnWeights <- function(
     ids,
     spec,
     s,
-    strengths,
+    coupling,
     options,
     fitRetention,
-    label
+    label,
+    grouped = FALSE,
+    choose = "own",
+    residual = NULL
 ) {
-    assertNumeric(strengths, lower = 0, finite = TRUE, min.len = 1L)
+    conds <- list(spec = .coupledSpec(coupling, length(stats)))
     lds <- .rssCoupledLd(map2(stats, ldReferences, .rssLdSource, label = label))
     walk(lds, .rssCheckHeldOutLd, label = label)
     ns <- map_dbl(stats, .rssCoupledN)
@@ -8246,7 +10093,11 @@ l0learnWeights <- function(
         nUnion = length(ids),
         spec = spec,
         options = .rssCoupledOptions(options, spec),
-        cells = .rssCoupledCells(s, strengths)
+        cells = .rssCoupledCells(s, conds),
+        grouped = grouped,
+        choose = choose,
+        residual = residual,
+        sources = .rssSharedSources(ldReferences, stats)
     )
     cors <- pmap(list(stats, ns, lds), .rssCoupledCor)
     search <- .rssCoupledGrid(
@@ -8310,13 +10161,25 @@ l0learnWeights <- function(
     list_assign(path, strategy = .rssStrategy(path$strategy, spec$penalty))
 }
 
-# The grid's cells, every shrinkage s with every coupling strength, in the
-# order the candidates are laid out.
+# The grid's cells, every shrinkage s with every cell of the coupling, in
+# the order the candidates are laid out, each with its pairs' strengths
+# (`W`, K x K).
 # @noRd
-.rssCoupledCells <- function(s, strengths) {
-    shrink <- rep(s, each = length(strengths))
-    coupling <- rep(strengths, times = length(s))
-    tibble(s = shrink, strength = coupling)
+.rssCoupledCells <- function(s, conds) {
+    cells <- expand_grid(s = s, !!!conds$spec$grids)
+    strengths <- map(
+        seq_len(nrow(cells)),
+        .rssCellStrength,
+        cells = cells,
+        conds = conds
+    )
+    mutate(cells, W = strengths)
+}
+
+# @noRd
+.rssCellStrength <- function(i, cells, conds) {
+    values <- unlist(cells[i, setdiff(names(cells), "s")])
+    .coupledPairStrengths(c(numeric(0), values), conds)
 }
 
 # The shared lambda path, as .rssDefaultLambda() makes one study's: from the
@@ -8349,7 +10212,7 @@ l0learnWeights <- function(
     fits <- pmap(
         list(
             run$cells$s,
-            run$cells$strength,
+            run$cells$W,
             grids %||% rep(list(path), nrow(run$cells))
         ),
         .rssCoupledFit,
@@ -8371,13 +10234,14 @@ l0learnWeights <- function(
 # One cell's coupled path, through the factor solver when the studies' LD
 # sources are factors.
 # @noRd
-.rssCoupledFit <- function(sVal, strength, path, cors, run) {
+.rssCoupledFit <- function(sVal, W, path, cors, run) {
     spec <- run$spec
     settings <- list(
         zList = cors,
         unionIdxList = map(run$idx, as.integer),
         nUnion = as.integer(run$nUnion),
-        strength = strength,
+        strengthR = W,
+        grouped = run$grouped,
         shrink = sVal,
         pathR = path,
         penaltyStr = spec$penalty,
@@ -8407,16 +10271,18 @@ l0learnWeights <- function(
     exec(cbind, !!!map(fits, list("studies", k, "beta")))
 }
 
-# One cell's candidates: its s and coupling, each lambda, the convergence
-# flag and the coupling term there.
+# One cell's candidates: its s and coupling strengths, each lambda, the
+# convergence flag and the coupling term there.
 # @noRd
 .rssCoupledCellMeta <- function(i, fit, cells) {
-    tibble(
-        s = cells$s[[i]],
-        strength = cells$strength[[i]],
-        lambda = as.numeric(fit$lambda),
-        conv = as.integer(fit$studies[[1L]]$conv),
-        coupling = as.numeric(fit$coupling)
+    lambda <- as.numeric(fit$lambda)
+    bind_cols(
+        cells[rep(i, length(lambda)), setdiff(names(cells), "W")],
+        tibble(
+            lambda = lambda,
+            conv = as.integer(fit$studies[[1L]]$conv),
+            coupling = as.numeric(fit$coupling)
+        )
     )
 }
 
@@ -8429,11 +10295,12 @@ l0learnWeights <- function(
 .rssCoupledSelect <- function(search, cors, ns, run) {
     nSplits <- .rssHeldOutSplits()
     ws <- map(run$lds, .rssCoupledIntensity)
-    noise <- pmap(
-        list(run$lds, ws, ns, cors),
-        .rssCoupledNoise,
+    unit <- pmap(
+        list(run$lds, ws, cors),
+        .rssCoupledUnitNoise,
         nSplits = nSplits
     )
+    noise <- map2(.rssCoupledCorrelate(unit, run), ns, .rssCoupledScaleNoise)
     scores <- map(
         seq_len(nSplits),
         .rssCoupledSplitScore,
@@ -8443,7 +10310,31 @@ l0learnWeights <- function(
         run = run,
         grids = search$grids
     )
-    map(seq_along(cors), .rssCoupledPick, scores = scores, search = search)
+    picked <- map(
+        seq_along(cors),
+        .rssCoupledScores,
+        scores = scores,
+        search = search
+    )
+    if (identical(run$choose, "pooled")) {
+        return(rep(list(.rssPooledPick(picked)), length(cors)))
+    }
+    map(picked, .rssScoresPick)
+}
+
+# The one candidate every condition takes: the best on its held-out scores
+# averaged over the conditions.
+# @noRd
+.rssPooledPick <- function(picked) {
+    .rssScoresPick(list(
+        cor = reduce(map(picked, "cor"), `+`) / length(picked),
+        explained = reduce(map(picked, "explained"), `+`) / length(picked)
+    ))
+}
+
+# @noRd
+.rssScoresPick <- function(scores) {
+    .rssHeldOutPick(scores$cor, scores$explained)
 }
 
 # @noRd
@@ -8451,14 +10342,79 @@ l0learnWeights <- function(
     .ldShrinkIntensity(ld, ld$nSamples)
 }
 
-# A study's splits' noise, as .rssSelectHeldOut() draws it.
+# A condition's splits' noise in unit variance, as .rssSelectHeldOut() draws
+# it, before its scale (.rssCoupledScaleNoise()).
 # @noRd
-.rssCoupledNoise <- function(ld, w, n, cor, nSplits) {
-    share <- .rssHeldOutTrainShare()
-    draws <- sqrt(1 - w) *
+.rssCoupledUnitNoise <- function(ld, w, cor, nSplits) {
+    sqrt(1 - w) *
         .ldSourceDraws(ld, nSplits) +
         sqrt(w) * matrix(rnorm(length(cor) * nSplits), ncol = nSplits)
+}
+
+# @noRd
+.rssCoupledScaleNoise <- function(draws, n) {
+    share <- .rssHeldOutTrainShare()
     draws * sqrt((1 - share) / (share * n))
+}
+
+# The conditions' unit noise, those sharing an LD reference and variants
+# (`run$sources`) correlated by their residual correlation (`run$residual`):
+# each a combination of the source's independent draws by a square root S of
+# the correlation (S S' = C), so its draws keep their variance and a pair's
+# correlate at C's entry, as a split of samples shared by both would. Every
+# condition's draws stay apart without a correlation.
+# @noRd
+.rssCoupledCorrelate <- function(unit, run) {
+    if (is.null(run$residual)) {
+        return(unit)
+    }
+    S <- .rssBlockRoot(run$residual, run$sources)
+    map(seq_along(unit), .rssMixedNoise, unit = unit, S = S)
+}
+
+# A square root of the residual correlation within each shared source, the
+# identity between sources.
+# @noRd
+.rssBlockRoot <- function(residual, sources) {
+    within <- outer(sources, sources, `==`)
+    C <- replace(residual, !within, 0)
+    ev <- eigen(C, symmetric = TRUE)
+    ev$vectors %*% (sqrt(pmax(ev$values, 0)) * t(ev$vectors))
+}
+
+# @noRd
+.rssMixedNoise <- function(k, unit, S) {
+    partners <- which(S[k, ] != 0)
+    reduce(map2(unit[partners], S[k, partners], `*`), `+`)
+}
+
+# Each condition's source: the first condition on the same LD reference over
+# the same variants, whose splits can be shared.
+# @noRd
+.rssSharedSources <- function(ldReferences, stats) {
+    map_int(
+        seq_along(stats),
+        .rssFirstSharing,
+        ldReferences = ldReferences,
+        stats = stats
+    )
+}
+
+# @noRd
+.rssFirstSharing <- function(k, ldReferences, stats) {
+    detect_index(
+        seq_len(k),
+        .rssSharesSource,
+        k = k,
+        ldReferences = ldReferences,
+        stats = stats
+    )
+}
+
+# @noRd
+.rssSharesSource <- function(l, k, ldReferences, stats) {
+    identical(ldReferences[[l]], ldReferences[[k]]) &&
+        identical(stats[[l]]$variantNames, stats[[k]]$variantNames)
 }
 
 # Split `i`: the coupled grid refit on each study's training part and each
@@ -8493,14 +10449,15 @@ l0learnWeights <- function(
     )
 }
 
-# Study `k`'s candidate (.rssHeldOutPick()): one empty on the full data has
-# nothing to return.
+# Condition `k`'s candidates' held-out scores (.rssHeldOutPick() reads
+# them), averaged over the splits: one empty on the full data has nothing to
+# return.
 # @noRd
-.rssCoupledPick <- function(k, scores, search) {
+.rssCoupledScores <- function(k, scores, search) {
     cor <- rowMeans(exec(cbind, !!!map(scores, list(k, "cor"))))
     explained <- rowMeans(exec(cbind, !!!map(scores, list(k, "explained"))))
     empty <- colSums(search$beta[[k]] != 0) == 0
-    .rssHeldOutPick(replace(cor, empty, -Inf), explained)
+    list(cor = replace(cor, empty, -Inf), explained = explained)
 }
 
 # The weights over the union, each study's at its pick, with the search kept
@@ -8603,18 +10560,25 @@ l0learnWeights <- function(
     ids,
     user,
     fitRetention,
-    label
+    label,
+    shared = list()
 ) {
     settings <- .prsCsCoupledSettings(user, label)
+    fixed <- .sdprCoupledRho(settings$rho, length(stats), label)
     run <- c(
-        list(settings = settings),
+        list(
+            settings = settings,
+            rho = fixed %||% .samplerSeedRho(shared$seed),
+            learnRho = is.null(fixed),
+            noise = .samplerNoisePrecision(shared$residual, ldReferences, stats)
+        ),
         .mcmcCoupledInputs(stats, ldReferences, ids, label)
     )
     fit <- .mcmcChains(
         ".jointPrsChain",
         list(run = run),
         .mcmcSeeds(settings$seed, settings$nChains),
-        c("betaEst", "psiEst", "sigmaEst", "phiEst", "rhoEst"),
+        c("betaEst", "psiEst", "sigmaEst", "phiEst", "rhoEst", "residualEst"),
         label,
         .coupledUnionMatrix(run)
     )
@@ -8632,7 +10596,7 @@ l0learnWeights <- function(
                 "{label}: `maf` puts one study's weights on its alleles' ",
                 "scale, and the weights across studies stay standardized."
             ),
-            i = "Leave `maf` unset, or pass studyCoupling = NULL."
+            i = "Leave `maf` unset, or pass coupling = NULL."
         ))
     }
     honoured <- c(
@@ -8646,7 +10610,8 @@ l0learnWeights <- function(
         "seed",
         "shrinkCorr",
         "raoBlackwell",
-        "nChains"
+        "nChains",
+        "rho"
     )
     settings <- list_modify(
         .formalDefaults(prsCs, honoured),
@@ -8660,8 +10625,10 @@ l0learnWeights <- function(
     settings
 }
 
-# One chain of the sampler across studies, on their LD matrices or factors,
-# each study's correlations learned (a constraint of 1).
+# One chain of the sampler across conditions, on their LD matrices or
+# factors: their correlations learned (a constraint of 1) from the identity or
+# `run$rho`, or held at `run$rho` (`run$learnRho`), and the noise of those on
+# shared samples correlated by `run$noise` (its precision, NULL for none).
 # @noRd
 .jointPrsChain <- function(run, seed, track) {
     s <- run$settings
@@ -8670,6 +10637,9 @@ l0learnWeights <- function(
         b = s$b,
         phi = s$phi,
         constraint = rep(1, length(run$bhats)),
+        rho = run$rho,
+        learnRho = run$learnRho,
+        noisePrecision = run$noise,
         bhatList = run$bhats,
         n = run$ns,
         unionIdxList = map(run$idx, as.integer),
@@ -8707,11 +10677,18 @@ l0learnWeights <- function(
     ids,
     user,
     fitRetention,
-    label
+    label,
+    shared = list()
 ) {
     settings <- .sdprCoupledSettings(user, length(stats), label)
     run <- c(
-        list(settings = settings),
+        list(
+            settings = settings,
+            rho = settings$rho %||% .samplerSeedRho(shared$seed),
+            learnRho = is.null(settings$rho),
+            kindWeights = .sdprSeedKindWeights(shared$seed, settings$kinds),
+            noise = .samplerNoisePrecision(shared$residual, ldReferences, stats)
+        ),
         .mcmcCoupledInputs(stats, ldReferences, ids, label)
     )
     fit <- .mcmcChains(
@@ -8741,7 +10718,7 @@ l0learnWeights <- function(
                 "describe one study's variants; a fit across studies reads ",
                 "each study's sample size and the optLlk = 1 likelihood."
             ),
-            i = "Leave them unset, or pass studyCoupling = NULL."
+            i = "Leave them unset, or pass coupling = NULL."
         ))
     }
     honoured <- c(
@@ -8829,7 +10806,99 @@ l0learnWeights <- function(
         min(eigen(rho, symmetric = TRUE, only.values = TRUE)$values) > 0
 }
 
-# One chain of SDPR across studies, on their LD matrices or factors.
+# The precision of the conditions' noise the samplers read (NoiseCoupling in
+# rss_mcmc.h): Q = E^-1 for E the residual correlation over conditions on
+# one LD reference and the same variants (.rssSharedSources()), zero between
+# others; NULL when no two share samples. solve() leaves the inverse
+# asymmetric by rounding, and the samplers take only an exactly symmetric
+# one, so it is symmetrized.
+# @noRd
+.samplerNoisePrecision <- function(residual, ldReferences, stats) {
+    if (is.null(residual)) {
+        return(NULL)
+    }
+    sources <- .rssSharedSources(ldReferences, stats)
+    E <- replace(residual, !outer(sources, sources, `==`), 0)
+    if (all(E[upper.tri(E)] == 0)) {
+        return(NULL)
+    }
+    Q <- solve(E)
+    unname((Q + t(Q)) / 2)
+}
+
+# A MashPrior's starting correlation for a sampler: that of its covariances
+# averaged over their weights, sum_k w_k U_k, on the group's conditions
+# (`seed`: U and w); NULL without a seed, or where it is not a positive-
+# definite correlation.
+# @noRd
+.samplerSeedRho <- function(seed) {
+    S <- .samplerSeedCovariance(seed)
+    if (is.null(S) || any(diag(S) <= 0)) {
+        return(NULL)
+    }
+    R <- stats::cov2cor(S)
+    if (min(eigen(R, symmetric = TRUE, only.values = TRUE)$values) <= 1e-8) {
+        return(NULL)
+    }
+    unname(R)
+}
+
+# sum_k w_k U_k over a seed's covariances, equal weights where it has none.
+# @noRd
+.samplerSeedCovariance <- function(seed) {
+    if (is.null(seed) || length(seed$U) == 0L) {
+        return(NULL)
+    }
+    w <- .samplerSeedWeights(seed)
+    reduce(map2(seed$U, w, `*`), `+`)
+}
+
+# @noRd
+.samplerSeedWeights <- function(seed) {
+    w <- seed$w[names(seed$U)] %||% seed$w
+    if (is.null(w) || length(w) != length(seed$U) || anyNA(w)) {
+        return(rep(1 / length(seed$U), length(seed$U)))
+    }
+    unname(w)
+}
+
+# SDPR's kinds' starting weights from a MashPrior seed: each covariance's
+# weight to the kind holding the conditions it covers (its diagonal's
+# non-zero entries), a covariance covering no kind's set adding to none; each
+# kind at least a small share, so every one can be drawn. NULL without a
+# seed.
+# @noRd
+.sdprSeedKindWeights <- function(seed, kinds) {
+    if (is.null(seed) || length(seed$U) == 0L) {
+        return(NULL)
+    }
+    covered <- map(seed$U, .samplerCovered)
+    at <- map_int(covered, .sdprKindOf, kinds = kinds)
+    w <- .samplerSeedWeights(seed)
+    total <- map_dbl(seq_along(kinds), .sdprKindWeight, at = at, w = w)
+    floor <- 1e-3 * max(sum(total), 1)
+    pmax(total, floor)
+}
+
+# @noRd
+.samplerCovered <- function(U) {
+    which(diag(U) > 1e-8 * max(diag(U), 1e-300))
+}
+
+# @noRd
+.sdprKindOf <- function(covered, kinds) {
+    hit <- detect_index(kinds, setequal, covered)
+    if (hit == 0L) NA_integer_ else hit
+}
+
+# @noRd
+.sdprKindWeight <- function(q, at, w) {
+    sum(w[!is.na(at) & at == q])
+}
+
+# One chain of SDPR across conditions, on their LD matrices or factors: rho
+# fixed or learned from `run$rho`, the kinds starting at `run$kindWeights`,
+# and the noise of conditions on shared samples correlated by `run$noise`.
 # @noRd
 .sdprxChain <- function(run, seed, track) {
     s <- run$settings
@@ -8839,7 +10908,10 @@ l0learnWeights <- function(
         unionIdxList = map(run$idx, as.integer),
         nUnion = as.integer(run$nUnion),
         kinds = map(s$kinds, as.integer),
-        rho = s$rho,
+        rho = run$rho,
+        learnRho = run$learnRho,
+        kindWeights = run$kindWeights,
+        noisePrecision = run$noise,
         a = s$a,
         c = s$c,
         M = as.integer(s$M),
@@ -8948,14 +11020,15 @@ bglrWeights <- function(
 # two or more (.jointTwasMultitrait()): `Y` has a column per condition,
 # missing where a condition's phenotype was not measured. Taking `Y` is what
 # sends the pipeline's fits, and each cross-validation fold's, down the
-# whole-Y path (.twasFitsWholeY()). Across studies the residuals are
-# independent (.bglrStudyResiduals()).
+# whole-Y path (.twasFitsWholeY()). `studies` names each condition's study:
+# the residuals are correlated within a study and independent across
+# (.bglrStudyResiduals()).
 # @noRd
 .bglrJointWeights <- function(
     X,
     Y,
     method,
-    acrossStudies = FALSE,
+    studies = NULL,
     backend = "bglr",
     pi = NULL,
     h2Estimate = NULL,
@@ -8976,21 +11049,37 @@ bglrWeights <- function(
         nBurnin = nBurnin,
         thin = thin,
         fitRetention = arg_match(fitRetention),
-        methodArgs = .bglrStudyResiduals(methodArgs, acrossStudies)
+        methodArgs = .bglrStudyResiduals(methodArgs, studies)
     )
 }
 
-# The residual covariance of a joint fit across studies: their samples are
-# disjoint, so it is diagonal there whatever `resCov` says, which keeps its
-# prior settings only when it is diagonal already.
+# The residual covariance of a joint fit over conditions in the studies
+# `studies`: `resCov` as given within one study; across studies, whose
+# samples are disjoint, independent. Each condition its own study makes it
+# diagonal; several conditions in some study make it REC (Multitrait()'s
+# recursive structure, R = (I - B)^-1 diag(psi) (I - B)^-T), its recursions
+# B allowed only between conditions of one study, so R is free within each
+# study and zero across. A diagonal `resCov` is kept as it is.
 # @noRd
-.bglrStudyResiduals <- function(methodArgs, acrossStudies) {
+.bglrStudyResiduals <- function(methodArgs, studies) {
     settings <- as.list(methodArgs)
-    if (!acrossStudies || identical(settings$resCov$type, "DIAG")) {
+    if (n_distinct(studies) <= 1L || identical(settings$resCov$type, "DIAG")) {
         return(methodArgs)
     }
-    diagonal <- list_assign(settings, resCov = list(type = "DIAG"))
-    exec(BglrOptions, !!!diagonal)
+    resCov <- if (anyDuplicated(studies) == 0L) {
+        list(type = "DIAG")
+    } else {
+        list(type = "REC", M = .bglrWithinStudy(studies))
+    }
+    exec(BglrOptions, !!!list_assign(settings, resCov = resCov))
+}
+
+# REC's recursions: TRUE where condition i (a row) may depend on an earlier
+# condition j of the same study.
+# @noRd
+.bglrWithinStudy <- function(studies) {
+    same <- outer(studies, studies, `==`)
+    same & lower.tri(same)
 }
 
 # BGLR() on one phenotype, its one linear term `model` with `etaArgs`. Of
@@ -9074,9 +11163,9 @@ bglrWeights <- function(
 #' Compute Weights Using Dirichlet Process Regression (RcppDPR)
 #'
 #' Fits a Dirichlet Process Regression model via `RcppDPR::fit_model` and
-#' returns the per-variant weights, computed as `beta + alpha` (matching
-#' RcppDPR's internal `predict.DPR_Model`, which uses `(beta + alpha) %*% x_new
-#' + pheno_mean`).
+#' returns its per-variant effects `beta` as the weights. Without a kinship
+#' rotation, `fit_model`'s `alpha` is not a genetic effect (it maps the
+#' in-sample residual back onto the genotypes), so it is left out.
 #'
 #' By default the variational Bayes (`VB`) fitting method is used, which is fast
 #' and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs` for
@@ -9139,7 +11228,7 @@ dprWeights <- function(
         !!!user
     )
     fit <- exec(RcppDPR::fit_model, !!!callArgs)
-    eff.wgt <- replace(zeros, keep, as.numeric(fit$beta + fit$alpha))
+    eff.wgt <- replace(zeros, keep, as.numeric(fit$beta))
     if (identical(fitRetention, "none")) {
         return(eff.wgt)
     }

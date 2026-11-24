@@ -379,7 +379,10 @@ QtlSumStats <- function(
 
 # A QtlSumStats run's selection, parsed once (parseContexts() /
 # parseTraitIds()), and its data with `cisWindow` laid on the tuples that
-# selection keeps -- so the windows cover exactly the tuples the run fits.
+# selection keeps -- so the windows cover exactly the tuples the run fits --
+# and, under a `cisWindow`, the data before it (`unwindowed`), which a group
+# of traits reads over the union of its traits' windows
+# (.crossTraitSource()).
 # @noRd
 .qssSelection <- function(data, contexts, traitId, cisWindow, caller) {
     contexts <- parseContexts(contexts, data)
@@ -387,6 +390,7 @@ QtlSumStats <- function(
     rows <- which(.sumStatsRowsSelected(data, contexts, traitId))
     list(
         data = .qssApplyCisWindow(data, cisWindow, caller, rows),
+        unwindowed = if (!is.null(cisWindow)) data,
         contexts = contexts,
         traitId = traitId
     )

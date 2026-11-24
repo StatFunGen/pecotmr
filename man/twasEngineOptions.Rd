@@ -9,7 +9,9 @@
 \alias{HibayesRssOptions}
 \alias{DprOptions}
 \alias{NcvregOptions}
+\alias{GrpregOptions}
 \alias{L0learnOptions}
+\alias{AbessOptions}
 \alias{SparsevbOptions}
 \alias{MrashOptions}
 \alias{MrashRssOptions}
@@ -36,7 +38,11 @@ DprOptions(...)
 
 NcvregOptions(...)
 
+GrpregOptions(...)
+
 L0learnOptions(...)
+
+AbessOptions(...)
 
 SparsevbOptions(...)
 
@@ -140,6 +146,20 @@ Options forwarded to the engine behind a TWAS weight method,
   The glasso and univariate-glmnet \code{mr.mash} initialisations are
   single-threaded for the same reason.
 
+  \code{GrpregOptions} and \code{AbessOptions} configure the
+  \code{"grpreg"} and \code{"abess"} backends: grpreg's lasso, elastic
+  net, MCP and SCAD for \code{lassoWeights}, \code{enetWeights},
+  \code{mcpWeights} and \code{scadWeights}, and abess's best subset for
+  \code{l0learnWeights}. Each is checked against its engine's named
+  arguments (\code{cv.grpreg}'s and \code{grpreg}'s together, and
+  \code{abess}'s), and each refuses the folds, the grouping and the
+  family, which the wrappers set. \code{AbessOptions} also refuses
+  \code{num.threads} (abess runs on one thread, for the reason
+  \code{parallel} is refused above), \code{weight} (abess scales a sparse
+  design's rows by the weights but its phenotype by their square roots)
+  and \code{init.active.set} (abess replaces it with an index of its
+  own).
+
   \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
   \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the
   path is walked (\code{"strongRule"} or \code{"gradientRanked"}; see
@@ -175,7 +195,7 @@ Options forwarded to the engine behind a TWAS weight method,
 
   \code{SdprOptions} also takes \code{sharing} and \code{rho}, which act
   only when \code{dprGibbs} is fitted across studies as SDPRX fits
-  ancestries (\code{\link{twasWeightsPipeline}}'s \code{studyCoupling}):
+  ancestries (\code{\link{twasWeightsPipeline}}'s \code{coupling}):
   which sets of the studies a component's effects lie in, and their
   correlation (see \code{\link{sdpr}}). A single study ignores them.
 }

@@ -406,6 +406,9 @@ public:
 	arma::vec times(const arma::vec& x) const { return S_ * x; }
 	double quad(const arma::vec& x) const { return arma::dot(S_ * x, x); }
 	arma::mat sub(const arma::uvec& idx) const { return S_.submat(idx, idx); }
+	arma::mat sub(const arma::uvec& rows, const arma::uvec& cols) const {
+		return S_.submat(rows, cols);
+	}
 
 	// Draws the block's effects, beta ~ N(P^-1 a, scale P^-1) with
 	// P = S + diag(1 / v) for prior variances v (gaussian_draw()), and
@@ -456,6 +459,19 @@ public:
 		return S;
 	}
 
+	// S's rows `rows` and columns `cols`, the ridge where they meet.
+	arma::mat sub(const arma::uvec& rows, const arma::uvec& cols) const {
+		arma::mat S = W_.cols(rows).t() * W_.cols(cols);
+		for (arma::uword a = 0; a < rows.n_elem; ++a) {
+			for (arma::uword b = 0; b < cols.n_elem; ++b) {
+				if (rows(a) == cols(b)) {
+					S(a, b) += extra_;
+				}
+			}
+		}
+		return S;
+	}
+
 	// The same draw as DenseLdBlock's without forming S or P. With D = diag(v)
 	// and M = W D W' + I (r x r), Woodbury gives P^-1 = D - D W' M^-1 W D, so
 	// the mean P^-1 a costs one solve against M, and the noise comes from the
@@ -500,6 +516,52 @@ private:
 	}
 };
 
+// ==== Conditions on shared samples ============================================
+
+// Conditions measured on shared samples -- one study's contexts or traits --
+// have marginal statistics whose noise is correlated. With E the correlation
+// of their z-scores under the null (their residual correlation times their
+// samples' overlap, what mashResidualCorrelation() estimates) and n their
+// sample sizes, the noise of their marginal effects has covariance
+// D^-1/2 E D^-1/2 (x) R, D = diag(n), and precision D^1/2 Q D^1/2 (x) R^-1
+// with Q = E^-1. Conditions share samples here only on one LD reference over
+// the same variants, so Q is block diagonal over such sets and the identity
+// where nothing is shared, and the samplers' draws are their independent
+// ones there. Both samplers read Q through this kernel.
+struct NoiseCoupling {
+	arma::mat Q;  // K x K, the identity when no condition shares samples
+	arma::vec n;  // the conditions' sample sizes
+
+	// Whether condition k shares samples with another.
+	bool shared(arma::uword k) const {
+		for (arma::uword l = 0; l < Q.n_cols; ++l) {
+			if (l != k && Q(k, l) != 0.0) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// The conditions sharing samples with k.
+	std::vector<arma::uword> partners(arma::uword k) const {
+		std::vector<arma::uword> out;
+		for (arma::uword l = 0; l < Q.n_cols; ++l) {
+			if (l != k && Q(k, l) != 0.0) {
+				out.push_back(l);
+			}
+		}
+		return out;
+	}
+
+	// The weight of condition l's residual in condition k's likelihood,
+	// relative to condition k's own when it shares none: the (k, l) entry of
+	// the precision D^1/2 Q D^1/2 over n_k, on residuals that carry their own
+	// n (n_l R residuals, as SDPR's B and A' beta_mrg do).
+	double weight(arma::uword k, arma::uword l) const {
+		return Q(k, l) * std::sqrt(n(k) / n(l));
+	}
+};
+
 // ==== PRS-CS, PRS-CSx and JointPRS ============================================
 
 // PRS-CS's prior is beta_j ~ N(0, sigma / n psi_j) with the
@@ -525,13 +587,15 @@ private:
 
 // The posterior means: each study's effects over its own variants, with the
 // fitted correlations and divergence every chain reports; the shared local
-// scales over the union; the studies' residual variances and correlation; and
-// the global scale.
+// scales over the union; the studies' residual variances, their effects'
+// correlation and their residuals' (the identity between conditions on
+// samples of their own); and the global scale.
 struct PrsCsEstimates {
 	std::vector<ChainEstimates> study;
 	arma::vec psi;
 	arma::vec sigma;
 	arma::mat rho;
+	arma::mat residual;
 	double phi = 0.0;
 
 	bool diverged() const {
@@ -542,6 +606,14 @@ struct PrsCsEstimates {
 		}
 		return false;
 	}
+};
+
+// Where the studies' correlations start, and whether they are learned from
+// there: the identity, learned, unless a caller gives a K x K correlation
+// (`value`), which `learn = false` holds fixed.
+struct RhoStart {
+	arma::mat value;
+	bool learn = true;
 };
 
 // The chain on study k's marginal effects `beta_mrg[k]` of the variants in
@@ -555,13 +627,18 @@ public:
 	           const std::vector<arma::vec>& beta_mrg, const arma::vec& n,
 	           const std::vector<std::vector<LdBlock>>& blocks,
 	           const std::vector<arma::uvec>& union_idx, arma::uword n_union,
-	           unsigned int seed, const ChainOptions& opts = ChainOptions())
-	    : a_(a), b_(b), learn_phi_(learn_phi), constraint_(constraint),
+	           unsigned int seed, const ChainOptions& opts = ChainOptions(),
+	           const RhoStart& rho_start = RhoStart(),
+	           const NoiseCoupling& coupling = NoiseCoupling())
+	    : a_(a), b_(b), learn_phi_(learn_phi), learn_rho_(rho_start.learn),
+	      coupling_(coupling),
+	      constraint_(constraint),
 	      beta_mrg_(beta_mrg), n_(n), blocks_(blocks), union_idx_(union_idx),
 	      n_union_(n_union), k_(beta_mrg.size()), rng_(seed),
 	      normal_(0.0, 1.0), psi_(n_union, arma::fill::ones),
 	      phi_(learn_phi ? 1.0 : phi), sigma_(k_, arma::fill::ones),
-	      rho_(k_, k_, arma::fill::eye),
+	      rho_(rho_start.value.n_elem > 0 ? rho_start.value
+	                                      : arma::mat(k_, k_, arma::fill::eye)),
 	      beta_union_(n_union, k_, arma::fill::zeros), opts_(opts) {
 		for (arma::uword k = 0; k < k_; ++k) {
 			arma::uword p = beta_mrg[k].n_elem;
@@ -575,16 +652,26 @@ public:
 			est.corr.zeros(p);
 			est_.study.push_back(est);
 		}
+		if (coupling_.Q.n_elem == 0) {
+			coupling_.Q = arma::mat(k_, k_, arma::fill::eye);
+			coupling_.n = n_;
+		}
+		check_shared_layouts();
+		build_sources();
 		build_patterns();
 		refresh_rinv();
 		est_.psi.zeros(n_union);
 		est_.sigma.zeros(k_);
 		est_.rho.zeros(k_, k_);
+		est_.residual.zeros(k_, k_);
 	}
 
 	void sweep() {
 		for (arma::uword k = 0; k < k_; ++k) {
 			draw_study(k);
+		}
+		for (const arma::uvec& s : sources_) {
+			update_source(s);
 		}
 		if (update_rho()) {
 			refresh_rinv();
@@ -612,6 +699,7 @@ public:
 		est_.psi += psi_ / n_kept;
 		est_.sigma += sigma_ / n_kept;
 		est_.rho += rho_ / n_kept;
+		est_.residual += gamma_ / n_kept;
 		est_.phi += phi_ / n_kept;
 	}
 
@@ -627,6 +715,14 @@ private:
 	double a_;
 	double b_;
 	bool learn_phi_;
+	bool learn_rho_;  // false: rho_ held at its start
+	NoiseCoupling coupling_;
+	// The sets of conditions sharing samples, their phenotypes' correlation
+	// E (the null z-scores' correlation, Q^-1) and their residuals' current
+	// correlation, whose inverse is coupling_.Q.
+	std::vector<arma::uvec> sources_;
+	arma::mat E_;
+	arma::mat gamma_;
 	arma::vec constraint_;
 	std::vector<arma::vec> beta_mrg_;
 	arma::vec n_;
@@ -707,6 +803,26 @@ private:
 		}
 	}
 
+	// Conditions sharing samples are read block by block against each other,
+	// so they must carry the same variants in the same blocks.
+	void check_shared_layouts() const {
+		for (arma::uword k = 0; k < k_; ++k) {
+			for (arma::uword l : coupling_.partners(k)) {
+				bool same = union_idx_[k].n_elem == union_idx_[l].n_elem &&
+				            layouts_[k].n_blocks() == layouts_[l].n_blocks() &&
+				            arma::all(union_idx_[k] == union_idx_[l]);
+				for (arma::uword b = 0; same && b < layouts_[k].n_blocks(); ++b) {
+					same = layouts_[k].size(b) == layouts_[l].size(b);
+				}
+				if (!same) {
+					cpp11::stop("Conditions %d and %d share samples but not their "
+					            "variants and LD blocks.",
+					            (int)k + 1, (int)l + 1);
+				}
+			}
+		}
+	}
+
 	// Each pattern's R_g^-1 from the current rho.
 	void refresh_rinv() {
 		rinv_.clear();
@@ -721,7 +837,13 @@ private:
 	// sigma. The prior's conditional for variant u has precision
 	// (R_g^-1)_kk / psi_u in PRS-CS's units, and shifts the marginal effect
 	// by sqrt(sigma_k / n_k) sum_t (R_g^-1)_kt sqrt(n_t / sigma_t) beta_ut /
-	// psi_u over the other studies t carrying u.
+	// psi_u over the other studies t carrying u. A condition sharing samples
+	// (coupling_) reads its likelihood with precision P_kk = Q_kk n_k /
+	// sigma_k, and its marginal effects shifted by the others' residuals,
+	// sum_l (P_kl / P_kk) (beta_mrg_l - R beta_l), P = (n / sigma)^1/2 Q
+	// (n / sigma)^1/2 (shared_marginal()). sigma keeps each condition's own
+	// update: the exact one would need the phenotypes' cross-products, which
+	// summary statistics do not hold.
 	void draw_study(arma::uword k) {
 		const arma::uvec& u = union_idx_[k];
 		arma::uword p = u.n_elem;
@@ -738,9 +860,10 @@ private:
 					         beta_union_(u(i), s(t));
 				}
 			}
-			v(i) = psi_(u(i)) / ri(self_[k](i), self_[k](i));
+			double qkk = coupling_.Q(k, k);
+			v(i) = qkk * psi_(u(i)) / ri(self_[k](i), self_[k](i));
 			shifted(i) = beta_mrg_[k](i) -
-			             std::sqrt(sigma_(k) / n_(k)) * shift / psi_(u(i));
+			             std::sqrt(sigma_(k) / n_(k)) * shift / (qkk * psi_(u(i)));
 		}
 		double quad = 0.0;
 		const BlockLayout& layout = layouts_[k];
@@ -751,7 +874,9 @@ private:
 			arma::span blk = layout.span(b);
 			arma::vec beta_blk;
 			arma::vec mean_blk;
-			quad += blocks_[k][b].draw(v(blk), shifted(blk), sigma_(k) / n_(k),
+			arma::vec target = shifted(blk) + shared_marginal(k, b, blk);
+			quad += blocks_[k][b].draw(v(blk), target,
+			                           sigma_(k) / (n_(k) * coupling_.Q(k, k)),
 			                           normal_, rng_, beta_blk,
 			                           opts_.rao_blackwell ? &mean_blk : nullptr);
 			beta_[k](blk) = beta_blk;
@@ -767,6 +892,9 @@ private:
 		// JointPRS reads sigma's quadratic with the prior's diagonal beta'
 		// beta / psi; the draws' was beta'beta / v. Their difference is
 		// exactly 0 at rho = 0, where this is PRS-CS's update.
+		if (coupling_.shared(k)) {
+			return;  // its source's residual covariance is drawn after
+		}
 		double err = std::max(
 		    n_(k) / 2.0 *
 		        (1.0 - 2.0 * arma::dot(beta_[k], beta_mrg_[k]) +
@@ -775,9 +903,183 @@ private:
 		sigma_(k) = err / gamma_sigma_[k](rng_);
 	}
 
+	// The sets of conditions sharing samples: the connected parts of the
+	// kernel's pattern, two or more each. E is Q^-1 over them, and their
+	// residuals' correlation starts there.
+	void build_sources() {
+		gamma_ = arma::mat(k_, k_, arma::fill::eye);
+		E_ = arma::mat(k_, k_, arma::fill::eye);
+		std::vector<bool> seen(k_, false);
+		for (arma::uword k = 0; k < k_; ++k) {
+			if (seen[k] || !coupling_.shared(k)) {
+				continue;
+			}
+			std::vector<arma::uword> members = {k};
+			seen[k] = true;
+			for (std::size_t at = 0; at < members.size(); ++at) {
+				for (arma::uword l : coupling_.partners(members[at])) {
+					if (!seen[l]) {
+						seen[l] = true;
+						members.push_back(l);
+					}
+				}
+			}
+			arma::uvec s = arma::sort(arma::conv_to<arma::uvec>::from(members));
+			arma::mat e = arma::inv_sympd(coupling_.Q.submat(s, s));
+			arma::mat d = arma::diagmat(1.0 / arma::sqrt(e.diag()));
+			E_.submat(s, s) = d * e * d;
+			gamma_.submat(s, s) = E_.submat(s, s);
+			sources_.push_back(s);
+		}
+	}
+
+	// Source s's residual covariance S = D^1/2 G D^1/2, D its conditions'
+	// sigma and G their residuals' correlation, drawn by random-walk
+	// Metropolis on log sigma and on atanh of each correlation, then read
+	// into sigma_ and coupling_.Q = G^-1. Its target is the residuals'
+	// likelihood on the source's shared samples,
+	//   -(n/2) log|S| - (n/2) tr(S^-1 M),
+	//   M_kl = E_kl - beta_k'b_l - beta_l'b_k + beta_k'R beta_l
+	// (b the marginal effects, E standing for the standardized phenotypes'
+	// cross-products, exact when the conditions share every sample, n their
+	// mean sample size), times JointPRS's prior on each sigma_k as its own
+	// sigma step reads it, sigma_k^-p_k/2 exp(-n_k beta_k'beta_k / (2 psi
+	// sigma_k)), 1 / sigma_k, and a uniform prior on each correlation. For one
+	// condition this is the inverse gamma draw of draw_study().
+	void update_source(const arma::uvec& s) {
+		arma::uword m = s.n_elem;
+		SourceStats st = source_stats(s);
+		arma::vec logsig = arma::log(sigma_(s));
+		arma::mat G = gamma_.submat(s, s);
+		double current = source_log_target(logsig, G, st);
+		for (arma::uword a = 0; a < m; ++a) {
+			arma::vec trial = logsig;
+			trial(a) += 0.1 * normal_(rng_);
+			double proposed = source_log_target(trial, G, st);
+			if (accept(proposed - current)) {
+				logsig = trial;
+				current = proposed;
+			}
+		}
+		for (arma::uword a = 0; a < m; ++a) {
+			for (arma::uword b = a + 1; b < m; ++b) {
+				double z = std::atanh(G(a, b)) + 0.05 * normal_(rng_);
+				arma::mat trial = G;
+				trial(a, b) = trial(b, a) = std::tanh(z);
+				if (arma::eig_sym(trial).min() <= 1e-8) {
+					continue;
+				}
+				double proposed = source_log_target(logsig, trial, st);
+				double jacobian = std::log(1.0 - trial(a, b) * trial(a, b)) -
+				                  std::log(1.0 - G(a, b) * G(a, b));
+				if (accept(proposed - current + jacobian)) {
+					G = trial;
+					current = proposed;
+				}
+			}
+		}
+		sigma_(s) = arma::exp(logsig);
+		gamma_.submat(s, s) = G;
+		coupling_.Q.submat(s, s) = arma::inv_sympd(G);
+	}
+
+	// What source s's target reads from the current effects: M, each
+	// condition's sum beta_k^2 / psi, its number of effects, its n, and the
+	// mean n.
+	struct SourceStats {
+		arma::mat M;
+		arma::vec P;
+		arma::vec p;
+		arma::vec n;
+		double nbar;
+	};
+
+	SourceStats source_stats(const arma::uvec& s) const {
+		arma::uword m = s.n_elem;
+		std::vector<arma::vec> Rb(m);
+		SourceStats st;
+		st.M.set_size(m, m);
+		st.P.set_size(m);
+		st.p.set_size(m);
+		st.n = n_(s);
+		st.nbar = arma::mean(st.n);
+		for (arma::uword a = 0; a < m; ++a) {
+			arma::uword k = s(a);
+			Rb[a] = arma::vec(beta_[k].n_elem);
+			const BlockLayout& layout = layouts_[k];
+			for (arma::uword b = 0; b < layout.n_blocks(); ++b) {
+				if (layout.size(b) > 0) {
+					arma::span blk = layout.span(b);
+					Rb[a](blk) = blocks_[k][b].times(beta_[k](blk));
+				}
+			}
+			st.P(a) = arma::sum(arma::square(beta_[k]) / psi_(union_idx_[k]));
+			st.p(a) = beta_[k].n_elem;
+		}
+		for (arma::uword a = 0; a < m; ++a) {
+			for (arma::uword b = 0; b < m; ++b) {
+				arma::uword k = s(a);
+				arma::uword l = s(b);
+				st.M(a, b) = E_(k, l) - arma::dot(beta_[k], beta_mrg_[l]) -
+				             arma::dot(beta_[l], beta_mrg_[k]) +
+				             arma::dot(beta_[k], Rb[b]);
+			}
+		}
+		st.M = 0.5 * (st.M + st.M.t());
+		return st;
+	}
+
+	// The log target of update_source() at log sigma `logsig` and residual
+	// correlation G, up to a constant.
+	static double source_log_target(const arma::vec& logsig, const arma::mat& G,
+	                                const SourceStats& st) {
+		arma::vec sd = arma::exp(0.5 * logsig);
+		arma::mat S = arma::diagmat(sd) * G * arma::diagmat(sd);
+		double logdet = 0.0;
+		double sign = 0.0;
+		arma::log_det(logdet, sign, S);
+		if (sign <= 0.0) {
+			return -arma::datum::inf;
+		}
+		double value = -0.5 * st.nbar * logdet -
+		               0.5 * st.nbar * arma::trace(arma::solve(S, st.M));
+		for (arma::uword a = 0; a < logsig.n_elem; ++a) {
+			value -= 0.5 * st.p(a) * logsig(a) +
+			         0.5 * st.n(a) * st.P(a) * std::exp(-logsig(a));
+		}
+		return value;
+	}
+
+	// A Metropolis acceptance at log ratio `log_ratio`.
+	bool accept(double log_ratio) {
+		if (log_ratio >= 0.0) {
+			return true;
+		}
+		std::uniform_real_distribution<double> unif(0.0, 1.0);
+		return std::exp(log_ratio) >= unif(rng_);
+	}
+
+	// The shift block b of condition k's marginal effects takes from the
+	// conditions sharing its samples: sum_l (P_kl / P_kk) (beta_mrg_l -
+	// R beta_l) over the block, with P_kl / P_kk = (Q_kl / Q_kk)
+	// sqrt(n_l sigma_k / (n_k sigma_l)). Zero for a condition sharing none.
+	arma::vec shared_marginal(arma::uword k, arma::uword b,
+	                          const arma::span& blk) const {
+		arma::vec out(layouts_[k].size(b), arma::fill::zeros);
+		for (arma::uword l : coupling_.partners(k)) {
+			double ratio = coupling_.Q(k, l) / coupling_.Q(k, k) *
+			               std::sqrt(n_(l) * sigma_(k) / (n_(k) * sigma_(l)));
+			out += ratio * (beta_mrg_[l](blk) - blocks_[l][b].times(beta_[l](blk)));
+		}
+		return out;
+	}
+
 	// JointPRS's Metropolis step on each pair's correlation. Whether any
-	// moved.
+	// moved; none does when rho is held fixed.
 	bool update_rho() {
+		if (!learn_rho_) {
+			return false;
+		}
 		bool moved = false;
 		std::uniform_real_distribution<double> unif(0.0, 1.0);
 		for (std::size_t r = 0; r < pairs_.size(); ++r) {
@@ -909,12 +1211,14 @@ PrsCsEstimates prs_cs_mcmc(double a, double b, bool learn_phi, double phi,
                            const std::vector<arma::uvec>& union_idx,
                            arma::uword n_union, const ChainSchedule& schedule,
                            bool verbose, unsigned int seed,
-                           const ChainOptions& opts = ChainOptions()) {
+                           const ChainOptions& opts = ChainOptions(),
+                           const RhoStart& rho_start = RhoStart(),
+                           const NoiseCoupling& coupling = NoiseCoupling()) {
 	if (verbose) {
 		Rprintf("Running Markov Chain Monte Carlo (MCMC) sampler...\n");
 	}
 	PrsCsChain<LdBlock> chain(a, b, learn_phi, phi, constraint, beta_mrg, n, blocks,
-	                          union_idx, n_union, seed, opts);
+	                          union_idx, n_union, seed, opts, rho_start, coupling);
 	run_chain(chain, schedule, verbose);
 	PrsCsEstimates est = chain.estimates();
 	if (verbose && learn_phi) {
@@ -996,11 +1300,15 @@ struct SdprEstimates {
 
 // How K studies' effects are shared: each non-null kind's studies (0-based,
 // in order), their correlations rho (K x K), and whether rho is learned,
-// starting from the given matrix. One study has the one kind {0}.
+// starting from the given matrix; the kinds' starting weights (empty for
+// equal ones); and the conditions sharing samples (NoiseCoupling, empty for
+// none). One study has the one kind {0}.
 struct SdprSharing {
 	std::vector<arma::uvec> kinds;
 	arma::mat rho;
 	bool learn_rho = false;
+	arma::vec kind_weight;
+	NoiseCoupling coupling;
 };
 
 /**

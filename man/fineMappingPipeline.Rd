@@ -33,6 +33,7 @@ fineMappingPipeline(data, ...)
   dataDrivenPriorWeightsCutoff = 1e-10,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
+  completeSamples = FALSE,
   fitRetention = c("slim", "full")
 )
 
@@ -63,6 +64,7 @@ fineMappingPipeline(data, ...)
   seed = NULL,
   phenotypeFilterParam = PhenotypeFilterParam(),
   verbose = 1,
+  completeSamples = FALSE,
   fitRetention = c("slim", "full")
 )
 
@@ -275,7 +277,7 @@ present are not refit.}
   off. \code{covariateScope} sets whose covariates a joint fit takes
   where its outcomes span contexts: by default each outcome's phenotypes
   its own context's, and the genotypes they share the genotype covariates
-  alone.
+  and the phenotype covariates every context shares.
 
   Only meaningful for \code{QtlDataset} / \code{MultiStudyQtlDataset}
   input. A \code{QtlSumStats} / \code{GwasSumStats} run has no covariates
@@ -349,6 +351,16 @@ samples are dropped. Every fit of the run, joint ones included, reads
 its phenotypes under it.}
 
 \item{verbose}{Verbosity (0 silent, 1 default). Default \code{1}.}
+
+\item{completeSamples}{Logical (length 1). Individual-level data only:
+whether a joint group within a study (a study's contexts or traits, or
+each study's share of a group across studies) is fitted only on the
+samples observed in every one of its conditions. \code{FALSE}, the
+default, keeps every sample observed in some condition, each condition
+fitted on its own samples. An engine that takes no missing phenotype
+(fSuSiE, the top-PC alternative to it, and mr.mash where the installed
+mr.mashr has no \code{missing_y_method}) still fits on the samples
+observing every condition itself.}
 
 \item{fitRetention}{How much of each fit the \code{susieFit} slot keeps:
 \code{"slim"} (default) a trimmed view, or \code{"full"} the whole

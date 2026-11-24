@@ -302,14 +302,20 @@ test_that("BglrOptions checks nothing where BGLR's arguments are unreadable", {
 
 test_that("a joint fit across studies takes diagonal residuals", {
     opts <- BglrOptions(resCov = list(type = "UN", df0 = 5))
-    across <- pecotmr:::.bglrStudyResiduals(opts, TRUE)
+    across <- pecotmr:::.bglrStudyResiduals(opts, c("s1", "s2"))
     expect_equal(as.list(across)$resCov, list(type = "DIAG"))
-    expect_identical(pecotmr:::.bglrStudyResiduals(opts, FALSE), opts)
+    expect_identical(pecotmr:::.bglrStudyResiduals(opts, c("s", "s")), opts)
     # A diagonal one keeps its prior settings.
     diagonal <- BglrOptions(resCov = list(type = "DIAG", df0 = c(4, 4)))
-    expect_identical(pecotmr:::.bglrStudyResiduals(diagonal, TRUE), diagonal)
+    expect_identical(
+        pecotmr:::.bglrStudyResiduals(diagonal, c("s1", "s2")),
+        diagonal
+    )
     expect_equal(
-        as.list(pecotmr:::.bglrStudyResiduals(BglrOptions(), TRUE))$resCov,
+        as.list(pecotmr:::.bglrStudyResiduals(
+            BglrOptions(),
+            c("s1", "s2")
+        ))$resCov,
         list(type = "DIAG")
     )
 })

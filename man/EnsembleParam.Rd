@@ -34,7 +34,7 @@ the stack, the held-out \eqn{R^2} on summary statistics. Default
 studies' fits into each study's ensemble, as MAGEPRO (individual-level
 data) and LEOPARD (summary statistics) combine ancestries. Each study's
 stack then holds its own methods' out-of-fold predictions (the fits
-across studies under \code{studyCoupling} among them) and, as fixed
+across studies under \code{coupling} among them) and, as fixed
 predictors, every other study's own fit of each method, applied to its
 samples or statistics. Another study's fit across studies saw this
 study's data, so it is left out. The rows carry \code{jointStudies}.

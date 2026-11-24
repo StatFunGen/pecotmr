@@ -37,9 +37,11 @@ Residualize the genotype matrix over the whole dataset:
   narrow it first, with \code{x[i, j, ]}, to residualize part of it. For
   one context, against that context's phenotype covariates and the
   genotype covariates. For several, the genotypes they share, over the
-  samples every one of them has, against the genotype covariates alone,
-  or under \code{covariateScope = "union"} against all the contexts'
-  covariates together.
+  samples every one of them has, against the genotype covariates and the
+  phenotype covariates every one of them selects with the same values
+  (see \code{\link{ResidualizationParam}}), or under
+  \code{covariateScope = "union"} against all the contexts' covariates
+  together.
 }
 \examples{
 data(qtlDatasetExample)

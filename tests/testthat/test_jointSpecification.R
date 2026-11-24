@@ -44,7 +44,8 @@
     region = NULL,
     residualizationParam = ResidualizationParam(),
     genotypeFilter = pecotmr:::.qtlResolveFilter(),
-    phenotypeFilter = NULL
+    phenotypeFilter = NULL,
+    completeSamples = FALSE
 ) {
     planned <- pecotmr:::.crossContextPlan(
         data,
@@ -53,7 +54,8 @@
         verbose,
         label,
         residualizationParam,
-        phenotypeFilter
+        phenotypeFilter,
+        completeSamples
     )
     if (is.null(planned)) {
         return(NULL)
@@ -87,7 +89,8 @@
     region = NULL,
     residualizationParam = ResidualizationParam(),
     genotypeFilter = pecotmr:::.qtlResolveFilter(),
-    phenotypeFilter = NULL
+    phenotypeFilter = NULL,
+    completeSamples = FALSE
 ) {
     planned <- pecotmr:::.crossTraitPlan(
         data,
@@ -97,7 +100,8 @@
         verbose,
         label,
         residualizationParam,
-        phenotypeFilter
+        phenotypeFilter,
+        completeSamples
     )
     if (is.null(planned)) {
         return(NULL)
@@ -115,7 +119,8 @@
         ),
         planned$allY,
         planned$traitsHere,
-        planned$se
+        planned$se,
+        planned$completeSamples
     )
 }
 
@@ -1640,7 +1645,7 @@ test_that(".buildJointSumstatZMatrix: entries in different SNP orders error", {
             c("c1", "c2"),
             errorLabel = "TESTLABEL"
         ),
-        "identical SNP order"
+        "statistics at the same variants"
     )
 })
 
@@ -1697,15 +1702,24 @@ test_that("a cross-context (X, Y): region path + complete-case skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(.js_crossContextXy(
-        NULL,
-        "g1",
-        c("c1", "c2"),
-        cisWindow = NULL,
-        verbose = 1,
-        label = "X",
-        region = region
-    )))
+    build <- function(completeSamples) {
+        suppressMessages(.js_crossContextXy(
+            NULL,
+            "g1",
+            c("c1", "c2"),
+            cisWindow = NULL,
+            verbose = 1,
+            label = "X",
+            region = region,
+            completeSamples = completeSamples
+        ))
+    }
+    # Every sample some context observes, c1 missing where it lacks one...
+    xy <- build(FALSE)
+    expect_equal(nrow(xy$Y), 6L)
+    expect_equal(sum(!is.na(xy$Y[, "c1"])), 1L)
+    # ...or only those every context observes, too few here.
+    expect_null(build(TRUE))
 })
 
 test_that("a cross-context (X, Y): too few shared samples skips", {
@@ -1754,9 +1768,20 @@ test_that(".crossContextFitSamples skips when too few samples are shared", {
         res <- pecotmr:::.crossContextFitSamples(
             Yres,
             c("c1", "c2"),
-            list(verbose = 1, label = "lbl", tid = "g1")
+            list(verbose = 1, label = "lbl", tid = "g1"),
+            TRUE
         ),
         "trait 'g1' has too few shared samples across contexts"
+    )
+    # Without completeSamples the samples either context observes are kept.
+    expect_equal(
+        pecotmr:::.crossContextFitSamples(
+            Yres,
+            c("c1", "c2"),
+            list(verbose = 1, label = "lbl", tid = "g1"),
+            FALSE
+        ),
+        c("s1", "s2", "s3")
     )
     expect_null(res)
 })
@@ -1842,16 +1867,22 @@ test_that("a cross-trait (X, Y): < 2 traits, region, complete skip", {
         },
         .package = "pecotmr"
     )
-    expect_null(suppressMessages(.js_crossTraitXy(
-        NULL,
-        "cx",
-        c("g1", "g2"),
-        cisWindow = NULL,
-        verbose = 1,
-        label = "X",
-        studyName = "S",
-        region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 9999))
-    )))
+    build <- function(completeSamples) {
+        suppressMessages(.js_crossTraitXy(
+            NULL,
+            "cx",
+            c("g1", "g2"),
+            cisWindow = NULL,
+            verbose = 1,
+            label = "X",
+            studyName = "S",
+            region = GenomicRanges::GRanges("chr1", IRanges::IRanges(1, 9999)),
+            completeSamples = completeSamples
+        ))
+    }
+    # Every sample some trait observes, or only those every trait does.
+    expect_equal(nrow(build(FALSE)$Y), 6L)
+    expect_null(build(TRUE))
 })
 
 test_that("a composed (X, Y): skip branches and single-context wrap", {
@@ -3081,7 +3112,26 @@ test_that("a merged row's joint position is NA where no result holds it", {
     expect_true(is.na(pecotmr:::.fmJointIndexForKey(NULL, "b")))
 })
 
-test_that("a composed spec with the study axis fits mr.mash alone across studies", {
+test_that("summary-statistics joint fits share one pipeline's settings", {
+    pipeline <- pecotmr:::.twasQssJointPipeline(
+        c("lasso", "mrmash"),
+        list(
+            fitRetention = "slim",
+            verbose = 0,
+            seed = 1,
+            coupling = list(study = c(0.1, 1)),
+            ensemble = list(enabled = TRUE, acrossStudies = TRUE),
+            h2Spec = list(value = 0.3)
+        )
+    )
+    config <- pecotmr:::.jpConfig(pipeline)
+    # The h2 joint mr.mash starts from (.jointMrmashRssWeights()).
+    expect_identical(config$h2, list(value = 0.3))
+    expect_equal(config$coupling, list(study = c(0.1, 1)))
+    expect_equal(config$ensembleParam$stackTokens, "lasso")
+})
+
+test_that("every study spec reaches one pass of the engine, with each method", {
     qdA <- .js_makeQtlDataset(
         studyName = "indA",
         contexts = c("c1", "c2"),
@@ -3095,15 +3145,9 @@ test_that("a composed spec with the study axis fits mr.mash alone across studies
     mt <- MultiStudyQtlDataset(qtlDatasets = list(indA = qdA, indB = qdB))
     seen <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        .twasStudyAxisFits = function(specs, fitted, methods, cfg, studies) {
-            if (length(specs) > 0L) {
-                key <- paste(specs[[1L]]$axes, collapse = "+")
-                seen[[key]] <- list(
-                    fitted = fitted,
-                    coupling = cfg$studyCoupling,
-                    across = cfg$ensembleParam$acrossStudies
-                )
-            }
+        .twasStudyAxisFits = function(specs, tokens, methods, cfg, studies) {
+            seen$axes <- map(specs, "axes")
+            seen$tokens <- tokens
             NULL
         },
         .package = "pecotmr"
@@ -3114,22 +3158,19 @@ test_that("a composed spec with the study axis fits mr.mash alone across studies
     )
     cfg <- list(
         data = mt,
-        studyCoupling = c(0.1, 1),
+        coupling = list(study = c(0.1, 1)),
         ensembleParam = EnsembleParam(enabled = TRUE, acrossStudies = TRUE),
         backend = c(bayesC = "bglr"),
         genotypeFilter = list()
     )
-    expect_null(pecotmr:::.twasDispatchStudySpecsCoupled(
+    expect_null(pecotmr:::.twasDispatchStudySpecsJoint(
         parsed,
         c("lasso", "mrmash", "bayesC"),
         list(),
         cfg
     ))
-    # The study axis alone: coupled, stacked and joint methods.
-    expect_setequal(seen$study$fitted, c("lasso", "mrmash", "bayesC"))
-    expect_equal(seen$study$coupling, c(0.1, 1))
-    # Composed with the context: mr.mash alone, neither coupled nor stacked.
-    expect_equal(seen[["study+context"]]$fitted, "mrmash")
-    expect_null(seen[["study+context"]]$coupling)
-    expect_false(seen[["study+context"]]$across)
+    # Each spec then fits the methods its layout admits (.jointSpecTokens()):
+    # the study axis alone all three, composed with the context mr.mash.
+    expect_equal(seen$axes, list("study", c("study", "context")))
+    expect_equal(seen$tokens, c("lasso", "mrmash", "bayesC"))
 })

@@ -445,22 +445,25 @@ NULL
 }
 
 # The step-2 log-likelihood at covariance h12, the cross intercept refitted
-# from `start` where the window fits it (`held` NA), held otherwise: a point
-# of its profile (.rgProfile()), list(value, par) with the refitted intercept
-# its par; NULL where the refit does not converge.
+# from the best of `starts` (.h2BestStart()) where the window fits it (`held`
+# NA), held otherwise: a point of its profile (.rgProfile()), list(value,
+# par) with the refitted intercept its par; NULL where the refit does not
+# converge.
 # @noRd
-.rgCrossRefit <- function(h12, start, cross, proc, held) {
+.rgCrossRefit <- function(h12, starts, cross, proc, held) {
     if (!is.na(held)) {
         data <- .rgCrossScoringData(cross, held)
         value <- .h2Likelihood("cross", data, h12)$value
         return(list(value = value, par = numeric(0)))
     }
+    data <- .rgCrossScoringData(cross, h12 = h12)
+    bounds <- proc@crossInterceptBounds
     .h2ScoringBest(.h2Scoring(
         "cross",
-        .rgCrossScoringData(cross, h12 = h12),
-        list(start),
-        proc@crossInterceptBounds[[1L]],
-        proc@crossInterceptBounds[[2L]],
+        data,
+        list(.h2BestStart("cross", data, starts, bounds[[1L]], bounds[[2L]])),
+        bounds[[1L]],
+        bounds[[2L]],
         proc@maxit,
         valueOnly = TRUE
     ))
@@ -533,12 +536,13 @@ NULL
 # rg's profile log-likelihood on the RgEstimate's rg grid (`grid`, on the
 # fit's scale) and its 95% interval from inverting the likelihood ratio,
 # about `fit` (its covariance `estimate`, its other parameters `par` and its
-# `value`); `refit(value, start, ...)` refits the other parameters with the
-# covariance held at `value` from `start`, list(value, par), NULL where that
-# does not converge. The grid is walked out from the fit (.rgProfileWalk()),
-# and each end of the interval is root-found between the two points where
-# the walk first falls past the cutoff (.rgWalkEnd()), the grid's end where
-# it never does: list(curve, interval), the curve relative to its largest.
+# `value`); `refit(value, starts, ...)` refits the other parameters with the
+# covariance held at `value` from the best of the list `starts`, list(value,
+# par), NULL where that does not converge. The grid is walked out from the
+# fit (.rgProfileWalk()), and each end of the interval is root-found between
+# the two points where the walk first falls past the cutoff (.rgWalkEnd()),
+# the grid's end where it never does: list(curve, interval), the curve
+# relative to its largest.
 # @noRd
 .rgProfile <- function(grid, fit, refit, ...) {
     walk <- .rgProfileWalk(grid, fit, refit, ...)
@@ -583,21 +587,23 @@ NULL
     )
 }
 
-# One point of .rgProfileWalk(): the refit at `value` started on the line
-# through the last two points' fits, or at the last one's where no point
-# comes before it (the fit starts the first point, too close to it to steer
-# a line) or a refit failed; -Inf where this one fails, the last fit kept
-# for the next to start from.
+# One point of .rgProfileWalk(): the refit at `value` started from the last
+# point's fit or, where it fits better, the line through the last two points'
+# fits; from the last one's alone where no point comes before it (the fit
+# starts the first point, too close to it to steer a line) or a refit
+# failed. A line steered through a jump between modes can start far outside
+# the box. -Inf where this one fails, the last fit kept for the next to start
+# from.
 # @noRd
 .rgWalkStep <- function(previous, value, refit, ...) {
     before <- previous$before
-    start <- if (is.null(before)) {
-        previous$par
+    starts <- if (is.null(before)) {
+        list(previous$par)
     } else {
         reach <- (value - previous$at) / (previous$at - before$at)
-        previous$par + reach * (previous$par - before$par)
+        list(previous$par + reach * (previous$par - before$par), previous$par)
     }
-    fit <- refit(value, start, ...)
+    fit <- refit(value, starts, ...)
     if (is.null(fit)) {
         return(list(par = previous$par, value = -Inf))
     }
@@ -648,7 +654,7 @@ NULL
 .rgWalkProfile <- function(value, ends, refit, ...) {
     share <- (value - ends$at[[1L]]) / (ends$at[[2L]] - ends$at[[1L]])
     start <- ends$par[[1L]] + share * (ends$par[[2L]] - ends$par[[1L]])
-    refit(value, start, ...)$value %||% -Inf
+    refit(value, list(start), ...)$value %||% -Inf
 }
 
 # ---- the likelihood of a group at once ---------------------------------------
@@ -1106,10 +1112,18 @@ NULL
 }
 
 # The joint fit's profile at partial correlation `at` = `value`, the rest
-# refitted from `start`'s (.rgJointCoordinateNull()): a point of
-# .rgProfile().
+# refitted (.rgJointCoordinateNull()) from the best of `starts` with `at` set
+# to `value` (.h2BestStart()): a point of .rgProfile().
 # @noRd
-.rgJointProfile <- function(value, start, at, joint, held, proc) {
+.rgJointProfile <- function(value, starts, at, joint, held, proc) {
+    bounds <- .rgJointBounds(joint, proc, held)
+    start <- .h2BestStart(
+        "joint",
+        .rgJointScoringData(joint, held, bounds),
+        map(starts, replace, at, value),
+        bounds$lower,
+        bounds$upper
+    )
     .rgJointCoordinateNull(start, at, joint, proc, held, value)
 }
 
@@ -2472,7 +2486,9 @@ NULL
 }
 
 # The 2.5% and 97.5% quantiles over the draws of the pair's rg given `rest`
-# and of the two conditions' r2s; NA without draws.
+# and of the two conditions' r2s; NA without draws. Each draw's Omega =
+# draw / K - Sigma, one column of its cells per draw, is read in
+# rgMixedDrawPairsCpp(), as the group's draws on several references are.
 # @noRd
 #' @importFrom stats quantile
 .rgConditionalDrawQuantiles <- function(draws, Sigma, K, i, j, rest) {
@@ -2480,35 +2496,16 @@ NULL
     if (is.null(draws)) {
         return(list(rg = none, r2Lower = none, r2Upper = none))
     }
-    stats <- map(
-        seq_len(dim(draws)[[3L]]),
-        .rgConditionalDraw,
-        draws = draws,
-        Sigma = Sigma,
-        K = K,
-        i = i,
-        j = j,
-        rest = rest
-    )
-    rg <- quantile(map_dbl(stats, 1L), c(0.025, 0.975), na.rm = TRUE)
-    r2i <- quantile(map_dbl(stats, 2L), c(0.025, 0.975), na.rm = TRUE)
-    r2j <- quantile(map_dbl(stats, 3L), c(0.025, 0.975), na.rm = TRUE)
+    P <- dim(draws)[[1L]]
+    cells <- matrix(draws, P * P) / K - as.vector(Sigma)
+    stats <- rgMixedDrawPairsCpp(cells, P, i, j, as.integer(rest))
+    rg <- quantile(stats$rg, c(0.025, 0.975), na.rm = TRUE)
+    r2i <- quantile(stats$r2i, c(0.025, 0.975), na.rm = TRUE)
+    r2j <- quantile(stats$r2j, c(0.025, 0.975), na.rm = TRUE)
     list(
         rg = unname(rg),
         r2Lower = unname(c(r2i[[1L]], r2j[[1L]])),
         r2Upper = unname(c(r2i[[2L]], r2j[[2L]]))
-    )
-}
-
-# One draw's rg given `rest` and the two conditions' r2s.
-# @noRd
-.rgConditionalDraw <- function(d, draws, Sigma, K, i, j, rest) {
-    omega <- draws[,, d] / K - Sigma
-    partial <- .rgPartial(omega, i, j, rest)
-    c(
-        .rgCorrelation(partial$cov, partial$var),
-        .rgExplained(omega, i),
-        .rgExplained(omega, j)
     )
 }
 
@@ -2570,56 +2567,30 @@ NULL
 # f's components given C's are normal, mean M_f + (Delta_C - M_C) B and
 # variance tau^2 per component, B = Sigma_CC^-1 Sigma_Cf; the partial
 # covariance is w'Delta_f / K - (Sigma_gf - a'Sigma_rest,f), w = Delta_g -
-# Delta_rest a with a = Omega_rest^-1 Omega_rest,g, all of C's.
+# Delta_rest a with a = Omega_rest^-1 Omega_rest,g, all of C's. The draws
+# are made here and each one's p-value in rgPartialDrawPCpp(), NA where its
+# rest's covariance is singular.
 # @noRd
-#' @importFrom stats pnorm
 .rgPartialConditionalP <- function(g, f, rest, sim, nDraws) {
     C <- c(g, rest)
     P <- ncol(sim$top)
     sigmaCC <- sim$Sigma[C, C, drop = FALSE]
     B <- solve(sigmaCC, sim$Sigma[C, f])
-    tau2 <- sim$Sigma[[f, f]] - sum(sim$Sigma[f, C] * B)
-    draw <- list(
-        noise = .rgCorrelatedNormals(nDraws * P, sigmaCC),
-        gram = .rgCentralGram(nDraws, sim$K - P, sigmaCC),
-        C = C,
-        f = f,
-        g = g,
-        rest = rest,
-        B = B,
-        tau2 = tau2
+    noise <- .rgCorrelatedNormals(nDraws * P, sigmaCC)
+    gram <- .rgCentralGram(nDraws, sim$K - P, sigmaCC)
+    p <- rgPartialDrawPCpp(
+        sim$top,
+        noise,
+        gram,
+        sim$Sigma,
+        sim$K,
+        as.integer(C),
+        f,
+        B,
+        sim$Sigma[[f, f]] - sum(sim$Sigma[f, C] * B),
+        sim$observed
     )
-    mean(
-        map_dbl(seq_len(nDraws), .rgPartialDrawP, draw = draw, sim = sim),
-        na.rm = TRUE
-    )
-}
-
-# One draw's conditional p-value; NA where its rest's covariance is singular.
-# @noRd
-.rgPartialDrawP <- function(k, draw, sim, P = ncol(sim$top)) {
-    rows <- (k - 1L) * P + seq_len(P)
-    DC <- sim$top[, draw$C, drop = FALSE] + draw$noise[rows, , drop = FALSE]
-    S <- crossprod(DC) + draw$gram[,, k]
-    DM <- crossprod(DC, sim$top)
-    omegaC <- S / sim$K - sim$Sigma[draw$C, draw$C, drop = FALSE]
-    a <- try_fetch(
-        solve(omegaC[-1L, -1L, drop = FALSE], omegaC[-1L, 1L]),
-        error = .rgSolveFailed
-    )
-    if (is.null(a)) {
-        return(NA_real_)
-    }
-    w <- c(1, -a)
-    shared <- sim$Sigma[[draw$g, draw$f]] -
-        sum(a * sim$Sigma[draw$rest, draw$f])
-    mu <- (sum(w * DM[, draw$f]) +
-        sum(w * ((S - DM[, draw$C, drop = FALSE]) %*% draw$B))) /
-        sim$K -
-        shared
-    sd <- sqrt(draw$tau2 * sum(w * (S %*% w))) / sim$K
-    observed <- abs(sim$observed)
-    pnorm(-observed, mu, sd) + pnorm(observed, mu, sd, lower.tail = FALSE)
+    mean(p, na.rm = TRUE)
 }
 
 # `n` draws of rows with covariance `Sigma`.
@@ -3684,7 +3655,7 @@ setMethod(
 # The reduced pairs' log-likelihood at covariance g as a point of its profile
 # (.rgProfile()), nothing else to refit.
 # @noRd
-.rgReducedRefit <- function(g, start, red) {
+.rgReducedRefit <- function(g, starts, red) {
     list(value = .rgReducedLl(g, red), par = numeric(0))
 }
 
@@ -4361,7 +4332,8 @@ setMethod(
 }
 
 # One chunk of draws' statistics: every draw's H cell by cell over the chunk
-# (.rgMixedDrawCells()), then each draw's pair.
+# (.rgMixedDrawCells()), then each draw's pair in rgMixedDrawPairsCpp(): its
+# partial covariance and rg given `rest` and the two r2s.
 # @noRd
 #' @importFrom stats rnorm
 .rgMixedDrawChunk <- function(size, source, group, i, j, rest) {
@@ -4372,21 +4344,7 @@ setMethod(
     ends <- cumsum(K)
     deltas <- map2(ends - K + 1, ends, .rgDrawRows, draws = draws)
     cells <- .rgMixedDrawCells(deltas, group)
-    stats <- map(
-        seq_len(size),
-        .rgMixedDrawPairAt,
-        cells = cells,
-        P = length(K),
-        i = i,
-        j = j,
-        rest = rest
-    )
-    list(
-        cov = map_dbl(stats, "cov"),
-        rg = map_dbl(stats, "rg"),
-        r2i = map_dbl(stats, "r2i"),
-        r2j = map_dbl(stats, "r2j")
-    )
+    rgMixedDrawPairsCpp(cells, length(K), i, j, as.integer(rest))
 }
 
 # The draws' H, one row per cell (column-major) and one column per draw: each
@@ -4416,27 +4374,9 @@ setMethod(
     (raw - group$sigma[[k, l]] * shape$noiseTrace) * shape$scale
 }
 
-# Draw d's pair from the cells.
-# @noRd
-.rgMixedDrawPairAt <- function(d, cells, P, i, j, rest) {
-    .rgMixedDrawPair(matrix(cells[, d], P), i, j, rest)
-}
-
 # @noRd
 .rgDrawRows <- function(from, to, draws) {
     draws[from:to, , drop = FALSE]
-}
-
-# One draw's partial covariance and rg for the pair and the two r2s.
-# @noRd
-.rgMixedDrawPair <- function(H, i, j, rest) {
-    partial <- .rgPartial(H, i, j, rest)
-    list(
-        cov = partial$cov,
-        rg = .rgCorrelation(partial$cov, partial$var),
-        r2i = .rgExplained(H, i),
-        r2j = .rgExplained(H, j)
-    )
 }
 
 # ---- the regressions and the GLS on two references --------------------------

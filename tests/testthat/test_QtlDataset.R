@@ -1840,6 +1840,37 @@ test_that("residualizedPhenotypes: scaleResiduals = FALSE skips rescaling", {
     max(abs(cor(A, B)))
 }
 
+# Two contexts on .qr_scopeDataset()'s samples that record the donors' age
+# alike, and each a principal component of its own under the same name.
+.qr_sharedCovariateDataset <- function() {
+    set.seed(12)
+    age <- rnorm(12L)
+    brain <- .qr_makeSe(n_samples = 12L)
+    SummarizedExperiment::colData(brain) <- .qr_sharedCovariates(age, 12L)
+    liver <- .qr_makeSe(n_samples = 10L)
+    SummarizedExperiment::colData(liver) <- .qr_sharedCovariates(age, 10L)
+    QtlDataset(
+        studyName = "study1",
+        genotypes = .qr_makeHandle(),
+        phenotypes = list(brain = brain, liver = liver),
+        genotypeCovariates = matrix(
+            rnorm(24),
+            12L,
+            2L,
+            dimnames = list(paste0("s", 1:12), c("pc1", "pc2"))
+        )
+    )
+}
+
+# The first `n` donors' `age`, and a PC1 of the context's own.
+.qr_sharedCovariates <- function(age, n) {
+    S4Vectors::DataFrame(
+        age = age[seq_len(n)],
+        PC1 = rnorm(n),
+        row.names = paste0("s", seq_len(n))
+    )
+}
+
 test_that("each context's phenotypes take their own covariates by default", {
     qd <- .qr_scopeDataset()
     both <- residualizedPhenotypes(qd, context = c("brain", "liver"))
@@ -1898,7 +1929,7 @@ test_that("the union scope takes every context's covariates", {
     expect_gt(.qr_maxCor(own[shared, ], pc$liver[shared, , drop = FALSE]), 0.01)
 })
 
-test_that("genotypes several contexts share take the genotype covariates", {
+test_that("contexts sharing no covariate share genotypes on genotype ones", {
     qd <- .qr_scopeDataset()
     local_mocked_bindings(
         .handleDosage = .qr_mockExtractor(),
@@ -1919,6 +1950,66 @@ test_that("genotypes several contexts share take the genotype covariates", {
     )
     expect_equal(unname(G), unname(alone))
     expect_lt(.qr_maxCor(G, genotypeCovariates(qd)[shared, ]), 1e-6)
+})
+
+test_that("shared genotypes take the covariates every context shares", {
+    qd <- .qr_sharedCovariateDataset()
+    local_mocked_bindings(
+        .handleDosage = .qr_mockExtractor(),
+        .package = "pecotmr"
+    )
+    shared <- paste0("s", 1:10)
+    pc <- phenotypeCovariates(qd, context = c("brain", "liver"))
+    G <- residualizedGenotypes(qd, context = c("brain", "liver"))
+    expect_equal(rownames(G), shared)
+    # Age, the same in both contexts, is out of them with the genotype
+    # covariates; each context's PC1 is its own, and stays in.
+    removed <- cbind(
+        pc$brain[shared, "age", drop = FALSE],
+        genotypeCovariates(qd)[shared, ]
+    )
+    expect_lt(.qr_maxCor(G, removed), 1e-6)
+    expect_gt(.qr_maxCor(G, pc$brain[shared, "PC1", drop = FALSE]), 0.01)
+    expect_gt(.qr_maxCor(G, pc$liver[shared, "PC1", drop = FALSE]), 0.01)
+    # Brain's genotypes on those samples, with age alone of its covariates.
+    alone <- pecotmr:::.qtlResidualizedGenotypes(
+        qd,
+        "brain",
+        samples = shared,
+        residualizationParam = ResidualizationParam(
+            phenotypeCovariates = "age"
+        )
+    )
+    expect_equal(unname(G), unname(alone))
+})
+
+test_that("a covariate is shared only where every context selects it", {
+    qd <- .qr_sharedCovariateDataset()
+    local_mocked_bindings(
+        .handleDosage = .qr_mockExtractor(),
+        .package = "pecotmr"
+    )
+    shared <- paste0("s", 1:10)
+    pc <- phenotypeCovariates(qd, context = c("brain", "liver"))
+    G <- residualizedGenotypes(
+        qd,
+        context = c("brain", "liver"),
+        residualizationParam = ResidualizationParam(
+            phenotypeCovariates = list(brain = c("age", "PC1"), liver = "PC1")
+        )
+    )
+    # Liver's phenotypes keep age, so the shared genotypes do too: they take
+    # the genotype covariates alone.
+    alone <- pecotmr:::.qtlResidualizedGenotypes(
+        qd,
+        "brain",
+        samples = shared,
+        residualizationParam = ResidualizationParam(
+            residualizePhenotype = FALSE
+        )
+    )
+    expect_equal(unname(G), unname(alone))
+    expect_gt(.qr_maxCor(G, pc$brain[shared, "age", drop = FALSE]), 0.01)
 })
 
 test_that("under the union scope shared genotypes take every covariate", {

@@ -15,16 +15,19 @@ ridgeWeights(
 \arguments{
 \item{X}{Numeric genotype / design matrix (samples x variants).}
 
-\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}.}
+\item{y}{Numeric response (phenotype) vector of length \code{nrow(X)}, or
+a matrix with a column per condition (see Details).}
 
 \item{fitRetention}{How much of the fit is kept as the \code{"fit"}
 attribute of the returned weights: \code{"none"} (default) attaches
 nothing; \code{"slim"} the selected fit, as a list of its coefficients
-(\code{coef}, over the variants fitted), \code{intercept},
-\code{lambda} and cross-validated error there (\code{cvm},
-\code{cvsd}); \code{"full"} the whole \code{cv.glmnet} object, with
-every \code{lambda}'s coefficients but without the copy of \code{X} its
-stored calls would hold. Each names the variants it was fitted on.}
+(\code{coef}, over the variants fitted, a column per condition for a
+matrix \code{y}), \code{intercept}, \code{lambda} and cross-validated
+error there (\code{cvm}, \code{cvsd}); \code{"full"} the whole
+\code{cv.glmnet} object, with every \code{lambda}'s coefficients but
+without the copy of \code{X} its stored calls would hold, fitted for a
+matrix \code{y} on the scaled phenotypes. Each names the variants it
+was fitted on.}
 
 \item{retainX}{Logical. Keep that copy of \code{X} in a \code{"full"} fit
 (default \code{FALSE}). An error at any other \code{fitRetention}.}

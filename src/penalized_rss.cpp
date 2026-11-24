@@ -51,16 +51,17 @@
 // Copyright (c) 2021 Hussein Hazimeh, MIT). Their license notices are in
 // inst/COPYRIGHTS.
 //
-// CoupledPathSolver solves K studies' paths together under a penalty on the
-// difference between their effects, PROSPER's cross-ancestry coupling:
+// CoupledPathSolver solves K conditions' paths together under a penalty on
+// the difference between their effects, PROSPER's cross-ancestry coupling:
 //   sum_k [beta_k'R_k,s beta_k - 2 beta_k'z_k + penalty(beta_k)]
-//     + strength * sum_j sum_{k < k' carrying j} (beta_jk - beta_jk')^2,
-// each study against its own LD. A coordinate then sees the partial
-// correlation z_j + strength * (the sum of its partners' coefficients) and the
-// curvature (R_s)_jj + strength * (its number of partners), so every
-// thresholding operator stays exact; the studies step through each point
-// together, each refreshing its coupling from the others' current
-// coefficients before every sweep and scan.
+//     + sum_j sum_{k < k' carrying j} c_kk' (beta_jk - beta_jk')^2,
+// each condition against its own LD, with c_kk' the strength of the pair
+// (zero for a pair not coupled). A coordinate then sees the partial
+// correlation z_j + sum_k' c_kk' beta_jk' over its partners and the curvature
+// (R_s)_jj + sum_k' c_kk' over them, so every thresholding operator
+// stays exact; the conditions step through each point together, each
+// refreshing its coupling from the others' current coefficients before every
+// sweep and scan.
 
 #include <cpp11.hpp>
 #include <cpp11armadillo.hpp>
@@ -332,8 +333,8 @@ private:
   vec v_;
   vec beta_;
   vec absGrad_;  // |z - R_s beta| at the last recorded point (or swap)
-  vec shift_;    // coupling: strength * the partners' coefficients
-  vec extra_;    // coupling: strength * the number of partners
+  vec shift_;    // coupling: the partners' coefficients, each times its c
+  vec extra_;    // coupling: the partners' strengths c, summed
   std::vector<unsigned char> ever_;    // strongRule: ever active
   std::vector<unsigned char> strong_;  // strongRule: ever strong
   std::vector<uword> everList_;        // ever_ in index order
@@ -793,25 +794,38 @@ public:
                     std::vector<std::unique_ptr<Ld>>& lds,
                     const std::vector<vec>& zs,
                     const std::vector<uvec>& unionIdx, uword nUnion,
-                    double strength)
+                    const mat& strength, bool grouped)
       : st_(settings), unionIdx_(unionIdx), members_(nUnion),
-        strength_(strength) {
+        strength_(strength), grouped_(grouped),
+        everGroup_(nUnion, 0), strongGroup_(nUnion, 0) {
     for (uword k = 0; k < zs.size(); k++) {
       solvers_.emplace_back(new PathSolver<Ld>(settings, *lds[k], zs[k]));
       for (uword i = 0; i < unionIdx[k].n_elem; i++)
         members_[unionIdx[k](i)].push_back(std::make_pair(k, i));
     }
+    // Under the group penalty a variant's coupling is solved inside its
+    // group's update (update_group()), so the conditions carry none apart.
+    if (grouped_) return;
     for (uword k = 0; k < solvers_.size(); k++) {
       vec& extra = solvers_[k]->extra_;
-      for (uword i = 0; i < extra.n_elem; i++)
-        extra(i) = strength_ * (members_[unionIdx_[k](i)].size() - 1.0);
+      for (uword i = 0; i < extra.n_elem; i++) {
+        double sum = 0.0;
+        for (const auto& m : members_[unionIdx_[k](i)])
+          if (m.first != k) sum += strength_(k, m.first);
+        extra(i) = sum;
+      }
     }
   }
 
   // The caller's path, or with none a geometric one from the joint pathMax.
   void run(const vec& path) {
     pathMax_ = 0.0;
-    for (auto& s : solvers_) pathMax_ = std::max(pathMax_, s->path_max());
+    if (grouped_) {
+      for (uword j = 0; j < members_.size(); j++)
+        pathMax_ = std::max(pathMax_, group_entry(j, true));
+    } else {
+      for (auto& s : solvers_) pathMax_ = std::max(pathMax_, s->path_max());
+    }
     for (auto& s : solvers_) s->pathMax_ = pathMax_;
     vec points = path.n_elem > 0 ? path : geometric_path();
     double prev = pathMax_;
@@ -841,7 +855,10 @@ private:
   const PathSettings& st_;
   const std::vector<uvec>& unionIdx_;
   std::vector<std::vector<std::pair<uword, uword>>> members_;
-  double strength_;
+  const mat& strength_;  // c_kk', one per pair of conditions
+  bool grouped_;         // each variant's coefficients one group
+  std::vector<unsigned char> everGroup_;    // grouped: ever active
+  std::vector<unsigned char> strongGroup_;  // grouped: ever strong
   double pathMax_ = 0.0;
   std::vector<std::unique_ptr<PathSolver<Ld>>> solvers_;
   std::vector<double> coupling_;  // the coupling term at each point
@@ -858,20 +875,23 @@ private:
     return out;
   }
 
-  // Study k's coupling: strength times the sum of each of its coefficients'
-  // partners in the other studies.
+  // Condition k's coupling: the sum of each of its coefficients' partners in
+  // the other conditions, each times the pair's strength. None under the
+  // group penalty, whose updates solve the coupling themselves.
   void refresh_shift(uword k) {
+    if (grouped_) return;
     vec& shift = solvers_[k]->shift_;
     for (uword i = 0; i < shift.n_elem; i++) {
       double sum = 0.0;
       for (const auto& m : members_[unionIdx_[k](i)])
-        if (m.first != k) sum += solvers_[m.first]->beta_(m.second);
-      shift(i) = strength_ * sum;
+        if (m.first != k)
+          sum += strength_(k, m.first) * solvers_[m.first]->beta_(m.second);
+      shift(i) = sum;
     }
   }
 
-  // strength * the sum over variants of (beta_jk - beta_jk')^2 over every
-  // pair of studies carrying the variant.
+  // The sum over variants of c_kk' (beta_jk - beta_jk')^2 over every pair of
+  // conditions carrying the variant.
   double coupling_term() const {
     double total = 0.0;
     for (const auto& carriers : members_) {
@@ -879,11 +899,11 @@ private:
         for (uword b = a + 1; b < carriers.size(); b++) {
           double d = solvers_[carriers[a].first]->beta_(carriers[a].second) -
                      solvers_[carriers[b].first]->beta_(carriers[b].second);
-          total += d * d;
+          total += strength_(carriers[a].first, carriers[b].first) * d * d;
         }
       }
     }
-    return strength_ * total;
+    return total;
   }
 
   bool all_zero() const {
@@ -902,13 +922,300 @@ private:
     }
     int conv = solve(pp, value, prev);
     if (st_.pen == PEN_L0 && st_.maxSwaps > 0)
-      conv = std::min(conv, swap_phase(pp, value, prev));
+      conv = std::min(conv, grouped_ ? group_swap_phase(pp, value, prev)
+                                     : swap_phase(pp, value, prev));
     finish(value, pp, conv);
   }
 
   int solve(const PointPenalty& pp, double value, double prev) {
+    if (grouped_) return solve_grouped(pp, value, prev);
     if (st_.strategy == STRONG_RULE) return solve_strong(pp, value, prev);
     return solve_ranked(pp);
+  }
+
+  // ---- The group penalty across the conditions (grouped_) ----
+  // Each variant's coefficients in the conditions carrying it are one group
+  // under 2 P(||beta_j||; l1 sqrt(K_j)), lambda0 once per group for the L0
+  // family, with the coupling between them, so a variant is in every
+  // condition's weights or in none. The groups are solved one at a time,
+  // each exactly (update_group()), under ncvreg's strong rule on the groups'
+  // gradient norms; the L0 family swaps whole groups (group_swap_once()).
+
+  // L0Learn's swaps over groups: rounds, each followed by a fresh solve,
+  // until a round finds none or maxSwaps rounds have run. The smallest
+  // convergence flag of those solves.
+  int group_swap_phase(const PointPenalty& pp, double value, double prev) {
+    int conv = 1;
+    for (int round = 0; round < st_.maxSwaps; round++) {
+      if (!group_swap_once(pp)) break;
+      conv = std::min(conv, solve_grouped(pp, value, prev));
+    }
+    return conv;
+  }
+
+  // One round of swap_once() over groups: the first active group, in index
+  // order, whose best replacement among the zero groups has a larger
+  // gradient norm, once the active group is set to zero, than the group is
+  // held at, (v + 2 l2) ||beta_i|| + l1 sqrt(K_i), and whose swap -- the
+  // group zeroed, the replacement set to its own update -- lowers the
+  // objective. A swap that does not is undone. False when no group swaps.
+  bool group_swap_once(const PointPenalty& pp) {
+    std::vector<vec> g;
+    for (auto& s : solvers_) g.push_back(s->gradient(s->ld_.product(s->beta_)));
+    for (uword i = 0; i < members_.size(); i++) {
+      double held = group_norm(i);
+      if (held == 0.0) continue;
+      std::vector<vec> cols = group_columns(i);
+      double best = -1.0;
+      uword jstar = members_.size();
+      for (uword j = 0; j < members_.size(); j++) {
+        if (members_[j].empty() || group_norm(j) != 0.0) continue;
+        double r = swapped_gradient(j, i, g, cols);
+        if (r > best) {
+          best = r;
+          jstar = j;
+        }
+      }
+      if (jstar == members_.size()) continue;
+      double curvature = 1.0 + 2.0 * pp.l2;
+      if (best <= curvature * held + pp.l1 * group_weight(i)) continue;
+      double before = group_objective(pp);
+      vec keptI = group_coefs(i);
+      zero_group(i);
+      update_group(jstar, pp);
+      if (group_objective(pp) >= before) {
+        zero_group(jstar);
+        set_group(i, keptI);
+        continue;
+      }
+      everGroup_[jstar] = 1;
+      strongGroup_[jstar] = 1;
+      for (auto& s : solvers_)
+        s->absGrad_ = abs(s->gradient(s->ld_.product(s->beta_)));
+      return true;
+    }
+    return false;
+  }
+
+  // The objective at the current coefficients: every condition's loss
+  // beta'R_s beta - 2 z'beta, the coupling, and the group L0 family's
+  // penalty, 2 lambda0 and 2 l1 sqrt(K_j) ||beta_j|| per group in the model
+  // and 2 l2 ||beta||^2.
+  double group_objective(const PointPenalty& pp) const {
+    double total = coupling_term();
+    for (const auto& s : solvers_) {
+      vec Rsb = s->ld_.product(s->beta_);
+      total += dot(s->beta_, Rsb) - 2.0 * dot(s->z_, s->beta_) +
+               2.0 * pp.l2 * dot(s->beta_, s->beta_);
+    }
+    for (uword j = 0; j < members_.size(); j++) {
+      double r = group_norm(j);
+      if (r > 0.0)
+        total += 2.0 * pp.lambda0 + 2.0 * pp.l1 * group_weight(j) * r;
+    }
+    return total;
+  }
+
+  // Group j's coefficients, one per condition carrying it.
+  vec group_coefs(uword j) const {
+    vec b(members_[j].size());
+    for (uword m = 0; m < members_[j].size(); m++)
+      b(m) = solvers_[members_[j][m].first]->beta_(members_[j][m].second);
+    return b;
+  }
+
+  // Group j's coefficients set to `b`.
+  void set_group(uword j, const vec& b) {
+    for (uword m = 0; m < members_[j].size(); m++) {
+      PathSolver<Ld>& s = *solvers_[members_[j][m].first];
+      uword i = members_[j][m].second;
+      double del = b(m) - s.beta_(i);
+      if (del == 0.0) continue;
+      s.beta_(i) = b(m);
+      s.ld_.update(i, del);
+    }
+  }
+
+  // The norm of group j's coefficients.
+  double group_norm(uword j) const {
+    double total = 0.0;
+    for (const auto& m : members_[j]) {
+      double b = solvers_[m.first]->beta_(m.second);
+      total += b * b;
+    }
+    return std::sqrt(total);
+  }
+
+  // Group i's columns of R_s, one per condition carrying it (empty for one
+  // that does not).
+  std::vector<vec> group_columns(uword i) {
+    std::vector<vec> cols(solvers_.size());
+    for (const auto& m : members_[i])
+      cols[m.first] = solvers_[m.first]->column(m.second);
+    return cols;
+  }
+
+  // The gradient norm of zero group j were group i set to zero: each
+  // condition's gradient at j plus i's pull on it there.
+  double swapped_gradient(uword j, uword i, const std::vector<vec>& g,
+                          const std::vector<vec>& cols) const {
+    double total = 0.0;
+    for (const auto& m : members_[j]) {
+      double gj = g[m.first](m.second);
+      for (const auto& n : members_[i])
+        if (n.first == m.first)
+          gj += cols[m.first](m.second) * solvers_[n.first]->beta_(n.second);
+      total += gj * gj;
+    }
+    return std::sqrt(total);
+  }
+
+  // Group j's coefficients set to zero.
+  void zero_group(uword j) {
+    for (const auto& m : members_[j]) {
+      PathSolver<Ld>& s = *solvers_[m.first];
+      double b = s.beta_(m.second);
+      if (b == 0.0) continue;
+      s.beta_(m.second) = 0.0;
+      s.ld_.update(m.second, -b);
+    }
+  }
+
+  // A group's weight: the square root of its size.
+  double group_weight(uword j) const {
+    return std::sqrt(static_cast<double>(members_[j].size()));
+  }
+
+  // The norm of group j's gradient: at zero (`atZero`, its z-scores), else
+  // at the last recorded point.
+  double group_gradient(uword j, bool atZero) const {
+    double total = 0.0;
+    for (const auto& m : members_[j]) {
+      const PathSolver<Ld>& s = *solvers_[m.first];
+      double g = atZero ? s.z_(m.second) : s.absGrad_(m.second);
+      total += g * g;
+    }
+    return std::sqrt(total);
+  }
+
+  // The largest path value at which zero group j leaves zero, as
+  // PathSolver::entry_value() reads it for one coefficient: its gradient
+  // norm over its weight, or for the L0 family the norm's excess over
+  // lambda1's weight, squared, over twice the curvature.
+  double group_entry(uword j, bool atZero) const {
+    if (members_[j].empty()) return 0.0;
+    double w = group_weight(j);
+    double g = group_gradient(j, atZero);
+    if (st_.pen == PEN_L0) {
+      double excess = std::max(g - st_.lambda1 * w, 0.0);
+      return excess * excess / (2.0 * (1.0 + 2.0 * st_.lambda2));
+    }
+    if (st_.alpha <= 0.0) return std::numeric_limits<double>::infinity();
+    return g / (st_.alpha * w);
+  }
+
+  // The strong rule over the groups, then descent over the ever-active
+  // groups until no coefficient moves by thr, a scan of the strong groups
+  // not yet active, and once that adds none a scan of the rest. 1 when a
+  // scan of the rest adds none within `maxiter` sweeps.
+  int solve_grouped(const PointPenalty& pp, double value, double prev) {
+    double cut = solvers_[0]->strong_cutoff(value, prev);
+    for (uword j = 0; j < members_.size(); j++)
+      if (!strongGroup_[j] && group_gradient(j, false) > cut * group_weight(j))
+        strongGroup_[j] = 1;
+    int budget = st_.maxiter;
+    while (true) {
+      while (true) {
+        if (budget-- <= 0) return 0;
+        double dlx = 0.0;
+        for (uword j = 0; j < members_.size(); j++)
+          if (everGroup_[j]) dlx = std::max(dlx, update_group(j, pp));
+        cpp11::check_user_interrupt();
+        if (dlx < st_.thr && !scan_groups(pp, true)) break;
+      }
+      if (!scan_groups(pp, false)) return 1;
+    }
+  }
+
+  // Each group not yet active, among the strong ones (`strong`) or the rest,
+  // updated in index order, joining the active and strong groups if it
+  // leaves zero. Whether any did.
+  bool scan_groups(const PointPenalty& pp, bool strong) {
+    bool added = false;
+    for (uword j = 0; j < members_.size(); j++) {
+      if (everGroup_[j] || (strongGroup_[j] != 0) != strong) continue;
+      if (update_group(j, pp) > 0.0) {
+        everGroup_[j] = 1;
+        strongGroup_[j] = 1;
+        added = true;
+      }
+    }
+    return added;
+  }
+
+  // Group j's exact update: the minimizer over its coefficients b of
+  //   b'Hb - 2 t'b + 2 P(||b||),
+  // H the conditions' curvatures plus the coupling between them and t their
+  // partial correlations, found by majorize-minimize steps (H below h I,
+  // each step the one-coefficient operator on a norm), a single step when
+  // H is h I. Returns how far its coefficients moved.
+  double update_group(uword j, const PointPenalty& pp) {
+    const auto& mem = members_[j];
+    uword K = mem.size();
+    if (K == 0) return 0.0;
+    double ridge = st_.pen == PEN_L0 ? 2.0 * pp.l2 : pp.l2;
+    vec t(K), b0(K), a(K);
+    mat C(K, K, fill::zeros);
+    for (uword m = 0; m < K; m++) {
+      PathSolver<Ld>& s = *solvers_[mem[m].first];
+      uword i = mem[m].second;
+      b0(m) = s.beta_(i);
+      t(m) = s.z_(i) - s.ld_.row(i, s.beta_) + s.v_(i) * b0(m);
+      a(m) = s.v_(i) + ridge;
+      for (uword n = 0; n < K; n++)
+        if (n != m) C(m, n) = strength_(mem[m].first, mem[n].first);
+    }
+    vec b = group_minimizer(t, a, C, b0, pp, group_weight(j));
+    double move = 0.0;
+    for (uword m = 0; m < K; m++) {
+      if (b(m) == b0(m)) continue;
+      PathSolver<Ld>& s = *solvers_[mem[m].first];
+      uword i = mem[m].second;
+      s.beta_(i) = b(m);
+      s.ld_.update(i, b(m) - b0(m));
+      if ((b0(m) == 0.0) != (b(m) == 0.0)) s.supportChanged_ = true;
+      move = std::max(move, std::abs(b(m) - b0(m)));
+    }
+    return move;
+  }
+
+  // The majorize-minimize steps of update_group(), from b0: with H =
+  // diag(a + row sums of C) - C and h = max(a + 2 row sums of C) above its
+  // largest eigenvalue (Gershgorin), each step minimizes h b'b - 2 u'b +
+  // 2 P(||b||) for u = t + (h I - H) b, whose solution is u's direction at
+  // the one-coefficient operator's value on ||u||. The steps stop when no
+  // coefficient moves by thr / 100, or at once when H is h I.
+  vec group_minimizer(const vec& t, const vec& a, const mat& C, const vec& b0,
+                      const PointPenalty& pp, double w) const {
+    vec rows = sum(C, 1);
+    mat H = diagmat(a + rows) - C;
+    double h = max(a + 2.0 * rows);
+    bool exact = accu(C) == 0.0 && max(a) - min(a) <= 1e-12 * h;
+    PointPenalty scaled{pp.l1 * w, 0.0, pp.lambda0};
+    vec b = b0;
+    for (int it = 0; it < st_.maxiter; it++) {
+      vec u = t + h * b - H * b;
+      double nu = norm(u);
+      double r = nu > 0.0
+                     ? std::abs(apply_threshold(st_.pen, nu, h, scaled,
+                                                st_.gamma))
+                     : 0.0;
+      vec next = nu > 0.0 ? vec((r / nu) * u) : vec(b.n_elem, fill::zeros);
+      double move = max(abs(next - b));
+      b = next;
+      if (exact || move < st_.thr * 1e-2) break;
+    }
+    return b;
   }
 
   void finish(double value, const PointPenalty& pp, int conv) {
@@ -1151,17 +1458,19 @@ static cpp11::writable::list run_coupled(const PathSettings& st,
                                          const std::vector<mat>& mats,
                                          const std::vector<vec>& zs,
                                          const std::vector<uvec>& idx,
-                                         int nUnion, double strength,
-                                         double shrink, const vec& path) {
+                                         int nUnion, const mat& strength,
+                                         bool grouped, double shrink,
+                                         const vec& path) {
   std::vector<std::unique_ptr<Ld>> lds;
   for (uword k = 0; k < mats.size(); k++)
     lds.emplace_back(new Ld(mats[k], shrink, vec(zs[k].n_elem, fill::zeros)));
-  CoupledPathSolver<Ld> solver(st, lds, zs, idx, nUnion, strength);
+  CoupledPathSolver<Ld> solver(st, lds, zs, idx, nUnion, strength, grouped);
   solver.run(path);
   return solver.result();
 }
 
-// The path of K studies coupled at `strength` (CoupledPathSolver), each
+// The path of K conditions coupled by `strengthR` (CoupledPathSolver), the
+// K x K strengths c_kk' of their pairs (zero for a pair not coupled), each
 // against its own LD matrix (DenseLd), shrunk to (1 - s) R + s I with s =
 // `shrink`. `unionIdxList` gives each study's variants' 1-based indices into
 // the union of the studies' variants, of size `nUnion`, in one allele frame.
@@ -1175,7 +1484,8 @@ cpp11::writable::list penalizedRssCoupledCpp(
     const list& ldList,
     const list& unionIdxList,
     int nUnion,
-    double strength,
+    const doubles_matrix<>& strengthR,
+    bool grouped,
     double shrink,
     const doubles& pathR,
     const std::string& penaltyStr,
@@ -1197,8 +1507,11 @@ cpp11::writable::list penalizedRssCoupledCpp(
   std::vector<mat> Rs = coupled_mats(ldList, zs, false);
   vec path = as_Col(pathR);
   check_path(path, st.pen);
-  return run_coupled<DenseLd>(st, Rs, zs, idx, nUnion, strength, shrink,
-                              path);
+  // The pairs' strengths, K x K: symmetric, finite and not negative as
+  // .coupledPairStrengths() builds them. The diagonal is not read.
+  mat strength = as_Mat(strengthR);
+  return run_coupled<DenseLd>(st, Rs, zs, idx, nUnion, strength, grouped,
+                              shrink, path);
 }
 
 // penalizedRssCoupledCpp() with each study's LD given by a factor F of
@@ -1209,7 +1522,8 @@ cpp11::writable::list penalizedRssCoupledFactorCpp(
     const list& factorList,
     const list& unionIdxList,
     int nUnion,
-    double strength,
+    const doubles_matrix<>& strengthR,
+    bool grouped,
     double shrink,
     const doubles& pathR,
     const std::string& penaltyStr,
@@ -1231,6 +1545,7 @@ cpp11::writable::list penalizedRssCoupledFactorCpp(
   std::vector<mat> Fs = coupled_mats(factorList, zs, true);
   vec path = as_Col(pathR);
   check_path(path, st.pen);
-  return run_coupled<FactorLd>(st, Fs, zs, idx, nUnion, strength, shrink,
-                               path);
+  mat strength = as_Mat(strengthR);
+  return run_coupled<FactorLd>(st, Fs, zs, idx, nUnion, strength, grouped,
+                               shrink, path);
 }

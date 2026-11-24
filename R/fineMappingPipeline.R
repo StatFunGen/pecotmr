@@ -346,6 +346,15 @@
 #'   \code{varY}), and their cross-validation payload supplies honest
 #'   per-fold priors. \code{NULL} uses the canonical prior instead, and
 #'   mvSuSiE's own residual covariance.
+#' @param completeSamples Logical (length 1). Individual-level data only:
+#'   whether a joint group within a study (a study's contexts or traits, or
+#'   each study's share of a group across studies) is fitted only on the
+#'   samples observed in every one of its conditions. \code{FALSE}, the
+#'   default, keeps every sample observed in some condition, each condition
+#'   fitted on its own samples. An engine that takes no missing phenotype
+#'   (fSuSiE, the top-PC alternative to it, and mr.mash where the installed
+#'   mr.mashr has no \code{missing_y_method}) still fits on the samples
+#'   observing every condition itself.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below
 #'   which data-driven prior weights are zeroed; \code{NULL} disables the
 #'   cutoff.
@@ -364,7 +373,7 @@
 #'   off. \code{covariateScope} sets whose covariates a joint fit takes
 #'   where its outcomes span contexts: by default each outcome's phenotypes
 #'   its own context's, and the genotypes they share the genotype covariates
-#'   alone.
+#'   and the phenotype covariates every context shares.
 #'
 #'   Only meaningful for \code{QtlDataset} / \code{MultiStudyQtlDataset}
 #'   input. A \code{QtlSumStats} / \code{GwasSumStats} run has no covariates
@@ -3197,7 +3206,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     verbose,
     seed,
     mrmashPrior,
-    dataDrivenPriorWeightsCutoff
+    dataDrivenPriorWeightsCutoff,
+    completeSamples = FALSE
 ) {
     cvCfg <- .cvResolve(crossValidationParam)
     list(
@@ -3217,7 +3227,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         verbose = verbose,
         seed = seed,
         mrmashPrior = mrmashPrior,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        completeSamples = completeSamples
     )
 }
 
@@ -3645,9 +3656,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     dataDrivenPriorWeightsCutoff = 1e-10,
     phenotypeFilterParam = PhenotypeFilterParam(),
     verbose = 1,
+    completeSamples = FALSE,
     fitRetention = c("slim", "full")
 ) {
     fitRetention <- arg_match(fitRetention)
+    assertFlag(completeSamples)
     phenotypeFilter <- .fmResolvePhenotypeFilter(phenotypeFilterParam)
     build <- .inputsBuild(
         list(data, region, fineMappingResult),
@@ -3683,7 +3696,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         verbose = verbose,
         seed = seed,
         mrmashPrior = mrmashPrior,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        completeSamples = completeSamples
     )
     rt <- .fmQdsResolveTokens(
         jointSpecification,
@@ -3794,7 +3808,8 @@ setMethod(
         nPCs = cfg$nPCs,
         fitRetention = cfg$fitRetention,
         mrmashPrior = cfg$mrmashPrior,
-        dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
+        dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff,
+        completeSamples = cfg$completeSamples
     )
 }
 
@@ -3995,9 +4010,11 @@ setMethod(
     seed = NULL,
     phenotypeFilterParam = PhenotypeFilterParam(),
     verbose = 1,
+    completeSamples = FALSE,
     fitRetention = c("slim", "full")
 ) {
     fitRetention <- arg_match(fitRetention)
+    assertFlag(completeSamples)
     # Resolved once here so a bad choice fails before any study runs; the
     # record carries the bundle itself, as each component resolves its own.
     .fmResolvePhenotypeFilter(phenotypeFilterParam)
@@ -4040,7 +4057,8 @@ setMethod(
         nPCs = nPCs,
         fitRetention = fitRetention,
         mrmashPrior = mrmashPrior,
-        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
+        dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff,
+        completeSamples = completeSamples
     )
     .msAssertTraitsSelected(data, cfg, "fineMappingPipeline")
     jointCfg <- .fmMsJointCfg(cfg, data, inputs$xRegions)
@@ -4107,7 +4125,8 @@ setMethod(
             verbose = cfg$verbose,
             seed = cfg$seed,
             mrmashPrior = cfg$mrmashPrior,
-            dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff
+            dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff,
+            completeSamples = cfg$completeSamples
         ),
         genotypeFilterParam = cfg$genotypeFilterParam,
         panelFilterParam = cfg$panelFilterParam,
@@ -4703,7 +4722,11 @@ NULL
                 mrmashPrior = mrmashPrior,
                 dataDrivenPriorWeightsCutoff = dataDrivenPriorWeightsCutoff
             ),
-            list(h2Spec = h2Spec, susieRssParam = susieRssParam)
+            list(
+                h2Spec = h2Spec,
+                susieRssParam = susieRssParam,
+                unwindowed = inputs$unwindowed
+            )
         ),
         h2Spec = h2Spec,
         susieRssParam = susieRssParam

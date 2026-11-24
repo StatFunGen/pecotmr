@@ -2347,8 +2347,9 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
 # set of contexts, the resolved per-context phenotype selections, and the
 # resolved genotype-covariate selection. Honors the inclusion flags. For
 # one context, its phenotype covariates and the genotype covariates are taken
-# with no cross-context alignment. For several (the "union" scope), the
-# phenotype covariates of all listed contexts are concatenated (prefixed with
+# with no cross-context alignment. For several (the "union" scope, or the
+# covariates genotypes several contexts share), the selected phenotype
+# covariates of all listed contexts are concatenated (prefixed with
 # "{context}." to keep same-named columns distinct) and the sample set is
 # intersected across all contributing matrices.
 # Returns a single matrix (with rownames = sample IDs) or NULL.
@@ -2714,28 +2715,6 @@ setMethod(
     }
 )
 
-# What the data are regressed against: resolve the convenience vs precise
-# inclusion flags, pick the phenotype- and genotype-covariate sets they
-# select, build the design, and apply the NA policy to it. One step, because
-# none of the four halves means anything without the others.
-# `withPhenotype = FALSE` leaves the contexts' phenotype covariates out
-# whatever the settings say, as genotypes several contexts share take them
-# (.qtlGenoDesign()).
-# @noRd
-.qtlResidCovariateMatrix <- function(
-    x,
-    contexts,
-    residualizationParam,
-    withPhenotype = TRUE
-) {
-    .qtlDesignOf(
-        contexts,
-        x = x,
-        settings = .qtlDesignSettings(x, contexts, residualizationParam),
-        withPhenotype = withPhenotype
-    )
-}
-
 # What a run's designs are built from, resolved once for all of `contexts`:
 # the covariate selections, the inclusion flags and the NA policy.
 # @noRd
@@ -2766,13 +2745,13 @@ setMethod(
 # The design of `contexts` under `settings` (.qtlDesignSettings()), with its
 # NA policy applied.
 # @noRd
-.qtlDesignOf <- function(contexts, x, settings, withPhenotype = TRUE) {
+.qtlDesignOf <- function(contexts, x, settings) {
     design <- .qtlBuildResidualizationDesign(
         x,
         contexts = contexts,
         phenoSelection = settings$phenoSelection,
         genoSelection = settings$genoSelection,
-        includePheno = withPhenotype && settings$includePheno,
+        includePheno = settings$includePheno,
         includeGeno = settings$includeGeno
     )
     .qtlHandleCovariateNa(design, settings$naAction)
@@ -2802,18 +2781,73 @@ setMethod(
     )
 }
 
-# The design genotypes are regressed on: one context's own; for genotypes
-# several contexts share, the genotype covariates alone, or under the "union"
-# scope the design of them all.
+# The design genotypes are regressed on: the genotype covariates and the
+# phenotype covariates every one of their contexts shares
+# (.qtlSharedCovariates()), which for one context is all of its own; under
+# the "union" scope, the design of them all.
 # @noRd
 .qtlGenoDesign <- function(x, contexts, residualizationParam) {
-    .qtlResidCovariateMatrix(
-        x,
-        contexts,
-        residualizationParam,
-        withPhenotype = length(contexts) == 1L ||
-            identical(.qtlCovariateScope(residualizationParam), "union")
+    settings <- .qtlDesignSettings(x, contexts, residualizationParam)
+    if (identical(.qtlCovariateScope(residualizationParam), "union")) {
+        return(.qtlDesignOf(contexts, x, settings))
+    }
+    .qtlDesignOf(contexts, x, .qtlSharedSettings(x, contexts, settings))
+}
+
+# `settings` (.qtlDesignSettings()) with every one of `contexts` selecting
+# only the phenotype covariates they all share. Each context gives its own
+# copy of them, the same values on the samples the design keeps: those every
+# context has.
+# @noRd
+.qtlSharedSettings <- function(x, contexts, settings) {
+    shared <- .qtlSharedCovariates(x, contexts, settings$phenoSelection)
+    list_assign(
+        settings,
+        phenoSelection = set_names(
+            rep(list(shared), length(contexts)),
+            contexts
+        )
     )
+}
+
+# The phenotype covariates of the study rather than of one context: those
+# `selection` picks in every one of `contexts` under the same name, with the
+# same values on the samples they all have, as sex or age are. A covariate
+# named alike whose values differ, as each context's own principal
+# components do, is not one of them.
+# @noRd
+.qtlSharedCovariates <- function(x, contexts, selection) {
+    samples <- reduce(map(contexts, .qtlOneContextSamples, x = x), intersect)
+    values <- map(contexts, .qtlCovariatesOn, x = x, samples = samples)
+    keep(
+        reduce(selection[contexts], intersect),
+        .qtlCovariateAgrees,
+        values = values
+    )
+}
+
+# Context `ctx`'s covariates on `samples`, a data frame.
+# @noRd
+.qtlCovariatesOn <- function(ctx, x, samples) {
+    covariates <- as.data.frame(
+        SummarizedExperiment::colData(.qtlContextSe(x, ctx))
+    )
+    covariates[samples, , drop = FALSE]
+}
+
+# Whether covariate `name` is the same in each of `values`, the contexts'
+# covariates on the same samples: equal, and missing where missing. An
+# integer column equals a double one holding the same numbers.
+# @noRd
+.qtlCovariateAgrees <- function(name, values) {
+    columns <- map(values, .qtlCovariateColumn, name = name)
+    every(columns[-1L], identical, columns[[1L]])
+}
+
+# @noRd
+.qtlCovariateColumn <- function(covariates, name) {
+    column <- covariates[[name]]
+    if (is.integer(column)) as.double(column) else column
 }
 
 # The samples genotypes several contexts share are read for when the caller
@@ -3050,15 +3084,18 @@ setClass(
 #'   regressed on its context's covariates and the genotype covariates, over
 #'   that context's samples: the residuals a fit of that outcome alone
 #'   takes, and so the data behind its own statistics, such as those a mash
-#'   prior is trained on. The genotypes the outcomes share are regressed on
-#'   the genotype covariates alone, over the samples every context has. They
-#'   are not adjusted for any one context's covariates, which shrinks an
-#'   outcome's standardized effects against its own statistics by about
+#'   prior is trained on. The genotypes the outcomes share are regressed,
+#'   over the samples every context has, on the genotype covariates and on
+#'   the covariates of the study: those \code{phenotypeCovariates} selects
+#'   in every context under the same name and that take the same values
+#'   there, as sex or age do. Those are removed from the shared genotypes as
+#'   from each outcome. A context's own covariates, such as its principal
+#'   components, differ between contexts even when named alike, and the
+#'   shared genotypes are not adjusted for them. That shrinks an outcome's
+#'   standardized effects against its own statistics by about
 #'   \eqn{k / (2n)} for \eqn{k} such covariates on \eqn{n} samples (its
 #'   per-allele effects by about \eqn{k / n}), when the covariates are
-#'   unrelated to the genotypes. A covariate every context records, such as
-#'   sex or age, reaches the shared genotypes only when it is held with the
-#'   genotype covariates.
+#'   unrelated to the genotypes.
 #'
 #'   Under \code{covariateScope = "union"}, every outcome's phenotypes and the
 #'   genotypes they share are all regressed on the covariates of all the

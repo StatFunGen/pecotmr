@@ -2232,6 +2232,24 @@ test_that("the recorded individual-path chains match what a fit enters", {
     expect_true(is_in("ncvregWeights", recorded("scad")))
 })
 
+test_that("a method's fit across conditions takes its backend's options", {
+    ctor <- function(impl, backend = NULL) {
+        pecotmr:::.twasImplCtorName(impl, backend)
+    }
+    expect_equal(ctor(".lassoGroupedWeights"), "GlmnetOptions")
+    expect_equal(ctor(".lassoGroupedWeights", "grpreg"), "GrpregOptions")
+    expect_equal(ctor(".l0learnGroupedWeights", "abess"), "AbessOptions")
+    expect_equal(ctor("mcpWeights"), "NcvregOptions")
+    expect_equal(ctor("mcpWeights", "grpreg"), "GrpregOptions")
+    chains <- pecotmr:::.twasMethodChainsOf("mcp", "QtlDataset")
+    expect_named(chains, c("ncvreg", "grpreg"))
+    expect_true(is_in("grpregWeights", chains$grpreg))
+    expect_true(is_in(
+        "abessWeights",
+        pecotmr:::.twasMethodChainsOf("l0learn", "QtlDataset")$abess
+    ))
+})
+
 test_that("the recorded RSS chains match what a fit enters", {
     fx <- .tw_rssFixture()
     recordedFor <- function(tk) {

@@ -1995,12 +1995,15 @@ setMethod("show", "TwasWeights", function(object) {
 # @noRd
 .twasMethodChainsIndividual <- function() {
     list(
-        lasso = c("lassoWeights", "glmnetWeights", "glmnet::cv.glmnet"),
-        enet = c("enetWeights", "glmnetWeights", "glmnet::cv.glmnet"),
+        lasso = .penalizedChains("lassoWeights", "glmnet"),
+        enet = .penalizedChains("enetWeights", "glmnet"),
         ridge = c("ridgeWeights", "glmnetWeights", "glmnet::cv.glmnet"),
-        scad = c("scadWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
-        mcp = c("mcpWeights", "ncvregWeights", "ncvreg::cv.ncvreg"),
-        l0learn = c("l0learnWeights", "L0Learn::L0Learn.cvfit"),
+        scad = .penalizedChains("scadWeights", "ncvreg"),
+        mcp = .penalizedChains("mcpWeights", "ncvreg"),
+        l0learn = list(
+            l0learn = c("l0learnWeights", "L0Learn::L0Learn.cvfit"),
+            abess = c("l0learnWeights", "abessWeights", "abess::abess.default")
+        ),
         sparsevb = c("sparsevbWeights", "sparsevb::svb.fit"),
         mrash = c("mrashWeights", "susieR::mr.ash"),
         mrmash = c(
@@ -2027,6 +2030,24 @@ setMethod("show", "TwasWeights", function(object) {
             "dprWeights",
             "RcppDPR::fit_model"
         )
+    )
+}
+
+# A penalized method's chains on individual-level data, one per backend: its
+# wrapper, then its default engine (`engine`, glmnet or ncvreg) or grpreg.
+# @noRd
+.penalizedChains <- function(wrapper, engine) {
+    default <- switch(
+        engine,
+        glmnet = c("glmnetWeights", "glmnet::cv.glmnet"),
+        ncvreg = c("ncvregWeights", "ncvreg::cv.ncvreg")
+    )
+    set_names(
+        list(
+            c(wrapper, default),
+            c(wrapper, "grpregWeights", "grpreg::cv.grpreg", "grpreg::grpreg")
+        ),
+        c(engine, "grpreg")
     )
 }
 
@@ -2326,14 +2347,19 @@ setMethod("show", "TwasWeights", function(object) {
 }
 
 # The backend constructors of the method whose implementation on `path` is
-# `impl`, or NULL.
+# `impl`, or NULL: its own, or on individual-level data its fits across a
+# group's conditions (grouped or coupled), which run on the same backends.
 # @noRd
 .twasPathBackendCtors <- function(path, impl) {
     caps <- .twasMethodCapabilities
+    fields <- c(
+        str_c(path, "Impl"),
+        if (identical(path, "individual")) c("grouped", "coupled")
+    )
     hit <- names(caps)[map_lgl(
         caps,
         .twasCapUsesImpl,
-        field = str_c(path, "Impl"),
+        fields = fields,
         impl = impl
     )]
     if (length(hit) == 0L) {
@@ -2345,8 +2371,8 @@ setMethod("show", "TwasWeights", function(object) {
 }
 
 # @noRd
-.twasCapUsesImpl <- function(cap, field, impl) {
-    identical(cap[[field]], impl)
+.twasCapUsesImpl <- function(cap, fields, impl) {
+    is_in(impl, unlist(cap[fields], use.names = FALSE))
 }
 
 # The constructor itself. Deliberately separate from the name: the

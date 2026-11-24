@@ -160,3 +160,70 @@ test_that("glmnetWeights keeps the selected fit or the whole path", {
     )
     expect_equal(dim(withX$glmnet.fit$beta), dim(full$glmnet.fit$beta))
 })
+
+# ---- glmnetWeights across conditions (mgaussian) ----
+test_that("glmnetWeights fits a matrix y with glmnet's mgaussian family", {
+    skip_if_not_installed("glmnet")
+    d <- .rrwMulti(n = 80, p = 8, K = 3)
+    set.seed(1)
+    w <- glmnetWeights(d$X, d$Y, alpha = 1, fitRetention = "slim")
+    expect_equal(dimnames(w), list(colnames(d$X), colnames(d$Y)))
+    # A variant is in every condition's model or in none.
+    expect_true(all(rowSums(w != 0) %in% c(0, 3)))
+    fit <- attr(w, "fit")
+    expect_named(
+        fit,
+        c("coef", "intercept", "lambda", "cvm", "cvsd", "variantIds")
+    )
+    # glmnet's fit at the lambda it selected, on each phenotype scaled to
+    # unit variance, put back on each one's own scale.
+    scaled <- scale(d$Y)
+    spread <- attr(scaled, "scaled:scale")
+    direct <- glmnet::glmnet(
+        d$X,
+        scaled,
+        family = "mgaussian",
+        standardize = FALSE,
+        lambda = fit$lambda
+    )
+    B <- do.call(cbind, lapply(coef(direct), as.numeric))
+    expect_equal(
+        unname(w),
+        sweep(B[-1L, ], 2L, spread, "*"),
+        tolerance = 1e-4,
+        check.attributes = FALSE
+    )
+    expect_equal(
+        fit$intercept,
+        colMeans(d$Y) + spread * B[1L, ],
+        tolerance = 1e-4,
+        check.attributes = FALSE
+    )
+})
+
+test_that("glmnet fits conditions on the samples observing all of them", {
+    skip_if_not_installed("glmnet")
+    d <- .rrwMulti(n = 40, p = 5, K = 2)
+    Y <- replace(d$Y, cbind(1:10, 2L), NA)
+    withr::local_seed(1L)
+    partial <- lassoWeights(d$X, Y)
+    withr::local_seed(1L)
+    complete <- lassoWeights(d$X[11:40, ], d$Y[11:40, ])
+    expect_equal(partial, complete)
+    # Conditions on samples of their own share none.
+    disjoint <- replace(d$Y, cbind(c(1:20, 21:40), rep(1:2, each = 20L)), NA)
+    expect_error(lassoWeights(d$X, disjoint), "backend = \"grpreg\"")
+})
+
+test_that("the lasso and elastic net take their backend's options", {
+    skip_if_not_installed("glmnet")
+    d <- .rrwXy(n = 50, p = 6)
+    expect_error(
+        lassoWeights(d$X, d$y, methodArgs = NcvregOptions()),
+        "backend 'glmnet' takes GlmnetOptions"
+    )
+    expect_error(
+        enetWeights(d$X, d$y, backend = "ncvreg"),
+        "must be one of glmnet, grpreg"
+    )
+})

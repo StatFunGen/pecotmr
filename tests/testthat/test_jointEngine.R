@@ -1745,7 +1745,13 @@ test_that(".enumCrossTraitIndividual: a group per context with 2+ traits", {
             )
         },
         .fmResidGeno = .je_X,
-        .crossTraitAssemble = function(X, allY, traitsHere, se) {
+        .crossTraitAssemble = function(
+            X,
+            allY,
+            traitsHere,
+            se,
+            completeSamples
+        ) {
             Y <- matrix(
                 0,
                 4,
@@ -1772,6 +1778,42 @@ test_that(".enumCrossTraitIndividual: study not in scope -> empty", {
             list(studies = "X", contexts = list(), traits = list())
         ),
         0L
+    )
+})
+
+test_that("a context's or trait's group with no usable (X, Y) is none", {
+    local_mocked_bindings(
+        .crossContextAssemble = function(...) NULL,
+        .crossTraitAssemble = function(...) NULL,
+        .package = "pecotmr"
+    )
+    expect_null(pecotmr:::.enumCrossContextGroupFor("G1", "S", list(), .je_X()))
+    expect_null(pecotmr:::.enumCrossTraitGroupFor("c1", "S", list(), .je_X()))
+    # Nor are top PCs on fewer than two samples the genotypes share.
+    scores <- matrix(1, 2L, 1L, dimnames = list(c("s1", "x"), "PC1"))
+    expect_identical(
+        pecotmr:::.enumTopPcForContext("c1", "S", scores, .je_X()),
+        list()
+    )
+})
+
+test_that(".enumCrossStudyIndividual fits two or more studies in scope", {
+    data <- list(s1 = NULL, s2 = NULL)
+    expect_identical(
+        pecotmr:::.enumCrossStudyIndividual(data, list(studies = "s1")),
+        list()
+    )
+    local_mocked_bindings(
+        .enumCrossStudyIndividualForContext = function(cx, ...) list(cx),
+        .package = "pecotmr"
+    )
+    scope <- list(
+        studies = c("s1", "s2"),
+        contexts = list(s1 = c("a", "b"), s2 = "b")
+    )
+    expect_identical(
+        pecotmr:::.enumCrossStudyIndividual(data, scope),
+        list("a", "b")
     )
 })
 
@@ -1842,7 +1884,7 @@ test_that(".enumComposedIndividual: one group of every (context, trait)", {
             )
         },
         .fmResidGeno = .je_X,
-        .composedAlignXy = function(sides, tuples) {
+        .composedAlignXy = function(sides, tuples, completeSamples) {
             Y <- matrix(
                 0,
                 4,
@@ -2504,7 +2546,8 @@ test_that("the joint RSS fit takes SusieRssParam's LD-reference settings", {
             ldReference = GenotypeMixture(halves, mixtureWeights = c(0.5, 0.5)),
             N = c(2000, 2000)
         ),
-        lds = lds
+        lds = lds,
+        halves = halves
     )
 }
 
@@ -2557,6 +2600,98 @@ test_that("the joint RSS fit estimates each study's mixture weights", {
             tolerance = 1e-8
         )
     }
+})
+
+test_that("the joint RSS fit estimates the weights of each study's mixture", {
+    .skipIfMvsusieCannotFitStudies()
+    fx <- .je_mixtureSsGroup()
+    # Each study on a reference of its own: B's lists the halves the other
+    # way round.
+    group <- methods::initialize(
+        fx$group,
+        ldReference = list(
+            GenotypeMixture(fx$halves, mixtureWeights = c(0.5, 0.5)),
+            GenotypeMixture(rev(fx$halves), mixtureWeights = c(0.5, 0.5))
+        )
+    )
+    captured <- list(fit = NULL)
+    local_mocked_bindings(
+        .fmPostprocessOne = function(fit, method, dataX, ..., conditionIdx) {
+            captured$fit <<- fit
+            .je_mockPostprocess(
+                fit,
+                method,
+                dataX,
+                ...,
+                conditionIdx = conditionIdx
+            )
+        },
+        .package = "pecotmr"
+    )
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 3L),
+            susieRssParam = SusieRssParam(estimateMixtureWeights = TRUE)
+        )
+    )
+    rows <- suppressWarnings(suppressMessages(
+        pecotmr:::fitJointGroup(group, pipe, "mvsusie", list())
+    ))
+    expect_length(rows, 2L)
+    # Each study's weight is on the half its z-scores came from: the first of
+    # A's reference, the first of B's.
+    omega <- captured$fit$omega_weights
+    expect_length(omega, 2L)
+    expect_gt(omega[[1L]][[1L]], 0.9)
+    expect_gt(omega[[2L]][[1L]], 0.9)
+})
+
+test_that("the joint RSS fit estimates one mixture's weights for a study", {
+    .skipIfMvsusieCannotFitStudies()
+    fx <- .je_mixtureSsGroup()
+    # One study's two contexts: one set of weights, on the LD of the one
+    # reference, each panel with its own size in the mismatch model.
+    group <- methods::initialize(
+        fx$group,
+        conditions = data.frame(
+            study = "A",
+            context = c("c1", "c2"),
+            trait = "G",
+            stringsAsFactors = FALSE
+        )
+    )
+    captured <- list(fit = NULL)
+    local_mocked_bindings(
+        .fmPostprocessOne = function(fit, method, dataX, ..., conditionIdx) {
+            captured$fit <<- fit
+            .je_mockPostprocess(
+                fit,
+                method,
+                dataX,
+                ...,
+                conditionIdx = conditionIdx
+            )
+        },
+        .package = "pecotmr"
+    )
+    pipe <- new(
+        "FmJointPipeline",
+        config = list(
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 3L),
+            susieRssParam = SusieRssParam(
+                estimateMixtureWeights = TRUE,
+                rMismatch = "eb"
+            )
+        )
+    )
+    rows <- suppressWarnings(suppressMessages(
+        pecotmr:::fitJointGroup(group, pipe, "mvsusie", list())
+    ))
+    expect_length(rows, 2L)
+    omega <- captured$fit$omega_weights
+    expect_length(omega, 1L)
+    expect_equal(sum(omega[[1L]]), 1)
 })
 
 test_that("the joint RSS fit falls back to its single-effect fit", {
@@ -4587,14 +4722,22 @@ test_that("a composed spec with the study takes each study's own reference", {
 
 test_that("a composed cross-study group needs two conditions with data", {
     tuples <- tibble::tibble(study = "A", context = "brain", trait = "g")
-    # A study whose samples observe its tuples together fewer than twice
-    # gives no plan.
+    # A study whose samples observe its tuples fewer than twice gives no plan,
+    # nor, under completeSamples, one whose samples observe them all together
+    # fewer than twice.
+    expect_null(pecotmr:::.xsComposedPlanOf(
+        "A",
+        NULL,
+        tuples,
+        matrix(c(1, NA, NA, NA), 2L, 2L),
+        list(axes = c("study", "context"))
+    ))
     expect_null(pecotmr:::.xsComposedPlanOf(
         "A",
         NULL,
         tuples,
         matrix(c(1, NA, 2, 3), 2L, 2L),
-        list(axes = c("study", "context"))
+        list(axes = c("study", "context"), completeSamples = TRUE)
     ))
     # A study whose tuples have no phenotype gives no plan.
     local_mocked_bindings(
@@ -4756,19 +4899,234 @@ test_that("a variant a study lacks carries no evidence for that study", {
 
 test_that("a univariate method on a group across studies is fitted coupled", {
     across <- tibble(study = c("s1", "s2"), context = "brain", trait = "g")
-    cfg <- list(studyCoupling = c(0.1, 1))
-    ma <- pecotmr:::.jointTwasCoupled(list(alpha = 0.3), "enet", across, cfg)
+    within <- tibble(study = "s1", context = c("brain", "liver"), trait = "g")
+    cfg <- list(coupling = list(study = c(0.1, 1)))
+    mode <- function(token, cond, cfg, path = "individual") {
+        pecotmr:::.jointTwasGroupMode(token, cond, cfg, path)
+    }
+    expect_equal(mode("enet", across, cfg), "coupled")
+    ma <- pecotmr:::.jointTwasCoupled(list(alpha = 0.3), "enet", cfg, across)
     expect_equal(attr(ma, "impl"), ".enetCoupledWeights")
     expect_equal(ma$alpha, 0.3)
-    expect_equal(ma$strengths, c(0.1, 1))
-    # A group of one study, or a method with no coupled fit, is left as is.
-    expect_identical(
-        pecotmr:::.jointTwasCoupled(list(), "lasso", across[1L, ], cfg),
-        list()
+    expect_equal(ma$coupling$grids, list(study = c(0.1, 1)))
+    expect_equal(ma$coupling$pairs[1L, 2L], "study")
+    # One condition, a group along no coupled axis, or a run coupling
+    # nothing: its own fit.
+    expect_null(mode("lasso", across[1L, ], cfg))
+    expect_null(mode("lasso", within, cfg))
+    expect_null(mode("lasso", across, list()))
+    # MCP is coupled on either path, and contexts when the run couples them.
+    expect_equal(mode("mcp", across, cfg), "coupled")
+    expect_equal(mode("mcp", across, cfg, "sumstat"), "coupled")
+    byContext <- list(coupling = list(context = 1))
+    expect_equal(mode("lasso", within, byContext), "coupled")
+    expect_equal(mode("lasso", within, byContext, "sumstat"), "coupled")
+})
+
+test_that("a group's layout is how its conditions share samples", {
+    layout <- function(study) {
+        pecotmr:::.jointLayout(tibble(study = study, context = "c"))
+    }
+    expect_equal(layout("s1"), "single")
+    expect_equal(layout(c("s1", "s1")), "shared")
+    expect_equal(layout(c("s1", "s2")), "disjoint")
+    expect_equal(layout(c("s1", "s1", "s2")), "mixed")
+    expect_equal(pecotmr:::.jointSpecLayout(c("context", "trait")), "shared")
+    expect_equal(pecotmr:::.jointSpecLayout("study"), "disjoint")
+    expect_equal(pecotmr:::.jointSpecLayout(c("study", "context")), "mixed")
+})
+
+test_that("every input class routes its joint methods by group layout", {
+    marker <- new(
+        "TwasJointPipeline",
+        config = list(
+            coupling = list(study = c(0.1, 1)),
+            multitraitTokens = "bayesC",
+            ensembleParam = list(stackTokens = c("lasso", "bayesA"))
+        )
     )
+    cfg <- pecotmr:::.jpConfig(marker)
+    tokens <- c("lasso", "mrmash", "bayesC", "mvsusie", "bayesA", "mcp")
+    route <- function(path, axes, dataForm = "individual") {
+        pecotmr:::.jointSpecTokens(
+            pecotmr:::.twasJointCandidates(tokens, path, cfg),
+            axes,
+            marker,
+            dataForm
+        )
+    }
+    expect_setequal(
+        pecotmr:::.twasJointCandidates(tokens, "individual", cfg),
+        tokens
+    )
+    # Within a study: the joint methods and BGLR's Multitrait().
+    expect_setequal(
+        route("individual", "context"),
+        c("mrmash", "bayesC", "mvsusie")
+    )
+    # Across studies: mvsusie is read off its fits elsewhere; the coupled,
+    # stacked and BGLR fits join mr.mash.
+    expect_setequal(
+        route("individual", "study"),
+        c("lasso", "mrmash", "bayesC", "bayesA", "mcp")
+    )
+    # Several conditions per study: mr.mash, BGLR's Multitrait() and the
+    # coupled fits.
+    expect_setequal(
+        route("individual", c("study", "context")),
+        c("mrmash", "bayesC", "lasso", "mcp")
+    )
+    # Summary statistics: no BGLR; mcp coupled; mvsusie on every layout.
+    expect_setequal(
+        route("sumstat", "study", "sumstats"),
+        c("lasso", "mrmash", "mvsusie", "bayesA", "mcp")
+    )
+    expect_setequal(
+        route("sumstat", c("study", "context"), "sumstats"),
+        c("mrmash", "mvsusie", "lasso", "mcp")
+    )
+    # Fine-mapping fits every method it is handed.
+    fm <- new("FmJointPipeline", config = list())
     expect_identical(
-        pecotmr:::.jointTwasCoupled(list(), "mcp", across, cfg),
-        list()
+        pecotmr:::.jointSpecTokens(tokens, "study", fm, "individual"),
+        tokens
+    )
+})
+
+test_that("a method with a group penalty fits the layouts its engine takes", {
+    tokens <- c("lasso", "enet", "mcp", "scad", "l0learn", "ridge", "bayesC")
+    engines <- pecotmr:::.twasRunEngines(
+        tokens,
+        c(mcp = "grpreg", l0learn = "abess")
+    )
+    # Only the engines `backend` names; the rest take their defaults.
+    expect_named(engines, c("mcp", "l0learn"))
+    expect_equal(engines$mcp, "grpreg")
+    expect_equal(engines$l0learn, "abess")
+    # A choice for the summary-statistics path alone leaves the default.
+    expect_null(
+        pecotmr:::.twasRunEngines("lasso", c(lasso = "bigsnpr"))$lasso
+    )
+    # With no engine named, a group fit takes the first engine with a group
+    # penalty: glmnet for the lasso, grpreg for SCAD.
+    expect_equal(pecotmr:::.twasGroupEngine("lasso", list()), "glmnet")
+    expect_equal(pecotmr:::.twasGroupEngine("scad", list()), "grpreg")
+    expect_equal(
+        pecotmr:::.twasGroupEngine(
+            "scad",
+            list(engines = list(scad = "ncvreg"))
+        ),
+        "ncvreg"
+    )
+    cfg <- list(engines = engines, coupling = list(study = c(0.1, 1)))
+    expect_equal(pecotmr:::.twasGroupedLayouts("lasso", cfg), "shared")
+    expect_setequal(
+        pecotmr:::.twasGroupedLayouts("mcp", cfg),
+        c("shared", "disjoint", "mixed")
+    )
+    expect_setequal(
+        pecotmr:::.twasGroupedLayouts("scad", cfg),
+        c("shared", "disjoint", "mixed")
+    )
+    onNcvreg <- list(engines = list(scad = "ncvreg"))
+    expect_null(pecotmr:::.twasGroupedLayouts("scad", onNcvreg))
+    # Ridge fits each condition at one lambda, on any layout.
+    expect_setequal(
+        pecotmr:::.twasGroupedLayouts("ridge", cfg),
+        c("shared", "disjoint", "mixed")
+    )
+    expect_null(pecotmr:::.twasGroupedLayouts("bayesC", cfg))
+    expect_setequal(
+        pecotmr:::.twasGroupedTokens(tokens, c(l0learn = "abess")),
+        c("lasso", "enet", "mcp", "scad", "l0learn", "ridge")
+    )
+    mode <- function(token, cond, settings = cfg) {
+        pecotmr:::.jointTwasGroupMode(token, cond, settings, "individual")
+    }
+    shared <- data.frame(study = "s", context = c("a", "b"), trait = "t")
+    disjoint <- data.frame(study = c("s1", "s2"), context = "a", trait = "t")
+    mixed <- data.frame(
+        study = c("s1", "s1", "s2"),
+        context = c("a", "b", "a"),
+        trait = "t"
+    )
+    # Within a study, every method whose engine has a group penalty.
+    expect_equal(mode("lasso", shared), "grouped")
+    expect_equal(mode("mcp", shared), "grouped")
+    expect_equal(mode("scad", shared), "grouped")
+    expect_null(mode("scad", shared, onNcvreg))
+    # Across coupled studies every method is coupled, on any engine...
+    expect_equal(mode("lasso", disjoint), "coupled")
+    expect_equal(mode("l0learn", disjoint), "coupled")
+    expect_equal(mode("mcp", disjoint), "coupled")
+    expect_equal(mode("scad", mixed), "coupled")
+    expect_equal(mode("lasso", mixed), "coupled")
+    # ...and uncoupled, those whose engine has a group penalty there.
+    uncoupled <- list(engines = engines)
+    expect_equal(mode("mcp", disjoint, uncoupled), "grouped")
+    expect_equal(mode("l0learn", mixed, uncoupled), "grouped")
+    expect_equal(mode("ridge", disjoint, uncoupled), "grouped")
+    expect_null(mode("lasso", disjoint, uncoupled))
+    expect_equal(mode("scad", disjoint, uncoupled), "grouped")
+    expect_null(mode("scad", disjoint, onNcvreg))
+    # Nor do summary statistics take a group penalty.
+    expect_false(is_in(
+        "grouped",
+        pecotmr:::.twasJointModes("mcp", "sumstat", cfg)
+    ))
+    # A group's arguments name the method's implementation of the fit and
+    # the engine it runs on; a method with one engine names none.
+    grouped <- pecotmr:::.jointTwasGrouped(
+        list(),
+        "mcp",
+        list(engines = list())
+    )
+    expect_equal(attr(grouped, "impl"), ".mcpGroupedWeights")
+    expect_equal(grouped$backend, "grpreg")
+    ridge <- pecotmr:::.jointTwasGrouped(
+        list(),
+        "ridge",
+        list(engines = list())
+    )
+    expect_equal(attr(ridge, "impl"), ".ridgeGroupedWeights")
+    expect_null(ridge$backend)
+})
+
+test_that("a group across studies makes rows of its fits, not its stacking", {
+    across <- new(
+        "SumStatsJointGroup",
+        Z = matrix(0, 2L, 2L, dimnames = list(c("v1", "v2"), c("a", "b"))),
+        ldReference = NULL,
+        N = c(100, 100),
+        conditions = data.frame(
+            study = c("s1", "s2"),
+            context = "c",
+            trait = "t"
+        )
+    )
+    marker <- new(
+        "TwasJointPipeline",
+        config = list(
+            coupling = list(study = 1),
+            ensembleParam = list(stackTokens = c("lasso", "bayesA"))
+        )
+    )
+    tokens <- c("lasso", "bayesA", "mrmash")
+    expect_setequal(
+        pecotmr:::.jointRowTokens(tokens, marker, across),
+        c("lasso", "mrmash")
+    )
+    expect_true(pecotmr:::.twasStacksGroup(marker, across, tokens))
+    expect_false(pecotmr:::.twasStacksGroup(marker, across, "mrmash"))
+    # The ensemble across summary-statistics studies refits the coupled fits.
+    entries <- list(lasso = list(), mrmash = list())
+    expect_named(
+        pecotmr:::.twasCoupledEntries(
+            entries,
+            across,
+            pecotmr:::.jpConfig(marker)
+        ),
+        "lasso"
     )
 })
 
@@ -4810,22 +5168,137 @@ test_that("a fine-mapping fit not over the group's conditions is refused", {
     ))
 })
 
+test_that("a sampler across studies is the one its capabilities name", {
+    g <- new(
+        "SumStatsJointGroup",
+        Z = matrix(0, 2L, 2L, dimnames = list(c("v1", "v2"), c("a", "b"))),
+        ldReference = NULL,
+        N = c(100, 100),
+        conditions = data.frame(
+            study = c("s1", "s2"),
+            context = "c",
+            trait = "t"
+        )
+    )
+    local_mocked_bindings(
+        .prsCsCoupledWeights = function(
+            stats,
+            refs,
+            ids,
+            user,
+            keep,
+            label,
+            shared
+        ) {
+            "JointPRS"
+        },
+        .sdprCoupledWeights = function(
+            stats,
+            refs,
+            ids,
+            user,
+            keep,
+            label,
+            shared
+        ) {
+            "SDPRX"
+        },
+        .package = "pecotmr"
+    )
+    fit <- function(token) {
+        pecotmr:::.jointCoupledFit(list(), g, list(), list(), token, "none")
+    }
+    expect_equal(fit("prsCs"), "JointPRS")
+    expect_equal(fit("dprGibbs"), "SDPRX")
+})
+
+test_that("a MashPrior seeds the samplers and draws their held-out noise", {
+    g <- new(
+        "SumStatsJointGroup",
+        Z = matrix(0, 2L, 2L, dimnames = list(c("v1", "v2"), c("a", "b"))),
+        ldReference = NULL,
+        N = c(100, 100),
+        conditions = data.frame(
+            study = c("s1", "s2"),
+            context = "c",
+            trait = "t"
+        )
+    )
+    U <- matrix(c(1, 0.2, 0.3, 0.2, 1, 0.4, 0.3, 0.4, 1), 3L)
+    E <- matrix(c(1, 0.5, 0.6, 0.5, 1, 0.7, 0.6, 0.7, 1), 3L)
+    # The prior's conditions in another order, with one the group lacks.
+    prior <- list(
+        axes = "study",
+        scope = list(),
+        conditions = data.frame(
+            study = c("s3", "s2", "s1"),
+            context = "c",
+            trait = "t"
+        ),
+        U = list(all = U),
+        w = c(all = 1),
+        residualCorrelation = E
+    )
+    local_mocked_bindings(
+        .sdprCoupledWeights = function(
+            stats,
+            refs,
+            ids,
+            user,
+            keep,
+            label,
+            shared
+        ) {
+            shared
+        },
+        .package = "pecotmr"
+    )
+    fit <- function(priors) {
+        cfg <- list(samplerPriors = priors, residualPriors = priors)
+        pecotmr:::.jointCoupledFit(
+            list(),
+            g,
+            cfg,
+            list(axes = "study"),
+            "dprGibbs",
+            "none"
+        )
+    }
+    shared <- fit(list(study = prior))
+    expect_equal(shared$seed, list(U = list(all = U[3:2, 3:2]), w = c(all = 1)))
+    expect_equal(shared$residual, E[3:2, 3:2])
+    # Two priors holding the group give neither; a prior with no residual
+    # correlation gives no noise.
+    expect_null(fit(list(study = prior, again = prior))$seed)
+    expect_null(fit(list(study = prior, again = prior))$residual)
+    bare <- list(study = list_assign(prior, residualCorrelation = zap()))
+    expect_null(fit(bare)$residual)
+})
+
+test_that("fine-mapping folds on samples the data lacks are refused", {
+    folds <- data.frame(Sample = str_c("x", 1:7), Fold = 1L)
+    expect_error(
+        pecotmr:::.jointCheckFmCvSamples(folds, "s1"),
+        "7 sample\\(s\\).*x1, x2, x3, x4, x5 \\(and 2 more\\)"
+    )
+})
+
 test_that("summary statistics fitted across studies take their penalties", {
     expect_identical(
-        pecotmr:::.coupledRssSpec("ridge", list(), "x"),
+        pecotmr:::.coupledRssSpec("ridge", list()),
         pecotmr:::.rssPenalty("lasso", alpha = 0)
     )
     expect_error(
-        pecotmr:::.coupledRssSpec("l0learn", list(penalty = "L0L2"), "x"),
+        pecotmr:::.coupledRssSpec("l0learn", list(penalty = "L0L2")),
         "fits penalty = \"L0\" only"
     )
     expect_identical(
-        pecotmr:::.coupledRssSpec("l0learn", list(), "x"),
+        pecotmr:::.coupledRssSpec("l0learn", list()),
         pecotmr:::.rssPenalty("L0")
     )
     # mcp and scad keep their own gamma and alpha.
     expect_identical(
-        pecotmr:::.coupledRssSpec("mcp", list(gamma = 3), "x"),
+        pecotmr:::.coupledRssSpec("mcp", list(gamma = 3)),
         pecotmr:::.rssPenalty("MCP", alpha = 1, gamma = 3)
     )
     expect_error(
@@ -4968,21 +5441,95 @@ test_that("bayesC and bayesN on BGLR swap in the joint fit on a group", {
         trait = "g"
     )
     across <- data.frame(study = c("s1", "s2"), context = "brain", trait = "g")
-    ma <- list(nIter = 10)
-    # One condition, or a method not fitted jointly, keeps its own fit.
-    expect_identical(pecotmr:::.jointTwasMultitrait(ma, "bayesC", one, cfg), ma)
-    expect_identical(pecotmr:::.jointTwasMultitrait(ma, "lasso", two, cfg), ma)
-    expect_identical(
-        pecotmr:::.jointTwasMultitrait(ma, "bayesC", two, list()),
-        ma
+    mixed <- data.frame(
+        study = c("s1", "s1", "s2"),
+        context = c("brain", "liver", "brain"),
+        trait = "g"
     )
-    within <- pecotmr:::.jointTwasMultitrait(ma, "bayesN", two, cfg)
+    mode <- function(token, cond, cfg) {
+        pecotmr:::.jointTwasGroupMode(token, cond, cfg, "individual")
+    }
+    ma <- list(nIter = 10)
+    # One condition, a method not fitted jointly, or a run fitting none so:
+    # its own fit.
+    expect_null(mode("bayesC", one, cfg))
+    expect_null(mode("lasso", two, cfg))
+    expect_null(mode("bayesC", two, list()))
+    expect_equal(mode("bayesN", two, cfg), "multitrait")
+    within <- pecotmr:::.jointTwasMultitrait(ma, "bayesN", two)
     expect_equal(attr(within, "impl"), ".bglrJointWeights")
     expect_equal(within$method, "bayesN")
-    expect_false(within$acrossStudies)
-    expect_true(
-        pecotmr:::.jointTwasMultitrait(ma, "bayesC", across, cfg)$acrossStudies
+    expect_equal(within$studies, c("s", "s"))
+    # Across studies, and within and across them at once.
+    expect_equal(mode("bayesC", across, cfg), "multitrait")
+    expect_equal(mode("bayesC", mixed, cfg), "multitrait")
+    expect_equal(
+        pecotmr:::.jointTwasMultitrait(ma, "bayesC", mixed)$studies,
+        c("s1", "s1", "s2")
     )
+})
+
+test_that("BGLR's residuals are free within a study and zero across", {
+    residuals <- function(studies) {
+        as.list(pecotmr:::.bglrStudyResiduals(BglrOptions(), studies))$resCov
+    }
+    expect_null(residuals(c("s", "s")))
+    expect_equal(residuals(c("s1", "s2")), list(type = "DIAG"))
+    mixed <- residuals(c("s1", "s1", "s2", "s2"))
+    expect_equal(mixed$type, "REC")
+    expect_equal(
+        mixed$M,
+        matrix(
+            c(
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                TRUE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                FALSE,
+                TRUE,
+                FALSE
+            ),
+            4L,
+            byrow = TRUE
+        )
+    )
+    # A diagonal residual asked for stays.
+    expect_equal(
+        as.list(pecotmr:::.bglrStudyResiduals(
+            BglrOptions(resCov = list(type = "DIAG")),
+            c("s1", "s1", "s2")
+        ))$resCov,
+        list(type = "DIAG")
+    )
+    skip_if_not_installed("BGLR")
+    d <- .rrwMulti(n = 60, p = 6, K = 4)
+    # Two studies on their own samples, each with two contexts.
+    Y <- d$Y
+    Y[31:60, 1:2] <- NA
+    Y[1:30, 3:4] <- NA
+    W <- suppressMessages(suppressWarnings(pecotmr:::.bglrJointWeights(
+        d$X,
+        Y,
+        "bayesN",
+        studies = c("s1", "s1", "s2", "s2"),
+        nIter = 200,
+        nBurnin = 50,
+        fitRetention = "full",
+        methodArgs = BglrOptions(saveAt = tempfile())
+    )))
+    expect_equal(dim(W), c(6L, 4L))
+    R <- attr(W, "fit")$resCov$R
+    expect_equal(R[1:2, 3:4], matrix(0, 2L, 2L))
+    expect_true(R[1L, 2L] != 0)
 })
 
 test_that("summary statistics' weights carried per allele scale by the SDs", {
