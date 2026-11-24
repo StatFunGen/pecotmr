@@ -1451,19 +1451,6 @@ static std::vector<mat> coupled_mats(const list& matList,
   return out;
 }
 
-// The pairs' strengths, K x K for K conditions: symmetric, finite and not
-// negative. The diagonal is not read.
-static mat coupled_strength(const doubles_matrix<>& strengthR, uword K) {
-  mat W = as_Mat(strengthR);
-  if (W.n_rows != K || W.n_cols != K)
-    cpp11::stop("The coupling strengths are %d x %d for %d conditions.",
-                (int)W.n_rows, (int)W.n_cols, (int)K);
-  if (!W.is_finite() || W.min() < 0.0 || !W.is_symmetric())
-    cpp11::stop("The coupling strengths must be symmetric, finite and not "
-                "negative.");
-  return W;
-}
-
 // The coupled path on `mats` held as Ld. The matrices outlive the solver,
 // which reads them by reference.
 template <class Ld>
@@ -1520,7 +1507,9 @@ cpp11::writable::list penalizedRssCoupledCpp(
   std::vector<mat> Rs = coupled_mats(ldList, zs, false);
   vec path = as_Col(pathR);
   check_path(path, st.pen);
-  mat strength = coupled_strength(strengthR, zs.size());
+  // The pairs' strengths, K x K: symmetric, finite and not negative as
+  // .coupledPairStrengths() builds them. The diagonal is not read.
+  mat strength = as_Mat(strengthR);
   return run_coupled<DenseLd>(st, Rs, zs, idx, nUnion, strength, grouped,
                               shrink, path);
 }
@@ -1556,7 +1545,7 @@ cpp11::writable::list penalizedRssCoupledFactorCpp(
   std::vector<mat> Fs = coupled_mats(factorList, zs, true);
   vec path = as_Col(pathR);
   check_path(path, st.pen);
-  mat strength = coupled_strength(strengthR, zs.size());
+  mat strength = as_Mat(strengthR);
   return run_coupled<FactorLd>(st, Fs, zs, idx, nUnion, strength, grouped,
                                shrink, path);
 }

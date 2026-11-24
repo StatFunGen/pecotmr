@@ -3241,6 +3241,57 @@ test_that("the group L0 penalty swaps whole groups", {
     }
 })
 
+test_that("a coupled group L0 swap that raises the objective is undone", {
+    # Two studies of one effect on AR(1) LD, coupled at 0.5: at lambda0 0.01
+    # a swap the gradients favour raises the objective, and is undone.
+    withr::local_seed(17L)
+    p <- 15L
+    n <- 200L
+    X <- scale(
+        matrix(rnorm(n * p), n) %*% chol(0.6^abs(outer(1:p, 1:p, "-")))
+    )
+    b <- replace(numeric(p), sample(p, 3L), rnorm(3L))
+    studies <- map(1:2, function(k) {
+        y <- drop(scale(X %*% b + rnorm(n)))
+        list(z = drop(crossprod(X, y)) / n, R = crossprod(X) / n)
+    })
+    run <- function(maxSwaps) {
+        path <- penalizedRssCoupledCpp(
+            map(studies, "z"),
+            map(studies, "R"),
+            list(1:p, 1:p),
+            p,
+            .rrwPairs(0.5),
+            TRUE,
+            0,
+            0.01,
+            "L0",
+            "gradientRanked",
+            0,
+            1,
+            0,
+            0,
+            1e-10,
+            100000L,
+            maxSwaps,
+            pecotmr:::.rssPathControl()
+        )
+        map(path$studies, function(s) s$beta[, 1L])
+    }
+    # sum_k [b_k'R_k b_k - 2 b_k'z_k] + c sum_j (b_j1 - b_j2)^2
+    #     + 2 lambda0 (groups in the model)
+    objective <- function(betas) {
+        loss <- sum(map2_dbl(studies, betas, function(s, b) {
+            drop(t(b) %*% s$R %*% b) - 2 * sum(s$z * b)
+        }))
+        coupling <- 0.5 * sum((betas[[1L]] - betas[[2L]])^2)
+        loss + coupling + 2 * 0.01 * sum(betas[[1L]] != 0 | betas[[2L]] != 0)
+    }
+    swapped <- run(5L)
+    expect_lte(objective(swapped), objective(run(0L)) + 1e-10)
+    expect_identical(swapped[[1L]] != 0, swapped[[2L]] != 0)
+})
+
 test_that("the coupled RSS path reads a factor of each study's LD as it", {
     fit <- .rrw_coupledRss()
     union <- map(fit, function(f) match(colnames(f$X), colnames(fit[[1L]]$X)))

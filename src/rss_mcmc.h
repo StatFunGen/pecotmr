@@ -462,12 +462,10 @@ public:
 	// S's rows `rows` and columns `cols`, the ridge where they meet.
 	arma::mat sub(const arma::uvec& rows, const arma::uvec& cols) const {
 		arma::mat S = W_.cols(rows).t() * W_.cols(cols);
-		if (extra_ != 0.0) {
-			for (arma::uword a = 0; a < rows.n_elem; ++a) {
-				for (arma::uword b = 0; b < cols.n_elem; ++b) {
-					if (rows(a) == cols(b)) {
-						S(a, b) += extra_;
-					}
+		for (arma::uword a = 0; a < rows.n_elem; ++a) {
+			for (arma::uword b = 0; b < cols.n_elem; ++b) {
+				if (rows(a) == cols(b)) {
+					S(a, b) += extra_;
 				}
 			}
 		}

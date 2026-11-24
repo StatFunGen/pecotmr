@@ -10809,7 +10809,9 @@ abessWeights <- function(
 # The precision of the conditions' noise the samplers read (NoiseCoupling in
 # rss_mcmc.h): Q = E^-1 for E the residual correlation over conditions on
 # one LD reference and the same variants (.rssSharedSources()), zero between
-# others; NULL when no two share samples.
+# others; NULL when no two share samples. solve() leaves the inverse
+# asymmetric by rounding, and the samplers take only an exactly symmetric
+# one, so it is symmetrized.
 # @noRd
 .samplerNoisePrecision <- function(residual, ldReferences, stats) {
     if (is.null(residual)) {
@@ -10820,7 +10822,8 @@ abessWeights <- function(
     if (all(E[upper.tri(E)] == 0)) {
         return(NULL)
     }
-    unname(solve(E))
+    Q <- solve(E)
+    unname((Q + t(Q)) / 2)
 }
 
 # A MashPrior's starting correlation for a sampler: that of its covariances

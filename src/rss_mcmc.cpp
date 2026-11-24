@@ -316,17 +316,23 @@ SdprChain<LdBlock>::SdprChain(
     eta = 1;
     h2_.assign(K_, 0.0);
     p.assign(T_, 1.0 / T_);
+    kind_weight_.assign(n_kinds_, 1.0 / n_kinds_);
+    if (sharing.kind_weight.n_elem == n_kinds_) {
+        arma::vec w = sharing.kind_weight / arma::accu(sharing.kind_weight);
+        kind_weight_ = arma::conv_to<std::vector<double>>::from(w);
+        // The first assignments read the starting weights, the only draw
+        // that does before sample_kind_weights() replaces them: each kind's
+        // components share its weight of what the null's 1/T leaves, evenly.
+        for (size_t t = 1; t < T_; t++) {
+            p[t] = (1.0 - 1.0 / T_) * kind_weight_[kind_of(t)] / (M - 1);
+        }
+    }
     log_p.assign(T_, 0);
     for (size_t i = 0; i < T_; i++) {
         log_p[i] = std::log(static_cast<float>(p[i] + 1e-40));
     }
 
     cluster_var.assign(T_, 0.0);
-    kind_weight_.assign(n_kinds_, 1.0 / n_kinds_);
-    if (sharing.kind_weight.n_elem == n_kinds_) {
-        arma::vec w = sharing.kind_weight / arma::accu(sharing.kind_weight);
-        kind_weight_ = arma::conv_to<std::vector<double>>::from(w);
-    }
     if (coupling_.Q.n_elem == 0) {
         coupling_.Q = arma::mat(K_, K_, arma::fill::eye);
         coupling_.n = arma::vec(K_, arma::fill::ones);
@@ -1881,12 +1887,9 @@ SdprxInputs sdprx_inputs(const list& bhatList, const list& ldList, const integer
 		}
 	}
 	in.sharing = sdprx_sharing(kinds, rho, learnRho, K);
+	// One positive weight per kind, as .sdprSeedKindWeights() gives them.
 	if (kindWeights != R_NilValue) {
 		in.sharing.kind_weight = as_Col(doubles(kindWeights));
-		if (in.sharing.kind_weight.n_elem != in.sharing.kinds.size() ||
-		    in.sharing.kind_weight.min() <= 0.0) {
-			cpp11::stop("The kinds' starting weights must be positive, one per kind.");
-		}
 	}
 	in.sharing.coupling = noise_coupling(noisePrecision, conv_to<vec>::from(as_Col(n)));
 	return in;

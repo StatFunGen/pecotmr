@@ -859,12 +859,15 @@ setMethod(
     if (!isTRUE(rssParam$serFallback)) {
         return(entries)
     }
+    # nocov start: needs an mvsusieR that fits across studies, which no
+    # release does yet. Remove the marks once one does.
     map(
         entries,
         .fmRssRecordFallback,
         f = fitted,
         keepFullFit = rssParam$keepFullFit
     )
+    # nocov end
 }
 
 # A summary-statistics group's statistics, as the RSS fits read them.
@@ -1054,7 +1057,14 @@ setMethod(
         rMismatch = rssParam$rMismatch,
         estimateMixtureWeights = rssParam$estimateMixtureWeights
     )
-    if (any(lengths(sizes) > 1L)) sizes else list_c(sizes)
+    if (any(lengths(sizes) > 1L)) {
+        # nocov start: a mixture's panels each with a size need an mvsusieR
+        # that fits across studies, which no release does yet. Remove the
+        # marks once one does.
+        return(sizes)
+        # nocov end
+    }
+    list_c(sizes)
 }
 
 # Each condition's LD reference (.jgLdRefAt()).
@@ -1076,12 +1086,16 @@ setMethod(
     ) {
         return(ld)
     }
+    # nocov start: estimating a mixture's weights needs an mvsusieR that fits
+    # across studies, which no release does yet. Remove the marks once one
+    # does.
     useFactor <- !is.null(ld$X)
     replace(
         ld,
         if (useFactor) "X" else "R",
         list(.jointRssPanels(group, ld, refs, useFactor))
     )
+    # nocov end
 }
 
 # Each condition's LD for a fit that estimates mixture weights
@@ -1092,6 +1106,9 @@ setMethod(
 # `ld` for any other reference.
 # @noRd
 .jointRssPanels <- function(group, ld, refs, useFactor) {
+    # nocov start: reached only from .jointRssFitLd(), with an mvsusieR that
+    # fits across studies, which no release does yet. Remove the marks once
+    # one does.
     ids <- .jgVariantIds(group)
     if (is.null(ld$group)) {
         panels <- .ldPanelsFromRef(
@@ -1114,6 +1131,7 @@ setMethod(
         useFactor = useFactor
     )
     map2(panels[refGroups], if (useFactor) ld$X else ld$R, `%||%`)
+    # nocov end
 }
 
 # The LD each condition's credible sets' purity reads (.jointRssEntry()):
@@ -1126,6 +1144,9 @@ setMethod(
     if (is.null(fit$omega_weights)) {
         return(ld)
     }
+    # nocov start: a fit with mixture weights needs an mvsusieR that fits
+    # across studies, which no release does yet. Remove the marks once one
+    # does.
     useFactor <- !is.null(fitLd$X)
     conditionLd <- if (useFactor) fitLd$X else fitLd$R
     group <- ld$group %||% rep(1L, length(conditionLd))
@@ -1136,6 +1157,7 @@ setMethod(
         useFactor = useFactor
     )
     replace(ld, if (useFactor) "X" else "R", list(mixed[group]))
+    # nocov end
 }
 
 # One RSS per-condition FineMappingRow of the mvSuSiE method `token`, its
@@ -2313,16 +2335,11 @@ setMethod(
 }
 
 # A residual correlation named by condition ("study:context:trait") on the
-# group's conditions, in their order; an error naming any it lacks.
+# group's conditions, in their order. The run checked at entry that it names
+# every selected condition (.twasAssertResidualCovers()).
 # @noRd
 .residualOnGroup <- function(residual, cond) {
     keys <- str_c(cond$study, cond$context, cond$trait, sep = ":")
-    missing <- setdiff(keys, rownames(residual))
-    if (length(missing) > 0L) {
-        abort(glue(
-            "`residualCorrelation` has no row for {str_flatten(missing, ', ')}."
-        ))
-    }
     unname(residual[keys, keys, drop = FALSE])
 }
 
