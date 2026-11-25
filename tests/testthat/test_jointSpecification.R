@@ -3179,3 +3179,17 @@ test_that("every study spec reaches one pass of the engine, with each method", {
     expect_equal(seen$axes, list("study", c("study", "context")))
     expect_equal(seen$tokens, c("lasso", "mrmash", "bayesC"))
 })
+
+test_that("each condition's own samples are its observed rows", {
+    Y <- cbind(
+        a = c(1, NA, 2, NA),
+        b = c(NA, 3, 4, 5)
+    )
+    rownames(Y) <- sprintf("s%d", 1:4)
+    expect_equal(
+        pecotmr:::.jointConditionSamples(Y, FALSE),
+        list(c("s1", "s3"), c("s2", "s3", "s4"))
+    )
+    # Complete samples observe every condition: there is nothing more to ask.
+    expect_null(pecotmr:::.jointConditionSamples(Y, TRUE))
+})

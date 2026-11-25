@@ -2507,6 +2507,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = tid,
         xContexts = planned$perTraitContexts,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         studyName = studyName,
         planned = planned
     )
@@ -2711,6 +2712,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = planned$traitsHere,
         xContexts = cx,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         studyName = studyName,
         planned = planned
     )
@@ -3460,7 +3462,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         spec = .qtlFitSpec(
             .fmGenoWindow(qd, unique(rows$trait), args$region, args$cisWindow),
             unique(rows$context),
-            rownames(Y)[kept]
+            rownames(Y)[kept],
+            .jointConditionSamples(
+                Y[kept, , drop = FALSE],
+                isTRUE(args$completeSamples)
+            )
         )
     )
 }
@@ -3519,6 +3525,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = planned$allTraits,
         xContexts = planned$allContexts,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         planned = planned
     ))
 }
@@ -4228,18 +4235,28 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # A unit of joint groups not built yet: the function that builds it from a
 # residualized X, its arguments, `x` first, and the genotypes it will be built
 # on (the traits that name their window, the contexts of their covariates and
-# the samples it may fit). The individual-level enumerators return these: their
-# phenotypes are in hand, so what can share an X is known before any genotype is
-# read, and a unit's X exists only while its groups are fitted. A unit is one
-# group, or a context's principal components, which share one X.
+# the samples it may fit, and of a group fitting each condition on its own
+# samples, those of each condition). The individual-level enumerators return
+# these: their phenotypes are in hand, so what can share an X is known before
+# any genotype is read, and a unit's X exists only while its groups are fitted.
+# A unit is one group, or a context's principal components, which share one X.
 # @noRd
-.deferGroups <- function(x, builder, xTraits, xContexts, samples, ...) {
+.deferGroups <- function(
+    x,
+    builder,
+    xTraits,
+    xContexts,
+    samples,
+    ...,
+    conditionSamples = NULL
+) {
     list(
         builder = builder,
         args = list(x, ...),
         xTraits = xTraits,
         xContexts = xContexts,
-        samples = samples
+        samples = samples,
+        conditionSamples = conditionSamples
     )
 }
 
@@ -4261,7 +4278,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     .qtlFitSpec(
         .fmGenoWindow(data, unit$xTraits, args$region, args$cisWindow),
         unit$xContexts,
-        unit$samples
+        unit$samples,
+        unit$conditionSamples
     )
 }
 

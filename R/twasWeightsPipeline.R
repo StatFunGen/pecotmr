@@ -1671,10 +1671,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   each study's share of a group across studies) is fitted only on the
 #'   samples observed in every one of its conditions. \code{FALSE}, the
 #'   default, keeps every sample observed in some condition, each condition
-#'   fitted on its own samples. An engine that takes no missing phenotype
-#'   (glmnet's \code{"mgaussian"} group fit, fSuSiE, and mr.mash where the
-#'   installed mr.mashr has no \code{missing_y_method}) still fits on the
-#'   samples observing every condition itself.
+#'   fitted on its own samples; a variant is then kept only when it passes
+#'   \code{genotypeFilterParam}'s MAF, MAC and X-variance cutoffs on every
+#'   condition's own samples, as well as on all of them. An engine that
+#'   takes no missing phenotype (glmnet's \code{"mgaussian"} group fit,
+#'   fSuSiE, and mr.mash where the installed mr.mashr has no
+#'   \code{missing_y_method}) still fits on the samples observing every
+#'   condition itself.
 #' @param residualCorrelation Summary statistics only: the correlation of
 #'   the conditions' z-scores under the null, which carries their residual
 #'   correlation and their samples' overlap (what

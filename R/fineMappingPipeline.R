@@ -351,10 +351,12 @@
 #'   each study's share of a group across studies) is fitted only on the
 #'   samples observed in every one of its conditions. \code{FALSE}, the
 #'   default, keeps every sample observed in some condition, each condition
-#'   fitted on its own samples. An engine that takes no missing phenotype
-#'   (fSuSiE, the top-PC alternative to it, and mr.mash where the installed
-#'   mr.mashr has no \code{missing_y_method}) still fits on the samples
-#'   observing every condition itself.
+#'   fitted on its own samples; a variant is then kept only when it passes
+#'   \code{genotypeFilterParam}'s MAF, MAC and X-variance cutoffs on every
+#'   condition's own samples, as well as on all of them. An engine that
+#'   takes no missing phenotype (fSuSiE, the top-PC alternative to it, and
+#'   mr.mash where the installed mr.mashr has no \code{missing_y_method})
+#'   still fits on the samples observing every condition itself.
 #' @param dataDrivenPriorWeightsCutoff Numeric or \code{NULL}. Cutoff below
 #'   which data-driven prior weights are zeroed; \code{NULL} disables the
 #'   cutoff.
@@ -1778,8 +1780,10 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 
 # The residualized genotypes of one analysis window -- the cis window of
 # `traitId` +/- `cisWindow`, or an explicit `region` -- over `samples`, under
-# the run's resolved `genotypeFilter`. No default for the filter: a call site
-# that forgot it must fail rather than extract unfiltered.
+# the run's resolved `genotypeFilter`, whose per-variant cutoffs a variant
+# must also pass in each of `conditionSamples` (a joint fit's conditions' own
+# samples). No default for the filter: a call site that forgot it must fail
+# rather than extract unfiltered.
 # @noRd
 .fmResidGeno <- function(
     x,
@@ -1790,6 +1794,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     region = NULL,
     cisWindow = NULL,
     samples = NULL,
+    conditionSamples = NULL,
     read = NULL
 ) {
     # No scaling step here: the residualizer already returns columns scaled
@@ -1803,7 +1808,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         samples = samples,
         filter = genotypeFilter,
         residualizationParam = residualizationParam %||% ResidualizationParam(),
-        read = read
+        read = read,
+        conditionSamples = conditionSamples
     )
 }
 

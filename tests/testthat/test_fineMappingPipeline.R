@@ -7202,3 +7202,48 @@ test_that("fineMappingPipeline(GwasSumStats) takes per-method options", {
     ))
     expect_equal(capture$userArgs$max_iter, 50L)
 })
+
+# ---------------------------------------------------------------------------
+# A joint fit on every condition's own samples filters variants on each
+# ---------------------------------------------------------------------------
+
+test_that("a joint fit drops variants rare in one condition's samples", {
+    skip_if_not_installed("mvsusieR")
+    n <- 40L
+    gh <- .fmp_makeHandle()
+    # Variant 1 is monomorphic in brain's samples (s1-s10), common in the
+    # rest, which only liver observes.
+    set.seed(3)
+    panel <- matrix(rbinom(n * 6L, 2, 0.3), n, 6L)
+    panel[, 1L] <- rep(c(0, 2), c(10L, 30L))
+    local_mocked_bindings(
+        .handleDosage = function(handle, snpIdx, sampleIdx = NULL) {
+            panel[sampleIdx %||% seq_len(n), snpIdx, drop = FALSE]
+        },
+        .package = "pecotmr"
+    )
+    se <- .fmp_makeSe(traits = "ENSG_A", n_samples = n, starts = 300L)
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = gh,
+        phenotypes = list(brain = se[, 1:10], liver = se),
+        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+    )
+    res <- suppressMessages(fineMappingPipeline(
+        qd,
+        methods = c("susie", "mvsusie"),
+        cisWindow = 1e6,
+        genotypeFilterParam = GenotypeFilterParam(mafCutoff = 0.05),
+        jointSpecification = "context"
+    ))
+    first <- "chr1:100:G:A"
+    holds <- function(i) is_in(first, variantIds(res[i]))
+    univariate <- which(res$method == "susie")
+    joint <- which(res$method == "mvsusie")
+    expect_length(joint, 2L)
+    # Liver's own fit is on its 40 samples; brain's on its 10.
+    expect_true(holds(univariate[res$context[univariate] == "liver"]))
+    expect_false(holds(univariate[res$context[univariate] == "brain"]))
+    # The joint fit pools all 40, but brain's part of it is on its own 10.
+    expect_false(any(map_lgl(joint, holds)))
+})

@@ -1062,21 +1062,17 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 #
 # `read` is the window's dosages when a caller already holds them
 # (.qtlReadBlock()); nothing is read again. It must span `window` and `samples`.
+# `conditionSamples`, a joint fit's conditions' own samples, are where each
+# variant must pass the per-variant cutoffs as well (.qtlVariantFilters()).
 .qtlExtractBlock <- function(
     x,
     window = NULL,
     samples = NULL,
     filter = .qtlResolveFilter(),
-    read = NULL
+    read = NULL,
+    conditionSamples = NULL
 ) {
-    # A pipeline threads its resolved filter to every extraction; a NULL one
-    # means a call site was missed, which must not pass for "no filter".
-    if (!is.list(filter) || is.null(filter$mafCutoff)) {
-        abort(
-            "No resolved genotype filter reached this extraction.",
-            .internal = TRUE
-        )
-    }
+    .qtlAssertResolvedFilter(filter)
     inRegion <- .qtlVariantIndices(x, window)
     if (length(inRegion) == 0L) {
         return(.qtlEmptyBlockAllSamples(x))
@@ -1100,7 +1096,8 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
     kept <- dosage[keep, , drop = FALSE]
     filtered <- .qtlVariantFilters(
         .qtlDropMissingSamples(kept, filter),
-        filter
+        filter,
+        conditionSamples
     )
     imputed <- .qtlMeanImpute(filtered$dosage)
     list(
@@ -1110,6 +1107,20 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         maf = filtered$maf,
         af = filtered$af
     )
+}
+
+# A pipeline threads its resolved filter (.qtlResolveFilter()) to every
+# extraction; a NULL one means a call site was missed, which must not pass for
+# "no filter".
+# @noRd
+.qtlAssertResolvedFilter <- function(filter) {
+    if (!is.list(filter) || is.null(filter$mafCutoff)) {
+        abort(
+            "No resolved genotype filter reached this extraction.",
+            .internal = TRUE
+        )
+    }
+    invisible(NULL)
 }
 
 # The dosages of one window, read once, for .qtlExtractBlock() to filter on the
@@ -1335,10 +1346,18 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 # Nothing runs until `.qtlRunWork()`.
 
 # The genotypes a fit is on: the variants of `window`, residualized on the
-# covariates of `contexts`, filtered and scaled on `samples`.
+# covariates of `contexts`, filtered and scaled on `samples`. A joint fit whose
+# conditions each fit on their own samples gives those too
+# (`conditionSamples`, a list), and a variant must pass the per-variant
+# cutoffs in each of them as well.
 # @noRd
-.qtlFitSpec <- function(window, contexts, samples) {
-    list(window = window, contexts = contexts, samples = samples)
+.qtlFitSpec <- function(window, contexts, samples, conditionSamples = NULL) {
+    list(
+        window = window,
+        contexts = contexts,
+        samples = samples,
+        conditionSamples = conditionSamples
+    )
 }
 
 # Fits to run: `fit(item, !!!fitArgs, block = )` for each of `items`, `block`
@@ -1517,11 +1536,18 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         .qtlXGroups(
             keys,
             map_chr(specs, .qtlSpecContexts),
-            map(specs, "samples")
+            map(specs, .qtlSpecSamples)
         ),
         .qtlBlockGroup,
         specs = specs
     )
+}
+
+# The samples a spec's block is filtered on, as one key: its samples and its
+# conditions' own.
+# @noRd
+.qtlSpecSamples <- function(spec) {
+    list(spec$samples, spec$conditionSamples)
 }
 
 # A spec's contexts as a key; the order matters to the covariate design.
@@ -1539,7 +1565,8 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
             .qtlFitSpec(
                 .qtlWidestWindow(map(specs[group$at], "window")),
                 first$contexts,
-                first$samples
+                first$samples,
+                first$conditionSamples
             )
         }
     )
@@ -1559,6 +1586,7 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         contexts = spec$contexts,
         region = spec$window,
         samples = spec$samples,
+        conditionSamples = spec$conditionSamples,
         read = read
     )
     list(
@@ -1725,14 +1753,52 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 }
 
 # Per-variant MAF / MAC / X-variance filters against the post-narrowing sample
-# count. MAF is computed from the un-imputed dosage (A1 = the effect allele
-# gives directional `af`; `maf` folds to the minor allele). Returns
-# list(dosage, maf, af).
+# count (.qtlVariantStats()), and against each of `conditionSamples` too: a
+# joint fit's conditions each fit on their own samples, so a variant is kept
+# only when it passes on the block's samples and on every condition's. A
+# condition with none of its samples left in the block (every one dropped for
+# missingness, say) has nothing fitted and asks nothing. Returns list(dosage,
+# maf, af), the frequencies the block's.
 # @noRd
-.qtlVariantFilters <- function(dosage, filter) {
-    # No zero-variant guard: the only caller returns early when snpIdx is
-    # empty, and extraction preserves the column count (.restoreRequestedOrder
-    # aborts on a mismatch). The body is 0-column safe regardless -- colSums
+.qtlVariantFilters <- function(dosage, filter, conditionSamples = NULL) {
+    stats <- .qtlVariantStats(dosage, filter)
+    keep <- reduce(
+        map(
+            conditionSamples,
+            .qtlConditionPasses,
+            dosage = dosage,
+            filter = filter
+        ),
+        `&`,
+        .init = stats$keep
+    )
+    list(
+        dosage = dosage[, keep, drop = FALSE],
+        maf = stats$maf[keep],
+        af = stats$af[keep]
+    )
+}
+
+# Which variants pass the per-variant cutoffs on one condition's samples among
+# the block's; all of them when the block holds none of its samples.
+# @noRd
+.qtlConditionPasses <- function(samples, dosage, filter) {
+    rows <- is_in(rownames(dosage), samples)
+    if (!any(rows)) {
+        return(rep(TRUE, ncol(dosage)))
+    }
+    .qtlVariantStats(dosage[rows, , drop = FALSE], filter)$keep
+}
+
+# Each variant's frequencies and whether it passes the MAF / MAC / X-variance
+# cutoffs on `dosage`'s samples. MAF is computed from the un-imputed dosage (A1
+# = the effect allele gives directional `af`; `maf` folds to the minor
+# allele). Returns list(maf, af, keep).
+# @noRd
+.qtlVariantStats <- function(dosage, filter) {
+    # No zero-variant guard: extraction returns early when snpIdx is empty,
+    # and preserves the column count (.restoreRequestedOrder aborts on a
+    # mismatch). The body is 0-column safe regardless -- colSums
     # gives numeric(0) and the mask logical(0), yielding the same empty result.
     nSamp <- nrow(dosage)
     nObs <- colSums(!is.na(dosage))
@@ -1759,11 +1825,7 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         varVec <- colSums(centered * centered) / (nSamp - 1L)
         byMaf & varVec >= filter$xvarCutoff
     }
-    list(
-        dosage = dosage[, keepVarMask, drop = FALSE],
-        maf = mafVec[keepVarMask],
-        af = afVec[keepVarMask]
-    )
+    list(maf = mafVec, af = afVec, keep = keepVarMask)
 }
 
 # Mean-impute remaining missing dosage cells (per column) so downstream linear
@@ -2561,7 +2623,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     samples = NULL,
     filter = .qtlResolveFilter(),
     residualizationParam = ResidualizationParam(),
-    read = NULL
+    read = NULL,
+    conditionSamples = NULL
 ) {
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
         msg <- glue(
@@ -2587,7 +2650,8 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         window,
         samples %||% .qtlSharedSamples(x, contexts, residualizationParam),
         filter,
-        read
+        read,
+        conditionSamples
     )$geno
     if (ncol(G) == 0L) {
         return(G)

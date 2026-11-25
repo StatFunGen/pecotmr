@@ -1144,6 +1144,23 @@ parseTraitIds <- function(traitId, data) {
     rowSums(!is.na(Y)) > 0L
 }
 
+# Each condition's observed samples among a group's fit samples (`Y`'s rows,
+# a column per condition): the samples its own part of the fit is on, which
+# the genotype filter's per-variant cutoffs must each pass in. NULL under
+# `complete`, where every condition observes every fit sample.
+# @noRd
+.jointConditionSamples <- function(Y, complete) {
+    if (isTRUE(complete)) {
+        return(NULL)
+    }
+    map(seq_len(ncol(Y)), .jointObservedIn, Y = Y)
+}
+
+# @noRd
+.jointObservedIn <- function(k, Y) {
+    rownames(Y)[!is.na(Y[, k])]
+}
+
 # The rows of `m` for `samples`, missing for a sample `m` lacks.
 # @noRd
 .jointRowsOf <- function(m, samples) {
@@ -1217,6 +1234,10 @@ parseTraitIds <- function(traitId, data) {
         perTraitContexts = perTraitContexts,
         Yres = Yres,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            .crossContextY(Yres, perTraitContexts, fitSamples),
+            completeSamples
+        ),
         report = report
     )
 }
@@ -1294,6 +1315,10 @@ parseTraitIds <- function(traitId, data) {
         traitsHere = traitsHere,
         allY = allY,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            allY[fitSamples, , drop = FALSE],
+            completeSamples
+        ),
         completeSamples = completeSamples
     )
 }
@@ -1455,6 +1480,10 @@ parseTraitIds <- function(traitId, data) {
         allTraits = allTraits,
         YresList = YresList,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            .composedYCols(YresList, tuples, fitSamples),
+            completeSamples
+        ),
         completeSamples = completeSamples
     )
 }

@@ -1275,6 +1275,41 @@ test_that(".qtlExtractBlock: mafCutoff retains variants above the threshold", {
     expect_true(all(blk$maf >= 0.4))
 })
 
+test_that("joint-fit variants pass the cutoffs in every condition's samples", {
+    # v1 is common overall but monomorphic in condition a's samples; v2 has
+    # one minor allele in condition b's; v3 is common in both.
+    dosage <- cbind(
+        v1 = c(0, 0, 0, 0, 2, 2, 2, 2),
+        v2 = c(1, 1, 0, 1, 0, 0, 1, 0),
+        v3 = c(0, 1, 2, 1, 1, 0, 1, 2)
+    )
+    rownames(dosage) <- sprintf("s%d", 1:8)
+    a <- sprintf("s%d", 1:4)
+    b <- sprintf("s%d", 5:8)
+    filter <- .qh_filter(mafCutoff = 0.1)
+    pooled <- pecotmr:::.qtlVariantFilters(dosage, filter)
+    expect_equal(colnames(pooled$dosage), c("v1", "v2", "v3"))
+    out <- pecotmr:::.qtlVariantFilters(dosage, filter, list(a, b))
+    expect_equal(colnames(out$dosage), c("v2", "v3"))
+    # The frequencies reported are the block's.
+    expect_equal(out$maf, pooled$maf[2:3])
+    # A count floor is read against each condition's own sample count: one
+    # minor allele among b's 4 samples falls short of a count of 2.
+    counted <- pecotmr:::.qtlVariantFilters(
+        dosage,
+        .qh_filter(macCutoff = 2),
+        list(a, b)
+    )
+    expect_equal(colnames(counted$dosage), "v3")
+    # A condition the block holds none of has nothing fitted and asks nothing.
+    expect_equal(
+        colnames(
+            pecotmr:::.qtlVariantFilters(dosage, filter, list(b, "s99"))$dosage
+        ),
+        c("v1", "v3")
+    )
+})
+
 # Deterministic dosage panel so the directional (un-folded) effect-allele
 # frequency is exactly known: rs1 = 0.70, rs2 = 0.20, rs3 = 0.50, rest 0.
 .qh_directionalExtractor <- function() {
