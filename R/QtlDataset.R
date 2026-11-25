@@ -353,6 +353,13 @@ setClass(
 #'   they fit, and \code{\link{ctwasPipeline}} models each type as its own. Kept
 #'   in the context's \code{metadata()} as \code{dataType}, and read by
 #'   \code{\link{dataType}}. \code{NULL} (default) leaves a context's as it is.
+#' @param genome Optional genome build of the genotypes' and phenotypes'
+#'   positions (e.g. \code{"hg38"}), a single string. Recorded in the
+#'   \code{seqinfo()} of every experiment, so the results pipelines compute
+#'   from the dataset carry it (see \code{\link{RangedTupleList-class}}), as
+#'   \code{\link{mashInput}} needs of a fine-mapping result. \code{NULL}
+#'   (default) leaves the build the inputs name, if any; a build other than
+#'   one they name is an error.
 #' @details A \code{QtlDataset} holds data only. Which variants and samples
 #'   an analysis keeps, and whether residuals are scaled, are the pipeline's
 #'   settings (\code{\link{GenotypeFilterParam}} and
@@ -395,7 +402,8 @@ QtlDataset <- function(
     genotypes,
     phenotypes,
     genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
-    dataType = NULL
+    dataType = NULL,
+    genome = NULL
 ) {
     handle <- .qtlValidateInputs(phenotypes, genotypes)
     # Every experiment's rowRanges in UCSC style, and the genotypes' alleles
@@ -411,6 +419,7 @@ QtlDataset <- function(
         ),
         .canonExperiment
     )
+    experiments <- .qtlWithGenome(experiments, genome)
     mae <- MultiAssayExperiment::MultiAssayExperiment(
         experiments = experiments,
         colData = .qtlPrimaryColData(experiments),
@@ -658,6 +667,30 @@ setMethod("longForm", "QtlDataset", function(object, ..., genotype = FALSE) {
         typed
     )
     imap(phenotypes, .qtlContextWithType, values = values)
+}
+
+# The experiments with `genome` as the build of every ranged one, or as they
+# are when it is NULL. A build other than the one they name is refused:
+# positions on one build do not place variants on another.
+# @noRd
+.qtlWithGenome <- function(experiments, genome) {
+    if (is.null(genome)) {
+        return(experiments)
+    }
+    assertString(genome, min.chars = 1L)
+    named <- setdiff(.namedBuilds(experiments), genome)
+    if (length(named) > 0L) {
+        abort(glue(
+            "QtlDataset: `genome` is \"{genome}\", but the inputs name ",
+            "{str_flatten(named, ', ')}."
+        ))
+    }
+    map(experiments, function(se) {
+        if (!methods::is(se, "RangedSummarizedExperiment")) {
+            return(se)
+        }
+        GenomeInfoDb::`genome<-`(se, value = genome)
+    })
 }
 
 # @noRd

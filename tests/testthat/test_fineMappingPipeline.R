@@ -858,6 +858,37 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
 # fineMappingPipeline(QtlDataset)
 # ===========================================================================
 
+test_that("fineMappingPipeline(QtlDataset): the result carries its build", {
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    fit <- function(qd) {
+        suppressMessages(fineMappingPipeline(
+            qd,
+            methods = "susie",
+            cisWindow = 1000L,
+            initializeWithSusieInf = FALSE
+        ))
+    }
+    # A dataset naming no build gives a result naming none.
+    expect_true(all(is.na(GenomeInfoDb::genome(fit(.fmp_qdAB)))))
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = .fmp_makeHandle(),
+        phenotypes = list(brain = .fmp_makeSe(traits = c("ENSG_A", "ENSG_B"))),
+        genome = "hg38"
+    )
+    res <- fit(qd)
+    expect_identical(unique(unname(GenomeInfoDb::genome(res))), "hg38")
+    expect_identical(
+        unique(unname(GenomeInfoDb::genome(marginalEffects(res)))),
+        "hg38"
+    )
+})
+
 test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
     local_mocked_bindings(
         .handleDosage = .fmp_mockExtractor(),

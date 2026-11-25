@@ -884,6 +884,28 @@ test_that("loadQtlDatasetFromManifest builds a single-study dataset", {
     expect_equal(contexts(qd), "ctxA")
 })
 
+test_that("loadQtlDatasetFromManifest records the genome build it is given", {
+    skip_if_not_installed("PlinkMatrix")
+    tmp <- withr::local_tempdir()
+    manifest <- data.frame(
+        context = "ctxA",
+        phenotypePath = .writePhenoBed(file.path(tmp, "ctxA.bed")),
+        study = "studyX",
+        genotypePath = .toyRefPrefix(),
+        stringsAsFactors = FALSE
+    )
+    expect_length(
+        pecotmr:::.namedBuilds(loadQtlDatasetFromManifest(manifest)),
+        0L
+    )
+    expect_identical(
+        pecotmr:::.namedBuilds(
+            loadQtlDatasetFromManifest(manifest, genome = "hg38")
+        ),
+        "hg38"
+    )
+})
+
 test_that("a QtlDataset manifest records each context's molecular type", {
     skip_if_not_installed("PlinkMatrix")
     tmp <- withr::local_tempdir()
@@ -961,6 +983,25 @@ test_that("loadMultiStudyQtlDatasetFromManifest builds from >=2 studies", {
     expect_s4_class(msd, "MultiStudyQtlDataset")
     expect_true(methods::validObject(msd))
     expect_equal(sort(names(msd)), c("study1", "study2"))
+})
+
+test_that("a multi-study manifest gives each study the genome build", {
+    skip_if_not_installed("PlinkMatrix")
+    tmp <- withr::local_tempdir()
+    manifest <- data.frame(
+        study = c("study1", "study2"),
+        context = c("ctxA", "ctxA"),
+        phenotypePath = c(
+            .writePhenoBed(file.path(tmp, "a.bed")),
+            .writePhenoBed(file.path(tmp, "b.bed"))
+        ),
+        genotypePath = rep(.toyRefPrefix(), 2),
+        stringsAsFactors = FALSE
+    )
+    msd <- loadMultiStudyQtlDatasetFromManifest(manifest, genome = "hg38")
+    for (s in names(msd)) {
+        expect_identical(pecotmr:::.namedBuilds(msd[[s]]), "hg38", info = s)
+    }
 })
 
 test_that("a multi-study manifest types each study's contexts", {

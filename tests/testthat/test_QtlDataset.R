@@ -3852,3 +3852,50 @@ test_that("QtlDataset records each context's molecular type", {
     expect_error(build(c(lung = "a")), "names no such context: lung")
     expect_error(build(1), "dataType")
 })
+
+# ===========================================================================
+# The genome build a dataset records
+# ===========================================================================
+
+test_that("QtlDataset records its genome build in every experiment", {
+    build <- function(genome, liver = .qh_makeSe(n_samples = 12L)) {
+        QtlDataset(
+            studyName = "study1",
+            genotypes = .qh_makeHandle(n_samples = 12L),
+            phenotypes = list(
+                brain = .qh_makeSe(n_samples = 12L),
+                liver = liver
+            ),
+            genome = genome
+        )
+    }
+    builds <- function(x) {
+        map(as.list(MultiAssayExperiment::experiments(x)), function(se) {
+            unique(unname(GenomeInfoDb::genome(se)))
+        })
+    }
+    # None by default; given, every experiment names it, the genotypes too.
+    expect_true(all(is.na(unlist(builds(.qh_makeDataset())))))
+    hg38 <- build("hg38")
+    expect_setequal(names(builds(hg38)), c("genotype", "brain", "liver"))
+    expect_true(all(unlist(builds(hg38)) == "hg38"))
+    expect_identical(pecotmr:::.namedBuilds(hg38), "hg38")
+    # It survives the subsetting that narrows a dataset.
+    expect_identical(pecotmr:::.namedBuilds(hg38[, seq_len(6L), ]), "hg38")
+    expect_identical(
+        pecotmr:::.namedBuilds(suppressWarnings(hg38[,, "liver"])),
+        "hg38"
+    )
+    # A build the inputs already name is kept, and naming it again is fine.
+    liver <- GenomeInfoDb::`genome<-`(
+        .qh_makeSe(n_samples = 12L),
+        value = "hg38"
+    )
+    expect_identical(pecotmr:::.namedBuilds(build(NULL, liver)), "hg38")
+    expect_identical(pecotmr:::.namedBuilds(build("hg38", liver)), "hg38")
+    # Refused: another build than the inputs', or not one string.
+    expect_error(build("hg19", liver), "the inputs name hg38")
+    expect_error(build(c("hg19", "hg38")), "genome")
+    expect_error(build(""), "genome")
+    expect_error(build(NA_character_), "genome")
+})
