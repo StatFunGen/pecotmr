@@ -17,7 +17,6 @@ noRelatedPairsRemain <- function(
 }
 
 test_that("maximizeUnrelated drops related individuals, leaving a clean set", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     # 10 individuals, several pairs above threshold 0.125
@@ -41,7 +40,6 @@ test_that("maximizeUnrelated drops related individuals, leaving a clean set", {
 })
 
 test_that("no related pairs returns empty exclusion vector", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     rel <- data.frame(
@@ -63,7 +61,6 @@ test_that("no related pairs returns empty exclusion vector", {
 })
 
 test_that("large component pre-pruning removes individuals", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     # Build a chain of 30 individuals: 1-2, 2-3, ..., 29-30, all above threshold
@@ -94,7 +91,6 @@ test_that("large component pre-pruning removes individuals", {
 })
 
 test_that("maximizeCases preferentially retains cases", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     # Cases: C1, C2, C3; Controls: X1, X2, X3
@@ -139,7 +135,6 @@ test_that("maximizeCases preferentially retains cases", {
 })
 
 test_that("maximizeCases ignores a case-control pair below the threshold", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
     # Kinship 0.05 is not related at 0.125: nobody is excluded, as under
     # maximizeUnrelated.
@@ -169,7 +164,6 @@ test_that("maximizeCases ignores a case-control pair below the threshold", {
 })
 
 test_that("maximizeCases errors without phenoData", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     rel <- data.frame(
@@ -190,7 +184,6 @@ test_that("maximizeCases errors without phenoData", {
 })
 
 test_that("maximizeCases drops a control listed as IID1 beside a kept case", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     # X1-C1 is a control(IID1)-case(IID2) pair, exercising the mirror branch of
@@ -221,7 +214,6 @@ test_that("maximizeCases drops a control listed as IID1 beside a kept case", {
 })
 
 test_that("iterative cleanup loops and warns when related pairs persist", {
-    skip_if_not_installed("igraph")
     skip_if_not_installed("plinkQC")
 
     # Force plinkQC to exclude nobody, so related pairs survive Phase 2 and the

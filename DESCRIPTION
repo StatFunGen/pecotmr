@@ -36,6 +36,7 @@ Imports:
     GenomeInfoDb,
     GenomicRanges,
     glue,
+    igraph,
     IRanges,
     magrittr,
     MASS,
@@ -86,7 +87,6 @@ Suggests:
     grpreg,
     harmonicmeanp,
     hibayes,
-    igraph,
     knitr,
     L0Learn,
     logging,
@@ -176,6 +176,7 @@ Collate:
     'exampleData.R'
     'fineMappingRow.R'
     'fineMappingWrappers.R'
+    'genePrioritization.R'
     'genotypeIo.R'
     'h2Annotations.R'
     'h2EstimationWrappers.R'

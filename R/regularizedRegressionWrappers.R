@@ -1514,7 +1514,8 @@ mrmashRssWeights <- function(
 #'   \code{parallel} is refused above), \code{weight} (abess scales a sparse
 #'   design's rows by the weights but its phenotype by their square roots)
 #'   and \code{init.active.set} (abess replaces it with an index of its
-#'   own).
+#'   own). Its \code{fit.intercept} applies to one phenotype; across
+#'   conditions the wrapper centres each condition itself and refuses it.
 #'
 #'   \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
 #'   \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the
@@ -1785,7 +1786,6 @@ DprOptions <- function(...) {
         c(
             y = "supplied from the data by the pipeline",
             x = "supplied from the data by the pipeline",
-            w = "supplied from the data by the pipeline",
             fitting_method = "the wrapper's `fittingMethod`"
         ),
         "DprOptions"
@@ -1919,8 +1919,7 @@ AbessOptions <- function(...) {
             ),
             nfolds = "the wrapper's `nFolds` (l0learnWeights)",
             foldid = "the wrapper, which deals each sample into a fold",
-            seed = "R's random number generator, which deals the folds",
-            fit.intercept = "the wrapper, which centres each condition"
+            seed = "R's random number generator, which deals the folds"
         ),
         "AbessOptions"
     )
@@ -8113,6 +8112,12 @@ abessWeights <- function(
     if (!.isConditionMatrix(y)) {
         return(.abessGaussianFit(X, y, nfolds, user))
     }
+    if (is_in("fit.intercept", names(user))) {
+        abort(str_c(
+            "AbessOptions(fit.intercept = ) applies to one phenotype; across ",
+            "conditions abessWeights() centres each condition itself."
+        ))
+    }
     if (!anyNA(y)) {
         return(.abessMgaussianFit(X, y, nfolds, user))
     }
@@ -11171,7 +11176,9 @@ bglrWeights <- function(
 #' and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs` for
 #' full Bayesian MCMC inference. `rotate_variables` is held to `FALSE` under the
 #' assumption that any covariates have already been regressed out upstream; an
-#' intercept-only covariate matrix is supplied to `fit_model`.
+#' intercept-only covariate matrix is supplied to `fit_model`, unless
+#' `methodArgs` gives its own `w`: a matrix with a row per sample, such as a
+#' whitened intercept for data with no intercept of their own.
 #'
 #' @param X A numeric matrix of predictors.
 #' @param y A numeric response vector.
@@ -11215,8 +11222,8 @@ dprWeights <- function(
     }
     zeros <- rep(0, ncol(X))
     keep <- .dropZeroVariance(X, "dprWeights")
-    w <- matrix(1, nrow = nrow(X), ncol = 1)
     user <- as.list(methodArgs)
+    w <- .dprCovariates(user$w, nrow(X))
     callArgs <- list_modify(
         list(
             y = y,
@@ -11234,6 +11241,23 @@ dprWeights <- function(
     }
     kept <- if (retainX) fit else .withoutFields(fit, "x")
     `attr<-`(eff.wgt, "fit", .withFitVariantIds(kept, colnames(X)[keep]))
+}
+
+# fit_model()'s fixed-effect covariates: the caller's `w`, a matrix with a
+# row per sample, else the intercept alone.
+# @noRd
+.dprCovariates <- function(w, n) {
+    if (is.null(w)) {
+        return(matrix(1, nrow = n, ncol = 1L))
+    }
+    assertMatrix(
+        w,
+        mode = "numeric",
+        nrows = n,
+        min.cols = 1L,
+        any.missing = FALSE
+    )
+    w
 }
 
 #' @rdname dprWeights

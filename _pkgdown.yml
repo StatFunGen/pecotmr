@@ -724,6 +724,8 @@ reference:
       # twasZ() turns weights-methods plus GWAS summary statistics into a per-tuple
       # Z and p-value, then delegates cross-tuple pooling to combinePValues().
       - twasZ
+      - geneCorrelation
+      - genePrioritization
       - combinePValues
       - waldTestPval
 

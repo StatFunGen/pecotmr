@@ -113,3 +113,34 @@ test_that("AbessOptions refuses what pecotmr sets and what abess mishandles", {
     expect_equal(AbessOptions(support.size = 0:3)$support.size, 0:3)
     expect_equal(pecotmr:::.optionsInputType(AbessOptions()), "QtlDataset")
 })
+
+test_that("abess fits one phenotype without an intercept when asked", {
+    skip_if_not_installed("abess")
+    set.seed(2)
+    X <- `colnames<-`(matrix(rnorm(300 * 10, mean = 1), 300), paste0("v", 1:10))
+    y <- drop(X %*% c(1, 0, -0.8, rep(0, 7))) + rnorm(300, sd = 0.5)
+    w <- abessWeights(
+        X,
+        y,
+        fitRetention = "slim",
+        methodArgs = AbessOptions(fit.intercept = FALSE)
+    )
+    support <- which(w[, 1L] != 0)
+    expect_equal(support, c(1L, 3L))
+    expect_equal(
+        w[support, 1L],
+        coef(lm(y ~ 0 + X[, support])),
+        tolerance = 1e-6,
+        check.attributes = FALSE
+    )
+    expect_equal(attr(w, "fit")$intercept, 0)
+    d <- .rrwMulti(n = 80, p = 8, K = 3)
+    expect_error(
+        abessWeights(
+            d$X,
+            unname(d$Y),
+            methodArgs = AbessOptions(fit.intercept = FALSE)
+        ),
+        "applies to one phenotype"
+    )
+})

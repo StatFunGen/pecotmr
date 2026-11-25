@@ -1,0 +1,898 @@
+context("genePrioritization")
+
+# ===========================================================================
+# Fixture: genes on chr1 and chr6, five variants each, neighbours sharing a
+# variant, so their TWAS z-scores correlate. On chr6 the first eight sit in
+# the HLA region (TSS at 30 Mb) and the rest outside it (50 Mb). AR(1) LD
+# within each chromosome. Two genes of `features` have no weights.
+# ===========================================================================
+
+.gp_nGenes <- 32L
+.gp_nHla <- 8L
+.gp_nVariants <- 4L * .gp_nGenes + 1L
+
+.gp_layout <- function() {
+    chr1 <- 1000L + 100L * seq_len(.gp_nVariants)
+    # Genes 1-8 of chr6 start within the first 32 variants: the HLA ones.
+    hla <- seq_len(.gp_nVariants) <= 4L * .gp_nHla
+    chr6 <- ifelse(hla, 30e6, 50e6) + 100L * seq_len(.gp_nVariants)
+    data.frame(
+        chrom = rep(c("chr1", "chr6"), each = .gp_nVariants),
+        pos = as.integer(c(chr1, chr6)),
+        A1 = "T",
+        A2 = "C"
+    ) |>
+        transform(SNP = paste(chrom, pos, "C", "T", sep = ":"))
+}
+
+.gp_R <- function() {
+    block <- 0.5^abs(outer(
+        seq_len(.gp_nVariants),
+        seq_len(.gp_nVariants),
+        "-"
+    ))
+    as.matrix(Matrix::bdiag(block, block))
+}
+
+.gp_gwas <- function(layout = .gp_layout()) {
+    set.seed(21)
+    gr <- GenomicRanges::GRanges(
+        layout$chrom,
+        IRanges::IRanges(layout$pos, width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = layout$SNP,
+        A1 = layout$A1,
+        A2 = layout$A2,
+        Z = rnorm(nrow(layout), sd = 2)
+    )
+    GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = LdMatrix(.gp_R(), variants = layout),
+        qcOptions = list(qc = "done")
+    )
+}
+
+# Gene k of a chromosome takes variants 4k + 1..5 of it.
+.gp_geneVariants <- function(chromosome, k) {
+    offset <- if (chromosome == "chr1") 0L else .gp_nVariants
+    offset + 4L * (k - 1L) + 1:5
+}
+
+.gp_genes <- function() {
+    data.frame(
+        gene = c(
+            sprintf("a%02d", seq_len(.gp_nGenes)),
+            sprintf("b%02d", seq_len(.gp_nGenes))
+        ),
+        chrom = rep(c("chr1", "chr6"), each = .gp_nGenes),
+        k = rep(seq_len(.gp_nGenes), 2)
+    )
+}
+
+.gp_twasWeights <- function(layout = .gp_layout()) {
+    genes <- .gp_genes()
+    set.seed(5)
+    entries <- map(seq_len(nrow(genes)), function(i) {
+        idx <- .gp_geneVariants(genes$chrom[[i]], genes$k[[i]])
+        TwasWeightsRow(
+            layout$SNP[idx],
+            c(rnorm(4), 0),
+            cvResult = list(metrics = c(rsq = runif(1), pval = 0.01))
+        )
+    })
+    n <- nrow(genes)
+    TwasWeights(
+        studyName = rep("Q1", n),
+        context = rep("c1", n),
+        trait = genes$gene,
+        method = rep("ridge", n),
+        entry = entries
+    )
+}
+
+.gp_features <- function(layout = .gp_layout()) {
+    genes <- .gp_genes()
+    ids <- c(genes$gene, "c01", "c02")
+    starts <- c(
+        map_int(seq_len(nrow(genes)), function(i) {
+            layout$pos[[.gp_geneVariants(genes$chrom[[i]], genes$k[[i]])[[1L]]]]
+        }),
+        2000L,
+        3000L
+    )
+    set.seed(8)
+    SummarizedExperiment::SummarizedExperiment(
+        list(
+            features = matrix(
+                rbinom(length(ids) * 6L, 1L, 0.4),
+                length(ids),
+                dimnames = list(ids, sprintf("f%d", 1:6))
+            )
+        ),
+        rowRanges = GenomicRanges::GRanges(
+            c(genes$chrom, "chr1", "chr6"),
+            IRanges::IRanges(starts, width = 300L),
+            names = ids
+        )
+    )
+}
+
+.gp_inputs <- function() {
+    gwas <- .gp_gwas()
+    tw <- .gp_twasWeights()
+    list(
+        gwas = gwas,
+        tw = tw,
+        res = causalInferencePipeline(
+            gwas,
+            twasWeights = tw,
+            weightSelectionParam = WeightSelectionParam(methods = "all")
+        ),
+        features = .gp_features()
+    )
+}
+
+# A stand-in fit with a closed form, X'y on the whitened data, so the
+# plumbing around it can be checked exactly.
+.gp_crossFit <- function(fitMethod, whitened, options) {
+    as.numeric(crossprod(whitened$X, whitened$y))
+}
+
+test_that("each chromosome is scored by the fit that held it out", {
+    inp <- .gp_inputs()
+    local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
+    out <- genePrioritization(
+        inp$res,
+        inp$features,
+        inp$gwas,
+        twasWeights = inp$tw
+    )
+    expect_named(out, "G1")
+    scores <- out$G1$scores
+    expect_s4_class(scores, "GRanges")
+    expect_equal(names(scores), rownames(inp$features))
+    # The response: the one-sided z of each gene's TWAS z.
+    twas <- inp$res[inp$res$analysis == "twas"]
+    y <- set_names(pecotmr:::.zOneSided(twas$twasZ), twas$trait)
+    n <- 2L * .gp_nGenes
+    expect_equal(scores$y[seq_len(n)], unname(y[names(scores)[seq_len(n)]]))
+    expect_true(all(is.na(scores$y[n + 1:2])))
+    # The expected fit for chr1: the chr6 genes outside HLA, whitened by
+    # the one-sided correlation with the covariates projected out of y.
+    corr <- geneCorrelation(inp$res, inp$gwas, twasWeights = inp$tw)$G1
+    X <- SummarizedExperiment::assay(inp$features)
+    W <- vapply(
+        seq_len(n),
+        function(i) {
+            genes <- .gp_genes()
+            idx <- .gp_geneVariants(genes$chrom[[i]], genes$k[[i]])
+            w <- as.numeric(
+                pecotmr:::.twrRowResolveWeights(
+                    pecotmr:::.twrCellParts(inp$tw, i, "ridge")
+                )$weights
+            )
+            replace(numeric(2L * .gp_nVariants), idx, w)
+        },
+        numeric(2L * .gp_nVariants)
+    )
+    variance <- set_names(
+        diag(crossprod(W, .gp_R() %*% W)),
+        .gp_genes()$gene
+    )
+    rsq <- map_dbl(seq_len(n), function(i) {
+        pecotmr:::.cvMetricValue(
+            pecotmr:::.weightCvMetrics(
+                pecotmr:::.weightCellPart(
+                    i,
+                    pecotmr:::.weightCellIds(inp$tw),
+                    inp$tw
+                )
+            ),
+            "rsq"
+        )
+    })
+    covariates <- cbind(
+        nVariants = 4,
+        logNVariants = log(4),
+        weightVariance = variance,
+        logWeightVariance = log(variance),
+        cvRsq = rsq
+    )
+    train <- sprintf("b%02d", (.gp_nHla + 1L):.gp_nGenes)
+    whitened <- pecotmr:::.glsWhiten(
+        y[train],
+        X[train, ],
+        corr,
+        covariates = covariates
+    )
+    coef <- as.numeric(crossprod(whitened$X, whitened$y))
+    expect_equal(unname(out$G1$coefficients[, "chr1"]), coef)
+    chr1 <- names(scores)[
+        as.character(GenomicRanges::seqnames(scores)) == "chr1"
+    ]
+    expect_equal(
+        scores[chr1]$score,
+        as.numeric(X[chr1, ] %*% coef)
+    )
+    expect_equal(unique(scores[chr1]$chromosome), "chr1")
+    expect_equal(colnames(out$G1$coefficients), c("chr1", "chr6"))
+})
+
+test_that("HLA genes are scored but fitted on only when asked", {
+    inp <- .gp_inputs()
+    local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
+    out <- genePrioritization(
+        inp$res,
+        inp$features,
+        inp$gwas,
+        twasWeights = inp$tw,
+        covariates = FALSE
+    )
+    kept <- genePrioritization(
+        inp$res,
+        inp$features,
+        inp$gwas,
+        twasWeights = inp$tw,
+        covariates = FALSE,
+        excludeHla = FALSE
+    )
+    # chr6 is held out of its own fit, so only chr1's coefficients change.
+    expect_equal(
+        out$G1$coefficients[, "chr6"],
+        kept$G1$coefficients[, "chr6"]
+    )
+    expect_false(isTRUE(all.equal(
+        out$G1$coefficients[, "chr1"],
+        kept$G1$coefficients[, "chr1"]
+    )))
+    hla <- sprintf("b%02d", seq_len(.gp_nHla))
+    expect_true(all(is.finite(out$G1$scores[hla]$score)))
+})
+
+test_that("every fit method runs without an intercept", {
+    inp <- .gp_inputs()
+    engines <- c(
+        ridge = "glmnet",
+        lasso = "glmnet",
+        enet = "glmnet",
+        l0learn = "L0Learn",
+        abess = "abess",
+        mrash = "susieR",
+        sparsevb = "sparsevb",
+        susie = "susieR",
+        dprVb = "RcppDPR"
+    )
+    for (m in names(engines)) {
+        if (!requireNamespace(engines[[m]], quietly = TRUE)) {
+            next
+        }
+        out <- suppressWarnings(suppressMessages(capture.output(
+            res <- genePrioritization(
+                inp$res,
+                inp$features,
+                inp$gwas,
+                twasWeights = inp$tw,
+                fitMethod = m,
+                seed = 1
+            )
+        )))
+        expect_true(all(is.finite(res$G1$coefficients)), info = m)
+        expect_true(all(is.finite(res$G1$scores$score)), info = m)
+    }
+})
+
+test_that("the fit's options turn its intercept off, and only that", {
+    .gp_cs <- CredibleSetParam()
+    ridge <- pecotmr:::.gpOptions("ridge", GlmnetOptions(nfolds = 3), .gp_cs)
+    expect_identical(S4Vectors::metadata(ridge)$constructor, "GlmnetOptions")
+    expect_false(ridge$intercept)
+    expect_equal(ridge$nfolds, 3)
+    expect_false(pecotmr:::.gpOptions("abess", NULL, .gp_cs)$fit.intercept)
+    expect_error(
+        pecotmr:::.gpOptions("ridge", GlmnetOptions(intercept = TRUE), .gp_cs),
+        "cannot set intercept"
+    )
+    expect_error(
+        pecotmr:::.gpOptions("l0learn", GlmnetOptions(), .gp_cs),
+        "must be built with L0learnOptions\\(\\), not GlmnetOptions\\(\\)"
+    )
+    expect_error(
+        pecotmr:::.gpOptions("dprVb", DprOptions(w = matrix(1, 3, 1)), .gp_cs),
+        "cannot set w"
+    )
+    expect_error(
+        pecotmr:::.gpOptions("ridge", list(nfolds = 3), .gp_cs),
+        "must be built with GlmnetOptions"
+    )
+})
+
+test_that("credibleSetParam sets SuSiE's L, and only SuSiE's", {
+    susie <- pecotmr:::.gpOptions(
+        "susie",
+        SusieOptions(max_iter = 50),
+        CredibleSetParam(maxNumSingleEffects = 25L)
+    )
+    expect_equal(susie$L, 25L)
+    expect_equal(susie$max_iter, 50)
+    expect_false(susie$intercept)
+    expect_null(susie$L_greedy)
+    greedy <- pecotmr:::.gpOptions(
+        "susie",
+        NULL,
+        CredibleSetParam(maxNumSingleEffectsGreedy = 5L)
+    )
+    expect_equal(greedy$L, 10L)
+    expect_equal(greedy$L_greedy, 5L)
+    inp <- .gp_inputs()
+    local_mocked_bindings(
+        .fmFitSusieIndiv = function(X, y, token, userArgs = NULL, ...) {
+            abort(str_c("fitted with L = ", userArgs$L))
+        },
+        .package = "pecotmr"
+    )
+    expect_error(
+        genePrioritization(
+            inp$res,
+            inp$features,
+            inp$gwas,
+            twasWeights = inp$tw,
+            fitMethod = "susie",
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 25L)
+        ),
+        "fitted with L = 25"
+    )
+    expect_error(
+        genePrioritization(
+            inp$res,
+            inp$features,
+            inp$gwas,
+            twasWeights = inp$tw,
+            credibleSetParam = CredibleSetParam(maxNumSingleEffects = 25L)
+        ),
+        "sets SuSiE's L, and the ridge fit has none"
+    )
+})
+
+test_that("MR covariates count the instruments; missing ones are left out", {
+    study <- list(
+        genes = list(
+            list(gene = "a", nIV = 2),
+            list(gene = "b", nIV = 5)
+        ),
+        variance = c(1, 1)
+    )
+    expect_equal(
+        pecotmr:::.gpCovariates(study, "mr", NULL),
+        cbind(nInstruments = c(a = 2, b = 5), logNInstruments = log(c(2, 5)))
+    )
+    twas <- list(
+        genes = list(
+            list(gene = "a", coef = c(1, 0, 2), cellKey = "ka"),
+            list(gene = "b", coef = c(1, 1, 1), cellKey = "kb")
+        ),
+        variance = c(2, 3)
+    )
+    expect_message(
+        table <- pecotmr:::.gpCovariates(
+            twas,
+            "twas",
+            c(ka = 0.2, kb = NA)
+        ),
+        "cvRsq are missing for some genes"
+    )
+    expect_equal(
+        colnames(table),
+        c(
+            "nVariants",
+            "logNVariants",
+            "weightVariance",
+            "logWeightVariance"
+        )
+    )
+    expect_equal(unname(table[, "nVariants"]), c(2, 3))
+})
+
+test_that("genePrioritization refuses features it cannot read", {
+    inp <- .gp_inputs()
+    expect_error(
+        genePrioritization(
+            inp$res,
+            SummarizedExperiment::assay(inp$features),
+            inp$gwas,
+            twasWeights = inp$tw
+        ),
+        "RangedSummarizedExperiment"
+    )
+    unnamed <- inp$features
+    rownames(unnamed) <- NULL
+    expect_error(
+        genePrioritization(inp$res, unnamed, inp$gwas, twasWeights = inp$tw),
+        "row names"
+    )
+    # Only chr1 genes in features: holding chr1 out leaves nothing to fit.
+    chr1 <- inp$features[seq_len(.gp_nGenes), ]
+    expect_error(
+        suppressMessages(genePrioritization(
+            inp$res,
+            chr1,
+            inp$gwas,
+            twasWeights = inp$tw
+        )),
+        "holding out chr1 leaves 0 gene"
+    )
+})
+
+# ===========================================================================
+# geneCorrelation
+# ===========================================================================
+
+# ===========================================================================
+# Fixture: 30 variants on chr1 with AR(1) LD in one LdMatrix, a GWAS split
+# into two rows (variants 1-15 and 16-30), and four genes: g1 and g2 in the
+# first row, g3 across both, g4 in the second. g2's weights name the variants
+# with their alleles swapped, so they enter in the GWAS coding negated.
+# ===========================================================================
+
+.gc_p <- 30L
+.gc_R <- 0.6^abs(outer(seq_len(.gc_p), seq_len(.gc_p), "-"))
+.gc_variants <- .testLdVariants(.gc_p, "chr1", 1000L)
+.gc_ids <- .gc_variants$SNP
+.gc_flipped <- sprintf("chr1:%d:T:C", .gc_variants$pos)
+
+.gc_genes <- list(
+    g3 = list(idx = 12:20, w = c(0.3, -0.1, 0.2, 0.4, 0, 0.1, -0.2, 0.3, 0.1)),
+    g1 = list(idx = 1:6, w = c(0.4, 0.2, 0, 0.1, 0.3, -0.2)),
+    g4 = list(idx = 22:28, w = c(0.2, 0.2, 0.1, -0.3, 0.4, 0.1, 0.2)),
+    g2 = list(idx = 4:10, w = c(0.1, 0.3, 0.2, -0.1, 0.2, 0.3, 0.1))
+)
+
+.gc_z <- function() {
+    set.seed(11)
+    rnorm(.gc_p, sd = 2)
+}
+
+.gc_gwas <- function(z = .gc_z(), study = "G1") {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(.gc_variants$pos, width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = .gc_ids,
+        A1 = "T",
+        A2 = "C",
+        Z = z,
+        N = 5000L,
+        MAF = .gc_variants$AF
+    )
+    GwasSumStats(
+        studyName = study,
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = LdMatrix(.gc_R, variants = .gc_variants, nSamples = 500),
+        qcOptions = list(qc = "done"),
+        region = GenomicRanges::GRanges(
+            "chr1",
+            IRanges::IRanges(c(1000L, 2500L), c(2400L, 3900L))
+        )
+    )
+}
+
+.gc_geneIds <- function(name) {
+    gene <- .gc_genes[[name]]
+    if (name == "g2") .gc_flipped[gene$idx] else .gc_ids[gene$idx]
+}
+
+.gc_twasWeights <- function(method = "lasso") {
+    n <- length(.gc_genes)
+    TwasWeights(
+        studyName = rep("Q1", n),
+        context = rep("c1", n),
+        trait = names(.gc_genes),
+        method = rep(method, n),
+        entry = map2(
+            map(names(.gc_genes), .gc_geneIds),
+            map(.gc_genes, "w"),
+            TwasWeightsRow
+        )
+    )
+}
+
+.gc_run <- function(gwas, tw) {
+    causalInferencePipeline(
+        gwas,
+        twasWeights = tw,
+        weightSelectionParam = WeightSelectionParam(methods = "all")
+    )
+}
+
+# The genes' weights in the GWAS coding as columns over all variants, in
+# genomic order g1..g4.
+.gc_weightMatrix <- function() {
+    genes <- c("g1", "g2", "g3", "g4")
+    W <- vapply(
+        genes,
+        function(g) {
+            gene <- .gc_genes[[g]]
+            sign <- if (g == "g2") -1 else 1
+            replace(numeric(.gc_p), gene$idx, sign * gene$w)
+        },
+        numeric(.gc_p)
+    )
+    W
+}
+
+# rho = w_g' R w_h / sqrt(...), zero for genes that share no GWAS row.
+.gc_expected <- function(W) {
+    C <- crossprod(W, .gc_R %*% W)
+    rho <- C / sqrt(outer(diag(C), diag(C)))
+    # g1, g2 in row 1; g3 in both; g4 in row 2.
+    rho["g1", "g4"] <- rho["g4", "g1"] <- 0
+    rho["g2", "g4"] <- rho["g4", "g2"] <- 0
+    rho
+}
+
+test_that("TWAS z correlation is w'Rw normalized, within shared GWAS rows", {
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    res <- .gc_run(gwas, tw)
+    out <- geneCorrelation(res, gwas, twasWeights = tw, scale = "signed")
+    expect_named(out, "G1")
+    m <- out$G1
+    expect_s4_class(m, "dsCMatrix")
+    # Genomic order, whatever order the weights came in.
+    expect_equal(rownames(m), c("g1", "g2", "g3", "g4"))
+    expect_equal(as.matrix(m), .gc_expected(.gc_weightMatrix()))
+    # Genes that share no row are structural zeros, not stored values.
+    expect_equal(m["g1", "g4"], 0)
+    expect_false(m["g1", "g3"] == 0)
+})
+
+test_that("each scale transforms the z-scores' correlation", {
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    res <- .gc_run(gwas, tw)
+    signed <- as.matrix(
+        geneCorrelation(res, gwas, twasWeights = tw, scale = "signed")$G1
+    )
+    squared <- geneCorrelation(res, gwas, twasWeights = tw, scale = "squared")
+    expect_equal(as.matrix(squared$G1), signed^2)
+    absolute <- geneCorrelation(
+        res,
+        gwas,
+        twasWeights = tw,
+        scale = "absolute"
+    )
+    r <- signed["g1", "g2"]
+    expect_equal(
+        absolute$G1["g1", "g2"],
+        (sqrt(1 - r^2) + r * asin(r) - 1) / (pi / 2 - 1)
+    )
+    oneSided <- geneCorrelation(res, gwas, twasWeights = tw)
+    expect_equal(
+        oneSided$G1["g1", "g2"],
+        pecotmr:::.oneSidedZCorrelation(r)
+    )
+    expect_equal(unname(diag(as.matrix(oneSided$G1))), rep(1, 4))
+})
+
+test_that("the |z| and one-sided correlations match simulated z-scores", {
+    set.seed(3)
+    n <- 2e6
+    z1 <- rnorm(n)
+    rhos <- c(-0.9, 0.3, 0.7, 0.99)
+    simulated <- vapply(
+        rhos,
+        function(r) {
+            z2 <- r * z1 + sqrt(1 - r^2) * rnorm(n)
+            c(
+                abs = cor(abs(z1), abs(z2)),
+                oneSided = cor(
+                    pecotmr:::.zOneSided(z1),
+                    pecotmr:::.zOneSided(z2)
+                )
+            )
+        },
+        numeric(2)
+    )
+    # Monte Carlo error at n = 2e6 is about 7e-4.
+    expect_equal(
+        pecotmr:::.gcScaleCorrelation(rhos, "absolute"),
+        simulated["abs", ],
+        tolerance = 3e-3
+    )
+    expect_equal(
+        pecotmr:::.oneSidedZCorrelation(rhos),
+        simulated["oneSided", ],
+        tolerance = 3e-3
+    )
+    expect_equal(pecotmr:::.oneSidedZCorrelation(c(0, 1, -1)), c(0, 1, 1))
+})
+
+test_that("the one-sided z is Phi^-1(1 - p) of the two-sided p-value", {
+    z <- c(-6, -2, -0.3, 0.01, 1, 3, 9)
+    expect_equal(
+        pecotmr:::.zOneSided(z),
+        qnorm(2 * pnorm(-abs(z)), lower.tail = FALSE)
+    )
+})
+
+test_that("one matrix per GWAS study", {
+    gwas <- combineGwasSumStats(
+        .gc_gwas(study = "G1"),
+        .gc_gwas(study = "G2")
+    )
+    tw <- .gc_twasWeights()
+    res <- .gc_run(gwas, tw)
+    out <- geneCorrelation(res, gwas, twasWeights = tw, scale = "signed")
+    expect_named(out, c("G1", "G2"))
+    expect_equal(as.matrix(out$G2), .gc_expected(.gc_weightMatrix()))
+})
+
+test_that("a gene with two rows needs method to choose one", {
+    gwas <- .gc_gwas()
+    tw <- combineTwasWeights(
+        .gc_twasWeights("lasso"),
+        .gc_twasWeights("enet")
+    )
+    res <- .gc_run(gwas, tw)
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = tw),
+        "more than one twas row against one GWAS study"
+    )
+    out <- geneCorrelation(
+        res,
+        gwas,
+        twasWeights = tw,
+        method = "enet",
+        scale = "signed"
+    )
+    expect_equal(as.matrix(out$G1), .gc_expected(.gc_weightMatrix()))
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = tw, method = "susie"),
+        "no twas row with a statistic for method 'susie'"
+    )
+})
+
+test_that("inputs other than x's are refused", {
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    res <- .gc_run(gwas, tw)
+    set.seed(99)
+    other <- .gc_gwas(z = rnorm(.gc_p))
+    expect_error(
+        geneCorrelation(res, other, twasWeights = tw),
+        "does not match the one these inputs give"
+    )
+    # Without allele flips g2 matches nothing, so it has no weights at all.
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = tw, alleleFlip = FALSE),
+        "trait=g2"
+    )
+    expect_error(
+        geneCorrelation(res, gwas),
+        "TWAS rows need the weights"
+    )
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = tw, analysis = "mr"),
+        "MR rows need the `fineMappingResult`"
+    )
+    expect_error(
+        geneCorrelation(GenomicRanges::GRanges(), gwas, twasWeights = tw),
+        "is not a causalInferencePipeline\\(\\) result"
+    )
+})
+
+# ---------------------------------------------------------------------------
+# MR: a fine-mapping row per gene, its instruments the top loci with pip > 0.5
+# in one credible set.
+# ---------------------------------------------------------------------------
+
+.gc_mrGenes <- list(
+    g1 = list(idx = c(2L, 4L, 5L), beta = c(0.3, -0.2, 0.25)),
+    g2 = list(idx = c(6L, 8L), beta = c(0.2, 0.15)),
+    g3 = list(idx = c(14L, 17L), beta = c(-0.3, 0.2))
+)
+
+.gc_fineMapping <- function() {
+    rows <- map(.gc_mrGenes, function(gene) {
+        n <- length(gene$idx)
+        FineMappingRow(
+            variantIds = .gc_ids[gene$idx],
+            susieFit = list(),
+            topLoci = data.frame(
+                variant_id = .gc_ids[gene$idx],
+                pip = seq(0.9, 0.6, length.out = n),
+                posterior_mean = gene$beta,
+                posterior_sd = rep(0.05, n),
+                cs_0.95 = rep("susie_1", n)
+            )
+        )
+    })
+    n <- length(rows)
+    QtlFineMappingResult(
+        studyName = rep("Q1", n),
+        context = rep("c1", n),
+        trait = names(rows),
+        method = rep("susie", n),
+        entry = unname(rows)
+    )
+}
+
+# The outcome's se and the exposure for gene `g`'s instruments.
+.gc_mrInputs <- function(gene, z) {
+    maf <- .gc_variants$AF[gene$idx]
+    zg <- z[gene$idx]
+    seY <- 1 / sqrt(2 * maf * (1 - maf) * (5000 + zg^2))
+    list(
+        z = zg,
+        seY = seY,
+        betaY = zg * seY,
+        betaX = gene$beta,
+        seX = rep(0.05, length(gene$idx)),
+        pip = seq(0.9, 0.6, length.out = length(gene$idx))
+    )
+}
+
+# Per-variant IVW: a = w seY / betaX / sum(w), w = 1 / rSe^2.
+.gc_ivwColumn <- function(gene, z) {
+    x <- .gc_mrInputs(gene, z)
+    rSe <- sqrt(
+        (x$seY / x$betaX)^2 + (x$betaY * x$seX / x$betaX^2)^2
+    )
+    w <- 1 / rSe^2
+    replace(numeric(.gc_p), gene$idx, w * x$seY / x$betaX / sum(w))
+}
+
+# One credible set: its PIP-weighted ratio, a = pNorm seY / betaX.
+.gc_csColumn <- function(gene, z) {
+    x <- .gc_mrInputs(gene, z)
+    replace(
+        numeric(.gc_p),
+        gene$idx,
+        x$pip / sum(x$pip) * x$seY / x$betaX
+    )
+}
+
+.gc_mrExpected <- function(column, z) {
+    A <- vapply(.gc_mrGenes, column, numeric(.gc_p), z = z)
+    C <- crossprod(A, .gc_R %*% A)
+    C / sqrt(outer(diag(C), diag(C)))
+}
+
+test_that("MR correlation uses the IVW estimate's linear weights", {
+    gwas <- .gc_gwas()
+    z <- .gc_z()
+    fmr <- .gc_fineMapping()
+    res <- causalInferencePipeline(gwas, fineMappingResult = fmr)
+    out <- geneCorrelation(
+        res,
+        gwas,
+        fineMappingResult = fmr,
+        analysis = "mr",
+        scale = "signed"
+    )
+    expect_equal(as.matrix(out$G1), .gc_mrExpected(.gc_ivwColumn, z))
+    cs <- MrParam(method = "csAware")
+    resCs <- causalInferencePipeline(
+        gwas,
+        fineMappingResult = fmr,
+        mrParam = cs
+    )
+    outCs <- geneCorrelation(
+        resCs,
+        gwas,
+        fineMappingResult = fmr,
+        analysis = "mr",
+        scale = "signed",
+        mrParam = cs
+    )
+    expect_equal(as.matrix(outCs$G1), .gc_mrExpected(.gc_csColumn, z))
+    # The other MR method's weights give other estimates.
+    expect_error(
+        geneCorrelation(
+            res,
+            gwas,
+            fineMappingResult = fmr,
+            analysis = "mr",
+            mrParam = cs
+        ),
+        "does not match"
+    )
+})
+
+test_that("a variant in two credible sets sums its coefficients", {
+    out <- pecotmr:::.gcByVariant(c("a", "b", "a"), c(1, 2, 3), c(5, 6, 5))
+    expect_equal(out$variantIds, c("a", "b"))
+    expect_equal(out$coef, c(4, 2))
+    expect_equal(out$z, c(5, 6))
+})
+
+# ---------------------------------------------------------------------------
+# Whitening
+# ---------------------------------------------------------------------------
+
+.gc_whitenFixture <- function() {
+    genes <- c("a", "b", "c", "d", "e")
+    sigma <- Matrix::sparseMatrix(
+        i = c(1:5, 1, 1, 4),
+        j = c(1:5, 2, 3, 5),
+        x = c(rep(1, 5), 0.5, -0.3, 0.4),
+        dims = c(5, 5),
+        dimnames = list(genes, genes),
+        symmetric = TRUE
+    )
+    set.seed(5)
+    list(
+        sigma = sigma,
+        y = set_names(rnorm(5, sd = 2), genes),
+        X = matrix(
+            rbinom(15, 1, 0.5),
+            5,
+            dimnames = list(rev(genes), c("f1", "f2", "f3"))
+        ),
+        covariates = matrix(rnorm(5), 5, dimnames = list(genes, "size"))
+    )
+}
+
+test_that(".glsWhiten whitens by the ridged correlation as PoPS does", {
+    fx <- .gc_whitenFixture()
+    out <- pecotmr:::.glsWhiten(
+        fx$y,
+        fx$X,
+        fx$sigma,
+        covariates = fx$covariates
+    )
+    dense <- as.matrix(fx$sigma)
+    ridge <- abs(min(0, eigen(dense)$values)) +
+        0.05 +
+        0.9 * max(0, var(fx$y) - 1)
+    Linv <- solve(t(chol(dense + diag(ridge, 5))))
+    one <- Linv %*% rep(1, 5)
+    yW <- Linv %*% fx$y
+    XW <- Linv %*% fx$X[names(fx$y), ]
+    nuisance <- cbind(one, Linv %*% fx$covariates)
+    expect_equal(
+        out$y,
+        set_names(as.numeric(lm.fit(nuisance, yW)$residuals), names(fx$y))
+    )
+    expect_equal(
+        out$X,
+        `dimnames<-`(
+            lm.fit(one, XW)$residuals,
+            list(names(fx$y), colnames(fx$X))
+        )
+    )
+})
+
+test_that(".glsWhiten splits the correlation into its independent blocks", {
+    fx <- .gc_whitenFixture()
+    blocks <- pecotmr:::.glsBlocks(fx$sigma)
+    expect_setequal(map(blocks, sort), list(1:3, 4:5))
+    plain <- pecotmr:::.glsWhiten(fx$y, fx$X, fx$sigma, regularize = FALSE)
+    Linv <- solve(t(chol(as.matrix(fx$sigma))))
+    one <- Linv %*% rep(1, 5)
+    expect_equal(
+        unname(plain$y),
+        as.numeric(lm.fit(one, Linv %*% fx$y)$residuals)
+    )
+})
+
+test_that(".glsWhiten needs every gene of y in the correlation and X", {
+    fx <- .gc_whitenFixture()
+    y <- c(fx$y, z = 1)
+    expect_error(
+        pecotmr:::.glsWhiten(y, fx$X, fx$sigma),
+        "1 gene\\(s\\) of `y` are not in the gene correlation: z"
+    )
+    expect_error(
+        pecotmr:::.glsWhiten(fx$y, fx$X[1:4, ], fx$sigma),
+        "not in `X`"
+    )
+    expect_error(
+        pecotmr:::.glsWhiten(unname(fx$y), fx$X, fx$sigma),
+        "must be named by gene"
+    )
+})
