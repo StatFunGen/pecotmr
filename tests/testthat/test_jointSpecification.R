@@ -1972,13 +1972,18 @@ test_that(".enumerateComposedSumstatGroups: empty scope and no complement", {
 })
 
 # -----------------------------------------------------------------------------
-# .defaultJointSpec
+# .assertJointSpecForJointMethods
 # -----------------------------------------------------------------------------
 
-test_that(".defaultJointSpec: trait beats context; single axes -> empty", {
-    expect_equal(pecotmr:::.defaultJointSpec(3L, 2L)[[1L]]$axes, "trait")
-    expect_equal(pecotmr:::.defaultJointSpec(2L, 1L)[[1L]]$axes, "context")
-    expect_equal(pecotmr:::.defaultJointSpec(1L, 1L), list())
+test_that("joint methods need a jointSpecification; others do not", {
+    check <- pecotmr:::.assertJointSpecForJointMethods
+    spec <- list(list(axes = "context", scope = NULL))
+    expect_error(
+        check(list(), c("mvsusie", "fsusie"), "caller"),
+        "caller: mvsusie, fsusie fit conditions jointly"
+    )
+    expect_silent(check(list(), character(0), "caller"))
+    expect_silent(check(spec, "mvsusie", "caller"))
 })
 
 # -----------------------------------------------------------------------------

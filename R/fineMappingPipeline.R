@@ -39,10 +39,9 @@
 #'           sumstat side of a \code{MultiStudyQtlDataset}); rejected on
 #'           individual-level \code{QtlDataset}.}
 #'     \item{\code{mvsusie}}{\code{mvsusieR::mvsusie} on individual-
-#'           level input (requires multi-trait OR multi-context Y),
-#'           \code{mvsusieR::mvsusie_rss} on sumstat input (requires
-#'           multi-context within a single (study, trait) group).
-#'           Errors on \code{GwasSumStats} input.}
+#'           level input, \code{mvsusieR::mvsusie_rss} on sumstat input,
+#'           over the groups \code{jointSpecification} makes, which it
+#'           needs. Errors on \code{GwasSumStats} input.}
 #'     \item{\code{mvsusieInf}}{\code{unmappable_effects = "inf"} variant
 #'           of \code{mvsusie}, set by \code{\link{MvsusieInfOptions}}:
 #'           the polygenic effects are integrated out, with a covariance
@@ -61,9 +60,9 @@
 #'           matrices of its mr.mash fit and the canonical ones, over its
 #'           grid) when the run has one, else mvsusieR's. The same
 #'           observation rule as \code{mvsusieInf} applies.}
-#'     \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
-#'           per context. Individual-level only; errors on any
-#'           SumStats input.}
+#'     \item{\code{fsusie}}{\code{fsusieR::susiF} joint fit over the
+#'           groups \code{jointSpecification} makes, which it needs.
+#'           Individual-level only; errors on any SumStats input.}
 #'     \item{\code{mrmash}}{Always rejected here. \code{mr.mash} is
 #'           a TWAS weight-oriented method and lives in
 #'           \code{\link{twasWeightsPipeline}}.}
@@ -277,11 +276,12 @@
 #'   \code{min(nPCs, usable traits)}.
 #' @param jointSpecification Optional joint-fit specification saying which
 #'   axes the joint methods (\code{mvsusie}, \code{mvsusieInf},
-#'   \code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the default)
-#'   they fit across traits if the input has two or more, else across
-#'   contexts. Otherwise give a character vector of axes (one spec) or a list
-#'   of specs. A spec is a character vector drawn from \code{"study"},
-#'   \code{"context"} and \code{"trait"}, or
+#'   \code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the
+#'   default) every method is fitted one (study, context, trait) at a time,
+#'   and the joint methods stop the run, since they need this to say which
+#'   conditions they fit together. Otherwise give a character vector of axes
+#'   (one spec) or a list of specs. A spec is a character vector drawn from
+#'   \code{"study"}, \code{"context"} and \code{"trait"}, or
 #'   \code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
 #'   (keys \code{study}, \code{context}, \code{trait}) limits the fit to the
 #'   listed values, each of which must exist in \code{data}. A list-form
@@ -3279,6 +3279,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 # here, weights there); the structure should not.
 # @noRd
 .fmQdsJointPhase <- function(parsedJointSpec, norm, cfg) {
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        intersect(norm$tokens, .fmMultivariateTokens()),
+        "fineMappingPipeline(QtlDataset)"
+    )
     if (length(parsedJointSpec) == 0L) {
         return(list(
             done = FALSE,
@@ -3324,7 +3329,16 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     jointResult
 }
 
+# A multi-study run's methods for a study the joint fits left nothing to fit
+# but its top PCs (`usePCA`): no method, and so no joint phase.
+# @noRd
+.fmTopPcsOnly <- function() {
+    structure(list(), class = "pecotmrTopPcsOnly")
+}
+
 # Normalize methods, capability-check them, then hand off to the joint phase.
+# A study of a multi-study run left only its top PCs (.fmTopPcsOnly()) has
+# no tokens.
 # @noRd
 .fmQdsResolveTokens <- function(
     jointSpecification,
@@ -3333,6 +3347,14 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     maxNumSingleEffectsGreedy,
     cfg
 ) {
+    if (inherits(methods, "pecotmrTopPcsOnly")) {
+        return(list(
+            done = TRUE,
+            work = .qtlWorkValue(NULL),
+            tokens = character(0),
+            methodArgs = list()
+        ))
+    }
     parsedJointSpec <- parseJointSpecification(jointSpecification, cfg$data)
     norm <- .fmNormalizeMethods(
         methods,
@@ -3355,8 +3377,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 
 # Resolve the study, the contexts to use, and the per-context trait lists.
 # `contexts` / `traitId` arrive parsed (parseContexts() / parseTraitIds()),
-# which is where requested contexts were checked. Returns `p` extended with
-# study / useCtx / perCtxTraits / nCtx / nTraits.
+# which is where requested contexts were checked. Returns study / useCtx /
+# perCtxTraits.
 # @noRd
 .fmQdsResolveContexts <- function(data, contexts, traitId, region) {
     useCtx <- .selectedContexts(contexts, studyName(data)) %||% contexts(data)
@@ -3377,40 +3399,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     list(
         study = studyName(data),
         useCtx = useCtx,
-        perCtxTraits = perCtxTraits,
-        nCtx = length(useCtx),
-        nTraits = length(allTraits)
-    )
-}
-
-# Partition tokens into univariate / mvSuSiE / fsusie sets and validate the
-# multivariate requirements (the mvSuSiE methods need multi-trait OR
-# multi-context; fsusie needs multi-trait per context). Returns `p` extended
-# with the three sets.
-# @noRd
-.fmQdsSplitTokens <- function(tokens, nCtx, nTraits) {
-    univTokens <- tokens[!is_in(tokens, .fmMultivariateTokens())]
-    mvTokens <- tokens[is_in(tokens, .fmMvsusieTokens())]
-    fsTokens <- tokens[tokens == "fsusie"]
-    if (length(mvTokens) > 0L && nCtx < 2L && nTraits < 2L) {
-        msg <- glue(
-            "fineMappingPipeline(QtlDataset): {str_flatten(mvTokens, ', ')} ",
-            "requires multi-trait or multi-context input (got {nTraits} ",
-            "trait(s) x {nCtx} context(s))."
-        )
-        abort(msg)
-    }
-    if (length(fsTokens) > 0L && nTraits < 2L) {
-        msg <- glue(
-            "fineMappingPipeline(QtlDataset): fsusie requires multi-trait ",
-            "input within a context (got {nTraits} trait(s))."
-        )
-        abort(msg)
-    }
-    list(
-        univTokens = univTokens,
-        mvTokens = mvTokens,
-        fsTokens = fsTokens
+        perCtxTraits = perCtxTraits
     )
 }
 
@@ -3458,32 +3447,6 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
             if (isTRUE(cfg$usePCA)) list(.fmPcaWork(cfg))
         ),
         list_flatten
-    )
-}
-
-# Multivariate dispatch via the joint engine (auto-detected shape) for
-# mvsusie / fsusie WITHOUT an explicit jointSpecification. An explicit spec
-# consumes those tokens, so they reach here only when there was none: the
-# explicit plan, `jointWork`, stands as it is when no multivariate token is
-# left, and has no fits otherwise.
-# @noRd
-.fmQdsAutoJointWork <- function(
-    cfg,
-    mvTokens,
-    fsTokens,
-    jointWork,
-    methodArgs,
-    nCtx,
-    nTraits
-) {
-    if (length(mvTokens) == 0L && length(fsTokens) == 0L) {
-        return(jointWork)
-    }
-    .fmJointSpecsWork(
-        .defaultJointSpec(nCtx, nTraits),
-        c(mvTokens, fsTokens),
-        methodArgs,
-        cfg
     )
 }
 
@@ -3542,9 +3505,9 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     .rbindFineMappingResult(perTupleResult, jointResult, ldReference = NULL)
 }
 
-# Resolve the context/trait tuples, split the tokens across the univariate,
-# multivariate and functional paths, dispatch one row per tuple and assemble
-# the result. Carved out of .fmPipelineQtlDataset purely to shorten it --
+# Resolve the context/trait tuples, dispatch one row per tuple alongside the
+# joint fits a jointSpecification planned (`jointWork`) and assemble the
+# result. Carved out of .fmPipelineQtlDataset purely to shorten it --
 # every argument is one the entry point already holds, so the two still have
 # to be read together.
 # @noRd
@@ -3567,7 +3530,6 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         traitId = traitId,
         region = region
     )
-    split <- .fmQdsSplitTokens(tokens, ctxInfo$nCtx, ctxInfo$nTraits)
     rowsWork <- .fmQdsRowsWork(.fmQdsRunCfg(
         cfg,
         initializeWithSusieInf = initializeWithSusieInf,
@@ -3576,20 +3538,11 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         phenotypeFilter = phenotypeFilter,
         perCtxTraits = ctxInfo$perCtxTraits,
         studyName = ctxInfo$study,
-        univTokens = split$univTokens,
+        univTokens = tokens,
         useCtx = ctxInfo$useCtx,
         usePCA = usePCA
     ))
-    autoJointWork <- .fmQdsAutoJointWork(
-        cfg,
-        mvTokens = split$mvTokens,
-        fsTokens = split$fsTokens,
-        jointWork = jointWork,
-        methodArgs = methodArgs,
-        nCtx = ctxInfo$nCtx,
-        nTraits = ctxInfo$nTraits
-    )
-    .fmQdsRunPaths(list(rowsWork, autoJointWork), cfg, region)
+    .fmQdsRunPaths(list(rowsWork, jointWork), cfg, region)
 }
 
 # A run's paths, all planned, so one read of a window serves them all.
@@ -3706,7 +3659,9 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         credibleSetParam$maxNumSingleEffectsGreedy,
         cfg
     )
-    out <- if (rt$done) {
+    # The top-PC fits run whatever the methods, so they still have to run
+    # when the joint fits took every method.
+    out <- if (rt$done && !isTRUE(usePCA)) {
         .fmQdsJointOnly(rt$work, cfg)
     } else {
         .fmQdsRunAndAssemble(
@@ -3768,7 +3723,7 @@ setMethod(
         if (length(specs) > 0L) cfg$studyMethods else cfg$methods,
         "individualImpl"
     )
-    if (length(m) == 0L) {
+    if (length(m) == 0L && !isTRUE(cfg$usePCA)) {
         return(NULL)
     }
     # `cfg` carries the parsed selection for every study; this study gets its
@@ -3787,7 +3742,8 @@ setMethod(
     # pins.
     fineMappingPipeline(
         data = qd,
-        methods = m,
+        # With no method left for it, a study still fits its top PCs.
+        methods = if (length(m) > 0L) m else .fmTopPcsOnly(),
         jointSpecification = if (length(specs) > 0L) specs,
         contexts = .selectedContexts(cfg$contexts, s),
         traitId = .studyTraitIdArg(cfg$traitId, s),
@@ -3877,6 +3833,11 @@ setMethod(
 # responsibilities, same done / result shape.
 # @noRd
 .fmMsJointPhase <- function(parsedJointSpec, norm, cfg) {
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        intersect(norm$tokens, .fmMultivariateTokens()),
+        "fineMappingPipeline(MultiStudyQtlDataset)"
+    )
     if (length(parsedJointSpec) == 0L) {
         return(list(
             done = FALSE,
@@ -3890,7 +3851,10 @@ setMethod(
     # fits its joint specs along with them, on one read of each window.
     narrowed <- .fmNarrowAfterJoint(norm$tokens, norm$methodArgs)
     jointTokens <- intersect(norm$tokens, .fmMultivariateTokens())
-    withComponents <- length(narrowed$tokens) > 0L && length(jointTokens) > 0L
+    # Each study's top-PC fits run whatever the methods, so with them the
+    # components still run when the joint fits took every method.
+    toComponents <- length(narrowed$tokens) > 0L || isTRUE(cfg$usePCA)
+    withComponents <- toComponents && length(jointTokens) > 0L
     jointResult <- .fmDispatchJointSpecsMultiStudy(
         parsedJointSpec,
         jointTokens,
@@ -3898,7 +3862,7 @@ setMethod(
         cfg,
         components = !withComponents
     )
-    if (length(narrowed$tokens) == 0L) {
+    if (!toComponents) {
         if (is.null(jointResult)) {
             abort(glue(
                 "fineMappingPipeline(MultiStudyQtlDataset): no joint fits ",
@@ -4130,6 +4094,7 @@ setMethod(
         ),
         genotypeFilterParam = cfg$genotypeFilterParam,
         panelFilterParam = cfg$panelFilterParam,
+        usePCA = cfg$usePCA,
         # For the joint fits on the summary-statistics component
         # (.fmMultiStudySumStats())
         susieRssParam = cfg$susieRssParam,
@@ -4182,6 +4147,11 @@ setMethod(
 # responsibilities, same done / result shape.
 # @noRd
 .fmQssJointPhase <- function(parsedJointSpec, norm, cfg) {
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        intersect(norm$tokens, .fmMultivariateTokens()),
+        "fineMappingPipeline(QtlSumStats)"
+    )
     if (length(parsedJointSpec) == 0L) {
         return(list(
             done = FALSE,
@@ -4566,54 +4536,6 @@ NULL
     )
 }
 
-# Partition tokens into the univariate RSS family (everything that isn't
-# multivariate) and the mvSuSiE methods, validating that they have >= 2
-# contexts for at least one (study, trait) group.
-# @noRd
-.fmQssSplitTokens <- function(tokens, sel) {
-    univTokens <- tokens[!is_in(tokens, .fmMultivariateTokens())]
-    mvTokens <- tokens[is_in(tokens, .fmMvsusieTokens())]
-    if (length(mvTokens) > 0L) {
-        groupKey <- str_c(
-            sel$studyCol[sel$selRows],
-            sel$traitCol[sel$selRows],
-            sep = "||"
-        )
-        perGroupNCtx <- map_int(
-            split(sel$contextCol[sel$selRows], groupKey),
-            length
-        )
-        if (all(perGroupNCtx < 2L)) {
-            msg <- glue(
-                "fineMappingPipeline(QtlSumStats): ",
-                "{str_flatten(mvTokens, ', ')} requires at least two ",
-                "contexts per (study, trait); the supplied collection has ",
-                "only one context per trait."
-            )
-            abort(msg)
-        }
-    }
-    list(univTokens = univTokens, mvTokens = mvTokens)
-}
-
-# Multivariate dispatch via the joint engine (auto-detected cross-context RSS
-# joint) for mvsusie WITHOUT an explicit jointSpecification. An explicit spec
-# consumes mvsusie, so it reaches here only when there was none: the explicit
-# result, `jointResult`, is returned as it stands when no mvsusie is left,
-# and is NULL otherwise.
-# @noRd
-.fmQssAutoJoint <- function(cfg, mvTokens, methodArgs, jointResult) {
-    if (length(mvTokens) == 0L) {
-        return(jointResult)
-    }
-    .fmDispatchJointSpecsQtlSumStats(
-        .defaultSumStatsJointSpec(),
-        mvTokens,
-        methodArgs,
-        cfg
-    )
-}
-
 # Assemble the QtlSumStats result: build the per-tuple QtlFineMappingResult
 # from the collected row-records (region = entry variant span, no cis-window)
 # and combine with the joint result, every row keeping its own LD reference.
@@ -4866,36 +4788,26 @@ NULL
     .fmQssRunRows(
         data,
         sel = sel,
-        split = .fmQssSplitTokens(rt$tokens, sel),
+        tokens = rt$tokens,
         cfg = cfg,
-        jointCfg = cfgs$joint,
-        methodArgs = rt$methodArgs,
         jointResult = rt$result
     )
 }
 
 # Fine-map the selected rows with the univariate tokens, then assemble that
-# with whatever the joint phase produced. `sel` and `split` travel whole:
-# the row selection and the token split are each one answer, and splitting
-# them back into loose columns here is what this function exists to avoid.
+# with whatever the joint phase produced. `sel` travels whole: the row
+# selection is one answer, and splitting it back into loose columns here is
+# what this function exists to avoid.
 # @noRd
-.fmQssRunRows <- function(
-    data,
-    sel,
-    split,
-    cfg,
-    jointCfg,
-    methodArgs,
-    jointResult
-) {
-    univOut <- if (length(split$univTokens) > 0L) {
+.fmQssRunRows <- function(data, sel, tokens, cfg, jointResult) {
+    univOut <- if (length(tokens) > 0L) {
         map(
             sel$selRows,
             .fmRssEntryRows,
             studyCol = sel$studyCol,
             contextCol = sel$contextCol,
             traitCol = sel$traitCol,
-            univTokens = split$univTokens,
+            univTokens = tokens,
             cfg = cfg
         )
     } else {
@@ -4905,12 +4817,7 @@ NULL
         data = data,
         rows = list_flatten(map(univOut, "rows")),
         nSkipped = sum(map_lgl(univOut, "skipped")),
-        jointResult = .fmQssAutoJoint(
-            cfg = jointCfg,
-            mvTokens = split$mvTokens,
-            methodArgs = methodArgs,
-            jointResult = jointResult
-        )
+        jointResult = jointResult
     )
 }
 

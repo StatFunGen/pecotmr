@@ -183,11 +183,12 @@ genotypes into one joint fit. Ignored for a single-range / cis
 
 \item{jointSpecification}{Optional joint-fit specification saying which
 axes the joint methods (\code{mvsusie}, \code{mvsusieInf},
-\code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the default)
-they fit across traits if the input has two or more, else across
-contexts. Otherwise give a character vector of axes (one spec) or a list
-of specs. A spec is a character vector drawn from \code{"study"},
-\code{"context"} and \code{"trait"}, or
+\code{mvsusieAsh} and \code{fsusie}) fit across. When NULL (the
+default) every method is fitted one (study, context, trait) at a time,
+and the joint methods stop the run, since they need this to say which
+conditions they fit together. Otherwise give a character vector of axes
+(one spec) or a list of specs. A spec is a character vector drawn from
+\code{"study"}, \code{"context"} and \code{"trait"}, or
 \code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
 (keys \code{study}, \code{context}, \code{trait}) limits the fit to the
 listed values, each of which must exist in \code{data}. A list-form
@@ -488,10 +489,9 @@ S4-dispatched per-region fine-mapping entry point that
           sumstat side of a \code{MultiStudyQtlDataset}); rejected on
           individual-level \code{QtlDataset}.}
     \item{\code{mvsusie}}{\code{mvsusieR::mvsusie} on individual-
-          level input (requires multi-trait OR multi-context Y),
-          \code{mvsusieR::mvsusie_rss} on sumstat input (requires
-          multi-context within a single (study, trait) group).
-          Errors on \code{GwasSumStats} input.}
+          level input, \code{mvsusieR::mvsusie_rss} on sumstat input,
+          over the groups \code{jointSpecification} makes, which it
+          needs. Errors on \code{GwasSumStats} input.}
     \item{\code{mvsusieInf}}{\code{unmappable_effects = "inf"} variant
           of \code{mvsusie}, set by \code{\link{MvsusieInfOptions}}:
           the polygenic effects are integrated out, with a covariance
@@ -510,9 +510,9 @@ S4-dispatched per-region fine-mapping entry point that
           matrices of its mr.mash fit and the canonical ones, over its
           grid) when the run has one, else mvsusieR's. The same
           observation rule as \code{mvsusieInf} applies.}
-    \item{\code{fsusie}}{\code{fsusieR::susiF} joint multi-trait fit
-          per context. Individual-level only; errors on any
-          SumStats input.}
+    \item{\code{fsusie}}{\code{fsusieR::susiF} joint fit over the
+          groups \code{jointSpecification} makes, which it needs.
+          Individual-level only; errors on any SumStats input.}
     \item{\code{mrmash}}{Always rejected here. \code{mr.mash} is
           a TWAS weight-oriented method and lives in
           \code{\link{twasWeightsPipeline}}.}

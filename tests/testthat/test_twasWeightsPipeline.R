@@ -214,12 +214,13 @@ test_that("twasWeightsPipeline reads each window once and shares its X", {
     run <- .countBlocks(twasWeightsPipeline(
         qd,
         methods = "lasso",
+        jointSpecification = "trait",
         region = .fitSamplesWindow(),
         seed = 1L
     ))
     expect_s4_class(run$result, "TwasWeights")
     # Each tuple alone, and each context's traits together, as the lasso fits
-    # the traits of a window by default.
+    # the groups a jointSpecification makes.
     joint <- !is.na(run$result$jointTraits)
     expect_equal(sum(!joint), 6L)
     expect_equal(sum(joint), 6L)
@@ -320,6 +321,7 @@ test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
                 lasso = list(),
                 enet = list()
             ),
+            jointSpecification = "trait",
             cisWindow = 1000L,
             estimatePi = FALSE,
             verbose = 0,
@@ -330,7 +332,7 @@ test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
     expect_s4_class(res, "TwasWeights")
     # 1 context x 2 traits = 2 genes, each with 2 methods; and each method's
     # fit of the two traits together, which the lasso and elastic net make
-    # of a window's traits by default, in two more rows.
+    # of the specification's group, in two more rows.
     joint <- !is.na(res$jointTraits)
     expect_equal(sum(!joint), 2L)
     expect_equal(sum(joint), 2L)
@@ -358,6 +360,19 @@ test_that("twasWeightsPipeline(QtlDataset) runs end to end, mocked solvers", {
     expect_true(all(GenomicRanges::end(reg)[trait == "ENSG_A"] <= 2499L))
     expect_true(all(GenomicRanges::start(reg)[trait == "ENSG_B"] >= 1000L))
     expect_true(all(GenomicRanges::end(reg)[trait == "ENSG_B"] <= 3499L))
+    # Without a specification each method fits each gene alone, and nothing
+    # else.
+    alone <- suppressMessages(twasWeightsPipeline(
+        qd,
+        methods = list(lasso = list(), enet = list()),
+        cisWindow = 1000L,
+        estimatePi = FALSE,
+        verbose = 0,
+        crossValidationParam = CrossValidationParam(folds = 0),
+        ensembleParam = EnsembleParam()
+    ))
+    expect_equal(nrow(.twasCells(alone)), 4L)
+    expect_false("jointTraits" %in% pecotmr:::.tupleColumnNames(alone))
 })
 
 test_that("twasWeightsPipeline hands each method the backend it names", {
@@ -905,7 +920,7 @@ test_that("sumstat TWAS: a method's failure warns and is skipped", {
     )
 })
 
-test_that("twasWeightsPipeline(QtlSumStats): mvsusie needs >= 2 contexts", {
+test_that("twasWeightsPipeline(QtlSumStats): mvsusie needs a specification", {
     ss <- .tp_makeQtlSumStats(n_entries = 1L) # 1 context per (study, trait)
     # Provide a stub fine-mapping result so the gate passes; the multivariate
     # guard is what we want to exercise here.
@@ -917,7 +932,7 @@ test_that("twasWeightsPipeline(QtlSumStats): mvsusie needs >= 2 contexts", {
     )
     expect_error(
         twasWeightsPipeline(ss, methods = "mvsusie", fineMappingResult = fmr),
-        "multivariate method(s) mvsusie require at least two contexts",
+        "twasWeightsPipeline(QtlSumStats): mvsusie fit conditions jointly",
         fixed = TRUE
     )
 })
@@ -1200,6 +1215,7 @@ test_that("twasWeightsPipeline(QtlDataset): mvsusie gives a row per context", {
         twasWeightsPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "context",
             fineMappingResult = fmr,
             cisWindow = 1000L,
             estimatePi = FALSE,
@@ -1219,18 +1235,19 @@ test_that("twasWeightsPipeline(QtlDataset): mvsusie gives a row per context", {
     expect_equal(mvCalls, 1L)
 })
 
-# twasWeightsPipeline() of mvsusie on `qd`, reading `fmr`, no CV.
-.tp_mvsusieRun <- function(qd, fmr, ...) {
+# twasWeightsPipeline() of mvsusie on `qd` across `jointSpecification`,
+# reading `fmr`, no CV.
+.tp_mvsusieRun <- function(qd, fmr, jointSpecification = "context") {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = "mvsusie",
+        jointSpecification = jointSpecification,
         fineMappingResult = fmr,
         cisWindow = 1000L,
         estimatePi = FALSE,
         verbose = 0,
         crossValidationParam = CrossValidationParam(folds = 0),
-        ensembleParam = EnsembleParam(),
-        ...
+        ensembleParam = EnsembleParam()
     )))
 }
 
@@ -1311,10 +1328,9 @@ test_that("a jointSpecification groups mvsusie as fine-mapping grouped it", {
         },
         .package = "pecotmr"
     )
-    # Without a specification two traits are grouped across traits, which
-    # is not how they were fine-mapped.
+    # Grouped across traits, which is not how they were fine-mapped.
     expect_error(
-        .tp_mvsusieRun(qd, fmr),
+        .tp_mvsusieRun(qd, fmr, jointSpecification = "trait"),
         "no mvsusie fit over exactly jointTraits = ENSG_A;ENSG_B"
     )
     res <- .tp_mvsusieRun(qd, fmr, jointSpecification = "context")
@@ -1344,6 +1360,7 @@ test_that("mr.mash multivariate TWAS with 2 traits x 2 contexts", {
         twasWeightsPipeline(
             qd,
             methods = "mrmash",
+            jointSpecification = "trait",
             cisWindow = 1000L,
             estimatePi = FALSE,
             verbose = 0,
@@ -1416,6 +1433,7 @@ test_that("mr.mash TWAS keeps its fit parts in the fits slot", {
             methods = list(
                 mrmash = list(dataDrivenPriorMatrices = ddpm)
             ),
+            jointSpecification = "context",
             cisWindow = 1000L,
             estimatePi = FALSE,
             verbose = 0,
@@ -1469,11 +1487,16 @@ test_that("summary statistics fit a study's contexts with the group penalty", {
     tw <- withr::with_seed(
         1L,
         suppressWarnings(suppressMessages(
-            twasWeightsPipeline(ss, methods = c("lasso", "mcp"), verbose = 0)
+            twasWeightsPipeline(
+                ss,
+                methods = c("lasso", "mcp"),
+                jointSpecification = "context",
+                verbose = 0
+            )
         ))
     )
     joint <- !is.na(tw$jointContexts)
-    # Each context alone and the two together, by default, each row holding
+    # Each context alone and the two together, each row holding
     # both methods.
     expect_equal(sum(joint), 2L)
     expect_equal(sum(!joint), 2L)
@@ -1557,6 +1580,7 @@ test_that("a residual correlation draws coupled contexts' splits together", {
                 twasWeightsPipeline(
                     ss,
                     methods = "lasso",
+                    jointSpecification = "context",
                     coupling = list(context = c(0.1, 1)),
                     residualCorrelation = residualCorrelation,
                     verbose = 0
@@ -1615,6 +1639,7 @@ test_that("sumstat mvsusie TWAS returns one row per context", {
         twasWeightsPipeline(
             ss,
             methods = "mvsusie",
+            jointSpecification = "context",
             fineMappingResult = fmr,
             verbose = 0
         )
@@ -1648,7 +1673,12 @@ test_that("sumstat mr.mash TWAS: a solver failure warns, result empty", {
     expect_warning(
         expect_error(
             suppressMessages(
-                twasWeightsPipeline(ss, methods = "mrmash", verbose = 0)
+                twasWeightsPipeline(
+                    ss,
+                    methods = "mrmash",
+                    jointSpecification = "context",
+                    verbose = 0
+                )
             ),
             "no joint fits produced"
         ),
@@ -1873,6 +1903,7 @@ test_that("twasWeightsPipeline: mr.mash and mvSuSiE fit side by side", {
         twasWeightsPipeline(
             qd,
             methods = c("mrmash", "mvsusie"),
+            jointSpecification = "context",
             fineMappingResult = fmr,
             cisWindow = 1000L,
             estimatePi = FALSE,
@@ -2741,45 +2772,6 @@ test_that("capability check: an unknown token errors with the full menu", {
 })
 
 # ===========================================================================
-# .twasCheckMultivariateY
-# ===========================================================================
-
-test_that(".twasCheckMultivariateY: no multivariate tokens is a no-op", {
-    expect_silent(pecotmr:::.twasCheckMultivariateY(
-        c("lasso", "enet"),
-        nTraits = 1L,
-        nContexts = 1L
-    ))
-})
-
-test_that(".twasCheckMultivariateY: mvsusie passes when contexts >= 2", {
-    expect_silent(pecotmr:::.twasCheckMultivariateY(
-        "mvsusie",
-        nTraits = 1L,
-        nContexts = 2L
-    ))
-})
-
-test_that(".twasCheckMultivariateY: mvsusie passes when traits >= 2", {
-    expect_silent(pecotmr:::.twasCheckMultivariateY(
-        "mvsusie",
-        nTraits = 2L,
-        nContexts = 1L
-    ))
-})
-
-test_that(".twasCheckMultivariateY refuses mvsusie, mrmash on one condition", {
-    expect_error(
-        pecotmr:::.twasCheckMultivariateY(
-            c("mvsusie", "mrmash"),
-            nTraits = 1L,
-            nContexts = 1L
-        ),
-        "require multi-trait or multi-context input"
-    )
-})
-
-# ===========================================================================
 # .twasAssertQcd
 # ===========================================================================
 
@@ -3138,6 +3130,7 @@ test_that("mr.mash with jointRegions = FALSE joins per-region weights", {
     res <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = "mrmash",
+        jointSpecification = "context",
         traitId = "ENSG_A",
         region = regions,
         jointRegions = FALSE,
@@ -3850,7 +3843,7 @@ test_that("QtlDataset: CrossValidationParam(fitFullData) reaches the engine", {
     qd <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
     cap <- new.env(parent = emptyenv())
     local_mocked_bindings(
-        .twasQdsGridWork = function(grid, marker, ...) {
+        .twasQdsUnivariateWork = function(grid, marker, ...) {
             cap$marker <- marker
             abort("captured")
         },
@@ -3923,6 +3916,7 @@ test_that("a full mashPrior reaches mr.mash's arguments", {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         qd,
         methods = list(mrmash = list()),
+        jointSpecification = "context",
         mashPrior = MashPrior(fullFit = list(context = prior)),
         cisWindow = 1000L,
         estimatePi = FALSE,
@@ -3976,6 +3970,7 @@ test_that("a summary-statistics mr.mash group takes its own prior", {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = "mrmash",
+        jointSpecification = "context",
         mashPrior = MashPrior(fullFit = priors),
         verbose = 0
     )))
@@ -4002,6 +3997,7 @@ test_that("summary statistics take a mashPrior's full-data priors alone", {
         twasWeightsPipeline(
             ss,
             methods = "mrmash",
+            jointSpecification = "context",
             mashPrior = MashPrior(
                 cvFits = list(perFoldFits = list(list(context = prior)))
             ),
@@ -4192,7 +4188,12 @@ test_that("sumstat multivariate mr.mash returns a column per context", {
     )
     exec(local_mocked_bindings, !!!mockArgs)
     res <- suppressMessages(suppressWarnings(
-        twasWeightsPipeline(ss, methods = "mrmash", verbose = 0)
+        twasWeightsPipeline(
+            ss,
+            methods = "mrmash",
+            jointSpecification = "context",
+            verbose = 0
+        )
     ))
     expect_s4_class(res, "TwasWeights")
     expect_equal(nrow(res), 2L) # one row per context
@@ -4219,6 +4220,7 @@ test_that("sumstat joint mr.mash starts from the run's h2", {
     suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = "mrmash",
+        jointSpecification = "context",
         h2Estimate = 0.3,
         verbose = 0
     )))
@@ -4701,10 +4703,15 @@ test_that("mvsusieInf weights on a genotype panel are its fit's", {
     )
     data(qtlSumStatsMulticontextExample, envir = environment())
     ss <- qtlSumStatsMulticontextExample
-    fm <- suppressMessages(fineMappingPipeline(ss, methods = "mvsusieInf"))
+    fm <- suppressMessages(fineMappingPipeline(
+        ss,
+        methods = "mvsusieInf",
+        jointSpecification = "context"
+    ))
     tw <- suppressMessages(twasWeightsPipeline(
         ss,
         methods = "mvsusieInf",
+        jointSpecification = "context",
         fineMappingResult = fm,
         verbose = 0
     ))
@@ -4877,11 +4884,10 @@ test_that("a fit across studies over two ranges is read range by range", {
 })
 
 test_that("fits across studies are read only for the study axis", {
-    # Without the study axis each study groups its own conditions, and a
-    # study of one context and one trait has none to join.
+    # Without a specification mvsusie has no groups to read fits for.
     expect_error(
         .tp_xsTwas("mvsusie", jointSpecification = NULL, cisWindow = 50000L),
-        "every study in a MultiStudyQtlDataset must"
+        "mvsusie fit conditions jointly"
     )
 })
 
@@ -5065,28 +5071,30 @@ test_that("lasso fits each group of a study's contexts with a group penalty", {
             seed = 1L
         )))
     }
-    for (tw in list(run("context"), run(NULL))) {
-        joint <- !is.na(tw$jointContexts)
-        # The trait's two contexts one at a time, and the two together,
-        # with or without a specification.
-        expect_equal(sum(joint), 2L)
-        expect_equal(sum(!joint), 2L)
-        expect_equal(
-            unique(as.character(tw$jointContexts[joint])),
-            "brain;liver"
-        )
-        cells <- map(
-            which(joint),
-            function(r) pecotmr:::.twrCellParts(tw, r, "lasso")
-        )
-        # glmnet's mgaussian fit, one column per context; a variant is in
-        # both contexts' weights or in neither.
-        expect_equal(ncol(methodFits(cells[[1L]])$coef), 2L)
-        expect_identical(
-            weights(cells[[1L]]) != 0,
-            weights(cells[[2L]]) != 0
-        )
-    }
+    tw <- run("context")
+    joint <- !is.na(tw$jointContexts)
+    # The trait's two contexts one at a time, and the two together.
+    expect_equal(sum(joint), 2L)
+    expect_equal(sum(!joint), 2L)
+    expect_equal(
+        unique(as.character(tw$jointContexts[joint])),
+        "brain;liver"
+    )
+    cells <- map(
+        which(joint),
+        function(r) pecotmr:::.twrCellParts(tw, r, "lasso")
+    )
+    # glmnet's mgaussian fit, one column per context; a variant is in both
+    # contexts' weights or in neither.
+    expect_equal(ncol(methodFits(cells[[1L]])$coef), 2L)
+    expect_identical(
+        weights(cells[[1L]]) != 0,
+        weights(cells[[2L]]) != 0
+    )
+    # Without a specification each context is fitted alone, and only so.
+    alone <- run(NULL)
+    expect_equal(nrow(alone), 2L)
+    expect_false("jointContexts" %in% pecotmr:::.tupleColumnNames(alone))
 })
 
 test_that("mcp fits a study's contexts coupled, or grouped on grpreg", {
@@ -5107,19 +5115,18 @@ test_that("mcp fits a study's contexts coupled, or grouped on grpreg", {
         )))
     }
     byContext <- list(context = c(0.1, 1))
-    for (tw in list(run("context", byContext), run(NULL, byContext))) {
-        joint <- !is.na(tw$jointContexts)
-        expect_equal(sum(joint), 2L)
-        expect_equal(sum(!joint), 2L)
-        fit <- methodFits(pecotmr:::.twrCellParts(
-            tw,
-            which(joint)[[1L]],
-            "mcp"
-        ))
-        expect_equal(dimnames(fit$strength)[[2L]], "context")
-    }
+    tw <- run("context", byContext)
+    joint <- !is.na(tw$jointContexts)
+    expect_equal(sum(joint), 2L)
+    expect_equal(sum(!joint), 2L)
+    fit <- methodFits(pecotmr:::.twrCellParts(
+        tw,
+        which(joint)[[1L]],
+        "mcp"
+    ))
+    expect_equal(dimnames(fit$strength)[[2L]], "context")
     # Uncoupled and with no backend named, the group fit runs on grpreg.
-    grouped <- run(NULL, NULL)
+    grouped <- run("context", NULL)
     joint <- which(!is.na(grouped$jointContexts))
     expect_length(joint, 2L)
     expect_equal(
@@ -5132,10 +5139,9 @@ test_that("mcp fits a study's contexts coupled, or grouped on grpreg", {
         ),
         2L
     )
-    # On ncvreg, named, there is no group fit: the default groups leave mcp
-    # to its fits one context at a time, and a specification naming it stops.
+    # On ncvreg, named, there is no group fit, so a specification naming mcp
+    # stops.
     onNcvreg <- c(mcp = "ncvreg")
-    expect_true(all(is.na(run(NULL, NULL, onNcvreg)$jointContexts)))
     expect_error(
         run("context", NULL, onNcvreg),
         "which mcp cannot fit on the engine the run puts it on"
@@ -5154,6 +5160,7 @@ test_that("contexts on different donors fit on every donor unless asked", {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
             differ,
             methods = methods,
+            jointSpecification = "context",
             region = .fitSamplesWindow(),
             traitId = "g1",
             completeSamples = completeSamples,
@@ -5337,6 +5344,23 @@ test_that("coupling names axes, each with distinct non-negative strengths", {
         twasWeightsPipeline(studies, coupling = c(0.1, 1)),
         "coupling"
     )
+})
+
+test_that("a coupling named in a run with no specification is refused", {
+    # Without a jointSpecification there are no groups to couple; the default
+    # coupling is left unused without complaint.
+    qd <- .tp_makeQtlDataset(contexts = c("brain", "liver"), traits = "ENSG_A")
+    ss <- .tp_makeMultiCtxQtlSumStats(contexts = c("c1", "c2"))
+    byContext <- list(context = c(0.1, 1))
+    for (data in list(qd, ss, .fm_disjointStudies())) {
+        expect_error(
+            twasWeightsPipeline(data, methods = "lasso", coupling = byContext),
+            "this run has none"
+        )
+    }
+    expect_null(pecotmr:::.twasAssertCouplingGroups(byContext, FALSE, NULL))
+    expect_null(pecotmr:::.twasAssertCouplingGroups(NULL, TRUE, NULL))
+    expect_null(pecotmr:::.twasAssertCouplingGroups(byContext, TRUE, "context"))
 })
 
 test_that("mr.mash is fitted on the groups across studies", {
@@ -5537,7 +5561,12 @@ test_that("twasWeightsPipeline(QtlSumStats): mr.mash skips 1-context traits", {
         .package = "pecotmr"
     )
     res <- suppressMessages(suppressWarnings(
-        twasWeightsPipeline(ss, methods = "mrmash", verbose = 0)
+        twasWeightsPipeline(
+            ss,
+            methods = "mrmash",
+            jointSpecification = "context",
+            verbose = 0
+        )
     ))
     expect_setequal(traitNames(res), "t1") # only t1
 })
@@ -5566,6 +5595,7 @@ test_that("sumstat TWAS errors on mismatched SNP order in a joint group", {
         suppressMessages(twasWeightsPipeline(
             ss,
             methods = "mrmash",
+            jointSpecification = "context",
             verbose = 0
         )),
         "statistics at the same variants"
@@ -6224,7 +6254,7 @@ test_that("a fine-mapping method's TWAS rows keep none of its fit", {
     expect_identical(pecotmr:::.jointRetentionLevel(cfg, "mrmash"), "slim")
 })
 
-test_that("both kinds of method run together with no joint spec", {
+test_that("both kinds of method run together on one read", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     window <- .fitSamplesWindow()
@@ -6234,6 +6264,7 @@ test_that("both kinds of method run together with no joint spec", {
         suppressWarnings(suppressMessages(twasWeightsPipeline(
             .fitSamplesDataset(),
             methods = method,
+            jointSpecification = "trait",
             region = window,
             traitId = traits,
             seed = 1L
@@ -6244,6 +6275,7 @@ test_that("both kinds of method run together with no joint spec", {
     run <- .countBlocks(suppressWarnings(twasWeightsPipeline(
         .fitSamplesDataset(),
         methods = c("lasso", "mrmash"),
+        jointSpecification = "trait",
         region = window,
         traitId = traits,
         seed = 1L
@@ -6281,12 +6313,13 @@ test_that("both kinds of method run together with no joint spec", {
     }
 })
 
-test_that("a multi-study run takes both kinds of method with no joint spec", {
+test_that("a multi-study run takes both kinds of method", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
         .fitSamplesTwoStudies(),
         methods = c("lasso", "mrmash"),
+        jointSpecification = "context",
         region = .fitSamplesWindow(),
         traitId = "g1",
         seed = 1L
@@ -6295,13 +6328,6 @@ test_that("a multi-study run takes both kinds of method with no joint spec", {
     expect_setequal(as.character(S4Vectors::mcols(res)$study), c("s", "s2"))
     # Each study's two contexts of g1, by each method.
     expect_equal(nrow(res), 8L)
-})
-
-test_that(".twasQdsGridResult takes a path that fitted nothing", {
-    result <- pecotmr:::.twasQdsGridResult
-    expect_null(result(list(NULL, NULL)))
-    expect_identical(result(list(NULL, "fits")), "fits")
-    expect_identical(result(list("fits", NULL)), "fits")
 })
 
 test_that(".twasNormKeep keeps a multi-word method's options", {
@@ -6717,10 +6743,7 @@ test_that("twasWeightsPipeline(QtlDataset): usePCA adds top-PC rows", {
     expect_true(all(is_in(c("ENSG_A", "ENSG_B"), pcs)))
 })
 
-test_that("a multivariate method needs every study to be multivariate", {
-    # mvsusie / mr.mash / fsusie fit one model across a tuple's traits and
-    # contexts, so each component they run on must supply a multivariate Y.
-    uni <- .tp_makeQtlDataset(contexts = "brain", traits = "ENSG_A")
+test_that("a joint method across studies needs a jointSpecification", {
     multi <- .tp_makeQtlDataset(
         contexts = c("brain", "liver"),
         traits = "ENSG_A"
@@ -6729,31 +6752,14 @@ test_that("a multivariate method needs every study to be multivariate", {
         contexts = c("brain", "liver"),
         traits = "ENSG_B"
     )
-    # A MultiStudyQtlDataset needs at least two studies, so both arms carry
-    # two; only the mix includes a univariate one.
-    mixed <- MultiStudyQtlDataset(qtlDatasets = list(s1 = multi, s2 = uni))
-    allMv <- MultiStudyQtlDataset(qtlDatasets = list(s1 = multi, s2 = multi2))
-
+    ms <- MultiStudyQtlDataset(qtlDatasets = list(s1 = multi, s2 = multi2))
     expect_error(
-        pecotmr:::.twasCheckMultivariateComponents("mrmash", mixed),
-        "every study in a MultiStudyQtlDataset must be multivariate"
+        twasWeightsPipeline(ms, methods = "mrmash", verbose = 0),
+        paste0(
+            "twasWeightsPipeline\\(MultiStudyQtlDataset\\): mrmash fit ",
+            "conditions jointly"
+        )
     )
-    expect_match(
-        tryCatch(
-            pecotmr:::.twasCheckMultivariateComponents("mrmash", mixed),
-            error = function(e) conditionMessage(e)
-        ),
-        "s2"
-    )
-    expect_silent(
-        pecotmr:::.twasCheckMultivariateComponents("mrmash", allMv)
-    )
-    # A univariate method is unaffected by any of this.
-    expect_silent(pecotmr:::.twasCheckMultivariateComponents("lasso", mixed))
-    expect_silent(pecotmr:::.twasCheckMultivariateComponents(
-        character(0),
-        mixed
-    ))
 })
 
 test_that("a joint group resumes from the cache in full, from its own fit", {
@@ -6818,7 +6824,12 @@ test_that("twasWeightsPipeline: multivariate resume is all-or-nothing", {
 
     # Cold run: one joint fit spans both contexts of the group.
     cold <- suppressMessages(suppressWarnings(
-        twasWeightsPipeline(ss, methods = "mrmash", verbose = 0)
+        twasWeightsPipeline(
+            ss,
+            methods = "mrmash",
+            jointSpecification = "context",
+            verbose = 0
+        )
     ))
     expect_equal(nrow(cold), 2L)
     expect_equal(calls$n, 1L)
@@ -6828,6 +6839,7 @@ test_that("twasWeightsPipeline: multivariate resume is all-or-nothing", {
     warm <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = "mrmash",
+        jointSpecification = "context",
         verbose = 0,
         twasWeights = cold
     )))
@@ -6841,6 +6853,7 @@ test_that("twasWeightsPipeline: multivariate resume is all-or-nothing", {
     refit <- suppressMessages(suppressWarnings(twasWeightsPipeline(
         ss,
         methods = "mrmash",
+        jointSpecification = "context",
         verbose = 0,
         twasWeights = partial
     )))
@@ -7077,7 +7090,11 @@ test_that("a multivariate TWAS group refuses contexts on two LD references", {
         qcOptions = list(step1 = "ok")
     )
     expect_error(
-        suppressMessages(twasWeightsPipeline(ss, methods = "mrmash")),
+        suppressMessages(twasWeightsPipeline(
+            ss,
+            methods = "mrmash",
+            jointSpecification = "context"
+        )),
         "a joint fit uses one LD matrix"
     )
 })

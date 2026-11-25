@@ -118,7 +118,7 @@ the default, which either preset also names, is
 and SDPR; the fine-mapping methods are not in it, and are requested by
 name together with a \code{fineMappingResult}. A
 multivariate method (\code{mrmash}, \code{mvsusie}, \code{mvsusieInf},
-\code{fsusie}) fits the selected contexts and traits together and any
+\code{fsusie}) fits the groups \code{jointSpecification} makes and any
 other method each (context, trait) alone, so the two kinds can be
 requested at once.}
 
@@ -195,10 +195,10 @@ axes the joint methods -- \code{mrmash}, \code{mvsusie},
 means what it means to
 \code{\link{fineMappingPipeline}}, so a run groups conditions exactly as
 a fine-mapping run given the same specification and selection did. When
-NULL (the default) they are grouped as fine-mapping groups them: across
-traits if the input has two or more, else across contexts (across
-contexts on summary statistics). Otherwise give a character vector of
-axes (one spec) or a list of specs. A spec is a character vector drawn
+NULL (the default) every method is fitted one (study, context, trait) at
+a time, and the joint methods stop the run, since they need this to say
+which conditions they fit together. Otherwise give a character vector
+of axes (one spec) or a list of specs. A spec is a character vector drawn
 from \code{"study"}, \code{"context"} and \code{"trait"}, or
 \code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
 (keys \code{study}, \code{context}, \code{trait}) limits the fit to the
@@ -245,10 +245,10 @@ across studies, with that structure's own prior. Without a
 specification they run one tuple at a time only.
 On individual-level data the penalized methods (\code{lasso},
 \code{enet}, \code{ridge}, \code{mcp}, \code{scad}, \code{l0learn})
-also fit each group of two or more conditions at once, alongside their
-fits of one tuple at a time, with or without a specification (in the
-groups it would make by default), on the engine \code{backend} puts
-them on. A group along an axis \code{coupling} names is fitted under
+also fit each group of two or more conditions a specification makes at
+once, alongside their fits of one tuple at a time, on the engine
+\code{backend} puts them on; without a specification they run one tuple
+at a time only. A group along an axis \code{coupling} names is fitted under
 the penalty on the difference between the conditions' effects, with
 the engine's group penalty as well where it has one; any other group
 under the group penalty alone: each variant's effects across the
@@ -264,12 +264,10 @@ ncvreg and L0Learn, the default engines of \code{mcp}, \code{scad} and
 \code{l0learn}, have no group penalty, so with no \code{backend} named
 those methods take their group fits on grpreg and abess, and their
 coupled ones on ncvreg and L0Learn; named \code{"ncvreg"} or
-\code{"l0learn"}, they fit a group only when it is coupled. Without a
-specification a method that fits the default groups neither way runs
-one tuple at a time; with one, a method named in \code{methods} that
-cannot fit its groups is an error. On summary statistics every
-penalized method fits each group, the default ones across contexts
-included, under the group penalty on pecotmr's own solver (not
+\code{"l0learn"}, they fit a group only when it is coupled. A method
+named in \code{methods} that cannot fit a specification's groups is an
+error. On summary statistics every penalized method fits each group
+under the group penalty on pecotmr's own solver (not
 \code{lasso} on \code{backend = "bigsnpr"}), every condition at one
 grid point; a coupled group takes it with the coupling. A trait group
 there is fitted over the union of its genes' variants where their
@@ -467,7 +465,9 @@ reference (the draws are made for each condition apart, as if no two
 shared samples). \eqn{c = 0} gives the conditions' separate fits and a
 large \eqn{c} one pooled fit. The default couples studies only, at
 \code{c(0.01, 0.1, 1, 10)}, which spans nearly separate to nearly
-pooled; \code{NULL} couples nothing. Coupled on individual-level data:
+pooled; \code{NULL} couples nothing. Only the groups a
+\code{jointSpecification} makes are coupled, so naming \code{coupling}
+in a run without one is an error. Coupled on individual-level data:
 \code{lasso}, \code{enet} and \code{ridge} on glmnet, with the group
 penalty of glmnet's \code{"mgaussian"} family as well on the conditions
 of a group that share samples and are not coupled to one another;
@@ -567,11 +567,9 @@ Method-restriction rules (enforced):
 \itemize{
   \item \code{mr.mash}, \code{mvsusie}, \code{mvsusieInf} and
         \code{fsusie} are grouped across conditions as
-        \code{\link{fineMappingPipeline}} groups them (see
-        \code{jointSpecification}) and follow the multi-trait /
-        multi-context rules of the fine-mapping \code{mvsusie} family
-        (require at least two traits OR at least two contexts), but for
-        the mvSuSiE methods grouped across studies.
+        \code{\link{fineMappingPipeline}} groups them, by
+        \code{jointSpecification}, which they need: without one the run
+        stops.
   \item \code{prsCs} runs only on summary statistics, so it is rejected
         on \code{QtlDataset} input.
   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run
