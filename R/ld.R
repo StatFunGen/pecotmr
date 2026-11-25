@@ -1777,6 +1777,24 @@ resolveGenotypePathForRegion <- function(metaPath, region) {
     crossprod(B, .ldSourceTimes(ld, B))
 }
 
+# B' (R o R) B, every pair of B's columns, with R o R the elementwise square
+# of the LD: the covariances of quadratic forms z' diag(b) z under
+# z ~ N(0, R), halved. R's rows are read a stripe at a time, so a factor
+# never forms R.
+# @noRd
+.ldSquaredCrossForms <- function(ld, B) {
+    p <- .ldSourceSize(ld)
+    starts <- seq.int(1L, p, by = .ldStripeSize())
+    reduce(map(starts, .ldSquaredStripe, ld = ld, B = B, p = p), `+`)
+}
+
+# One stripe's share of .ldSquaredCrossForms().
+# @noRd
+.ldSquaredStripe <- function(start, ld, B, p) {
+    rows <- seq.int(start, min(start + .ldStripeSize() - 1L, p))
+    crossprod(B[rows, , drop = FALSE], .ldSourceRows(ld, rows)^2 %*% B)
+}
+
 # `nDraws` draws from N(0, R), as the columns of a p x nDraws matrix: F' e /
 # sqrt(m - 1) for a factor, exact without forming R, and otherwise through
 # R's eigendecomposition (.ldSourceEigen()), which takes the zero eigenvalues

@@ -231,6 +231,39 @@ pvalAspu <- function(
     )
 }
 
+# P(sum_k lambda_k chi2_1 > q) for positive weights `lambda`. Farebrother's
+# algorithm (CompQuadForm) is exact, but it computes the tail as one minus
+# the distribution function, so its relative precision is lost below about
+# 1e-12; there Kuonen's (1999) saddlepoint approximation (survey) takes over,
+# whose relative error stays bounded however far into the tail (about 15% at
+# most, with one dominant weight).
+# @noRd
+.quadFormUpperTail <- function(q, lambda) {
+    if (q <= 0 || length(lambda) == 0L) {
+        return(1)
+    }
+    if (!requireNamespace("CompQuadForm", quietly = TRUE)) {
+        abort("Package 'CompQuadForm' is required for this test.")
+    }
+    exact <- CompQuadForm::farebrother(q, lambda, eps = 1e-15)
+    if (exact$ifault == 0L && exact$Qq >= 1e-12) {
+        return(exact$Qq)
+    }
+    if (!requireNamespace("survey", quietly = TRUE)) {
+        abort(str_c(
+            "Package 'survey' is required for this test's p-values below ",
+            "1e-12."
+        ))
+    }
+    survey::pchisqsum(
+        q,
+        df = rep(1, length(lambda)),
+        a = lambda,
+        lower.tail = FALSE,
+        method = "saddlepoint"
+    )
+}
+
 # =============================================================================
 # combinePValues -- unified dispatcher
 # =============================================================================

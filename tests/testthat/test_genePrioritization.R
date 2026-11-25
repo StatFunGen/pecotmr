@@ -896,3 +896,541 @@ test_that(".glsWhiten needs every gene of y in the correlation and X", {
         "must be named by gene"
     )
 })
+
+# ---------------------------------------------------------------------------
+# Variance components
+# ---------------------------------------------------------------------------
+
+# rho = a_g'(R o R)a_h / sqrt(...) for weight columns `A`, zero for genes
+# that share no GWAS row.
+.gc_quadraticExpected <- function(A) {
+    C <- crossprod(A, .gc_R^2 %*% A)
+    C / sqrt(outer(diag(C), diag(C)))
+}
+
+test_that("variance-component correlation is a'(R o R)a normalized", {
+    skip_if_not_installed("CompQuadForm")
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    vc <- geneVarianceComponentTest(
+        gwas,
+        twasWeights = tw,
+        variantWeights = "squaredWeight"
+    )
+    out <- geneCorrelation(
+        vc,
+        gwas,
+        twasWeights = tw,
+        analysis = "varianceComponent"
+    )
+    expected <- .gc_quadraticExpected(.gc_weightMatrix()^2)
+    expected["g1", "g4"] <- expected["g4", "g1"] <- 0
+    expected["g2", "g4"] <- expected["g4", "g2"] <- 0
+    expect_equal(as.matrix(out$G1), expected)
+    # The probit's correlation is taken as the same one, as MAGMA takes it.
+    probit <- geneCorrelation(
+        vc,
+        gwas,
+        twasWeights = tw,
+        analysis = "varianceComponent",
+        scale = "probit"
+    )
+    expect_equal(as.matrix(probit$G1), expected)
+})
+
+test_that("PIP-weighted correlation reads the fine-mapping windows", {
+    skip_if_not_installed("CompQuadForm")
+    gwas <- .gc_gwas()
+    fmr <- .gc_fineMapping()
+    vc <- geneVarianceComponentTest(gwas, fineMappingResult = fmr)
+    out <- geneCorrelation(
+        vc,
+        gwas,
+        fineMappingResult = fmr,
+        analysis = "varianceComponent"
+    )
+    A <- vapply(
+        .gc_mrGenes,
+        function(gene) {
+            pip <- seq(0.9, 0.6, length.out = length(gene$idx))
+            replace(numeric(.gc_p), gene$idx, pip)
+        },
+        numeric(.gc_p)
+    )
+    expect_equal(as.matrix(out$G1), .gc_quadraticExpected(A))
+    expect_error(
+        geneCorrelation(vc, gwas, analysis = "varianceComponent"),
+        "\"pip\" rows need the `fineMappingResult`"
+    )
+})
+
+test_that("each analysis takes its own scales and its own result", {
+    skip_if_not_installed("CompQuadForm")
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    vc <- geneVarianceComponentTest(
+        gwas,
+        twasWeights = tw,
+        variantWeights = "squaredWeight"
+    )
+    expect_error(
+        geneCorrelation(
+            vc,
+            gwas,
+            twasWeights = tw,
+            analysis = "varianceComponent",
+            scale = "oneSided"
+        ),
+        "`scale` for varianceComponent statistics must be one of"
+    )
+    res <- .gc_run(gwas, tw)
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = tw, scale = "probit"),
+        "`scale` for twas statistics must be one of"
+    )
+    expect_error(
+        geneCorrelation(
+            res,
+            gwas,
+            twasWeights = tw,
+            analysis = "varianceComponent"
+        ),
+        "not a geneVarianceComponentTest\\(\\) result"
+    )
+    set.seed(99)
+    other <- .gc_gwas(z = rnorm(.gc_p))
+    expect_error(
+        geneCorrelation(
+            vc,
+            other,
+            twasWeights = tw,
+            analysis = "varianceComponent"
+        ),
+        "does not match the one these inputs give"
+    )
+})
+
+test_that("variance components are prioritized on either response", {
+    skip_if_not_installed("CompQuadForm")
+    inp <- .gp_inputs()
+    local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
+    vc <- geneVarianceComponentTest(
+        inp$gwas,
+        twasWeights = inp$tw,
+        variantWeights = "squaredWeight"
+    )
+    for (scale in c("standardized", "probit")) {
+        out <- genePrioritization(
+            vc,
+            inp$features,
+            inp$gwas,
+            twasWeights = inp$tw,
+            analysis = "varianceComponent",
+            scale = scale
+        )
+        column <- if (scale == "probit") "vcZ" else "vcStandardized"
+        y <- set_names(S4Vectors::mcols(vc)[[column]], vc$trait)
+        scores <- out$G1$scores
+        scored <- names(scores)[!is.na(scores$y)]
+        expect_setequal(scored, vc$trait)
+        expect_equal(scores[scored]$y, unname(y[scored]))
+    }
+})
+
+test_that("variance-component covariates count variants and eigenvalues", {
+    study <- list(
+        genes = list(
+            list(
+                gene = "a",
+                coef = c(1, 0.5),
+                vcMean = 1.5,
+                variantWeights = "squaredWeight",
+                cellKey = "ka"
+            ),
+            list(
+                gene = "b",
+                coef = c(1, 1, 1),
+                vcMean = 3,
+                variantWeights = "squaredWeight",
+                cellKey = "kb"
+            )
+        ),
+        variance = c(1.25, 4)
+    )
+    expect_equal(
+        pecotmr:::.gpCovariates(
+            study,
+            "varianceComponent",
+            c(ka = 0.3, kb = 0.1)
+        ),
+        cbind(
+            nVariants = c(a = 2, b = 3),
+            logNVariants = log(c(2, 3)),
+            effectiveDf = c(1.8, 2.25),
+            logEffectiveDf = log(c(1.8, 2.25)),
+            cvRsq = c(0.3, 0.1)
+        )
+    )
+    pips <- list_modify(
+        study,
+        genes = map(study$genes, list_modify, variantWeights = "pip")
+    )
+    expect_equal(
+        colnames(pecotmr:::.gpCovariates(pips, "varianceComponent", NULL)),
+        c("nVariants", "logNVariants", "effectiveDf", "logEffectiveDf")
+    )
+})
+
+# ---------------------------------------------------------------------------
+# Gene-set enrichment
+# ---------------------------------------------------------------------------
+
+test_that("a set's effect is its GLS slope with covariates out of both", {
+    fx <- .gc_whitenFixture()
+    sets <- cbind(
+        s1 = c(1, 0, 1, 1, 0),
+        s2 = c(0.5, 2, -1, 0, 1),
+        all = 1
+    )
+    rownames(sets) <- names(fx$y)
+    fit <- pecotmr:::.gseNullFit(fx$y, fx$sigma, fx$covariates)
+    out <- pecotmr:::.gseChunk(1L, sets, fit)
+    dense <- as.matrix(fx$sigma)
+    ridge <- abs(min(0, eigen(dense)$values)) +
+        0.05 +
+        0.9 * max(0, var(fx$y) - 1)
+    Linv <- solve(t(chol(dense + diag(ridge, 5))))
+    nuisance <- Linv %*% cbind(1, fx$covariates)
+    for (s in c("s1", "s2")) {
+        lm <- summary(stats::lm(
+            Linv %*% fx$y ~ 0 + nuisance + I(Linv %*% sets[, s])
+        ))$coefficients
+        row <- out[out$set == s, ]
+        expect_equal(row$beta, lm[3, "Estimate"])
+        expect_equal(row$se, lm[3, "Std. Error"])
+        expect_equal(row$t, lm[3, "t value"])
+        expect_equal(row$df, 2L)
+        expect_equal(row$pval, pt(lm[3, "t value"], 2, lower.tail = FALSE))
+    }
+    expect_equal(out$nGenes, c(3L, 4L, 5L))
+    # A set of every gene is the intercept: nothing is left to estimate.
+    expect_true(is.na(out$beta[out$set == "all"]))
+    expect_true(is.na(out$pval[out$set == "all"]))
+})
+
+test_that("geneSetEnrichment tests each set against each study", {
+    skip_if_not_installed("CompQuadForm")
+    inp <- .gp_inputs()
+    out <- geneSetEnrichment(
+        inp$res,
+        inp$features,
+        inp$gwas,
+        twasWeights = inp$tw
+    )
+    expect_named(out, "G1")
+    table <- out$G1
+    expect_named(
+        table,
+        c("set", "nGenes", "beta", "se", "t", "df", "pval")
+    )
+    expect_equal(table$set, colnames(SummarizedExperiment::assay(inp$features)))
+    # 64 genes with a statistic, less the set and the nuisance's rank: the
+    # intercept and three covariates, as every gene has four nonzero weights
+    # (nVariants and its log are the intercept again).
+    expect_equal(unique(table$df), 64L - 4L - 1L)
+    vc <- geneVarianceComponentTest(
+        inp$gwas,
+        twasWeights = inp$tw,
+        variantWeights = "squaredWeight"
+    )
+    quadratic <- geneSetEnrichment(
+        vc,
+        inp$features,
+        inp$gwas,
+        twasWeights = inp$tw,
+        analysis = "varianceComponent",
+        scale = "probit"
+    )
+    expect_true(all(is.finite(quadratic$G1$pval)))
+    unnamed <- inp$features
+    colnames(unnamed) <- NULL
+    expect_error(
+        geneSetEnrichment(inp$res, unnamed, inp$gwas, twasWeights = inp$tw),
+        "must name its sets"
+    )
+})
+
+# ===========================================================================
+# geneVarianceComponentTest
+# ===========================================================================
+
+# ===========================================================================
+# Fixture: 12 variants on chr1 with AR(1) LD in one LdMatrix, one GWAS row,
+# and two genes. g1's weights sit on variants 1-6; g2's on 5-12, named with
+# their alleles swapped, so they match the GWAS flipped.
+# ===========================================================================
+
+.vc_p <- 12L
+.vc_R <- 0.5^abs(outer(seq_len(.vc_p), seq_len(.vc_p), "-"))
+.vc_variants <- .testLdVariants(.vc_p, "chr1", 1000L)
+.vc_ids <- .vc_variants$SNP
+.vc_flipped <- sprintf("chr1:%d:T:C", .vc_variants$pos)
+.vc_z <- c(3, -2.5, 1, 0.4, -1.2, 2, 0.3, -0.8, 1.5, -0.2, 0.9, 2.2)
+
+.vc_genes <- list(
+    g1 = list(idx = 1:6, w = c(0.4, -0.2, 0, 0.3, 0.1, -0.5)),
+    g2 = list(idx = 5:12, w = c(0.2, 0.1, -0.3, 0.4, 0, 0.2, 0.1, -0.1))
+)
+
+.vc_gwas <- function(z = .vc_z) {
+    gr <- GenomicRanges::GRanges(
+        "chr1",
+        IRanges::IRanges(.vc_variants$pos, width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = .vc_ids,
+        A1 = "T",
+        A2 = "C",
+        Z = z
+    )
+    GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg19",
+        ldReference = LdMatrix(.vc_R, variants = .vc_variants),
+        qcOptions = list(qc = "done")
+    )
+}
+
+.vc_geneIds <- function(name) {
+    idx <- .vc_genes[[name]]$idx
+    if (name == "g2") .vc_flipped[idx] else .vc_ids[idx]
+}
+
+.vc_twasWeights <- function() {
+    TwasWeights(
+        studyName = rep("Q1", 2),
+        context = rep("c1", 2),
+        trait = names(.vc_genes),
+        method = rep("lasso", 2),
+        entry = map2(
+            map(names(.vc_genes), .vc_geneIds),
+            map(.vc_genes, "w"),
+            TwasWeightsRow
+        )
+    )
+}
+
+# PIPs over each gene's whole window, the squared weights rescaled.
+.vc_pips <- function(name) {
+    w2 <- .vc_genes[[name]]$w^2
+    w2 / sum(w2) + 0.01
+}
+
+.vc_fineMapping <- function() {
+    rows <- map(names(.vc_genes), function(name) {
+        FineMappingRow(
+            variantIds = .vc_geneIds(name),
+            susieFit = list(),
+            topLoci = data.frame(
+                variant_id = .vc_geneIds(name),
+                pip = .vc_pips(name)
+            )
+        )
+    })
+    QtlFineMappingResult(
+        studyName = rep("Q1", 2),
+        context = rep("c1", 2),
+        trait = names(.vc_genes),
+        method = rep("susie", 2),
+        entry = rows
+    )
+}
+
+# Q, its null eigenvalues and p-value for weights `a` on variants `idx`.
+.vc_expected <- function(a, idx) {
+    keep <- a > 0
+    a <- a[keep]
+    idx <- idx[keep]
+    root <- sqrt(a)
+    lambda <- eigen(
+        outer(root, root) * .vc_R[idx, idx],
+        symmetric = TRUE
+    )$values
+    q <- sum(a * .vc_z[idx]^2)
+    p <- CompQuadForm::farebrother(q, lambda, eps = 1e-15)$Qq
+    list(
+        nVariants = length(a),
+        vcStatistic = q,
+        vcMean = sum(lambda),
+        vcSd = sqrt(2 * sum(lambda^2)),
+        vcStandardized = (q - sum(lambda)) / sqrt(2 * sum(lambda^2)),
+        vcPval = p,
+        vcZ = qnorm(p, lower.tail = FALSE)
+    )
+}
+
+.vc_columns <- function(res, gene) {
+    mc <- as.data.frame(S4Vectors::mcols(res))
+    as.list(mc[mc$trait == gene, pecotmr:::.VC_STATISTICS])
+}
+
+test_that("squared weights give Q = sum(w^2 z^2) and its exact null", {
+    skip_if_not_installed("CompQuadForm")
+    res <- geneVarianceComponentTest(
+        .vc_gwas(),
+        twasWeights = .vc_twasWeights(),
+        variantWeights = "squaredWeight"
+    )
+    expect_s4_class(res, "GRanges")
+    expect_equal(res$trait, c("g1", "g2"))
+    expect_equal(unique(res$analysis), "varianceComponent")
+    expect_equal(unique(res$variantWeights), "squaredWeight")
+    expect_true(all(is.na(res$pipFloor)))
+    # Zero weights do not enter; g2's allele swap leaves its squares alone.
+    for (gene in names(.vc_genes)) {
+        g <- .vc_genes[[gene]]
+        expect_equal(.vc_columns(res, gene), .vc_expected(g$w^2, g$idx))
+    }
+    expect_equal(GenomeInfoDb::genome(res)[["chr1"]], "hg19")
+})
+
+test_that("PIPs weight every variant of the fine-mapping window", {
+    skip_if_not_installed("CompQuadForm")
+    fmr <- .vc_fineMapping()
+    res <- geneVarianceComponentTest(.vc_gwas(), fineMappingResult = fmr)
+    expect_equal(unique(res$variantWeights), "pip")
+    for (gene in names(.vc_genes)) {
+        expect_equal(
+            .vc_columns(res, gene),
+            .vc_expected(.vc_pips(gene), .vc_genes[[gene]]$idx)
+        )
+    }
+    floored <- geneVarianceComponentTest(
+        .vc_gwas(),
+        fineMappingResult = fmr,
+        variantWeights = "flooredPip",
+        pipFloor = 0.05
+    )
+    expect_equal(unique(floored$pipFloor), 0.05)
+    expect_equal(
+        .vc_columns(floored, "g1"),
+        .vc_expected(.vc_pips("g1") + 0.05, .vc_genes$g1$idx)
+    )
+})
+
+test_that("the arguments are checked against the weights they choose", {
+    gwas <- .vc_gwas()
+    tw <- .vc_twasWeights()
+    fmr <- .vc_fineMapping()
+    expect_error(
+        geneVarianceComponentTest(gwas, twasWeights = tw),
+        "are PIPs, read from a `fineMappingResult`"
+    )
+    expect_error(
+        geneVarianceComponentTest(
+            gwas,
+            twasWeights = tw,
+            fineMappingResult = fmr
+        ),
+        "`twasWeights` is not read"
+    )
+    expect_error(
+        geneVarianceComponentTest(gwas, fineMappingResult = fmr, pipFloor = 1),
+        "applies to `variantWeights = \"flooredPip\"` only"
+    )
+    expect_error(
+        geneVarianceComponentTest(
+            gwas,
+            fineMappingResult = fmr,
+            variantWeights = "flooredPip"
+        ),
+        "needs `pipFloor`"
+    )
+    expect_error(
+        geneVarianceComponentTest(
+            gwas,
+            fineMappingResult = fmr,
+            variantWeights = "flooredPip",
+            pipFloor = 0
+        ),
+        "must be positive"
+    )
+    expect_error(
+        geneVarianceComponentTest(gwas, variantWeights = "squaredWeight"),
+        "squared weights need"
+    )
+})
+
+test_that("weights matching no GWAS variant test nothing, and say so", {
+    tw <- TwasWeights(
+        "Q1",
+        "c1",
+        "g9",
+        "lasso",
+        list(TwasWeightsRow(c("chr1:1000:A:C", "chr1:1100:A:C"), c(1, 1)))
+    )
+    expect_message(
+        res <- geneVarianceComponentTest(
+            .vc_gwas(),
+            twasWeights = tw,
+            variantWeights = "squaredWeight"
+        ),
+        "nothing was tested"
+    )
+    expect_length(res, 0L)
+    expect_true(all(
+        c("variantWeights", pecotmr:::.VC_STATISTICS) %in%
+            names(S4Vectors::mcols(res))
+    ))
+})
+
+test_that("a genotype factor's eigenvalues are the LD matrix's", {
+    set.seed(4)
+    X <- scale(matrix(rbinom(40 * 9, 2, 0.3), 40, 9))
+    R <- crossprod(X) / 39
+    a <- runif(9)
+    fromMatrix <- pecotmr:::.vcEigenvalues(list(R = R), a)
+    # More samples than variants, then fewer.
+    expect_equal(pecotmr:::.vcEigenvalues(list(ldFactor = X), a), fromMatrix)
+    few <- X[1:6, ]
+    expect_equal(
+        pecotmr:::.vcEigenvalues(list(ldFactor = few), a),
+        pecotmr:::.vcEigenvalues(list(R = crossprod(few) / 5), a)
+    )
+    expect_length(pecotmr:::.vcEigenvalues(list(ldFactor = few), a), 6L)
+})
+
+test_that("the tail is exact where Farebrother is and saddlepoint past it", {
+    skip_if_not_installed("CompQuadForm")
+    skip_if_not_installed("survey")
+    lambda <- rep(1, 5)
+    expect_equal(pecotmr:::.quadFormUpperTail(0, lambda), 1)
+    expect_equal(pecotmr:::.quadFormUpperTail(3, numeric(0)), 1)
+    bulk <- c(2, 10, 40)
+    expect_equal(
+        map_dbl(bulk, pecotmr:::.quadFormUpperTail, lambda = lambda),
+        pchisq(bulk, 5, lower.tail = FALSE),
+        tolerance = 1e-8
+    )
+    # Past 1e-12 the saddlepoint keeps its relative error to a few percent
+    # for five equal weights, where Farebrother returns 0.
+    tail <- c(80, 150, 400)
+    expect_equal(
+        map_dbl(tail, pecotmr:::.quadFormUpperTail, lambda = lambda) /
+            pchisq(tail, 5, lower.tail = FALSE),
+        rep(1, 3),
+        tolerance = 0.05
+    )
+})
+
+test_that("squared cross forms are B'(R o R)B over several stripes", {
+    set.seed(2)
+    p <- 300L
+    R <- 0.7^abs(outer(seq_len(p), seq_len(p), "-"))
+    B <- matrix(runif(p * 3), p, 3)
+    expect_equal(
+        pecotmr:::.ldSquaredCrossForms(list(R = R), B),
+        crossprod(B, R^2 %*% B)
+    )
+})

@@ -2,23 +2,25 @@
 % Please edit documentation in R/genePrioritization.R
 \name{geneCorrelation}
 \alias{geneCorrelation}
-\title{Correlation of genes' TWAS or MR statistics}
+\title{Correlation of genes' TWAS, MR or variance-component statistics}
 \usage{
 geneCorrelation(
   x,
   gwasSumStats,
   twasWeights = NULL,
   fineMappingResult = NULL,
-  analysis = c("twas", "mr"),
+  analysis = c("twas", "mr", "varianceComponent"),
   method = NULL,
   context = NULL,
-  scale = c("oneSided", "signed", "absolute", "squared"),
+  scale = NULL,
   mrParam = MrParam(),
   alleleFlip = TRUE
 )
 }
 \arguments{
-\item{x}{A \code{\link{causalInferencePipeline}} result.}
+\item{x}{A \code{\link{causalInferencePipeline}} result, or for
+\code{analysis = "varianceComponent"} a
+\code{\link{geneVarianceComponentTest}} result.}
 
 \item{gwasSumStats}{The \code{\link{GwasSumStats}} \code{x} was computed
 from.}
@@ -26,18 +28,23 @@ from.}
 \item{twasWeights, fineMappingResult}{The weights \code{x} was computed
 from: for TWAS rows \code{twasWeights}, else the
 \code{fineMappingResult}, as the pipeline chooses; for MR rows the
-\code{fineMappingResult}.}
+\code{fineMappingResult}; for variance-component rows the fits
+\code{\link{geneVarianceComponentTest}} read.}
 
 \item{analysis}{Which rows of \code{x}: \code{"twas"} (default), their
-TWAS z-scores, or \code{"mr"}, their Wald-ratio MR estimates.}
+TWAS z-scores, \code{"mr"}, their Wald-ratio MR estimates, or
+\code{"varianceComponent"}, the statistics of a
+\code{\link{geneVarianceComponentTest}} result.}
 
 \item{method, context}{Optional: the one method and the one context whose
 rows are used. After them each gene (\code{trait}) must have one row per
 GWAS study; without them \code{x} must have one already.}
 
-\item{scale}{The statistic the correlation is of: \code{"oneSided"}
-(default), \code{"signed"}, \code{"absolute"} or \code{"squared"}; see
-Details.}
+\item{scale}{The statistic the correlation is of: for TWAS and MR rows
+\code{"oneSided"}, \code{"signed"}, \code{"absolute"} or
+\code{"squared"}; for variance-component rows \code{"standardized"} or
+\code{"probit"}. \code{NULL} (default) takes the analysis's default,
+\code{"oneSided"} or \code{"standardized"}. See Details.}
 
 \item{mrParam, alleleFlip}{As passed to \code{causalInferencePipeline} for
 \code{x}.}
@@ -52,9 +59,11 @@ A list with one element per GWAS study, named by study: a sparse
 For the genes of a \code{\link{causalInferencePipeline}}
   result, the correlation between their TWAS z-scores, or their MR
   estimates, that the LD between their variants induces, against each GWAS
-  study. It is the error correlation a regression of gene-level statistics
-  on gene features whitens by (generalized least squares), as PoPS does
-  with MAGMA's gene correlations.
+  study; or, for a \code{\link{geneVarianceComponentTest}} result, between
+  their variance-component statistics. It is the error correlation a
+  regression of gene-level statistics on gene features whitens by
+  (generalized least squares), as PoPS does with MAGMA's gene
+  correlations.
 }
 \details{
 A gene's TWAS z-score is linear in the GWAS z-scores,
@@ -68,6 +77,15 @@ A gene's TWAS z-score is linear in the GWAS z-scores,
   the GWAS z-scores too, \eqn{\hat\beta_g = a_g' z}, and correlates as
   above with \eqn{a_g} in place of \eqn{w_g}. That is a first-order
   approximation: the weights themselves depend on the GWAS z-scores.
+
+  A gene's variance-component statistic is a quadratic form,
+  \eqn{Q_g = z' A_g z} with \eqn{A_g} the diagonal of its variant weights,
+  and two genes' statistics correlate as
+  \deqn{\rho_{gh} = \frac{a_g' (R \circ R) a_h}{\sqrt{a_g' (R \circ R)
+  a_g \; a_h' (R \circ R) a_h}}}{rho_gh = a_g' (R o R) a_h /
+  sqrt(a_g' (R o R) a_g a_h' (R o R) a_h)}
+  exactly, \eqn{R \circ R} the elementwise square of the LD (MAGMA's gene
+  correlation, for weights from QTL fits).
 
   Two genes correlate only when their variants fall in a common row of the
   GWAS study (an LD block, or a chromosome), the rows the pipeline read
@@ -93,7 +111,18 @@ A gene's TWAS z-score is linear in the GWAS z-scores,
   }
   All but \code{"signed"} depend on \eqn{|\rho|} only. Each keeps the
   matrix positive semi-definite, as a power series in \eqn{\rho} with
-  non-negative coefficients.
+  non-negative coefficients. These are the scales of TWAS and MR
+  statistics; \code{"oneSided"} is their default. A variance-component
+  statistic takes one of two others, \code{"standardized"} its default:
+  \describe{
+    \item{\code{"standardized"}}{\eqn{(Q - E Q) / SD(Q)}, whose
+      correlation is \eqn{\rho} above, exactly.}
+    \item{\code{"probit"}}{\eqn{\Phi^{-1}(1 - p)} of its p-value, MAGMA's
+      gene z-score, with \eqn{\rho} above as its correlation, as MAGMA
+      takes it. That approximation is close for a gene whose statistic
+      spreads over many eigenvalues and overstates the correlation of one
+      dominated by a single one.}
+  }
 }
 \examples{
 ids <- sprintf("chr1:\%d:C:T", 100L * seq_len(8))
@@ -127,5 +156,6 @@ res <- causalInferencePipeline(
 geneCorrelation(res, gwas, twasWeights = tw)
 }
 \seealso{
-\code{\link{causalInferencePipeline}}, \code{\link{twasZ}}
+\code{\link{causalInferencePipeline}},
+  \code{\link{geneVarianceComponentTest}}, \code{\link{twasZ}}
 }

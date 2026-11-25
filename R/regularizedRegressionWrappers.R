@@ -11625,6 +11625,34 @@ mrmashWrapper <- function(
         threads = threads,
         gridSd = .mrmashGridSd(methodArgs, V, Y)
     )
+    .mrmashFitTimed(
+        setup,
+        X,
+        Y,
+        V,
+        updateV,
+        updateVMethod,
+        standardize,
+        methodArgs,
+        BPPARAM
+    )
+}
+
+# mrmashWrapper()'s fit from its `setup` (.mrmashWrapperSetup()): the
+# coefficients' and residual covariance's starts, then mr.mash, with the
+# time the three took as its `analysis_time`.
+# @noRd
+.mrmashFitTimed <- function(
+    setup,
+    X,
+    Y,
+    V,
+    updateV,
+    updateVMethod,
+    standardize,
+    methodArgs,
+    BPPARAM
+) {
     time1 <- proc.time()
     bInit <- .mrmashInitB(X, Y, setup$bInitMethod, standardize, BPPARAM)
     vInit <- .mrmashInitV(

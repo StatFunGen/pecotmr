@@ -10,10 +10,10 @@ genePrioritization(
   gwasSumStats,
   twasWeights = NULL,
   fineMappingResult = NULL,
-  analysis = c("twas", "mr"),
+  analysis = c("twas", "mr", "varianceComponent"),
   method = NULL,
   context = NULL,
-  scale = c("oneSided", "signed", "absolute", "squared"),
+  scale = NULL,
   fitMethod = "ridge",
   methodArgs = NULL,
   covariates = TRUE,
@@ -25,7 +25,9 @@ genePrioritization(
 )
 }
 \arguments{
-\item{x}{A \code{\link{causalInferencePipeline}} result.}
+\item{x}{A \code{\link{causalInferencePipeline}} result, or for
+\code{analysis = "varianceComponent"} a
+\code{\link{geneVarianceComponentTest}} result.}
 
 \item{features}{A \code{RangedSummarizedExperiment} of genes by features:
 its rows the genes, named as \code{x}'s \code{trait}, with their
@@ -38,18 +40,23 @@ from.}
 \item{twasWeights, fineMappingResult}{The weights \code{x} was computed
 from: for TWAS rows \code{twasWeights}, else the
 \code{fineMappingResult}, as the pipeline chooses; for MR rows the
-\code{fineMappingResult}.}
+\code{fineMappingResult}; for variance-component rows the fits
+\code{\link{geneVarianceComponentTest}} read.}
 
 \item{analysis}{Which rows of \code{x}: \code{"twas"} (default), their
-TWAS z-scores, or \code{"mr"}, their Wald-ratio MR estimates.}
+TWAS z-scores, \code{"mr"}, their Wald-ratio MR estimates, or
+\code{"varianceComponent"}, the statistics of a
+\code{\link{geneVarianceComponentTest}} result.}
 
 \item{method, context}{Optional: the one method and the one context whose
 rows are used. After them each gene (\code{trait}) must have one row per
 GWAS study; without them \code{x} must have one already.}
 
-\item{scale}{The statistic the correlation is of: \code{"oneSided"}
-(default), \code{"signed"}, \code{"absolute"} or \code{"squared"}; see
-Details.}
+\item{scale}{The statistic the correlation is of: for TWAS and MR rows
+\code{"oneSided"}, \code{"signed"}, \code{"absolute"} or
+\code{"squared"}; for variance-component rows \code{"standardized"} or
+\code{"probit"}. \code{NULL} (default) takes the analysis's default,
+\code{"oneSided"} or \code{"standardized"}. See Details.}
 
 \item{fitMethod}{The method fitted to the whitened data; see Details.}
 
@@ -94,10 +101,11 @@ A list with one element per GWAS study, named by study, each a
   }
 }
 \description{
-Scores each gene by how well its features predict its TWAS
-  or MR association, as the Polygenic Priority Score (PoPS; Weeks et al.
-  2023) does with MAGMA's gene z-scores. The genes' statistics from a
-  \code{\link{causalInferencePipeline}} result are regressed on their
+Scores each gene by how well its features predict its TWAS,
+  MR or variance-component association, as the Polygenic Priority Score
+  (PoPS; Weeks et al. 2023) does with MAGMA's gene z-scores. The genes'
+  statistics from a \code{\link{causalInferencePipeline}} or
+  \code{\link{geneVarianceComponentTest}} result are regressed on their
   features by generalized least squares, whitened by the correlation the
   LD between their variants induces (\code{\link{geneCorrelation}}), and
   each gene is scored from its own features by the fit that left its
@@ -128,9 +136,13 @@ For each GWAS study and each chromosome, the genes with a
   TWAS, the number of variants with a nonzero weight, the weights'
   variance under the LD (\eqn{w' R w}), the logarithms of both, and the
   weights' cross-validated \eqn{r^2}; for MR, the number of instruments and
-  its logarithm. A covariate missing for any gene (a CV \eqn{r^2} the
-  weights do not record, say) is left out, with a message. They play the
-  part of MAGMA's gene size and density in PoPS.
+  its logarithm; for variance components, the number of variants tested,
+  the effective number of eigenvalues of the statistic's null distribution
+  (\eqn{(\sum_k \lambda_k)^2 / \sum_k \lambda_k^2}), the logarithms of
+  both, and for squared TWAS weights their cross-validated \eqn{r^2}. A
+  covariate missing for any gene (a CV \eqn{r^2} the weights do not
+  record, say) is left out, with a message. They play the part of MAGMA's
+  gene size and density in PoPS.
 
   The features are read as a dense matrix of the training genes for each
   held-out chromosome, and whitening keeps them dense.
@@ -185,5 +197,7 @@ if (requireNamespace("glmnet", quietly = TRUE)) {
 }
 \seealso{
 \code{\link{geneCorrelation}},
-  \code{\link{causalInferencePipeline}}
+  \code{\link{causalInferencePipeline}},
+  \code{\link{geneVarianceComponentTest}},
+  \code{\link{geneSetEnrichment}}
 }

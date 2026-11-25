@@ -726,6 +726,8 @@ reference:
       - twasZ
       - geneCorrelation
       - genePrioritization
+      - geneVarianceComponentTest
+      - geneSetEnrichment
       - combinePValues
       - waldTestPval
 

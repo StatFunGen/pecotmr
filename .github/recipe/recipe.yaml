@@ -50,6 +50,7 @@ requirements:
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-compquadform
     - r-corshrink
     - r-cpp11
     - r-cpp11armadillo
@@ -94,6 +95,7 @@ requirements:
     - r-softimpute
     - r-sparsevb
     - r-stringr
+    - r-survey
     - r-susier
     - r-tibble
     - r-tictoc
@@ -131,6 +133,7 @@ requirements:
     - r-coda
     - r-coloc
     - r-colocboost
+    - r-compquadform
     - r-corshrink
     - r-cpp11
     - r-cpp11armadillo
@@ -175,6 +178,7 @@ requirements:
     - r-softimpute
     - r-sparsevb
     - r-stringr
+    - r-survey
     - r-susier
     - r-tibble
     - r-tictoc

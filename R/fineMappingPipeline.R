@@ -3719,17 +3719,8 @@ setMethod(
 # @noRd
 .fmPerStudy <- function(qd, cfg) {
     specs <- .msStudySpecs(cfg$studySpecs, qd)
-    m <- .fmFilterMethodsForKind(
-        if (length(specs) > 0L) cfg$studyMethods else cfg$methods,
-        "individualImpl"
-    )
-    if (length(m) == 0L && !isTRUE(cfg$usePCA)) {
-        return(NULL)
-    }
-    # `cfg` carries the parsed selection for every study; this study gets its
-    # own share, and a study left with no trait selected in its selected
-    # contexts -- none of its contexts, none of the traits -- sits out.
-    if (!.studyHasSelectedTraits(qd, cfg$contexts, cfg$traitId, cfg$region)) {
+    m <- .fmStudyMethods(qd, specs, cfg)
+    if (is.null(m)) {
         return(NULL)
     }
     s <- studyName(qd)
@@ -3767,6 +3758,27 @@ setMethod(
         dataDrivenPriorWeightsCutoff = cfg$dataDrivenPriorWeightsCutoff,
         completeSamples = cfg$completeSamples
     )
+}
+
+# The individual-level methods study `qd` runs (those of its own joint
+# `specs` when it has any): possibly none, when it still fits its top PCs.
+# NULL when the study sits out.
+# @noRd
+.fmStudyMethods <- function(qd, specs, cfg) {
+    m <- .fmFilterMethodsForKind(
+        if (length(specs) > 0L) cfg$studyMethods else cfg$methods,
+        "individualImpl"
+    )
+    if (length(m) == 0L && !isTRUE(cfg$usePCA)) {
+        return(NULL)
+    }
+    # `cfg` carries the parsed selection for every study; this study gets its
+    # own share, and a study left with no trait selected in its selected
+    # contexts -- none of its contexts, none of the traits -- sits out.
+    if (!.studyHasSelectedTraits(qd, cfg$contexts, cfg$traitId, cfg$region)) {
+        return(NULL)
+    }
+    m
 }
 
 # Embedded-sumstats fine-mapping worker for .multiStudyPipelineDriver: recurse
@@ -3863,14 +3875,7 @@ setMethod(
         components = !withComponents
     )
     if (!toComponents) {
-        if (is.null(jointResult)) {
-            abort(glue(
-                "fineMappingPipeline(MultiStudyQtlDataset): no joint fits ",
-                "produced. Check that the jointSpecification scope ",
-                "intersects the available data."
-            ))
-        }
-        return(list(done = TRUE, result = jointResult))
+        return(.fmMsJointOnly(jointResult))
     }
     list(
         done = FALSE,
@@ -3882,6 +3887,20 @@ setMethod(
         },
         studyMethods = norm$methodArgs
     )
+}
+
+# The joint phase's result when the joint fits are the whole answer: they
+# must have produced something.
+# @noRd
+.fmMsJointOnly <- function(jointResult) {
+    if (is.null(jointResult)) {
+        abort(glue(
+            "fineMappingPipeline(MultiStudyQtlDataset): no joint fits ",
+            "produced. Check that the jointSpecification scope ",
+            "intersects the available data."
+        ))
+    }
+    list(done = TRUE, result = jointResult)
 }
 
 # Resolve method tokens for a MultiStudyQtlDataset run and run any EXPLICIT
