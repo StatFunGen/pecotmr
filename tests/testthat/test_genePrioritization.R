@@ -327,6 +327,12 @@ test_that("HLA genes are scored but fitted on only when asked", {
 
 # genePrioritization() fitted by `fitMethod`, which needs `engine`: every
 # fold's effects and every gene's score finite.
+# A stand-in DPR fit: the effects X'w of its covariate w. It keeps the
+# methodArgs default, which DprOptions() reads its constructor from.
+.gp_dprCovariate <- function(X, y, methodArgs = DprOptions()) {
+    as.numeric(crossprod(X, methodArgs$w))
+}
+
 .gp_expectFitRuns <- function(fitMethod, engine) {
     skip_if_not_installed(engine)
     inp <- .gp_inputs()
@@ -495,6 +501,38 @@ test_that("MR covariates count the instruments; missing ones are left out", {
         )
     )
     expect_equal(unname(table[, "nVariants"]), c(2, 3))
+    # With every covariate missing for some gene, there are none.
+    unknown <- list_modify(
+        study,
+        genes = map(study$genes, list_modify, nIV = NA_real_)
+    )
+    expect_message(
+        none <- pecotmr:::.gpCovariates(unknown, "mr", NULL),
+        "nInstruments, logNInstruments are missing"
+    )
+    expect_null(none)
+})
+
+test_that("a DPR fit takes the whitened intercept as its covariate", {
+    options <- pecotmr:::.gpOptions("dprVb", NULL, CredibleSetParam())
+    # Each stand-in returns X'w, so its effects show the w it was given.
+    local_mocked_bindings(
+        dprVbWeights = .gp_dprCovariate,
+        dprGibbsWeights = .gp_dprCovariate,
+        dprAdaptiveGibbsWeights = .gp_dprCovariate,
+        .package = "pecotmr"
+    )
+    whitened <- list(
+        X = matrix(c(1, 0, 2, 1, 1, 0), 3),
+        y = c(0.5, -1, 2),
+        intercept = matrix(c(0.6, 0.3, -0.2))
+    )
+    for (fitMethod in c("dprVb", "dprGibbs", "dprAdaptiveGibbs")) {
+        expect_equal(
+            pecotmr:::.gpFit(fitMethod, whitened, options),
+            as.numeric(crossprod(whitened$X, whitened$intercept))
+        )
+    }
 })
 
 test_that("genePrioritization refuses features it cannot read", {
@@ -514,6 +552,13 @@ test_that("genePrioritization refuses features it cannot read", {
     expect_error(
         genePrioritization(inp$res, unnamed, inp$gwas, twasWeights = inp$tw),
         "row names"
+    )
+    bare <- SummarizedExperiment::SummarizedExperiment(
+        rowRanges = SummarizedExperiment::rowRanges(inp$features)
+    )
+    expect_error(
+        genePrioritization(inp$res, bare, inp$gwas, twasWeights = inp$tw),
+        "`features` has no assay of features"
     )
     # Only chr1 genes in features: holding chr1 out leaves nothing to fit.
     chr1 <- inp$features[seq_len(.gp_nGenes), ]
@@ -786,6 +831,22 @@ test_that("inputs other than x's are refused", {
         geneCorrelation(GenomicRanges::GRanges(), gwas, twasWeights = tw),
         "is not a causalInferencePipeline\\(\\) result"
     )
+    # Weights between the two GWAS rows meet none of them.
+    gap <- TwasWeights(
+        "Q1",
+        "c1",
+        "g1",
+        "lasso",
+        list(TwasWeightsRow(c("chr1:2410:C:T", "chr1:2420:C:T"), c(1, 1)))
+    )
+    expect_error(
+        geneCorrelation(res, gwas, twasWeights = gap),
+        "trait=g1, method=lasso\\) x GWAS 'G1' does not match"
+    )
+    expect_error(
+        geneCorrelation(res[0], gwas, twasWeights = tw),
+        "`x` holds no twas row with a statistic\\.$"
+    )
 })
 
 # ---------------------------------------------------------------------------
@@ -799,7 +860,9 @@ test_that("inputs other than x's are refused", {
     g3 = list(idx = c(14L, 17L), beta = c(-0.3, 0.2))
 )
 
-.gc_fineMapping <- function() {
+# `effectScale` scales the instruments' effects; `set` labels their credible
+# set (NA for none).
+.gc_fineMapping <- function(effectScale = 1, set = "susie_1") {
     rows <- map(.gc_mrGenes, function(gene) {
         n <- length(gene$idx)
         FineMappingRow(
@@ -808,9 +871,9 @@ test_that("inputs other than x's are refused", {
             topLoci = data.frame(
                 variant_id = .gc_ids[gene$idx],
                 pip = seq(0.9, 0.6, length.out = n),
-                posterior_mean = gene$beta,
+                posterior_mean = effectScale * gene$beta,
                 posterior_sd = rep(0.05, n),
-                cs_0.95 = rep("susie_1", n)
+                cs_0.95 = rep(set, n)
             )
         )
     })
@@ -903,6 +966,57 @@ test_that("MR correlation uses the IVW estimate's linear weights", {
             mrParam = cs
         ),
         "does not match"
+    )
+})
+
+test_that("MR inputs that give a gene no estimate are refused", {
+    gwas <- .gc_gwas()
+    fmr <- .gc_fineMapping()
+    res <- causalInferencePipeline(gwas, fineMappingResult = fmr)
+    cs <- MrParam(method = "csAware")
+    resCs <- causalInferencePipeline(
+        gwas,
+        fineMappingResult = fmr,
+        mrParam = cs
+    )
+    mismatch <- "trait=g1, method=susie\\) x GWAS 'G1' does not match"
+    # No instrument passes the cutoff.
+    expect_error(
+        geneCorrelation(
+            res,
+            gwas,
+            fineMappingResult = fmr,
+            analysis = "mr",
+            mrParam = MrParam(pipCutoff = 0.95)
+        ),
+        mismatch
+    )
+    # Instruments with no effect have no finite ratio, per variant or per set.
+    null <- .gc_fineMapping(effectScale = 0)
+    expect_error(
+        geneCorrelation(res, gwas, fineMappingResult = null, analysis = "mr"),
+        mismatch
+    )
+    expect_error(
+        geneCorrelation(
+            resCs,
+            gwas,
+            fineMappingResult = null,
+            analysis = "mr",
+            mrParam = cs
+        ),
+        mismatch
+    )
+    # Instruments in no credible set.
+    expect_error(
+        geneCorrelation(
+            resCs,
+            gwas,
+            fineMappingResult = .gc_fineMapping(set = NA_character_),
+            analysis = "mr",
+            mrParam = cs
+        ),
+        mismatch
     )
 })
 
@@ -1011,6 +1125,26 @@ test_that(".glsWhiten needs every gene of y in the correlation and X", {
     C / sqrt(outer(diag(C), diag(C)))
 }
 
+# .gc_fineMapping() with g2's row holding no variants, so no PIPs.
+.gc_noPipFineMapping <- function() {
+    rows <- map(c("g1", "g3"), function(name) {
+        ids <- .gc_ids[.gc_mrGenes[[name]]$idx]
+        FineMappingRow(ids, list(), data.frame(variant_id = ids, pip = 0.9))
+    })
+    empty <- FineMappingRow(
+        character(0),
+        list(),
+        data.frame(variant_id = character(0), pip = numeric(0))
+    )
+    QtlFineMappingResult(
+        studyName = rep("Q1", 3),
+        context = rep("c1", 3),
+        trait = c("g1", "g2", "g3"),
+        method = rep("susie", 3),
+        entry = list(rows[[1L]], empty, rows[[2L]])
+    )
+}
+
 test_that("variance-component correlation is a'(R o R)a normalized", {
     skip_if_not_installed("CompQuadForm")
     gwas <- .gc_gwas()
@@ -1110,6 +1244,56 @@ test_that("each analysis takes its own scales and its own result", {
             analysis = "varianceComponent"
         ),
         "does not match the one these inputs give"
+    )
+})
+
+test_that("variance-component inputs other than x's are refused", {
+    skip_if_not_installed("CompQuadForm")
+    gwas <- .gc_gwas()
+    tw <- .gc_twasWeights()
+    fmr <- .gc_fineMapping()
+    squared <- geneVarianceComponentTest(
+        gwas,
+        twasWeights = tw,
+        variantWeights = "squaredWeight"
+    )
+    pips <- geneVarianceComponentTest(gwas, fineMappingResult = fmr)
+    expect_error(
+        geneCorrelation(squared, gwas, analysis = "varianceComponent"),
+        "\"squaredWeight\" rows need the `twasWeights` \\(or the"
+    )
+    expect_error(
+        geneCorrelation(
+            c(squared[squared$trait == "g4"], pips),
+            gwas,
+            twasWeights = tw,
+            fineMappingResult = fmr,
+            analysis = "varianceComponent"
+        ),
+        "more than one kind of variant weight"
+    )
+    # g2's weights name its variants with their alleles swapped.
+    expect_error(
+        geneCorrelation(
+            squared,
+            gwas,
+            twasWeights = tw,
+            analysis = "varianceComponent",
+            alleleFlip = FALSE
+        ),
+        "trait=g2, method=lasso\\) x GWAS 'G1' does not match"
+    )
+    expect_warning(
+        expect_error(
+            geneCorrelation(
+                pips,
+                gwas,
+                fineMappingResult = .gc_noPipFineMapping(),
+                analysis = "varianceComponent"
+            ),
+            "trait=g2, method=susie\\) x GWAS 'G1' does not match"
+        ),
+        "trait='g2', method='susie'\\) holds no PIPs"
     )
 })
 
@@ -1216,6 +1400,13 @@ test_that("a set's effect is its GLS slope with covariates out of both", {
     # A set of every gene is the intercept: nothing is left to estimate.
     expect_true(is.na(out$beta[out$set == "all"]))
     expect_true(is.na(out$pval[out$set == "all"]))
+    # Five genes, the intercept and three covariates: no df left for a set.
+    set.seed(6)
+    crowded <- matrix(rnorm(15), 5, dimnames = list(names(fx$y), NULL))
+    expect_error(
+        pecotmr:::.gseNullFit(fx$y, fx$sigma, crowded),
+        "5 gene\\(s\\) with a statistic leave no residual degrees of freedom"
+    )
 })
 
 test_that("geneSetEnrichment tests each set against each study", {
@@ -1278,7 +1469,7 @@ test_that("geneSetEnrichment tests each set against each study", {
     g2 = list(idx = 5:12, w = c(0.2, 0.1, -0.3, 0.4, 0, 0.2, 0.1, -0.1))
 )
 
-.vc_gwas <- function(z = .vc_z) {
+.vc_gwas <- function(z = .vc_z, qcOptions = list(qc = "done")) {
     gr <- GenomicRanges::GRanges(
         "chr1",
         IRanges::IRanges(.vc_variants$pos, width = 1L)
@@ -1294,7 +1485,7 @@ test_that("geneSetEnrichment tests each set against each study", {
         entry = list(gr),
         genome = "hg19",
         ldReference = LdMatrix(.vc_R, variants = .vc_variants),
-        qcOptions = list(qc = "done")
+        qcOptions = qcOptions
     )
 }
 
@@ -1371,6 +1562,35 @@ test_that("geneSetEnrichment tests each set against each study", {
 .vc_columns <- function(res, gene) {
     mc <- as.data.frame(S4Vectors::mcols(res))
     as.list(mc[mc$trait == gene, pecotmr:::.VC_STATISTICS])
+}
+
+# The variance components of `tw`'s squared weights on GWAS `gr` with LD
+# reference `ldReference`, and their correlation.
+.vc_runOn <- function(ldReference, gr, tw) {
+    gwas <- GwasSumStats(
+        studyName = "G1",
+        entry = list(gr),
+        genome = "hg38",
+        ldReference = ldReference,
+        qcOptions = list(qc = "done")
+    )
+    vc <- geneVarianceComponentTest(
+        gwas,
+        twasWeights = tw,
+        variantWeights = "squaredWeight"
+    )
+    correlation <- geneCorrelation(
+        vc,
+        gwas,
+        twasWeights = tw,
+        analysis = "varianceComponent"
+    )
+    list(
+        statistics = as.data.frame(
+            S4Vectors::mcols(vc)
+        )[pecotmr:::.VC_STATISTICS],
+        correlation = as.matrix(correlation$G1)
+    )
 }
 
 test_that("squared weights give Q = sum(w^2 z^2) and its exact null", {
@@ -1464,6 +1684,79 @@ test_that("the arguments are checked against the weights they choose", {
         geneVarianceComponentTest(gwas, variantWeights = "squaredWeight"),
         "squared weights need"
     )
+    expect_error(
+        geneVarianceComponentTest(
+            .vc_gwas(qcOptions = list()),
+            fineMappingResult = fmr
+        ),
+        "gwasSumStats has no QC record"
+    )
+})
+
+test_that("weight sets with no PIPs, or no one weight vector, are skipped", {
+    skip_if_not_installed("CompQuadForm")
+    gwas <- .gc_gwas()
+    expect_warning(
+        pips <- geneVarianceComponentTest(
+            gwas,
+            fineMappingResult = .gc_noPipFineMapping()
+        ),
+        "trait='g2', method='susie'\\) holds no PIPs; skipping"
+    )
+    expect_equal(pips$trait, c("g1", "g3"))
+    twoColumns <- TwasWeights(
+        rep("Q1", 2),
+        rep("c1", 2),
+        c("g1", "g2"),
+        rep("lasso", 2),
+        list(
+            TwasWeightsRow(.gc_ids[1:3], matrix(1:6 / 10, 3)),
+            TwasWeightsRow(.gc_ids[4:6], c(0.1, 0.2, 0.3))
+        )
+    )
+    expect_warning(
+        squared <- geneVarianceComponentTest(
+            gwas,
+            twasWeights = twoColumns,
+            variantWeights = "squaredWeight"
+        ),
+        "trait=g1, method=lasso\\) are a matrix with 2 columns"
+    )
+    expect_equal(squared$trait, "g2")
+})
+
+test_that("a genotype panel's LD gives what its LdMatrix gives", {
+    skip_if_not_installed("CompQuadForm")
+    skip_if_not_installed("PlinkMatrix")
+    panel <- readGenotypes(test_path("test_data", "test_variants.bed"))
+    panel <- panel[seq_len(.vc_p), ]
+    ranges <- SummarizedExperiment::rowRanges(panel)
+    ids <- names(ranges)
+    gr <- GenomicRanges::GRanges(
+        GenomicRanges::seqnames(ranges),
+        IRanges::IRanges(GenomicRanges::start(ranges), width = 1L)
+    )
+    S4Vectors::mcols(gr) <- S4Vectors::DataFrame(
+        SNP = ids,
+        A1 = ranges$A1,
+        A2 = ranges$A2,
+        Z = .vc_z
+    )
+    tw <- TwasWeights(
+        rep("Q1", 2),
+        rep("c1", 2),
+        names(.vc_genes),
+        rep("lasso", 2),
+        unname(map(.vc_genes, function(g) TwasWeightsRow(ids[g$idx], g$w)))
+    )
+    ld <- LdMatrix(unname(computeLd(panel)), variants = ranges)
+    runs <- map(list(panel = panel, ld = ld), .vc_runOn, gr = gr, tw = tw)
+    expect_equal(
+        runs$panel$statistics,
+        runs$ld$statistics,
+        tolerance = 1e-6
+    )
+    expect_equal(runs$panel$correlation, runs$ld$correlation)
 })
 
 test_that("weights matching no GWAS variant test nothing, and say so", {
