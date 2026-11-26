@@ -1537,7 +1537,8 @@ NULL
     base,
     transposeCov,
     genotypesOverride = NULL,
-    genoCovOverride = NULL
+    genoCovOverride = NULL,
+    genome = NULL
 ) {
     contexts <- unique(as.character(rows$context))
     phenotypes <- set_names(
@@ -1564,7 +1565,8 @@ NULL
         genotypes = genotypes,
         phenotypes = phenotypes,
         genotypeCovariates = genoCov,
-        dataType = .manifestContextTypes(rows, studyName)
+        dataType = .manifestContextTypes(rows, studyName),
+        genome = genome
     )
 }
 
@@ -1730,6 +1732,8 @@ NULL
 #'   to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.
 #' @param transposeCovariates Transpose covariate TSVs (QTLtools layout) before
 #'   treating them as samples-as-rows.
+#' @param genome Optional genome build of the data, as for
+#'   \code{\link{QtlDataset}}.
 #' @return A \code{QtlDataset} object.
 #' @examples
 #' d <- system.file("extdata", "qtl_mini", package = "pecotmr")
@@ -1747,7 +1751,8 @@ loadQtlDatasetFromManifest <- function(
     studyName = NULL,
     genotypes = NULL,
     genotypeCovariates = NULL,
-    transposeCovariates = FALSE
+    transposeCovariates = FALSE,
+    genome = NULL
 ) {
     assertString(studyName, null.ok = TRUE)
     assertFlag(transposeCovariates)
@@ -1767,7 +1772,8 @@ loadQtlDatasetFromManifest <- function(
         base,
         transposeCovariates,
         genotypesOverride = genotypes,
-        genoCovOverride = genotypeCovariates
+        genoCovOverride = genotypeCovariates,
+        genome = genome
     )
 }
 
@@ -2419,7 +2425,10 @@ loadQtlSumStatsFromManifest <- function(
 #'   \code{study}); one \code{QtlDataset} is built per study group.
 #' @param sumStatsManifest Optional QtlSumStats manifest (see
 #'   \code{\link{loadQtlSumStatsFromManifest}}).
-#' @param genome,ldReference,which,minLdOverlapWarn Passed to the QtlSumStats
+#' @param genome Optional genome build, given to each study's
+#'   \code{QtlDataset} (see \code{\link{QtlDataset}}) and to the QtlSumStats
+#'   loader for \code{sumStatsManifest}.
+#' @param ldReference,which,minLdOverlapWarn Passed to the QtlSumStats
 #'   loader for \code{sumStatsManifest}.
 #' @param columnMapping,sampleSelect,formatMapping Passed to the QtlSumStats
 #'   loader for \code{sumStatsManifest}.
@@ -2449,7 +2458,11 @@ loadMultiStudyQtlDatasetFromManifest <- function(
 ) {
     assertFlag(transposeCovariates)
     assertNumber(minLdOverlapWarn, lower = 0, upper = 1)
-    qtlDatasets <- .msqBuildDatasets(qtlDatasetsManifest, transposeCovariates)
+    qtlDatasets <- .msqBuildDatasets(
+        qtlDatasetsManifest,
+        transposeCovariates,
+        genome
+    )
     sumStats <- .msqLoadSumStats(
         sumStatsManifest,
         genome,
@@ -2465,7 +2478,11 @@ loadMultiStudyQtlDatasetFromManifest <- function(
 
 # Read the qtlDatasets manifest and build one QtlDataset per study.
 # @noRd
-.msqBuildDatasets <- function(qtlDatasetsManifest, transposeCovariates) {
+.msqBuildDatasets <- function(
+    qtlDatasetsManifest,
+    transposeCovariates,
+    genome = NULL
+) {
     base <- .manifestBase(qtlDatasetsManifest)
     df <- .canonManifestCols(
         .readManifest(qtlDatasetsManifest),
@@ -2480,7 +2497,8 @@ loadMultiStudyQtlDatasetFromManifest <- function(
             .msqDatasetForStudy,
             df = df,
             base = base,
-            transposeCovariates = transposeCovariates
+            transposeCovariates = transposeCovariates,
+            genome = genome
         ),
         studies
     )
@@ -2602,11 +2620,18 @@ loadMultiStudyQtlDatasetFromManifest <- function(
 
 # One study's QtlDataset from its manifest rows.
 # @noRd
-.msqDatasetForStudy <- function(s, df, base, transposeCovariates) {
+.msqDatasetForStudy <- function(
+    s,
+    df,
+    base,
+    transposeCovariates,
+    genome = NULL
+) {
     .buildQtlDatasetFromRows(
         df[as.character(df$study) == s, , drop = FALSE],
         s,
         base,
-        transposeCovariates
+        transposeCovariates,
+        genome = genome
     )
 }

@@ -158,7 +158,8 @@ Options forwarded to the engine behind a TWAS weight method,
   \code{parallel} is refused above), \code{weight} (abess scales a sparse
   design's rows by the weights but its phenotype by their square roots)
   and \code{init.active.set} (abess replaces it with an index of its
-  own).
+  own). Its \code{fit.intercept} applies to one phenotype; across
+  conditions the wrapper centres each condition itself and refuses it.
 
   \code{LassosumOptions} and \code{PenalizedRssOptions} hold the path:
   \code{lambda}, \code{thr}, \code{maxiter} and \code{strategy}, how the

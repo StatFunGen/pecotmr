@@ -196,27 +196,29 @@ fine-mapping methods here: they are not re-fit, so run
 ## Multivariate (multi-context) weights
 
 When you have multiple contexts for the same trait (e.g. multi-tissue
-expression), pass `methods = "mrmash"` to do a joint multivariate fit:
+expression), pass `methods = "mrmash"` with a `jointSpecification` naming the
+axis to fit across, to do a joint multivariate fit:
 
 ```{r multivariate, eval=FALSE}
 twasWeightsPipeline(
     qtlDatasetExample,
     methods = "mrmash",
-    contexts = c("brain", "liver")
+    contexts = c("brain", "liver"),
+    jointSpecification = "context"
 )
 ```
 
-To choose the axes yourself, pass a `jointSpecification`: a character
-vector of axes, or `list(axes = , scope = )` to limit the fit to listed
-studies, contexts or traits. The `jointSpecification` argument in
+A `jointSpecification` is a character vector of axes, or
+`list(axes = , scope = )` to limit the fit to listed studies, contexts or
+traits. The joint methods (`mrmash`, `mvsusie`, `mvsusieInf`, `fsusie`)
+need one; without it every method is fitted one condition at a time, and
+asking for a joint method stops the run. The `jointSpecification` argument in
 `?twasWeightsPipeline` gives the full grammar. On a `QtlSumStats` the
 contexts are fitted against one LD matrix, so their rows must share an LD
 reference.
 
 The joint methods are grouped exactly as `fineMappingPipeline()` groups
-them. By default that is across traits when there are two or more, else
-across contexts (always across contexts on summary statistics); with a
-`jointSpecification`, it is by that specification.
+them, by the `jointSpecification`.
 `mvsusie` weights are read off the fine-mapping fit over each group's exact
 conditions, so fine-map and build weights with the same specification and
 `contexts` / `traitId` selection: a group with no such fit stops the run.
@@ -225,25 +227,24 @@ off a fine-mapping fit across its studies; on summary statistics that fit
 holds each study on its own LD reference, and a variant a study lacks has
 weight 0 in it.
 
-On individual-level data the penalized methods also fit each such group at
-once, alongside their fits of each condition alone, on the engine `backend`
-puts them on. A group penalty puts each variant's effects across the group's
-conditions under one penalty, so a variant is in every condition's weights
-or in none: glmnet's `"mgaussian"` family (`lasso`, `enet`) for a study's
-contexts or traits on its samples, and grpreg's group penalties (`lasso`,
-`enet`, `mcp` and `scad` on `"grpreg"`) and abess's best subset (`l0learn`
-on `"abess"`) for any group, including those across a
-`MultiStudyQtlDataset`'s studies, each condition on its own samples. `ridge`
-fits each condition at one penalty level chosen across them. ncvreg and
-L0Learn, the default engines of `mcp`, `scad` and `l0learn`, have no group
-penalty, so unless you name a `backend` those methods take their group fits
-on grpreg and abess. Without a `jointSpecification` the default groups are
-fitted the same way by the methods that can; with one, a method you name in
-`methods` that cannot fit its groups is an error. Within a study a group
-keeps every sample any of its conditions observes, each condition fitted on
-its own; `completeSamples = TRUE` keeps only the samples observed in all of
-them, which the engines that take no missing phenotype (glmnet's
-`"mgaussian"`, fSuSiE, and mr.mash without `missing_y_method`) do anyway.
+With a `jointSpecification`, the penalized methods on individual-level data
+also fit each of its groups at once, alongside their fits of each condition
+alone, on the engine `backend` puts them on. A group penalty puts each
+variant's effects across the group's conditions under one penalty, so a
+variant is in every condition's weights or in none: glmnet's `"mgaussian"`
+family (`lasso`, `enet`) for a study's contexts or traits on its samples, and
+grpreg's group penalties (`lasso`, `enet`, `mcp` and `scad` on `"grpreg"`) and
+abess's best subset (`l0learn` on `"abess"`) for any group, including those
+across a `MultiStudyQtlDataset`'s studies, each condition on its own samples.
+`ridge` fits each condition at one penalty level chosen across them. ncvreg
+and L0Learn, the default engines of `mcp`, `scad` and `l0learn`, have no group
+penalty, so unless you name a `backend` those methods take their group fits on
+grpreg and abess. A method you name in `methods` that cannot fit the
+specification's groups is an error. Within a study a group keeps every sample
+any of its conditions observes, each condition fitted on its own;
+`completeSamples = TRUE` keeps only the samples observed in all of them, which
+the engines that take no missing phenotype (glmnet's `"mgaussian"`, fSuSiE,
+and mr.mash without `missing_y_method`) do anyway.
 
 ```{r joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.
@@ -292,11 +293,11 @@ whichever axes it names. Each study is fitted against its own LD reference,
 over the union of the studies' variants, and keeps the shrinkage, penalty
 level and coupling strength its own held-out statistics score best. On
 summary statistics the penalized methods also take the group penalty across
-a group's conditions on pecotmr's solver, the default groups across contexts
-included, and a trait group spans the union of its genes' variants where
-their statistics cover different ones. Where conditions share samples, their
-held-out splits are drawn correlated by `residualCorrelation`, or by a
-`mashPrior`'s residual correlation, and independently without either.
+a group's conditions on pecotmr's solver, and a trait group spans the union
+of its genes' variants where their statistics cover different ones. Where
+conditions share samples, their held-out splits are drawn correlated by
+`residualCorrelation`, or by a `mashPrior`'s residual correlation, and
+independently without either.
 `prsCs` is fitted across the studies as JointPRS fits ancestries: they share
 PRS-CS's continuous shrinkage prior, as PRS-CSx shares it, and the
 correlation of their effects is learned. In one cis window that correlation

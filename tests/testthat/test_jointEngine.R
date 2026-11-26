@@ -2112,6 +2112,7 @@ test_that("joint fits share one read, allele frequencies included", {
     run <- .countBlocks(fineMappingPipeline(
         data,
         methods = "mvsusie",
+        jointSpecification = "trait",
         region = .fitSamplesWindow(),
         seed = 1L
     ))

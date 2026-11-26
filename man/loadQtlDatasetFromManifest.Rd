@@ -9,7 +9,8 @@ loadQtlDatasetFromManifest(
   studyName = NULL,
   genotypes = NULL,
   genotypeCovariates = NULL,
-  transposeCovariates = FALSE
+  transposeCovariates = FALSE,
+  genome = NULL
 )
 }
 \arguments{
@@ -32,6 +33,9 @@ to a covariate TSV; reconciled with a \code{genotypeCovariatePath} column.}
 
 \item{transposeCovariates}{Transpose covariate TSVs (QTLtools layout) before
 treating them as samples-as-rows.}
+
+\item{genome}{Optional genome build of the data, as for
+\code{\link{QtlDataset}}.}
 }
 \value{
 A \code{QtlDataset} object.

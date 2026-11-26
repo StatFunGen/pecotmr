@@ -1144,6 +1144,23 @@ parseTraitIds <- function(traitId, data) {
     rowSums(!is.na(Y)) > 0L
 }
 
+# Each condition's observed samples among a group's fit samples (`Y`'s rows,
+# a column per condition): the samples its own part of the fit is on, which
+# the genotype filter's per-variant cutoffs must each pass in. NULL under
+# `complete`, where every condition observes every fit sample.
+# @noRd
+.jointConditionSamples <- function(Y, complete) {
+    if (isTRUE(complete)) {
+        return(NULL)
+    }
+    map(seq_len(ncol(Y)), .jointObservedIn, Y = Y)
+}
+
+# @noRd
+.jointObservedIn <- function(k, Y) {
+    rownames(Y)[!is.na(Y[, k])]
+}
+
 # The rows of `m` for `samples`, missing for a sample `m` lacks.
 # @noRd
 .jointRowsOf <- function(m, samples) {
@@ -1217,6 +1234,10 @@ parseTraitIds <- function(traitId, data) {
         perTraitContexts = perTraitContexts,
         Yres = Yres,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            .crossContextY(Yres, perTraitContexts, fitSamples),
+            completeSamples
+        ),
         report = report
     )
 }
@@ -1294,6 +1315,10 @@ parseTraitIds <- function(traitId, data) {
         traitsHere = traitsHere,
         allY = allY,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            allY[fitSamples, , drop = FALSE],
+            completeSamples
+        ),
         completeSamples = completeSamples
     )
 }
@@ -1455,6 +1480,10 @@ parseTraitIds <- function(traitId, data) {
         allTraits = allTraits,
         YresList = YresList,
         fitSamples = fitSamples,
+        conditionSamples = .jointConditionSamples(
+            .composedYCols(YresList, tuples, fitSamples),
+            completeSamples
+        ),
         completeSamples = completeSamples
     )
 }
@@ -1757,30 +1786,26 @@ parseTraitIds <- function(traitId, data) {
     rbindFn(perTupleResult, jointResult)
 }
 
-# The jointSpecification of a run on individual-level data that names none:
-# both pipelines group every joint method (mvsusie, fsusie, mr.mash) by it,
-# so a TWAS run reads the very fits a fine-mapping run made, through the SAME
-# engine as an explicit jointSpecification. >= 2 traits -> cross-trait (covers
-# multi-trait single-context AND both-multi, since the cross-trait enumerator
-# iterates contexts -> per-context multi-trait fits); else >= 2 contexts
-# (single trait) -> cross-context. Single context & single trait -> no joint
-# (the callers' multivariate guards already reject the joint methods there).
-# Returns a list of parsed specs (full scope) or list().
+# A run with no jointSpecification fits each condition on its own, which the
+# joint methods among `tokens` (mvsusie, fsusie, mr.mash) cannot: they fit
+# conditions together, and only a jointSpecification says which. `caller`
+# names the pipeline and input class for the message.
 # @noRd
-.defaultJointSpec <- function(nCtx, nTraits) {
-    if (nTraits >= 2L) {
-        list(list(axes = "trait", scope = NULL))
-    } else if (nCtx >= 2L) {
-        list(list(axes = "context", scope = NULL))
-    } else {
-        list()
+.assertJointSpecForJointMethods <- function(parsedJointSpec, tokens, caller) {
+    if (length(parsedJointSpec) > 0L || length(tokens) == 0L) {
+        return(invisible(NULL))
     }
-}
-
-# The same for summary statistics: across contexts.
-# @noRd
-.defaultSumStatsJointSpec <- function() {
-    list(list(axes = "context", scope = NULL))
+    abort(c(
+        glue(
+            "{caller}: {str_flatten(tokens, ', ')} fit conditions jointly, ",
+            "so they need a `jointSpecification`."
+        ),
+        i = str_c(
+            "Name the conditions to fit together, e.g. ",
+            "`jointSpecification = \"context\"` or `\"trait\"`; without one ",
+            "every method is fitted one condition at a time."
+        )
+    ))
 }
 # ---- fine-mapping joint dispatch --------------------------------------------
 #

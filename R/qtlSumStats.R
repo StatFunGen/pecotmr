@@ -209,19 +209,13 @@ QtlSumStats <- function(
     metadata = list(),
     dataType = NULL
 ) {
-    if (
-        missing(studyName) ||
-            missing(context) ||
-            missing(trait) ||
-            missing(entry) ||
-            missing(genome)
-    ) {
-        msg <- glue(
-            "`studyName`, `context`, `trait`, `entry`, and `genome` ",
-            "are all required."
-        )
-        abort(msg)
-    }
+    .qssRequireArgs(c(
+        missing(studyName),
+        missing(context),
+        missing(trait),
+        missing(entry),
+        missing(genome)
+    ))
     n <- length(studyName)
     varY <- .qssValidateArgs(context, trait, entry, genome, varY, n)
     windows <- .qssWindows(region, n)
@@ -244,6 +238,19 @@ QtlSumStats <- function(
         ),
         metadata
     )
+}
+
+# The constructor's five arguments without a default, which `absent` says
+# whether each was left out of the call: all are required.
+# @noRd
+.qssRequireArgs <- function(absent) {
+    if (any(absent)) {
+        abort(glue(
+            "`studyName`, `context`, `trait`, `entry`, and `genome` ",
+            "are all required."
+        ))
+    }
+    invisible(NULL)
 }
 
 # The collection's elements: each tuple's entry split by seqname, each piece

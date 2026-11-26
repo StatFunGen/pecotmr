@@ -84,7 +84,9 @@ By default the variational Bayes (`VB`) fitting method is used, which is fast
 and deterministic. The user may switch to `Gibbs` or `Adaptive_Gibbs` for
 full Bayesian MCMC inference. `rotate_variables` is held to `FALSE` under the
 assumption that any covariates have already been regressed out upstream; an
-intercept-only covariate matrix is supplied to `fit_model`.
+intercept-only covariate matrix is supplied to `fit_model`, unless
+`methodArgs` gives its own `w`: a matrix with a row per sample, such as a
+whitened intercept for data with no intercept of their own.
 }
 \examples{
 data(eqtlRegionExample)

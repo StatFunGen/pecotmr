@@ -9,7 +9,8 @@ QtlDataset(
   genotypes,
   phenotypes,
   genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0),
-  dataType = NULL
+  dataType = NULL,
+  genome = NULL
 )
 }
 \arguments{
@@ -33,6 +34,14 @@ being only numbers, so pipelines read it from here and record it on what
 they fit, and \code{\link{ctwasPipeline}} models each type as its own. Kept
 in the context's \code{metadata()} as \code{dataType}, and read by
 \code{\link{dataType}}. \code{NULL} (default) leaves a context's as it is.}
+
+\item{genome}{Optional genome build of the genotypes' and phenotypes'
+positions (e.g. \code{"hg38"}), a single string. Recorded in the
+\code{seqinfo()} of every experiment, so the results pipelines compute
+from the dataset carry it (see \code{\link{RangedTupleList-class}}), as
+\code{\link{mashInput}} needs of a fine-mapping result. \code{NULL}
+(default) leaves the build the inputs name, if any; a build other than
+one they name is an error.}
 }
 \value{
 A \code{QtlDataset} object.

@@ -1414,7 +1414,14 @@ setMethod(
     # FM-fit injection: an FM-derived token extracts its weights from the
     # precomputed fine-mapping fit rather than refitting.
     withFit <- .twasWithH2(
-        .jointTwasInjectFit(supplied %||% list(), token, fittedModels),
+        .jointTwasInjectFit(
+            supplied %||% list(),
+            token,
+            fittedModels,
+            args$fittedIds[[token]],
+            colnames(Xc),
+            cond
+        ),
         token,
         args$h2,
         "individual"
@@ -1809,9 +1816,18 @@ setMethod(
 }
 
 # The method args with the precomputed fine-mapping fit injected, when the
-# token has an adapter, a fit exists, and the caller did not pass one.
+# token has an adapter, a fit exists, and the caller did not pass one. The
+# fit's variants (`fitIds`, when known) must be the genotypes' (`xIds`) of
+# the group `cond` (.twasAssertFitVariants()).
 # @noRd
-.jointTwasInjectFit <- function(ma, token, fittedModels) {
+.jointTwasInjectFit <- function(
+    ma,
+    token,
+    fittedModels,
+    fitIds = NULL,
+    xIds = NULL,
+    cond = NULL
+) {
     adapter <- .twasFineMappingMethodAdapters[[token]]
     if (
         is.null(adapter) ||
@@ -1820,8 +1836,45 @@ setMethod(
     ) {
         return(ma)
     }
+    .twasAssertFitVariants(fitIds, xIds, token, cond)
     fittedArg <- set_names(list(fittedModels[[token]]), adapter$fitArg)
     list_assign(ma, !!!fittedArg)
+}
+
+# TWAS reads a fine-mapping method's weights off its fit, never refitting
+# it, so the genotypes they apply to must be the variants the fit was made
+# on, in its order. A fine-mapping run and a TWAS run under different
+# genotype filters (or windows) build different blocks for one gene; that is
+# refused here, by the variants, rather than later by their count alone. No
+# check when the fit does not say what its variants are.
+# @noRd
+.twasAssertFitVariants <- function(fitIds, xIds, token, cond) {
+    if (is.null(fitIds) || identical(as.character(fitIds), xIds)) {
+        return(invisible(NULL))
+    }
+    differ <- if (setequal(fitIds, xIds)) {
+        "the same variants in another order"
+    } else {
+        glue(
+            "{sum(!is_in(fitIds, xIds))} of the fit's not among them and ",
+            "{sum(!is_in(xIds, fitIds))} of theirs not in the fit"
+        )
+    }
+    abort(c(
+        glue(
+            "twasWeightsPipeline: the '{token}' fine-mapping fit of ",
+            "{.twasConditionsLabel(cond)} is on {length(fitIds)} variants, ",
+            "but the genotypes TWAS reads for it are on {length(xIds)} ",
+            "({differ})."
+        ),
+        i = str_c(
+            "TWAS reads these weights off the fit and never refits it, so ",
+            "both must be on the same variants: run fineMappingPipeline() ",
+            "and twasWeightsPipeline() with the same genotypeFilterParam (its ",
+            "MAF, MAC and X-variance cutoffs and keep-lists) and the same ",
+            "window."
+        )
+    ))
 }
 
 # Spike-and-slab pi from an internal mr.ash fit (self-contained per method).
@@ -2507,6 +2560,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = tid,
         xContexts = planned$perTraitContexts,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         studyName = studyName,
         planned = planned
     )
@@ -2711,6 +2765,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = planned$traitsHere,
         xContexts = cx,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         studyName = studyName,
         planned = planned
     )
@@ -3460,7 +3515,11 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         spec = .qtlFitSpec(
             .fmGenoWindow(qd, unique(rows$trait), args$region, args$cisWindow),
             unique(rows$context),
-            rownames(Y)[kept]
+            rownames(Y)[kept],
+            .jointConditionSamples(
+                Y[kept, , drop = FALSE],
+                isTRUE(args$completeSamples)
+            )
         )
     )
 }
@@ -3519,6 +3578,7 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
         xTraits = planned$allTraits,
         xContexts = planned$allContexts,
         samples = planned$fitSamples,
+        conditionSamples = planned$conditionSamples,
         planned = planned
     ))
 }
@@ -3807,6 +3867,18 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     )
     list(
         fittedModels = .twasFitsForRegion(af, bi, nR),
+        # A multi-region fit's variants are its regions', which its row does
+        # not tell apart; only a single region's are checked.
+        fittedIds = if (nR == 1L) {
+            .twasFineMappingFitIds(
+                fmRes,
+                studyName = as.character(cond$study[[1L]]),
+                context = as.character(cond$context[[1L]]),
+                trait = as.character(cond$trait[[1L]]),
+                joint = joint,
+                tokens = names(af)
+            )
+        },
         fineMappingCv = .twasGroupFmCv(fmRes, cond, joint),
         fmColumns = .twasGroupFmColumns(fmRes, cond, joint, names(af))
     )
@@ -4228,18 +4300,28 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
 # A unit of joint groups not built yet: the function that builds it from a
 # residualized X, its arguments, `x` first, and the genotypes it will be built
 # on (the traits that name their window, the contexts of their covariates and
-# the samples it may fit). The individual-level enumerators return these: their
-# phenotypes are in hand, so what can share an X is known before any genotype is
-# read, and a unit's X exists only while its groups are fitted. A unit is one
-# group, or a context's principal components, which share one X.
+# the samples it may fit, and of a group fitting each condition on its own
+# samples, those of each condition). The individual-level enumerators return
+# these: their phenotypes are in hand, so what can share an X is known before
+# any genotype is read, and a unit's X exists only while its groups are fitted.
+# A unit is one group, or a context's principal components, which share one X.
 # @noRd
-.deferGroups <- function(x, builder, xTraits, xContexts, samples, ...) {
+.deferGroups <- function(
+    x,
+    builder,
+    xTraits,
+    xContexts,
+    samples,
+    ...,
+    conditionSamples = NULL
+) {
     list(
         builder = builder,
         args = list(x, ...),
         xTraits = xTraits,
         xContexts = xContexts,
-        samples = samples
+        samples = samples,
+        conditionSamples = conditionSamples
     )
 }
 
@@ -4261,7 +4343,8 @@ setMethod("construct", "TwasJointPipeline", function(pipeline, records) {
     .qtlFitSpec(
         .fmGenoWindow(data, unit$xTraits, args$region, args$cisWindow),
         unit$xContexts,
-        unit$samples
+        unit$samples,
+        unit$conditionSamples
     )
 }
 

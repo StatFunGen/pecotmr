@@ -25,7 +25,11 @@ loadMultiStudyQtlDatasetFromManifest(
 \item{sumStatsManifest}{Optional QtlSumStats manifest (see
 \code{\link{loadQtlSumStatsFromManifest}}).}
 
-\item{genome, ldReference, which, minLdOverlapWarn}{Passed to the QtlSumStats
+\item{genome}{Optional genome build, given to each study's
+\code{QtlDataset} (see \code{\link{QtlDataset}}) and to the QtlSumStats
+loader for \code{sumStatsManifest}.}
+
+\item{ldReference, which, minLdOverlapWarn}{Passed to the QtlSumStats
 loader for \code{sumStatsManifest}.}
 
 \item{columnMapping, sampleSelect, formatMapping}{Passed to the QtlSumStats

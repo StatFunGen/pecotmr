@@ -362,16 +362,8 @@ test_that("fineMappingPipeline reads a window once across its paths", {
     expect_equal(pca$reads, 1L)
     expect_true(any(grepl("PC", as.character(pca$result$trait))))
     skip_if_not_installed("mvsusieR")
-    # The univariate fits and the joint ones, whichever way they are asked for.
-    # The fixture's contexts share phenotypes, which mvSuSiE warns about.
-    auto <- .countBlocks(suppressWarnings(fineMappingPipeline(
-        .fitSamplesDataset(),
-        methods = c("susie", "mvsusie"),
-        region = window,
-        seed = 1L
-    )))
-    expect_equal(auto$reads, 1L)
-    expect_setequal(as.character(auto$result$method), c("susie", "mvsusie"))
+    # The univariate fits and the joint ones. The fixture's contexts share
+    # phenotypes, which mvSuSiE warns about.
     bySpec <- .countBlocks(suppressWarnings(fineMappingPipeline(
         .fitSamplesDataset(),
         methods = c("susie", "mvsusie"),
@@ -866,6 +858,37 @@ test_that(".fmExtractZn: errors on missing SNP / Z / N columns", {
 # fineMappingPipeline(QtlDataset)
 # ===========================================================================
 
+test_that("fineMappingPipeline(QtlDataset): the result carries its build", {
+    local_mocked_bindings(
+        .handleDosage = .fmp_mockExtractor(),
+        .fmFitSusieIndiv = .fmp_mockFitIndiv(),
+        .fmPostprocessOne = .fmp_mockPostprocess(),
+        .package = "pecotmr"
+    )
+    fit <- function(qd) {
+        suppressMessages(fineMappingPipeline(
+            qd,
+            methods = "susie",
+            cisWindow = 1000L,
+            initializeWithSusieInf = FALSE
+        ))
+    }
+    # A dataset naming no build gives a result naming none.
+    expect_true(all(is.na(GenomeInfoDb::genome(fit(.fmp_qdAB)))))
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = .fmp_makeHandle(),
+        phenotypes = list(brain = .fmp_makeSe(traits = c("ENSG_A", "ENSG_B"))),
+        genome = "hg38"
+    )
+    res <- fit(qd)
+    expect_identical(unique(unname(GenomeInfoDb::genome(res))), "hg38")
+    expect_identical(
+        unique(unname(GenomeInfoDb::genome(marginalEffects(res)))),
+        "hg38"
+    )
+})
+
 test_that("fineMappingPipeline(QtlDataset): univariate rows record traitPos", {
     local_mocked_bindings(
         .handleDosage = .fmp_mockExtractor(),
@@ -958,13 +981,19 @@ test_that("a multi-study run reads a window once per component", {
 }
 
 # Fits of `method` on `data` hold no copy of its genotypes, at any level.
-.fmExpectFitsHoldNoX <- function(data, method, window) {
+.fmExpectFitsHoldNoX <- function(
+    data,
+    method,
+    window,
+    jointSpecification = NULL
+) {
     X <- residualizedGenotypes(data, context = "brain")
     expect_true(.fmShapeHoldsX(dim(X), X))
     for (level in c("slim", "full")) {
         res <- suppressWarnings(suppressMessages(fineMappingPipeline(
             data,
             methods = method,
+            jointSpecification = jointSpecification,
             region = window,
             phenotypeFilterParam = PhenotypeFilterParam(naAction = "impute"),
             fitRetention = level,
@@ -1024,7 +1053,7 @@ test_that("a joint fit keeps no copy of X, at any level", {
     skip_if_not_installed("mvsusieR")
     skip_if_not_installed("fsusieR")
     window <- .fitSamplesWindow()
-    .fmExpectFitsHoldNoX(.fitSamplesDataset(), "mvsusie", window)
+    .fmExpectFitsHoldNoX(.fitSamplesDataset(), "mvsusie", window, "trait")
     panel <- pecotmr:::.qtlGenotypeSe(.fitSamplesDataset())
     set.seed(1)
     .fmExpectFitsHoldNoX(
@@ -1033,7 +1062,8 @@ test_that("a joint fit keeps no copy of X, at any level", {
             GenomicRanges::start(window) + 100L * seq_len(16L)
         ),
         "fsusie",
-        window
+        window,
+        "trait"
     )
 })
 
@@ -1074,6 +1104,7 @@ test_that("a joint fit reports the frequencies of the samples it keeps", {
         res <- suppressWarnings(suppressMessages(fineMappingPipeline(
             data,
             methods = method,
+            jointSpecification = "trait",
             region = GenomicRanges::GRanges("chr1:1-3000"),
             genotypeFilterParam = GenotypeFilterParam(imissCutoff = cutoff),
             traitId = str_c("cpg", 1:16),
@@ -1825,17 +1856,23 @@ test_that("fineMappingPipeline(QtlDataset): empty trait filter errors", {
     )
 })
 
-test_that("fineMappingPipeline refuses mvsusie on one trait and context", {
+test_that("fineMappingPipeline refuses joint methods with no specification", {
+    # Without a specification every method is fitted one condition at a time,
+    # which the joint methods cannot be, however many conditions there are.
     expect_error(
-        fineMappingPipeline(.fmp_qdA, methods = "mvsusie"),
-        "mvsusie requires multi-trait or multi-context"
+        fineMappingPipeline(.fmp_qdAB, methods = c("susie", "mvsusie")),
+        "fineMappingPipeline\\(QtlDataset\\): mvsusie fit conditions jointly"
     )
-})
-
-test_that("fineMappingPipeline refuses fsusie on a single trait", {
     expect_error(
-        fineMappingPipeline(.fmp_qdA, methods = "fsusie"),
-        "fsusie requires multi-trait"
+        fineMappingPipeline(.fmp_qdAB, methods = "fsusie"),
+        "fsusie fit conditions jointly"
+    )
+    expect_error(
+        fineMappingPipeline(.fmp_msqd, methods = "mvsusie", cisWindow = 1000L),
+        paste0(
+            "fineMappingPipeline\\(MultiStudyQtlDataset\\): mvsusie fit ",
+            "conditions jointly"
+        )
     )
 })
 
@@ -1906,7 +1943,12 @@ test_that("fineMappingPipeline dispatches mvsusie: traits in one context", {
         .package = "mvsusieR"
     )
     res <- suppressMessages(
-        fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L)
+        fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            jointSpecification = "trait",
+            cisWindow = 1000L
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     # mvsusie multi-trait fans the joint fit out across both traits.
@@ -1949,7 +1991,12 @@ test_that("fineMappingPipeline dispatches mvsusie: contexts of one trait", {
         .package = "mvsusieR"
     )
     res <- suppressMessages(
-        fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L)
+        fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            jointSpecification = "context",
+            cisWindow = 1000L
+        )
     )
     # Multi-context fan-out: one row per context for the shared trait.
     expect_equal(nrow(res), 2L)
@@ -1978,6 +2025,7 @@ test_that("pipCutoffToSkip drops null contexts before a joint mvsusie", {
         fineMappingPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "context",
             cisWindow = 1000L,
             signalScreenParam = SignalScreenParam(pip = -1)
         )
@@ -2009,6 +2057,7 @@ test_that("pipCutoffToSkip skips mvsusie when under 2 contexts survive", {
         fineMappingPipeline(
             qd,
             methods = c("susie", "mvsusie"),
+            jointSpecification = "context",
             cisWindow = 1000L,
             initializeWithSusieInf = FALSE,
             signalScreenParam = SignalScreenParam(pip = -1)
@@ -2033,7 +2082,12 @@ test_that("mvsusie with both multi falls back to per-context multi-trait", {
         .package = "mvsusieR"
     )
     res <- suppressMessages(
-        fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L)
+        fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            jointSpecification = "trait",
+            cisWindow = 1000L
+        )
     )
     # 2 contexts * 2 traits = 4 rows (joint fit reused per context).
     expect_equal(nrow(res), 4L)
@@ -2096,6 +2150,7 @@ test_that("multi-trait auto-detection uses the data-driven mr.mash prior", {
         fineMappingPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "trait",
             cisWindow = 1000L,
             mrmashPrior = tw
         )
@@ -2152,6 +2207,7 @@ test_that("pooled unmappable scales take the mash prior's shape", {
             methods = FineMappingMethodsParam(
                 qtlDatasetMethods = setNames(list(options), token)
             ),
+            jointSpecification = "trait",
             cisWindow = 1000L,
             mrmashPrior = tw
         ))
@@ -2193,7 +2249,12 @@ test_that("multi-trait without mrmashPrior keeps the canonical prior", {
         .package = "mvsusieR"
     )
     res <- suppressMessages(
-        fineMappingPipeline(qd, methods = "mvsusie", cisWindow = 1000L)
+        fineMappingPipeline(
+            qd,
+            methods = "mvsusie",
+            jointSpecification = "trait",
+            cisWindow = 1000L
+        )
     )
     expect_false(sawMixturePrior)
     expect_true(sawCanonical)
@@ -2241,6 +2302,7 @@ test_that("the mvsusie resume cache short-circuits the joint fitter", {
         fineMappingPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "trait",
             cisWindow = 1000L,
             fineMappingResult = cache
         )
@@ -2292,6 +2354,7 @@ test_that("the mvsusie resume cache does not borrow another fit's rows", {
         suppressMessages(fineMappingPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "trait",
             cisWindow = 1000L,
             fineMappingResult = cacheOf(joint)
         ))
@@ -2507,6 +2570,7 @@ test_that("fineMappingPipeline passes mvsusie the CredibleSetParam settings", {
         fineMappingPipeline(
             qd,
             methods = "mvsusie",
+            jointSpecification = "trait",
             cisWindow = 1000L,
             credibleSetParam = CredibleSetParam(
                 maxNumSingleEffects = 3L,
@@ -2535,7 +2599,12 @@ test_that("fineMappingPipeline dispatches fsusie on traits per context", {
         .package = "fsusieR"
     )
     res <- suppressMessages(
-        fineMappingPipeline(qd, methods = "fsusie", cisWindow = 1000L)
+        fineMappingPipeline(
+            qd,
+            methods = "fsusie",
+            jointSpecification = "trait",
+            cisWindow = 1000L
+        )
     )
     expect_s4_class(res, "QtlFineMappingResult")
     # fsusie fits ONE functional model across the traits and stores it once.
@@ -3516,30 +3585,21 @@ test_that("fineMappingPipeline(ANY): unsupported input class errors", {
     )
 }
 
-test_that("fineMappingPipeline(QtlSumStats): mvsusie needs two contexts", {
-    # Build a single-context-per-(study, trait) collection. Mvsusie requires
-    # at least two contexts per (study, trait) group.
-    ss <- QtlSumStats(
-        studyName = c("Q1", "Q1"),
-        context = c("c1", "c1"),
-        trait = c("t1", "t2"),
-        entry = list(.fmp_makeSumstatsGr(), .fmp_makeSumstatsGr()),
-        genome = "hg19",
-        ldReference = .fmp_makeHandle(),
-        qcOptions = list(step1 = "ok")
-    )
+test_that("fineMappingPipeline(QtlSumStats): mvsusie needs a specification", {
     expect_error(
-        fineMappingPipeline(ss, methods = "mvsusie"),
-        "mvsusie requires at least two"
+        fineMappingPipeline(
+            .fmp_makeMultiCtxQtlSumStats(),
+            methods = "mvsusie"
+        ),
+        "fineMappingPipeline\\(QtlSumStats\\): mvsusie fit conditions jointly"
     )
 })
 
-test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
+test_that("fineMappingPipeline(QtlSumStats): mvsusie joins contexts", {
     .skipIfMvsusieCannotFitStudies()
-    # Multi-context (c1, c2) single-trait collection: mvsusie without an
-    # explicit jointSpecification routes through the joint engine -> per-context
-    # rows that share the cross-context RSS fit, each tagged with the co-fit
-    # membership.
+    # Multi-context (c1, c2) single-trait collection: mvsusie across contexts
+    # routes through the joint engine -> per-context rows that share the
+    # cross-context RSS fit, each tagged with the co-fit membership.
     ss <- .fmp_makeMultiCtxQtlSumStats()
     local_mocked_bindings(
         .handleDosage = .fmp_mockExtractor(),
@@ -3553,7 +3613,11 @@ test_that("fineMappingPipeline(QtlSumStats): mvsusie auto-joins contexts", {
         create_mixture_prior = .fmp_mockMixturePrior(),
         .package = "mvsusieR"
     )
-    res <- suppressMessages(fineMappingPipeline(ss, methods = "mvsusie"))
+    res <- suppressMessages(fineMappingPipeline(
+        ss,
+        methods = "mvsusie",
+        jointSpecification = "context"
+    ))
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(nrow(res), 2L)
     expect_setequal(as.character(res$context), c("c1", "c2"))
@@ -3593,6 +3657,7 @@ test_that("QtlSumStats joint fits take h2 and the RSS settings", {
         suppressMessages(fineMappingPipeline(
             ss,
             methods = "mvsusie",
+            jointSpecification = "context",
             h2Estimate = est,
             susieRssParam = SusieRssParam(rMismatch = "eb")
         ))
@@ -4042,6 +4107,7 @@ test_that("mvsusie with jointRegions = FALSE merges per-region fits", {
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "mvsusie",
+        jointSpecification = "trait",
         traitId = c("ENSG_A", "ENSG_B"),
         region = regions,
         jointRegions = FALSE
@@ -4073,6 +4139,7 @@ test_that("fsusie with jointRegions = FALSE merges per-region fits", {
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "fsusie",
+        jointSpecification = "trait",
         traitId = c("ENSG_A", "ENSG_B"),
         region = regions,
         jointRegions = FALSE
@@ -4291,21 +4358,6 @@ test_that("fineMappingPipeline(QtlSumStats): joint spec plus per-entry susie", {
     expect_s4_class(res, "QtlFineMappingResult")
     expect_equal(sum(res$method == "mvsusie"), 1L)
     expect_equal(sum(res$method == "susie"), nrow(ss))
-})
-
-test_that("fineMappingPipeline(QtlSumStats): no auto-joint fit is an error", {
-    # Without a joint spec mvsusie is fit by the automatic cross-context
-    # joint; with no other method to run, a joint that produces nothing
-    # leaves no result at all.
-    ss <- .fmp_makeMultiCtxQtlSumStats()
-    local_mocked_bindings(
-        .fmDispatchJointSpecsQtlSumStats = function(...) NULL,
-        .package = "pecotmr"
-    )
-    expect_error(
-        suppressMessages(fineMappingPipeline(ss, methods = "mvsusie")),
-        "no entries produced a result"
-    )
 })
 
 test_that("QTL sumstats: mvsusie-only jointSpec with no fits errors", {
@@ -5137,6 +5189,33 @@ test_that("fineMappingPipeline(QtlDataset): usePCA reuses a cached PC entry", {
     expect_true(any(as.character(res$trait) == "topPC1")) # from the cache
 })
 
+test_that("each study fits its top PCs when the joint fits take every method", {
+    skip_if_not_installed("PlinkMatrix")
+    seen <- new.env(parent = emptyenv())
+    seen$tokens <- list()
+    local_mocked_bindings(
+        .fmDispatchJointSpecsMultiStudy = function(...) .fmp_jr(),
+        .fmQdsRunAndAssemble = function(cfg, tokens, usePCA, ...) {
+            seen$tokens <- c(seen$tokens, list(tokens))
+            seen$usePCA <- usePCA
+            NULL
+        },
+        .package = "pecotmr"
+    )
+    suppressMessages(fineMappingPipeline(
+        .fm_disjointStudies(),
+        methods = "mvsusie",
+        jointSpecification = "study",
+        usePCA = TRUE,
+        nPCs = 1L,
+        cisWindow = 50000L
+    ))
+    # Both studies run, with no method of their own: only their top PCs.
+    expect_length(seen$tokens, 2L)
+    expect_true(all(lengths(seen$tokens) == 0L))
+    expect_true(seen$usePCA)
+})
+
 test_that("usePCA with a region uses the region's genotype block", {
     qd <- .fmp_qdAB
     local_mocked_bindings(
@@ -5151,6 +5230,7 @@ test_that("usePCA with a region uses the region's genotype block", {
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "mvsusie",
+        jointSpecification = "trait",
         usePCA = TRUE,
         nPCs = 1L,
         region = region
@@ -5179,6 +5259,7 @@ test_that("usePCA skips a PC block with too few shared samples", {
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "mvsusie",
+        jointSpecification = "trait",
         usePCA = TRUE,
         nPCs = 1L,
         cisWindow = 1000L
@@ -5197,6 +5278,7 @@ test_that("usePCA skips a PC block the SER screens out", {
     res <- suppressMessages(fineMappingPipeline(
         qd,
         methods = "mvsusie",
+        jointSpecification = "trait",
         usePCA = TRUE,
         nPCs = 1L,
         cisWindow = 1000L
@@ -6658,7 +6740,11 @@ test_that("each QtlSumStats row is fine-mapped against its own LD reference", {
 test_that("mvsusie on QtlSumStats refuses contexts on two LD references", {
     ss <- .fmp_twoRefSs(list(.fmp_ldm(0.1), .fmp_ldm(0.95)))
     expect_error(
-        suppressMessages(fineMappingPipeline(ss, methods = "mvsusie")),
+        suppressMessages(fineMappingPipeline(
+            ss,
+            methods = "mvsusie",
+            jointSpecification = "context"
+        )),
         "a joint fit uses one LD matrix"
     )
 })
@@ -7115,4 +7201,49 @@ test_that("fineMappingPipeline(GwasSumStats) takes per-method options", {
         initializeWithSusieInf = FALSE
     ))
     expect_equal(capture$userArgs$max_iter, 50L)
+})
+
+# ---------------------------------------------------------------------------
+# A joint fit on every condition's own samples filters variants on each
+# ---------------------------------------------------------------------------
+
+test_that("a joint fit drops variants rare in one condition's samples", {
+    skip_if_not_installed("mvsusieR")
+    n <- 40L
+    gh <- .fmp_makeHandle()
+    # Variant 1 is monomorphic in brain's samples (s1-s10), common in the
+    # rest, which only liver observes.
+    set.seed(3)
+    panel <- matrix(rbinom(n * 6L, 2, 0.3), n, 6L)
+    panel[, 1L] <- rep(c(0, 2), c(10L, 30L))
+    local_mocked_bindings(
+        .handleDosage = function(handle, snpIdx, sampleIdx = NULL) {
+            panel[sampleIdx %||% seq_len(n), snpIdx, drop = FALSE]
+        },
+        .package = "pecotmr"
+    )
+    se <- .fmp_makeSe(traits = "ENSG_A", n_samples = n, starts = 300L)
+    qd <- QtlDataset(
+        studyName = "study1",
+        genotypes = gh,
+        phenotypes = list(brain = se[, 1:10], liver = se),
+        genotypeCovariates = matrix(numeric(0), nrow = 0, ncol = 0)
+    )
+    res <- suppressMessages(fineMappingPipeline(
+        qd,
+        methods = c("susie", "mvsusie"),
+        cisWindow = 1e6,
+        genotypeFilterParam = GenotypeFilterParam(mafCutoff = 0.05),
+        jointSpecification = "context"
+    ))
+    first <- "chr1:100:G:A"
+    holds <- function(i) is_in(first, variantIds(res[i]))
+    univariate <- which(res$method == "susie")
+    joint <- which(res$method == "mvsusie")
+    expect_length(joint, 2L)
+    # Liver's own fit is on its 40 samples; brain's on its 10.
+    expect_true(holds(univariate[res$context[univariate] == "liver"]))
+    expect_false(holds(univariate[res$context[univariate] == "brain"]))
+    # The joint fit pools all 40, but brain's part of it is on its own 10.
+    expect_false(any(map_lgl(joint, holds)))
 })

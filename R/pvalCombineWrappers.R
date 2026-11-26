@@ -231,6 +231,46 @@ pvalAspu <- function(
     )
 }
 
+# P(sum_k lambda_k chi2_1 > q) for positive weights `lambda`, by numerical
+# inversion (CompQuadForm), from the cheapest method accurate where it lands:
+# Davies' algorithm to an absolute error of 1e-8, for a tail of at least
+# 1e-5 (a relative error of at most 1e-3); Farebrother's, to 1e-15, below
+# that. Farebrother's is slow for widely spread weights, and both compute the
+# tail as one minus the distribution function, so their relative precision is
+# lost below about 1e-12; there Kuonen's (1999) saddlepoint approximation
+# (survey) takes over, whose relative error stays bounded however far into
+# the tail (about 15% at most, with one dominant weight).
+# @noRd
+.quadFormUpperTail <- function(q, lambda) {
+    if (q <= 0 || length(lambda) == 0L) {
+        return(1)
+    }
+    if (!requireNamespace("CompQuadForm", quietly = TRUE)) {
+        abort("Package 'CompQuadForm' is required for this test.")
+    }
+    fast <- CompQuadForm::davies(q, lambda, acc = 1e-8, lim = 1e6)
+    if (fast$ifault == 0L && fast$Qq >= 1e-5) {
+        return(min(fast$Qq, 1))
+    }
+    exact <- CompQuadForm::farebrother(q, lambda, eps = 1e-15)
+    if (exact$ifault == 0L && exact$Qq >= 1e-12) {
+        return(exact$Qq)
+    }
+    if (!requireNamespace("survey", quietly = TRUE)) {
+        abort(str_c(
+            "Package 'survey' is required for this test's p-values below ",
+            "1e-12."
+        ))
+    }
+    survey::pchisqsum(
+        q,
+        df = rep(1, length(lambda)),
+        a = lambda,
+        lower.tail = FALSE,
+        method = "saddlepoint"
+    )
+}
+
 # =============================================================================
 # combinePValues -- unified dispatcher
 # =============================================================================

@@ -1022,82 +1022,11 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     .twasMethodCapabilities[[token]][["coupled"]][[path]]
 }
 
-# The joint methods among `tokens` (mr.mash, mvsusie, fsusie): those a
-# jointSpecification, or the grouping a run takes without one
-# (.defaultJointSpec()), groups -- the same groups for both pipelines.
+# The joint methods among `tokens` (mr.mash, mvsusie, fsusie): those only a
+# jointSpecification groups, the same groups for both pipelines.
 # @noRd
 .twasJointTokens <- function(tokens) {
     keep(tokens, .twasIsMultivariateToken)
-}
-
-# The multivariate rule across a MultiStudyQtlDataset's components.
-#
-# A multivariate method -- mvsusie, mr.mash, fsusie, and the PCA alternative
-# to fsusie -- fits one model across a tuple's traits and contexts, so it
-# needs a multivariate Y from EVERY component it will run on, not just from
-# one. A collection mixing multivariate and univariate studies cannot answer
-# that, so the request is refused here rather than failing partway through
-# the per-component recursion with only some studies fitted.
-#
-# .twasCheckMultivariateY asks the same question of a single QtlDataset; this
-# asks it of each component and names the ones that cannot comply.
-# @noRd
-.twasCheckMultivariateComponents <- function(tokens, data) {
-    mv <- keep(tokens, .twasIsMultivariateToken)
-    if (length(mv) == 0L) {
-        return(invisible(NULL))
-    }
-    components <- as.list(data)
-    if (length(components) == 0L) {
-        return(invisible(NULL))
-    }
-    bad <- keep(
-        names(components) %||% seq_along(components),
-        .twasComponentIsUnivariate,
-        components = components
-    )
-    if (length(bad) == 0L) {
-        return(invisible(NULL))
-    }
-    abort(glue(
-        "twasWeightsPipeline: method(s) {str_flatten(mv, ', ')} fit one ",
-        "model across a tuple's traits and contexts, so every study in a ",
-        "MultiStudyQtlDataset must be multivariate. These are not: ",
-        "{str_flatten(as.character(bad), ', ')}."
-    ))
-}
-
-# TRUE when one component offers neither multiple traits nor multiple
-# contexts, which is what a multivariate fit needs.
-# @noRd
-.twasComponentIsUnivariate <- function(key, components) {
-    d <- components[[key]]
-    nTraits <- length(try_fetch(traitNames(d), error = function(cnd) {
-        character(0)
-    }))
-    nCtx <- length(try_fetch(contexts(d), error = function(cnd) character(0)))
-    nTraits < 2L && nCtx < 2L
-}
-
-# Enforce the multi-trait / multi-context rule for mvsusie / mr.mash
-# methods (same family as the fine-mapping mvSuSiE rule in the design
-# doc). Multivariate methods need at least 2 traits *or* at least 2
-# contexts in the Y matrix passed to learnTwasWeights.
-# @noRd
-.twasCheckMultivariateY <- function(tokens, nTraits, nContexts) {
-    multivariateTokens <- tokens[map_lgl(tokens, .twasIsMultivariateToken)]
-    if (length(multivariateTokens) == 0L) {
-        return(invisible(NULL))
-    }
-    if (nTraits < 2L && nContexts < 2L) {
-        mvStr <- str_flatten(multivariateTokens, ", ")
-        msg <- glue(
-            "twasWeightsPipeline: method(s) {mvStr} require multi-trait or ",
-            "multi-context input (got {nTraits} trait(s) x ",
-            "{nContexts} context(s))."
-        )
-        abort(msg)
-    }
 }
 
 # Reject SumStats inputs that have not been QC'd via summaryStatsQc(), which
@@ -1169,13 +1098,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         return(list())
     }
     assertClass(fineMappingResult, "FineMappingResultBase")
-    tokens <- c(
-        "susie",
-        "susieInf",
-        "susieAsh",
-        .fmMvsusieTokens(),
-        "fsusie"
-    )
+    tokens <- .twasFmFitTokens()
     found <- compact(set_names(
         map(
             tokens,
@@ -1191,6 +1114,78 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     # compact() on an all-NULL named list leaves a zero-length names
     # attribute, which is not the bare list() the contract promises.
     if (length(found) == 0L) list() else found
+}
+
+# The fine-mapping methods whose fits TWAS reads its weights off.
+# @noRd
+.twasFmFitTokens <- function() {
+    c("susie", "susieInf", "susieAsh", .fmMvsusieTokens(), "fsusie")
+}
+
+# The variants each of `tokens`' fits of .twasFineMappingFits() was made on,
+# in the fit's order, by token (.twasFitIdsForToken()); a token whose fit
+# does not say is left out.
+# @noRd
+.twasFineMappingFitIds <- function(
+    fineMappingResult,
+    studyName,
+    context,
+    trait,
+    joint = .noJointKey(),
+    tokens = .twasFmFitTokens()
+) {
+    if (is.null(fineMappingResult) || length(tokens) == 0L) {
+        return(list())
+    }
+    found <- compact(set_names(
+        map(
+            tokens,
+            .twasFitIdsForToken,
+            fineMappingResult = fineMappingResult,
+            studyName = studyName,
+            context = context,
+            trait = trait,
+            joint = joint
+        ),
+        tokens
+    ))
+    if (length(found) == 0L) list() else found
+}
+
+# The variants the fit .twasFitForToken() returns was made on, in its order:
+# its row's, when the row holds all of the fit, else the names the fit gives
+# them; NULL when it has no fit, or neither says. A fit of unknown width
+# (no PIPs or effects) says nothing of its variants.
+# @noRd
+.twasFitIdsForToken <- function(
+    canonical,
+    fineMappingResult,
+    studyName,
+    context,
+    trait,
+    joint
+) {
+    idx <- .twasFmTokenRows(
+        fineMappingResult,
+        canonical,
+        studyName,
+        context,
+        trait,
+        joint
+    )
+    if (length(idx) == 0L) {
+        return(NULL)
+    }
+    parts <- .fmrRowParts(fineMappingResult, idx[[1L]])
+    fit <- susieFit(parts)
+    width <- .fitWidth(fit)
+    if (is.na(width)) {
+        return(NULL)
+    }
+    if (length(variants(parts)) == width) {
+        return(variantIds(parts))
+    }
+    .fitVariableNames(fit)
 }
 
 # The fit this result holds for one token on one tuple in joint group
@@ -1352,11 +1347,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #' \itemize{
 #'   \item \code{mr.mash}, \code{mvsusie}, \code{mvsusieInf} and
 #'         \code{fsusie} are grouped across conditions as
-#'         \code{\link{fineMappingPipeline}} groups them (see
-#'         \code{jointSpecification}) and follow the multi-trait /
-#'         multi-context rules of the fine-mapping \code{mvsusie} family
-#'         (require at least two traits OR at least two contexts), but for
-#'         the mvSuSiE methods grouped across studies.
+#'         \code{\link{fineMappingPipeline}} groups them, by
+#'         \code{jointSpecification}, which they need: without one the run
+#'         stops.
 #'   \item \code{prsCs} runs only on summary statistics, so it is rejected
 #'         on \code{QtlDataset} input.
 #'   \item \code{dprVb}, \code{dprAdaptiveGibbs} and \code{sparsevb} run
@@ -1418,7 +1411,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   and SDPR; the fine-mapping methods are not in it, and are requested by
 #'   name together with a \code{fineMappingResult}. A
 #'   multivariate method (\code{mrmash}, \code{mvsusie}, \code{mvsusieInf},
-#'   \code{fsusie}) fits the selected contexts and traits together and any
+#'   \code{fsusie}) fits the groups \code{jointSpecification} makes and any
 #'   other method each (context, trait) alone, so the two kinds can be
 #'   requested at once.
 #' @param backend The engine a method with several runs on, as a named
@@ -1505,10 +1498,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   means what it means to
 #'   \code{\link{fineMappingPipeline}}, so a run groups conditions exactly as
 #'   a fine-mapping run given the same specification and selection did. When
-#'   NULL (the default) they are grouped as fine-mapping groups them: across
-#'   traits if the input has two or more, else across contexts (across
-#'   contexts on summary statistics). Otherwise give a character vector of
-#'   axes (one spec) or a list of specs. A spec is a character vector drawn
+#'   NULL (the default) every method is fitted one (study, context, trait) at
+#'   a time, and the joint methods stop the run, since they need this to say
+#'   which conditions they fit together. Otherwise give a character vector
+#'   of axes (one spec) or a list of specs. A spec is a character vector drawn
 #'   from \code{"study"}, \code{"context"} and \code{"trait"}, or
 #'   \code{list(axes = <axes>, scope = <named list>)}, where \code{scope}
 #'   (keys \code{study}, \code{context}, \code{trait}) limits the fit to the
@@ -1555,10 +1548,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   specification they run one tuple at a time only.
 #'   On individual-level data the penalized methods (\code{lasso},
 #'   \code{enet}, \code{ridge}, \code{mcp}, \code{scad}, \code{l0learn})
-#'   also fit each group of two or more conditions at once, alongside their
-#'   fits of one tuple at a time, with or without a specification (in the
-#'   groups it would make by default), on the engine \code{backend} puts
-#'   them on. A group along an axis \code{coupling} names is fitted under
+#'   also fit each group of two or more conditions a specification makes at
+#'   once, alongside their fits of one tuple at a time, on the engine
+#'   \code{backend} puts them on; without a specification they run one tuple
+#'   at a time only. A group along an axis \code{coupling} names is fitted under
 #'   the penalty on the difference between the conditions' effects, with
 #'   the engine's group penalty as well where it has one; any other group
 #'   under the group penalty alone: each variant's effects across the
@@ -1574,12 +1567,10 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   \code{l0learn}, have no group penalty, so with no \code{backend} named
 #'   those methods take their group fits on grpreg and abess, and their
 #'   coupled ones on ncvreg and L0Learn; named \code{"ncvreg"} or
-#'   \code{"l0learn"}, they fit a group only when it is coupled. Without a
-#'   specification a method that fits the default groups neither way runs
-#'   one tuple at a time; with one, a method named in \code{methods} that
-#'   cannot fit its groups is an error. On summary statistics every
-#'   penalized method fits each group, the default ones across contexts
-#'   included, under the group penalty on pecotmr's own solver (not
+#'   \code{"l0learn"}, they fit a group only when it is coupled. A method
+#'   named in \code{methods} that cannot fit a specification's groups is an
+#'   error. On summary statistics every penalized method fits each group
+#'   under the group penalty on pecotmr's own solver (not
 #'   \code{lasso} on \code{backend = "bigsnpr"}), every condition at one
 #'   grid point; a coupled group takes it with the coupling. A trait group
 #'   there is fitted over the union of its genes' variants where their
@@ -1706,7 +1697,9 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   shared samples). \eqn{c = 0} gives the conditions' separate fits and a
 #'   large \eqn{c} one pooled fit. The default couples studies only, at
 #'   \code{c(0.01, 0.1, 1, 10)}, which spans nearly separate to nearly
-#'   pooled; \code{NULL} couples nothing. Coupled on individual-level data:
+#'   pooled; \code{NULL} couples nothing. Only the groups a
+#'   \code{jointSpecification} makes are coupled, so naming \code{coupling}
+#'   in a run without one is an error. Coupled on individual-level data:
 #'   \code{lasso}, \code{enet} and \code{ridge} on glmnet, with the group
 #'   penalty of glmnet's \code{"mgaussian"} family as well on the conditions
 #'   of a group that share samples and are not coupled to one another;
@@ -1744,10 +1737,13 @@ combineTwasWeights <- function(..., ldReference = NULL) {
 #'   each study's share of a group across studies) is fitted only on the
 #'   samples observed in every one of its conditions. \code{FALSE}, the
 #'   default, keeps every sample observed in some condition, each condition
-#'   fitted on its own samples. An engine that takes no missing phenotype
-#'   (glmnet's \code{"mgaussian"} group fit, fSuSiE, and mr.mash where the
-#'   installed mr.mashr has no \code{missing_y_method}) still fits on the
-#'   samples observing every condition itself.
+#'   fitted on its own samples; a variant is then kept only when it passes
+#'   \code{genotypeFilterParam}'s MAF, MAC and X-variance cutoffs on every
+#'   condition's own samples, as well as on all of them. An engine that
+#'   takes no missing phenotype (glmnet's \code{"mgaussian"} group fit,
+#'   fSuSiE, and mr.mash where the installed mr.mashr has no
+#'   \code{missing_y_method}) still fits on the samples observing every
+#'   condition itself.
 #' @param residualCorrelation Summary statistics only: the correlation of
 #'   the conditions' z-scores under the null, which carries their residual
 #'   correlation and their samples' overlap (what
@@ -1947,85 +1943,6 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
 
 # ---- QtlDataset pipeline worker + phase helpers ----------------------------
 
-# Plan the resolved grid: the methods that fit its contexts and traits together
-# on the multivariate engine, the others one tuple at a time on the univariate
-# one, so that both kinds can be asked for at once, as on summary statistics.
-# A method with a fit across conditions (.twasGroupedTokens()) takes both: its
-# fits one tuple at a time, and its fits of the groups the grid makes -- unless
-# the run has a jointSpecification, whose groups the joint phase fitted. `grid`
-# carries the axes (.twasQdsResolveGrid), `marker` the per-run fit settings,
-# `phase` the joint phase's result (.twasQdsJointPhase(): the methods it left,
-# `norm`, and whether it fitted a specification's groups) and `settings` what
-# the paths read.
-# @noRd
-.twasQdsGridWork <- function(grid, marker, phase, settings) {
-    norm <- phase$norm
-    isMv <- map_lgl(norm$tokens, .twasIsMultivariateToken)
-    grouped <- if (!isTRUE(phase$specified)) {
-        .twasQdsGroupedTokens(grid, marker, norm)
-    }
-    joint <- c(norm$tokens[isMv], grouped)
-    works <- compact(list(
-        if (!all(isMv)) {
-            exec(
-                .twasQdsUnivariateWork,
-                grid,
-                marker = marker,
-                norm = .twasNormKeep(norm, norm$tokens[!isMv]),
-                !!!settings
-            )
-        },
-        if (length(joint) > 0L) {
-            .twasQdsMultivariateWork(
-                grid,
-                marker,
-                .twasNormKeep(norm, joint),
-                settings
-            )
-        }
-    ))
-    if (length(works) == 1L) {
-        return(works[[1L]])
-    }
-    .qtlWorkOf(works, .twasQdsGridResult)
-}
-
-# The methods of `norm` that fit the grid's default groups across conditions
-# (.defaultJointSpec()) coupled or with a group penalty, in a run whose
-# settings are `marker`'s: none when the grid has one context and one trait.
-# A method whose engine fits neither is left to its fits one tuple at a time.
-# @noRd
-.twasQdsGroupedTokens <- function(grid, marker, norm) {
-    spec <- .defaultJointSpec(length(grid$useCtx), length(grid$allTraits))
-    if (length(spec) == 0L) {
-        return(character(0))
-    }
-    keep(
-        norm$tokens,
-        .twasFitsAcross,
-        axes = spec[[1L]]$axes,
-        cfg = .jpConfig(marker)
-    )
-}
-
-# Whether univariate `token` fits a group of one study's conditions varying
-# along `axes`, coupled or with a group penalty.
-# @noRd
-.twasFitsAcross <- function(token, axes, cfg) {
-    modes <- intersect(
-        .twasJointModes(token, "individual", cfg),
-        c("coupled", "grouped")
-    )
-    any(map_lgl(
-        modes,
-        .twasTokenModeFits,
-        token = token,
-        group = list(layout = "shared", axes = axes),
-        path = "individual",
-        cfg = cfg
-    ))
-}
-
 # A jointSpecification's groups must be ones every penalized method the
 # caller names in `methods` fits, coupled or with its engine's group penalty;
 # a preset's methods that fit neither are left to their fits one tuple at a
@@ -2067,44 +1984,6 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             "couple one of the axes (`coupling`), or leave the method out."
         )
     ))
-}
-
-# The multivariate methods' fits over the grid, grouped as fine-mapping groups
-# them without a jointSpecification (.defaultJointSpec()): across traits when
-# there are two or more, else across contexts. A per-context selection goes in
-# whole: the joint scope then takes each study's union of it and drops the
-# (context, trait) pairs it leaves out.
-# @noRd
-.twasQdsMultivariateWork <- function(grid, marker, norm, settings) {
-    .twasJointSpecGridWork(
-        .defaultJointSpec(length(grid$useCtx), length(grid$allTraits)),
-        norm$tokens,
-        grid$useCtx,
-        grid$traitSelection %||% grid$allTraits,
-        marker,
-        list(
-            xRegions = settings$xRegions,
-            data = settings$data,
-            norm = norm,
-            fineMappingResult = settings$fineMappingResult,
-            mashPriors = settings$mashPriors,
-            cisWindow = settings$cisWindow,
-            residualizationParam = settings$residualizationParam,
-            genotypeFilter = settings$genotypeFilter,
-            twasWeights = settings$twasWeights,
-            verbose = settings$verbose
-        )
-    )
-}
-
-# The result of a grid's two paths, either of which may have fitted nothing.
-# @noRd
-.twasQdsGridResult <- function(results) {
-    fitted <- compact(results)
-    if (length(fitted) < 2L) {
-        return(pluck(fitted, 1L))
-    }
-    .rbindTwasWeights(fitted[[1L]], fitted[[2L]], ldReference = NULL)
 }
 
 # `norm` narrowed to the methods among `keep`.
@@ -2177,6 +2056,7 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
     phenotypeFilter <- .twasResolvePhenotypeFilter(phenotypeFilterParam)
     fitRetention <- arg_match(fitRetention)
     .twasAssertCoupling(coupling)
+    .twasAssertCouplingGroups(coupling, !missing(coupling), jointSpecification)
     assertFlag(completeSamples)
     build <- .inputsBuild(
         list(data, region, fineMappingResult, twasWeights),
@@ -2266,31 +2146,23 @@ setGeneric("twasWeightsPipeline", function(data, ...) {
             build
         ))
     }
-    grid <- .twasQdsResolveGrid(
-        data,
-        contexts,
-        traitId,
-        region,
-        joint$norm$tokens
-    )
-    gridWork <- .twasQdsGridWork(
+    grid <- .twasQdsResolveGrid(data, contexts, traitId, region)
+    gridWork <- .twasQdsUnivariateWork(
         grid,
-        setup$marker,
-        joint,
-        list(
-            data = data,
-            xRegions = resolved$xRegions,
-            fineMappingResult = fineMappingResult,
-            twasWeights = twasWeights,
-            mashPriors = setup$ctx$mashPriors,
-            cisWindow = cisWindow,
-            phenotypeFilter = phenotypeFilter,
-            residualizationParam = residualizationParam,
-            genotypeFilter = resolved$genotypeFilter,
-            usePCA = usePCA,
-            nPCs = nPCs,
-            verbose = verbose
-        )
+        marker = setup$marker,
+        data = data,
+        xRegions = resolved$xRegions,
+        norm = joint$norm,
+        fineMappingResult = fineMappingResult,
+        twasWeights = twasWeights,
+        mashPriors = setup$ctx$mashPriors,
+        cisWindow = cisWindow,
+        phenotypeFilter = phenotypeFilter,
+        residualizationParam = residualizationParam,
+        genotypeFilter = resolved$genotypeFilter,
+        usePCA = usePCA,
+        nPCs = nPCs,
+        verbose = verbose
     )
     # Every path planned, so one read of a window serves them all.
     .withGenome(
@@ -2409,10 +2281,11 @@ setMethod(
 }
 
 # Explicit jointSpecification path: plan the per-spec axis dispatcher for the
-# joint methods (.twasJointTokens()). Returns list(done, work, norm): `done`
-# means its fits are the whole answer; otherwise `norm` is the normalization
-# left for the per-tuple loop below, the joint methods gone. Planned, not
-# run: they share their reads with the per-tuple fits.
+# joint methods (.twasJointTokens()), which need one. Returns
+# list(done, work, norm): `done` means its fits are the whole answer;
+# otherwise `norm` is the normalization left for the per-tuple loop below,
+# the joint methods gone. Planned, not run: they share their reads with the
+# per-tuple fits.
 # @noRd
 .twasQdsJointPhase <- function(
     parsedJointSpec,
@@ -2422,6 +2295,11 @@ setMethod(
     traitId
 ) {
     norm <- ctx$norm
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        .twasJointTokens(norm$tokens),
+        "twasWeightsPipeline(QtlDataset)"
+    )
     if (length(parsedJointSpec) == 0L) {
         return(list(done = FALSE, work = .qtlWorkValue(NULL), norm = norm))
     }
@@ -2437,12 +2315,7 @@ setMethod(
     if (length(keep) == 0L) {
         return(list(done = TRUE, work = work))
     }
-    list(
-        done = FALSE,
-        work = work,
-        norm = .twasNormKeep(norm, keep),
-        specified = TRUE
-    )
+    list(done = FALSE, work = work, norm = .twasNormKeep(norm, keep))
 }
 
 # Parse the joint spec and normalize the methods, then run the capability,
@@ -2683,20 +2556,12 @@ setMethod(
     )
 }
 
-# Resolve the (context, trait) grid and build the joint-pipeline marker + shared
-# grid context. Returns the updated parameter bundle.
+# Resolve the (context, trait) grid the per-tuple fits run over.
 # @noRd
-.twasQdsResolveGrid <- function(
-    data,
-    contexts,
-    traitId,
-    region,
-    tokens
-) {
+.twasQdsResolveGrid <- function(data, contexts, traitId, region) {
     studyName <- studyName(data)
     useCtx <- .twasQdsResolveContexts(data, contexts)
     allTraits <- .twasQdsResolveTraits(data, useCtx, traitId, region)
-    .twasCheckMultivariateY(tokens, length(allTraits), length(useCtx))
     list(
         study = studyName,
         useCtx = useCtx,
@@ -3034,6 +2899,11 @@ setMethod(
     ) {
         fitRetention <- arg_match(fitRetention)
         .twasAssertCoupling(coupling)
+        .twasAssertCouplingGroups(
+            coupling,
+            !missing(coupling),
+            jointSpecification
+        )
         .twasAssertResidualCorrelation(residualCorrelation)
         .twasWarnResidualOverride(mashPrior, residualCorrelation)
         .assertMethodParam(ensembleParam, "EnsembleParam")
@@ -3308,17 +3178,27 @@ setMethod(
 
 # The joint phase: every method fitted on joint groups -- mr.mash fitted,
 # mvsusie read off its fine-mapping fits, and across studies the coupled and
-# stacked ones -- over the run's groups (.twasQssJointSpecs()), as
-# fine-mapping groups them. Returns list(done, result, tokens, methodArgs):
+# stacked ones -- over the groups the run's jointSpecification makes, as
+# fine-mapping groups them; the joint methods refuse a run without one.
+# Returns list(done, result, tokens, methodArgs):
 # `done` requests an early return with `result`; otherwise the tokens left,
 # all but the joint methods (.twasJointTokens()), and their args continue
 # through the per-tuple loop.
 # @noRd
 .twasQssJointPhase <- function(parsedJointSpec, tokens, methodArgs, cfg) {
     jointTokens <- .twasJointTokens(tokens)
-    specs <- .twasQssJointSpecs(parsedJointSpec, jointTokens, tokens, cfg)
-    jointResult <- if (length(specs) > 0L) {
-        .twasDispatchJointSpecsQtlSumStats(specs, tokens, methodArgs, cfg)
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        jointTokens,
+        "twasWeightsPipeline(QtlSumStats)"
+    )
+    jointResult <- if (length(parsedJointSpec) > 0L) {
+        .twasDispatchJointSpecsQtlSumStats(
+            parsedJointSpec,
+            tokens,
+            methodArgs,
+            cfg
+        )
     }
     if (length(jointTokens) == 0L) {
         return(list(
@@ -3341,53 +3221,6 @@ setMethod(
         tokens = keep,
         methodArgs = methodArgs[keep]
     )
-}
-
-# The specs a summary-statistics run makes joint groups by: its
-# jointSpecification's, else, for its joint methods, the grouping across
-# contexts (.twasQssDefaultSpec()), which the penalized methods with a group
-# fit take too where the rows hold a group (.twasQssGroupedSpec()); none
-# when it has neither.
-# @noRd
-.twasQssJointSpecs <- function(parsedJointSpec, jointTokens, tokens, cfg) {
-    if (length(parsedJointSpec) > 0L) {
-        return(parsedJointSpec)
-    }
-    if (length(jointTokens) > 0L) {
-        return(.twasQssDefaultSpec(jointTokens, cfg))
-    }
-    .twasQssGroupedSpec(tokens, cfg)
-}
-
-# The grouping across contexts for the penalized methods fitted across
-# conditions on summary statistics (.twasGroupsSumstat()), when two selected
-# rows share a (study, trait); none otherwise, each fitted one row at a time.
-# @noRd
-.twasQssGroupedSpec <- function(tokens, cfg) {
-    engines <- list(engines = .twasSumstatEngines(tokens, cfg$backend))
-    grouped <- keep(tokens, .twasGroupsSumstat, cfg = engines)
-    data <- cfg$data
-    rows <- .twasQssSelectRows(data, cfg$contexts, cfg$traitId)
-    keys <- str_c(data$study, data$trait, sep = "\r")[rows]
-    if (length(grouped) == 0L || !anyDuplicated(keys)) {
-        return(list())
-    }
-    .defaultSumStatsJointSpec()
-}
-
-# A run with no jointSpecification groups its joint methods across contexts,
-# which needs two contexts of one (study, trait) among the selected rows.
-# @noRd
-.twasQssDefaultSpec <- function(jointTokens, cfg) {
-    data <- cfg$data
-    .twasQssCheckMultivariate(
-        jointTokens,
-        .twasQssSelectRows(data, cfg$contexts, cfg$traitId),
-        as.character(data$study),
-        as.character(data$context),
-        as.character(data$trait)
-    )
-    .defaultSumStatsJointSpec()
 }
 
 # Normalize the method tokens, run the capability / fine-mapping gates, then
@@ -3474,36 +3307,6 @@ setMethod(
         abort(msg)
     }
     selRows
-}
-
-# Multivariate methods require at least two contexts within some (study, trait).
-# @noRd
-.twasQssCheckMultivariate <- function(
-    multivariateTokens,
-    selRows,
-    studyCol,
-    contextCol,
-    traitCol
-) {
-    if (length(multivariateTokens) == 0L) {
-        return(invisible(NULL))
-    }
-    groupKey <- str_c(
-        studyCol[selRows],
-        traitCol[selRows],
-        sep = "||"
-    )
-    perGroupNCtx <- map_int(split(contextCol[selRows], groupKey), length)
-    if (all(perGroupNCtx < 2L)) {
-        mvStr <- str_flatten(multivariateTokens, ", ")
-        msg <- glue(
-            "twasWeightsPipeline(QtlSumStats): multivariate method(s) ",
-            "{mvStr} require at least two contexts per (study, trait); the ",
-            "supplied collection has only one context per trait."
-        )
-        abort(msg)
-    }
-    invisible(NULL)
 }
 
 # ---- Shared row-record helpers ---------------------------------------------
@@ -4164,7 +3967,8 @@ setMethod(
         usePCA = cfg$usePCA,
         nPCs = cfg$nPCs,
         residualizationParam = cfg$residualizationParam,
-        coupling = cfg$coupling,
+        # A study with no specification of its own has no groups to couple.
+        coupling = if (length(specs) > 0L) cfg$coupling,
         completeSamples = cfg$completeSamples
     ))
 }
@@ -4178,9 +3982,8 @@ setMethod(
     # fit on full data. `cfg` carries those for the individual-level sibling
     # and they are not forwarded here. The ensemble is, as summary statistics
     # stack on held-out draws; the study axis, and with it `acrossStudies`
-    # and the coupling `coupling` sets, is the collection's own run's.
-    # `coupling` is forwarded all the same, so that no setting falls
-    # back to a default unseen.
+    # and the coupling `coupling` sets, is the collection's own run's, and
+    # this run, with no specification, has no groups to couple.
     #
     # The parsed selection is applied here, to the rows, so the recursion runs
     # on what it keeps with nothing left to filter -- and rows it leaves out
@@ -4207,7 +4010,7 @@ setMethod(
         verbose = cfg$verbose,
         panelFilterParam = cfg$panelFilterParam,
         ensembleParam = .ensembleWithinStudy(cfg$ensembleParam),
-        coupling = cfg$coupling,
+        coupling = NULL,
         residualCorrelation = cfg$residualCorrelation
     ))
 }
@@ -4404,6 +4207,7 @@ setMethod(
 ) {
     fitRetention <- arg_match(fitRetention)
     .twasAssertCoupling(coupling)
+    .twasAssertCouplingGroups(coupling, !missing(coupling), jointSpecification)
     assertFlag(completeSamples)
     .twasAssertResidualCorrelation(residualCorrelation)
     .twasWarnResidualOverride(mashPrior, residualCorrelation)
@@ -4506,6 +4310,24 @@ setMethod(
         subset.of = c("study", "context", "trait")
     )
     walk(coupling, .twasAssertCouplingGrid)
+}
+
+# A `coupling` the caller names couples a group's conditions, and a run with
+# no jointSpecification makes no groups, so it would go unused. `supplied` is
+# whether the caller named it: the default couples studies and is left
+# unused without complaint.
+# @noRd
+.twasAssertCouplingGroups <- function(coupling, supplied, jointSpecification) {
+    if (!supplied || is.null(coupling) || !is.null(jointSpecification)) {
+        return(invisible(NULL))
+    }
+    abort(c(
+        str_c(
+            "twasWeightsPipeline: `coupling` couples the conditions of the ",
+            "groups a `jointSpecification` makes, and this run has none."
+        ),
+        i = "Pass a `jointSpecification`, or leave `coupling` unset."
+    ))
 }
 
 # The run's residual correlation for the summary-statistics held-out splits:
@@ -4684,17 +4506,16 @@ setMethod(
 # fsusie), grouped as fineMappingPipeline() groups them. Returns
 # list(done, result, methods) where `done` requests an early return with
 # `result` and `methods` is the set left for the per-component recursion.
-# Without a spec each component groups its own joint methods by default
-# (.defaultJointSpec()), and fits across studies are not read.
+# The joint methods refuse a run without a spec, which fits every other
+# method one condition at a time in each component.
 # @noRd
 .twasMsJointPhase <- function(parsedJointSpec, methods, cfg) {
+    .assertJointSpecForJointMethods(
+        parsedJointSpec,
+        .twasJointTokens(.twasMethodTokensFromArg(methods)),
+        "twasWeightsPipeline(MultiStudyQtlDataset)"
+    )
     if (length(parsedJointSpec) == 0L) {
-        # No joint spec: every token is fitted per component, so each must
-        # find a multivariate Y there.
-        .twasCheckMultivariateComponents(
-            .twasMethodTokensFromArg(methods),
-            cfg$data
-        )
         return(list(done = FALSE, result = NULL, methods = methods))
     }
     # A component with per-tuple fits to come fits its joint specs along with
@@ -4721,12 +4542,6 @@ setMethod(
     if (.twasMethodsEmpty(stripped)) {
         return(list(done = TRUE, result = .twasMsRequireJoint(jointResult)))
     }
-    # Whatever the joint phase did not handle falls to the per-component
-    # recursion, and is held to the same requirement.
-    .twasCheckMultivariateComponents(
-        .twasMethodTokensFromArg(stripped),
-        cfg$data
-    )
     list(
         done = FALSE,
         result = jointResult,

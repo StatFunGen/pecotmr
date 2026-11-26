@@ -3730,13 +3730,17 @@ fitFsusie <- function(
         abort(msg)
     }
     if (!is.null(X) && length(fit$pip) != ncol(X)) {
-        nPip <- length(fit$pip)
-        nX <- ncol(X)
-        msg <- glue(
-            "Dimension mismatch on number of variant in susie fit ",
-            "{nPip} and TWAS weights {nX}. "
-        )
-        abort(msg)
+        abort(c(
+            glue(
+                "{token}Weights: the fit is on {length(fit$pip)} variants, ",
+                "but `X` has {ncol(X)} columns."
+            ),
+            i = str_c(
+                "The weights are read off the fit, so `X` must hold the ",
+                "variants it was fitted on, in its order: the same genotype ",
+                "filter and window as the fine-mapping run."
+            )
+        ))
     }
     weights <- if (all(is_in(requiredFields, names(fit)))) {
         .susieCoefWeights(fit)

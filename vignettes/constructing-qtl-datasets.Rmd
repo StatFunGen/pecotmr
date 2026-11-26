@@ -19,8 +19,7 @@ knitr::opts_chunk$set(
     fig.height = 4.5,
     eval = hasPlinkMatrix
 )
-hasRelatednessQc <- requireNamespace("plinkQC", quietly = TRUE) &&
-    requireNamespace("igraph", quietly = TRUE)
+hasRelatednessQc <- requireNamespace("plinkQC", quietly = TRUE)
 ```
 
 ```{r plinkmatrix-missing, echo=FALSE, eval=!hasPlinkMatrix, results="asis"}
@@ -347,8 +346,8 @@ instead retains as many cases as it can — the right objective for a
 case/control design, where cases are the scarce resource — and requires
 `phenoData` naming each sample's status.
 
-`filterRelatedness()` needs the suggested packages **igraph** and **plinkQC**;
-the chunk above is skipped when they are not installed.
+`filterRelatedness()` needs the suggested package **plinkQC**; the chunk
+above is skipped when it is not installed.
 
 ## Next steps
 

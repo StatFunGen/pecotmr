@@ -1972,13 +1972,18 @@ test_that(".enumerateComposedSumstatGroups: empty scope and no complement", {
 })
 
 # -----------------------------------------------------------------------------
-# .defaultJointSpec
+# .assertJointSpecForJointMethods
 # -----------------------------------------------------------------------------
 
-test_that(".defaultJointSpec: trait beats context; single axes -> empty", {
-    expect_equal(pecotmr:::.defaultJointSpec(3L, 2L)[[1L]]$axes, "trait")
-    expect_equal(pecotmr:::.defaultJointSpec(2L, 1L)[[1L]]$axes, "context")
-    expect_equal(pecotmr:::.defaultJointSpec(1L, 1L), list())
+test_that("joint methods need a jointSpecification; others do not", {
+    check <- pecotmr:::.assertJointSpecForJointMethods
+    spec <- list(list(axes = "context", scope = NULL))
+    expect_error(
+        check(list(), c("mvsusie", "fsusie"), "caller"),
+        "caller: mvsusie, fsusie fit conditions jointly"
+    )
+    expect_silent(check(list(), character(0), "caller"))
+    expect_silent(check(spec, "mvsusie", "caller"))
 })
 
 # -----------------------------------------------------------------------------
@@ -3020,7 +3025,17 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
             ...
         ) {
             seen[[length(seen) + 1L]] <<- phenotypeFilter
-            matrix(0, 3, 1, dimnames = list(samp, "t1"))
+            Y <- matrix(
+                0,
+                3,
+                length(traitId),
+                dimnames = list(samp, traitId)
+            )
+            # One context's matrix, several a list keyed by context.
+            if (length(contexts) == 1L) {
+                return(Y)
+            }
+            set_names(rep(list(Y), length(contexts)), contexts)
         },
         .crossContextFitSamples = function(...) samp,
         .composedFitSamples = function(...) samp,
@@ -3173,4 +3188,18 @@ test_that("every study spec reaches one pass of the engine, with each method", {
     # the study axis alone all three, composed with the context mr.mash.
     expect_equal(seen$axes, list("study", c("study", "context")))
     expect_equal(seen$tokens, c("lasso", "mrmash", "bayesC"))
+})
+
+test_that("each condition's own samples are its observed rows", {
+    Y <- cbind(
+        a = c(1, NA, 2, NA),
+        b = c(NA, 3, 4, 5)
+    )
+    rownames(Y) <- sprintf("s%d", 1:4)
+    expect_equal(
+        pecotmr:::.jointConditionSamples(Y, FALSE),
+        list(c("s1", "s3"), c("s2", "s3", "s4"))
+    )
+    # Complete samples observe every condition: there is nothing more to ask.
+    expect_null(pecotmr:::.jointConditionSamples(Y, TRUE))
 })

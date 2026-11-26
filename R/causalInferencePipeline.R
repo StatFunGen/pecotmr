@@ -1155,37 +1155,53 @@ causalInferencePipeline <- function(
     alleleFlip = TRUE,
     label = "this (QTL, GWAS) pair"
 ) {
-    # Match QTL weights to the GWAS sumstats by (chrom, pos, allele) rather than
-    # by raw id string, so chr-prefix / separator / allele-swap differences are
-    # reconciled instead of silently dropped. sign = -1 marks an allele swap;
-    # weights[idxA] * sign brings the weight into the GWAS allele coding, which
-    # the GWAS z and the GWAS-panel LD already share.
-    m <- matchVariants(variantIds, gwasDf$variant_id, allowFlip = alleleFlip)
+    aligned <- .cipAlignWeights(weights, variantIds, gwasDf, alleleFlip)
     # Reconciliation here is one-sided and unbiased -- subsetting both w and R
     # keeps Z = w'z / sqrt(w'Rw) honest, it only costs power -- but the caller
     # cannot see how much power was lost unless the drop is reported.
-    .cipWarnVariantDrop(length(variantIds), length(m$idxA), label)
-    if (length(m$idxA) < 2L) {
+    .cipWarnVariantDrop(length(variantIds), length(aligned$idxB), label)
+    if (length(aligned$idxB) < 2L) {
         return(NULL)
     }
 
-    wSub <- weights[m$idxA] * m$sign
-    zSub <- gwasDf$z[m$idxB]
-    gwasIds <- gwasDf$variant_id[m$idxB]
-    res <- .cipTwasZ(wSub, zSub, gwasLd, gwasIds)
+    res <- .cipTwasZ(
+        aligned$weights,
+        aligned$z,
+        gwasLd,
+        aligned$variantIds
+    )
     zMat <- res$Z
     zVal <- as.numeric(zMat[1L, "Z"])
     pVal <- as.numeric(zMat[1L, "pval"])
     # Position the row at the variant span.
-    chrom <- gwasDf$chrom[[m$idxB[[1L]]]]
-    startPos <- min(gwasDf$pos[m$idxB])
-    endPos <- max(gwasDf$pos[m$idxB])
+    chrom <- gwasDf$chrom[[aligned$idxB[[1L]]]]
+    startPos <- min(gwasDf$pos[aligned$idxB])
+    endPos <- max(gwasDf$pos[aligned$idxB])
     list(
         Z = zVal,
         pval = pVal,
         chrom = chrom,
         startPos = startPos,
         endPos = endPos
+    )
+}
+
+# A weight vector on the GWAS variants it matches: the weights in the GWAS
+# allele coding, the GWAS z and variant ids at them, and their GWAS rows
+# (`idxB`). Variants match by (chrom, pos, allele) rather than by raw id
+# string, so chr-prefix / separator / allele-swap differences are reconciled
+# instead of silently dropped; sign = -1 marks an allele swap, and weights *
+# sign brings the weight into the GWAS allele coding, which the GWAS z and the
+# GWAS-panel LD already share. geneCorrelation() reads a gene's weights the
+# same way.
+# @noRd
+.cipAlignWeights <- function(weights, variantIds, gwasDf, alleleFlip) {
+    m <- matchVariants(variantIds, gwasDf$variant_id, allowFlip = alleleFlip)
+    list(
+        weights = weights[m$idxA] * m$sign,
+        z = gwasDf$z[m$idxB],
+        variantIds = gwasDf$variant_id[m$idxB],
+        idxB = m$idxB
     )
 }
 
@@ -1243,13 +1259,36 @@ causalInferencePipeline <- function(
 # Returns list(waldRatio, waldRatioSe, mrPval, nIV) with NA fields when
 # no IVs survive.
 .cipComputeMr <- function(fmrEntry, gwasDf, pipCutoff, alleleFlip = TRUE) {
-    iv <- .cipMrInstruments(fmrEntry, pipCutoff)
+    iv <- .cipMrIvwInputs(fmrEntry, gwasDf, pipCutoff, alleleFlip)
     if (is.null(iv)) {
         return(.cipEmptyMrRatio())
     }
+    # IVW pooling of the per-instrument Wald ratios.
+    pooled <- .ivwPool(iv$ratio, iv$rSe)
+    if (pooled$n == 0L) {
+        return(.cipEmptyMrRatio())
+    }
+    list(
+        waldRatio = pooled$effect,
+        waldRatioSe = pooled$se,
+        mrPval = pooled$pval,
+        nIV = pooled$n
+    )
+}
+
+# The per-variant Wald ratios .cipComputeMr() pools, on the GWAS variants the
+# instruments match: each one's GWAS variant id and z, exposure effect,
+# outcome se, ratio and delta-method se. NULL when no instrument survives or
+# none matches. geneCorrelation() reads a gene's instruments the same way.
+# @noRd
+.cipMrIvwInputs <- function(fmrEntry, gwasDf, pipCutoff, alleleFlip) {
+    iv <- .cipMrInstruments(fmrEntry, pipCutoff)
+    if (is.null(iv)) {
+        return(NULL)
+    }
     m <- matchVariants(iv$ivVars, gwasDf$variant_id, allowFlip = alleleFlip)
     if (length(m$idxA) == 0L) {
-        return(.cipEmptyMrRatio())
+        return(NULL)
     }
     gIdx <- m$idxB
     gZ <- gwasDf$z[gIdx]
@@ -1267,19 +1306,14 @@ causalInferencePipeline <- function(
     seX <- exposure$se
     betaY <- .cipZToBeta(gZ, gMaf, gN)
     seY <- .cipZToSe(gZ, gMaf, gN)
-    ratio <- betaY / betaX
-    # Standard Wald-ratio SE via delta method.
-    rSe <- sqrt((seY / betaX)^2 + (betaY * seX / betaX^2)^2)
-    # IVW pooling of the per-instrument Wald ratios.
-    pooled <- .ivwPool(ratio, rSe)
-    if (pooled$n == 0L) {
-        return(.cipEmptyMrRatio())
-    }
     list(
-        waldRatio = pooled$effect,
-        waldRatioSe = pooled$se,
-        mrPval = pooled$pval,
-        nIV = pooled$n
+        variantIds = gwasDf$variant_id[gIdx],
+        z = gZ,
+        betaX = betaX,
+        seY = seY,
+        ratio = betaY / betaX,
+        # Standard Wald-ratio SE via delta method.
+        rSe = sqrt((seY / betaX)^2 + (betaY * seX / betaX^2)^2)
     )
 }
 
@@ -1397,7 +1431,8 @@ causalInferencePipeline <- function(
 }
 
 # Extract + GWAS-align the CS-aware exposure instruments. Returns the aligned,
-# unit-SE-standardized (cs, pip, bhatX, sbhatX, bhatY, sbhatY) or NULL.
+# unit-SE-standardized (variantIds, z, cs, pip, bhatX, sbhatX, bhatY, sbhatY)
+# or NULL; `variantIds` and `z` are the GWAS's own.
 # @noRd
 .cipCsAwareInstruments <- function(fmrEntry, gwasDf, alleleFlip) {
     tl <- .cipTopLociTable(fmrEntry)
@@ -1466,6 +1501,8 @@ causalInferencePipeline <- function(
         .cipGwasHasScale(gMaf, gN)
     )
     list(
+        variantIds = gwasDf$variant_id[gIdx],
+        z = gZ,
         cs = raw$cs[m$idxA],
         pip = raw$pip[m$idxA],
         bhatX = exposure$beta,
@@ -1476,7 +1513,8 @@ causalInferencePipeline <- function(
 }
 
 # Per-CS PIP-weighted composite Wald ratios (dropping CSs below cpipCutoff or
-# with a degenerate SE). Returns list(bhat, sbhat) vectors.
+# with a degenerate SE). Returns list(bhat, sbhat, cs) vectors, `cs` naming the
+# set each composite comes from.
 # @noRd
 .cipCsComposites <- function(inst, cpipCutoff) {
     csIds <- sort(unique(inst$cs))
@@ -1486,7 +1524,11 @@ causalInferencePipeline <- function(
         inst = inst,
         cpipCutoff = cpipCutoff
     ))
-    list(bhat = map_dbl(comps, "bhat"), sbhat = map_dbl(comps, "sbhat"))
+    list(
+        bhat = map_dbl(comps, "bhat"),
+        sbhat = map_dbl(comps, "sbhat"),
+        cs = list_c(map(comps, "cs"))
+    )
 }
 
 # One CS's composite Wald ratio + delta-method SE, or NULL when the CS is
@@ -1511,7 +1553,7 @@ causalInferencePipeline <- function(
     if (!is.finite(cBhat) || !is.finite(cSe) || cSe <= 0) {
         return(NULL)
     }
-    list(bhat = cBhat, sbhat = cSe)
+    list(bhat = cBhat, sbhat = cSe, cs = cid)
 }
 
 # IVW-meta the per-CS composite Walds into the final CS-aware MR result.

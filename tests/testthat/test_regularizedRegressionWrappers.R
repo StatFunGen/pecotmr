@@ -674,6 +674,31 @@ test_that("dprAdaptiveGibbsWeights returns length-p weights", {
     expect_length(w, f$p)
 })
 
+test_that("dprWeights fits the caller's covariates in place of the intercept", {
+    skip_if_not_installed("RcppDPR")
+    f <- .rrwXy()
+    set.seed(4)
+    w <- matrix(rnorm(nrow(f$X)), ncol = 1L)
+    invisible(capture.output(
+        fit <- dprWeights(
+            f$X,
+            f$y,
+            methodArgs = DprOptions(w = w),
+            fitRetention = "slim"
+        )
+    ))
+    expect_length(fit, f$p)
+    expect_equal(nrow(attr(fit, "fit")$w), nrow(f$X))
+    expect_error(
+        dprWeights(
+            f$X,
+            f$y,
+            methodArgs = DprOptions(w = w[-1L, , drop = FALSE])
+        ),
+        "Must have exactly"
+    )
+})
+
 test_that("mrmashWeights fits from (X, Y) and returns p x K weights", {
     skip_if_not_installed("mr.mashr")
     skip_if_not_installed("glmnet")

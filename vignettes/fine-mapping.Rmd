@@ -223,12 +223,11 @@ fineMappingPipeline(
 
 ## Joint multi-context / multi-trait fits
 
-The joint methods (`mvsusie`, `mvsusieInf`, `mvsusieAsh`, `fsusie`) fit
-across traits when
-the input has two or more, else across contexts. To choose the axes yourself,
-pass a `jointSpecification`: a character vector of axes, or
-`list(axes = , scope = )` to limit the fit to listed studies, contexts or
-traits:
+The joint methods (`mvsusie`, `mvsusieInf`, `mvsusieAsh`, `fsusie`) need a
+`jointSpecification` to say which conditions they fit together: a character
+vector of axes, or `list(axes = , scope = )` to limit the fit to listed
+studies, contexts or traits. Without one every method is fitted one
+condition at a time, and asking for a joint method stops the run:
 
 ```{r fm-joint, eval=FALSE}
 # `qd`: a QtlDataset whose traits are measured in brain, liver and more.
