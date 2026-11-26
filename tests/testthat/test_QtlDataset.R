@@ -1304,9 +1304,9 @@ test_that("joint-fit variants pass the cutoffs in every condition's samples", {
     # A condition the block holds none of has nothing fitted and asks nothing.
     expect_equal(
         colnames(
-            pecotmr:::.qtlVariantFilters(dosage, filter, list(b, "s99"))$dosage
+            pecotmr:::.qtlVariantFilters(dosage, filter, list("s99"))$dosage
         ),
-        c("v1", "v3")
+        c("v1", "v2", "v3")
     )
 })
 

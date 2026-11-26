@@ -285,7 +285,10 @@ test_that("susieWeights checks dimension mismatch", {
     set.seed(42)
     X <- matrix(rnorm(100), 20, 5)
     fake_fit <- list(pip = rep(0.01, 10))
-    expect_error(susieWeights(X = X, susieFit = fake_fit), "Dimension mismatch")
+    expect_error(
+        susieWeights(X = X, susieFit = fake_fit),
+        "susieWeights: the fit is on 10 variants, but `X` has 5 columns"
+    )
 })
 
 # =============================================================================
@@ -365,7 +368,7 @@ test_that("susieAshWeights / susieInfWeights error on dimension mismatch", {
     for (fn in c("susieAshWeights", "susieInfWeights")) {
         expect_error(
             exec(fn, X, NULL, mock_fit),
-            "Dimension mismatch",
+            "the fit is on 2 variants, but `X` has 3 columns",
             info = fn
         )
     }
@@ -5646,7 +5649,7 @@ test_that("serWeights extracts weights from a single-effect fit", {
     expect_equal(serWeights(X = X, serFit = fit), w)
     expect_error(
         serWeights(X = X[, 1:5], serFit = fit),
-        "Dimension mismatch"
+        "serWeights: the fit is on [0-9]+ variants, but `X` has 5 columns"
     )
     # Shares the fit-derived extractors' message, naming its own token.
     expect_error(serWeights(), "no 'ser' fit supplied")

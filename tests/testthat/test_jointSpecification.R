@@ -3025,7 +3025,17 @@ test_that("the joint builders read phenotypes under the run's phenotype QC", {
             ...
         ) {
             seen[[length(seen) + 1L]] <<- phenotypeFilter
-            matrix(0, 3, 1, dimnames = list(samp, "t1"))
+            Y <- matrix(
+                0,
+                3,
+                length(traitId),
+                dimnames = list(samp, traitId)
+            )
+            # One context's matrix, several a list keyed by context.
+            if (length(contexts) == 1L) {
+                return(Y)
+            }
+            set_names(rep(list(Y), length(contexts)), contexts)
         },
         .crossContextFitSamples = function(...) samp,
         .composedFitSamples = function(...) samp,

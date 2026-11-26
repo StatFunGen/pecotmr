@@ -1098,13 +1098,7 @@ combineTwasWeights <- function(..., ldReference = NULL) {
         return(list())
     }
     assertClass(fineMappingResult, "FineMappingResultBase")
-    tokens <- c(
-        "susie",
-        "susieInf",
-        "susieAsh",
-        .fmMvsusieTokens(),
-        "fsusie"
-    )
+    tokens <- .twasFmFitTokens()
     found <- compact(set_names(
         map(
             tokens,
@@ -1120,6 +1114,78 @@ combineTwasWeights <- function(..., ldReference = NULL) {
     # compact() on an all-NULL named list leaves a zero-length names
     # attribute, which is not the bare list() the contract promises.
     if (length(found) == 0L) list() else found
+}
+
+# The fine-mapping methods whose fits TWAS reads its weights off.
+# @noRd
+.twasFmFitTokens <- function() {
+    c("susie", "susieInf", "susieAsh", .fmMvsusieTokens(), "fsusie")
+}
+
+# The variants each of `tokens`' fits of .twasFineMappingFits() was made on,
+# in the fit's order, by token (.twasFitIdsForToken()); a token whose fit
+# does not say is left out.
+# @noRd
+.twasFineMappingFitIds <- function(
+    fineMappingResult,
+    studyName,
+    context,
+    trait,
+    joint = .noJointKey(),
+    tokens = .twasFmFitTokens()
+) {
+    if (is.null(fineMappingResult) || length(tokens) == 0L) {
+        return(list())
+    }
+    found <- compact(set_names(
+        map(
+            tokens,
+            .twasFitIdsForToken,
+            fineMappingResult = fineMappingResult,
+            studyName = studyName,
+            context = context,
+            trait = trait,
+            joint = joint
+        ),
+        tokens
+    ))
+    if (length(found) == 0L) list() else found
+}
+
+# The variants the fit .twasFitForToken() returns was made on, in its order:
+# its row's, when the row holds all of the fit, else the names the fit gives
+# them; NULL when it has no fit, or neither says. A fit of unknown width
+# (no PIPs or effects) says nothing of its variants.
+# @noRd
+.twasFitIdsForToken <- function(
+    canonical,
+    fineMappingResult,
+    studyName,
+    context,
+    trait,
+    joint
+) {
+    idx <- .twasFmTokenRows(
+        fineMappingResult,
+        canonical,
+        studyName,
+        context,
+        trait,
+        joint
+    )
+    if (length(idx) == 0L) {
+        return(NULL)
+    }
+    parts <- .fmrRowParts(fineMappingResult, idx[[1L]])
+    fit <- susieFit(parts)
+    width <- .fitWidth(fit)
+    if (is.na(width)) {
+        return(NULL)
+    }
+    if (length(variants(parts)) == width) {
+        return(variantIds(parts))
+    }
+    .fitVariableNames(fit)
 }
 
 # The fit this result holds for one token on one tuple in joint group

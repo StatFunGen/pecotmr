@@ -120,7 +120,7 @@ context("genePrioritization")
     )
 }
 
-.gp_inputs <- function() {
+.gp_buildInputs <- function() {
     gwas <- .gp_gwas()
     tw <- .gp_twasWeights()
     list(
@@ -135,6 +135,77 @@ context("genePrioritization")
     )
 }
 
+# Built once for the file: the inputs are seeded, so every test reads the
+# same ones, and rebuilding them per test cost about 6 s a test.
+.gp_shared <- .gp_buildInputs()
+
+.gp_inputs <- function() {
+    .gp_shared
+}
+
+# The shared inputs' TWAS studies and gene correlation (.gcCompute()),
+# computed once. A test of what is fitted to them stands these in for the
+# pipeline's own (.gp_useSharedCorrelation()), which cost about 3.4 s a call.
+.gp_sharedStudies <- pecotmr:::.gcCompute(
+    .gp_shared$res,
+    .gp_shared$gwas,
+    .gp_shared$tw,
+    NULL,
+    "twas",
+    NULL,
+    NULL,
+    MrParam(),
+    TRUE
+)
+
+# The shared inputs' variance components on squared TWAS weights, and their
+# studies, likewise computed once (about 19 s together); NULL without
+# CompQuadForm, whose tests skip.
+.gp_sharedVc <- if (requireNamespace("CompQuadForm", quietly = TRUE)) {
+    geneVarianceComponentTest(
+        .gp_shared$gwas,
+        twasWeights = .gp_shared$tw,
+        variantWeights = "squaredWeight"
+    )
+}
+.gp_sharedVcStudies <- if (!is.null(.gp_sharedVc)) {
+    pecotmr:::.gcCompute(
+        .gp_sharedVc,
+        .gp_shared$gwas,
+        .gp_shared$tw,
+        NULL,
+        "varianceComponent",
+        NULL,
+        NULL,
+        MrParam(),
+        TRUE
+    )
+}
+
+# For the calling test: the shared inputs' TWAS rows, or their variance
+# components, with default selection, get their studies without
+# recomputing them.
+.gp_useSharedCorrelation <- function(env = parent.frame()) {
+    local_mocked_bindings(
+        .gcCompute = function(
+            x,
+            gwasSumStats,
+            twasWeights,
+            fmr,
+            analysis,
+            ...
+        ) {
+            if (analysis == "varianceComponent") {
+                .gp_sharedVcStudies
+            } else {
+                .gp_sharedStudies
+            }
+        },
+        .package = "pecotmr",
+        .env = env
+    )
+}
+
 # A stand-in fit with a closed form, X'y on the whitened data, so the
 # plumbing around it can be checked exactly.
 .gp_crossFit <- function(fitMethod, whitened, options) {
@@ -143,6 +214,7 @@ context("genePrioritization")
 
 test_that("each chromosome is scored by the fit that held it out", {
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
     out <- genePrioritization(
         inp$res,
@@ -223,6 +295,7 @@ test_that("each chromosome is scored by the fit that held it out", {
 
 test_that("HLA genes are scored but fitted on only when asked", {
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
     out <- genePrioritization(
         inp$res,
@@ -252,36 +325,64 @@ test_that("HLA genes are scored but fitted on only when asked", {
     expect_true(all(is.finite(out$G1$scores[hla]$score)))
 })
 
-test_that("every fit method runs without an intercept", {
+# genePrioritization() fitted by `fitMethod`, which needs `engine`: every
+# fold's effects and every gene's score finite.
+.gp_expectFitRuns <- function(fitMethod, engine) {
+    skip_if_not_installed(engine)
     inp <- .gp_inputs()
-    engines <- c(
-        ridge = "glmnet",
-        lasso = "glmnet",
-        enet = "glmnet",
-        l0learn = "L0Learn",
-        abess = "abess",
-        mrash = "susieR",
-        sparsevb = "sparsevb",
-        susie = "susieR",
-        dprVb = "RcppDPR"
-    )
-    for (m in names(engines)) {
-        if (!requireNamespace(engines[[m]], quietly = TRUE)) {
-            next
-        }
-        out <- suppressWarnings(suppressMessages(capture.output(
-            res <- genePrioritization(
-                inp$res,
-                inp$features,
-                inp$gwas,
-                twasWeights = inp$tw,
-                fitMethod = m,
-                seed = 1
-            )
-        )))
-        expect_true(all(is.finite(res$G1$coefficients)), info = m)
-        expect_true(all(is.finite(res$G1$scores$score)), info = m)
-    }
+    .gp_useSharedCorrelation()
+    out <- suppressWarnings(suppressMessages(capture.output(
+        res <- genePrioritization(
+            inp$res,
+            inp$features,
+            inp$gwas,
+            twasWeights = inp$tw,
+            fitMethod = fitMethod,
+            seed = 1
+        )
+    )))
+    expect_true(all(is.finite(res$G1$coefficients)))
+    expect_true(all(is.finite(res$G1$scores$score)))
+}
+
+test_that("ridge fits without an intercept", {
+    .gp_expectFitRuns("ridge", "glmnet")
+})
+
+test_that("lasso fits without an intercept", {
+    .gp_expectFitRuns("lasso", "glmnet")
+})
+
+test_that("enet fits without an intercept", {
+    .gp_expectFitRuns("enet", "glmnet")
+})
+
+test_that("l0learn fits without an intercept", {
+    .gp_expectFitRuns("l0learn", "L0Learn")
+})
+
+test_that("abess fits without an intercept", {
+    .gp_expectFitRuns("abess", "abess")
+})
+
+test_that("mrash fits without an intercept", {
+    .gp_expectFitRuns("mrash", "susieR")
+})
+
+test_that("sparsevb fits without an intercept", {
+    .gp_expectFitRuns("sparsevb", "sparsevb")
+})
+
+test_that("susie fits without an intercept", {
+    .gp_expectFitRuns("susie", "susieR")
+})
+
+test_that("dprVb fits without an intercept", {
+    # RcppDPR 0.1.10's VB fit corrupts the heap on Linux for some data, at any
+    # size tried here (random 56 x 6 and 120 x 60 inputs included); glibc then
+    # aborts a later test.
+    skip("RcppDPR corrupts the heap on Linux (upstream bug)")
+    .gp_expectFitRuns("dprVb", "RcppDPR")
 })
 
 test_that("the fit's options turn its intercept off, and only that", {
@@ -327,6 +428,7 @@ test_that("credibleSetParam sets SuSiE's L, and only SuSiE's", {
     expect_equal(greedy$L, 10L)
     expect_equal(greedy$L_greedy, 5L)
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     local_mocked_bindings(
         .fmFitSusieIndiv = function(X, y, token, userArgs = NULL, ...) {
             abort(str_c("fitted with L = ", userArgs$L))
@@ -397,6 +499,7 @@ test_that("MR covariates count the instruments; missing ones are left out", {
 
 test_that("genePrioritization refuses features it cannot read", {
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     expect_error(
         genePrioritization(
             inp$res,
@@ -1013,12 +1116,9 @@ test_that("each analysis takes its own scales and its own result", {
 test_that("variance components are prioritized on either response", {
     skip_if_not_installed("CompQuadForm")
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     local_mocked_bindings(.gpFit = .gp_crossFit, .package = "pecotmr")
-    vc <- geneVarianceComponentTest(
-        inp$gwas,
-        twasWeights = inp$tw,
-        variantWeights = "squaredWeight"
-    )
+    vc <- .gp_sharedVc
     for (scale in c("standardized", "probit")) {
         out <- genePrioritization(
             vc,
@@ -1121,6 +1221,7 @@ test_that("a set's effect is its GLS slope with covariates out of both", {
 test_that("geneSetEnrichment tests each set against each study", {
     skip_if_not_installed("CompQuadForm")
     inp <- .gp_inputs()
+    .gp_useSharedCorrelation()
     out <- geneSetEnrichment(
         inp$res,
         inp$features,
@@ -1134,17 +1235,12 @@ test_that("geneSetEnrichment tests each set against each study", {
         c("set", "nGenes", "beta", "se", "t", "df", "pval")
     )
     expect_equal(table$set, colnames(SummarizedExperiment::assay(inp$features)))
-    # 64 genes with a statistic, less the set and the nuisance's rank: the
+    # Every gene with a statistic, less the set and the nuisance's rank: the
     # intercept and three covariates, as every gene has four nonzero weights
     # (nVariants and its log are the intercept again).
-    expect_equal(unique(table$df), 64L - 4L - 1L)
-    vc <- geneVarianceComponentTest(
-        inp$gwas,
-        twasWeights = inp$tw,
-        variantWeights = "squaredWeight"
-    )
+    expect_equal(unique(table$df), 2L * .gp_nGenes - 4L - 1L)
     quadratic <- geneSetEnrichment(
-        vc,
+        .gp_sharedVc,
         inp$features,
         inp$gwas,
         twasWeights = inp$tw,
@@ -1258,6 +1354,8 @@ test_that("geneSetEnrichment tests each set against each study", {
         symmetric = TRUE
     )$values
     q <- sum(a * .vc_z[idx]^2)
+    # Farebrother's to 1e-15: the test's Davies inversion, to an absolute
+    # 1e-8, is compared with it at a matching tolerance.
     p <- CompQuadForm::farebrother(q, lambda, eps = 1e-15)$Qq
     list(
         nVariants = length(a),
@@ -1290,7 +1388,11 @@ test_that("squared weights give Q = sum(w^2 z^2) and its exact null", {
     # Zero weights do not enter; g2's allele swap leaves its squares alone.
     for (gene in names(.vc_genes)) {
         g <- .vc_genes[[gene]]
-        expect_equal(.vc_columns(res, gene), .vc_expected(g$w^2, g$idx))
+        expect_equal(
+            .vc_columns(res, gene),
+            .vc_expected(g$w^2, g$idx),
+            tolerance = 1e-5
+        )
     }
     expect_equal(GenomeInfoDb::genome(res)[["chr1"]], "hg19")
 })
@@ -1303,7 +1405,8 @@ test_that("PIPs weight every variant of the fine-mapping window", {
     for (gene in names(.vc_genes)) {
         expect_equal(
             .vc_columns(res, gene),
-            .vc_expected(.vc_pips(gene), .vc_genes[[gene]]$idx)
+            .vc_expected(.vc_pips(gene), .vc_genes[[gene]]$idx),
+            tolerance = 1e-5
         )
     }
     floored <- geneVarianceComponentTest(
@@ -1315,7 +1418,8 @@ test_that("PIPs weight every variant of the fine-mapping window", {
     expect_equal(unique(floored$pipFloor), 0.05)
     expect_equal(
         .vc_columns(floored, "g1"),
-        .vc_expected(.vc_pips("g1") + 0.05, .vc_genes$g1$idx)
+        .vc_expected(.vc_pips("g1") + 0.05, .vc_genes$g1$idx),
+        tolerance = 1e-5
     )
 })
 
@@ -1401,17 +1505,19 @@ test_that("a genotype factor's eigenvalues are the LD matrix's", {
     expect_length(pecotmr:::.vcEigenvalues(list(ldFactor = few), a), 6L)
 })
 
-test_that("the tail is exact where Farebrother is and saddlepoint past it", {
+test_that("the tail inverts numerically, and by saddlepoint past 1e-12", {
     skip_if_not_installed("CompQuadForm")
     skip_if_not_installed("survey")
     lambda <- rep(1, 5)
     expect_equal(pecotmr:::.quadFormUpperTail(0, lambda), 1)
     expect_equal(pecotmr:::.quadFormUpperTail(3, numeric(0)), 1)
+    # Davies' inversion for p of 1e-5 or more (q = 2, 10), to an absolute
+    # 1e-8; Farebrother's below it (q = 40, p = 1.5e-7).
     bulk <- c(2, 10, 40)
     expect_equal(
         map_dbl(bulk, pecotmr:::.quadFormUpperTail, lambda = lambda),
         pchisq(bulk, 5, lower.tail = FALSE),
-        tolerance = 1e-8
+        tolerance = 1e-6
     )
     # Past 1e-12 the saddlepoint keeps its relative error to a few percent
     # for five equal weights, where Farebrother returns 0.

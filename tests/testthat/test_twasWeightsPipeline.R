@@ -204,6 +204,63 @@ context("twasWeightsPipeline (S4 dispatch) with mocked weight methods")
     )
 }
 
+# The rest of the individual-level methods, zero too, mr.mash's a column per
+# condition named as Y's.
+.tp_mockMoreWeights <- function() {
+    zero <- function(X, y, ...) matrix(0, ncol(X), NCOL(y))
+    list(
+        mcpWeights = zero,
+        scadWeights = zero,
+        l0learnWeights = zero,
+        mrmashWeights = function(mrmashFit = NULL, X = NULL, Y = NULL, ...) {
+            matrix(
+                0,
+                ncol(X),
+                ncol(Y),
+                dimnames = list(colnames(X), colnames(Y))
+            )
+        }
+    )
+}
+
+# For the calling test: every individual-level fit mocked to zero weights. A
+# test of which methods run, how often a window is read, or how many rows
+# come back needs no engine's fit, and those fits made such tests slow.
+.tp_mockFits <- function(env = parent.frame()) {
+    exec(
+        local_mocked_bindings,
+        !!!c(
+            .tp_mockIndividualWeights(),
+            .tp_mockMoreWeights(),
+            list(.package = "pecotmr", .env = env)
+        )
+    )
+}
+
+# Y with its missing values at zero, for a closed-form stand-in fit.
+.tp_observed <- function(Y) {
+    replace(Y, is.na(Y), 0)
+}
+
+# For the calling test: lasso and mr.mash fitted in closed form, X'y / n on
+# the samples each is given, so their weights still tell apart the X and Y a
+# fit was handed.
+.tp_mockClosedForm <- function(env = parent.frame()) {
+    local_mocked_bindings(
+        lassoWeights = function(X, y, ...) {
+            crossprod(X, .tp_observed(as.matrix(y))) / nrow(X)
+        },
+        mrmashWeights = function(mrmashFit = NULL, X = NULL, Y = NULL, ...) {
+            `dimnames<-`(
+                crossprod(X, .tp_observed(Y)) / nrow(X),
+                list(colnames(X), colnames(Y))
+            )
+        },
+        .package = "pecotmr",
+        .env = env
+    )
+}
+
 # ===========================================================================
 # twasWeightsPipeline(QtlDataset)
 # ===========================================================================
@@ -241,6 +298,7 @@ test_that("twasWeightsPipeline reads each window once and shares its X", {
 })
 
 test_that("twasWeightsPipeline reads a window once across its paths", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     window <- .fitSamplesWindow()
     pca <- .countBlocks(twasWeightsPipeline(
@@ -267,6 +325,7 @@ test_that("twasWeightsPipeline reads a window once across its paths", {
 })
 
 test_that("a multi-study TWAS run reads a window once per component", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     # One trait's fits read the window as all three would.
@@ -287,6 +346,7 @@ test_that("a multi-study TWAS run reads a window once per component", {
 })
 
 test_that("a panel of rsIDs gives the weights of one labelled by position", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     window <- .fitSamplesWindow()
     byId <- suppressMessages(twasWeightsPipeline(
@@ -2537,6 +2597,7 @@ test_that("a preset over a collection gives each kind of input its own list", {
 })
 
 test_that("a preset fits every method it names", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("L0Learn")
     data <- .fitSamplesDataset()
@@ -2599,6 +2660,7 @@ test_that("a preset fits every method it names", {
 })
 
 test_that("a preset runs without the fine-mapping methods it cannot read", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("L0Learn")
     window <- .fitSamplesWindow()
@@ -4983,17 +5045,18 @@ test_that("a study-axis spec fits lasso across the studies and in each", {
 test_that("bayesC on BGLR also fits each context group jointly", {
     skip_if_not_installed("BGLR")
     skip_if_not_installed("pgenlibr")
-    run <- function(data, jointSpecification) {
+    # Cross-validated only where its metrics are checked.
+    run <- function(data, jointSpecification, folds = 0L) {
         .tp_bglrRun(
             data,
             "bayesC",
             jointSpecification,
             region = .fitSamplesWindow(),
             traitId = "g1",
-            crossValidationParam = CrossValidationParam(folds = 2)
+            crossValidationParam = CrossValidationParam(folds = folds)
         )
     }
-    tw <- run(.fitSamplesDataset(), "context")
+    tw <- run(.fitSamplesDataset(), "context", folds = 2L)
     joint <- !is.na(tw$jointContexts)
     # The trait's two contexts one at a time, and the two together.
     expect_equal(sum(joint), 2L)
@@ -5108,7 +5171,6 @@ test_that("mcp fits a study's contexts coupled, or grouped on grpreg", {
             jointSpecification = jointSpecification,
             region = .fitSamplesWindow(),
             traitId = "g1",
-            crossValidationParam = CrossValidationParam(folds = 2),
             coupling = coupling,
             fitRetention = "slim",
             seed = 1L
@@ -5164,7 +5226,6 @@ test_that("contexts on different donors fit on every donor unless asked", {
             region = .fitSamplesWindow(),
             traitId = "g1",
             completeSamples = completeSamples,
-            crossValidationParam = CrossValidationParam(folds = 2),
             fitRetention = "slim",
             seed = 1L
         )))
@@ -5204,7 +5265,7 @@ test_that("on grpreg and abess the studies take the group penalty", {
             backend = c(mcp = "grpreg", l0learn = "abess"),
             jointSpecification = "study",
             cisWindow = 50000L,
-            crossValidationParam = CrossValidationParam(folds = 3),
+            crossValidationParam = CrossValidationParam(folds = 2),
             coupling = coupling,
             fitRetention = "slim",
             seed = 1L
@@ -5271,7 +5332,7 @@ test_that("the ensemble across studies stacks each study's own fits", {
             methods = c("lasso", "enet"),
             jointSpecification = "study",
             cisWindow = 50000L,
-            crossValidationParam = CrossValidationParam(folds = 3),
+            crossValidationParam = CrossValidationParam(folds = 2),
             ensembleParam = EnsembleParam(
                 enabled = TRUE,
                 acrossStudies = TRUE,
@@ -6254,7 +6315,53 @@ test_that("a fine-mapping method's TWAS rows keep none of its fit", {
     expect_identical(pecotmr:::.jointRetentionLevel(cfg, "mrmash"), "slim")
 })
 
+test_that("a fine-mapping fit on other variants than TWAS's is refused", {
+    cond <- tibble::tibble(study = "s", context = "c", trait = "t")
+    check <- function(fitIds, xIds) {
+        pecotmr:::.twasAssertFitVariants(fitIds, xIds, "susie", cond)
+    }
+    ids <- c("v1", "v2", "v3")
+    # A fit that does not say what its variants are is not checked.
+    expect_null(check(NULL, ids))
+    expect_null(check(ids, ids))
+    expect_error(
+        check(c(ids, "v4", "v5"), c("v1", "v3")),
+        "is on 5 variants, but the genotypes TWAS reads for it are on 2 \\(3"
+    )
+    expect_error(check(rev(ids), ids), "the same variants in another order")
+})
+
+test_that("TWAS under another genotype filter than its fine-mapping stops", {
+    skip_if_not_installed("pgenlibr")
+    data <- .fitSamplesDataset()
+    window <- .fitSamplesWindow()
+    fm <- suppressWarnings(suppressMessages(fineMappingPipeline(
+        data,
+        methods = "susie",
+        region = window,
+        contexts = "brain",
+        traitId = "g1",
+        seed = 1L
+    )))
+    # The fine-mapping fit is on every variant of the window; a MAF cutoff
+    # leaves TWAS fewer, which its weights cannot be read for.
+    expect_error(
+        suppressWarnings(suppressMessages(twasWeightsPipeline(
+            data,
+            methods = "susie",
+            fineMappingResult = fm,
+            region = window,
+            contexts = "brain",
+            traitId = "g1",
+            genotypeFilterParam = GenotypeFilterParam(mafCutoff = 0.3),
+            seed = 1L
+        ))),
+        "same genotypeFilterParam"
+    )
+})
+
 test_that("both kinds of method run together on one read", {
+    .tp_mockClosedForm()
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     window <- .fitSamplesWindow()
@@ -6314,6 +6421,7 @@ test_that("both kinds of method run together on one read", {
 })
 
 test_that("a multi-study run takes both kinds of method", {
+    .tp_mockFits()
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
     res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
@@ -6558,9 +6666,10 @@ test_that("retainX leaves a fine-mapping method's rows keeping no fit", {
 test_that("a multi-study run keeps X in its individual-level fits if asked", {
     skip_if_not_installed("pgenlibr")
     skip_if_not_installed("mr.mashr")
+    # The lasso's fits are the ones checked; mr.mash's only added time.
     res <- suppressWarnings(suppressMessages(twasWeightsPipeline(
         .fitSamplesTwoStudies(),
-        methods = c("lasso", "mrmash"),
+        methods = "lasso",
         jointSpecification = "context",
         region = .fitSamplesWindow(),
         traitId = "g1",
@@ -7961,7 +8070,10 @@ test_that("the ensemble across summary-statistics studies stacks each study", {
             1L,
             suppressMessages(twasWeightsPipeline(
                 ss,
-                methods = c("lasso", "enet"),
+                # One LD shrinkage, not the default four: the ensemble refits
+                # each coupled grid on every held-out split, and the stacking
+                # is what is tested.
+                methods = list(lasso = list(s = 0.9), enet = list(s = 0.9)),
                 jointSpecification = "study",
                 coupling = if (!is.null(strengths)) list(study = strengths),
                 ensembleParam = EnsembleParam(

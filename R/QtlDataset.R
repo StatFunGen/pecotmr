@@ -1522,8 +1522,11 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
 # The fits that share one block, as groups of their positions: the same contexts
 # and samples, each group with the spec its block is built to. A residualized
 # column depends on no other, so a block over the widest window serves narrower
-# windows too. The exception is a per-sample missingness filter, which looks
-# across a block's variants: with one on, a block serves only its own window.
+# windows too, and a joint fit whose conditions each fit on their own samples
+# shares it as well, taking only the columns that pass on its conditions'
+# samples (.qtlBlockFor()). The exception is a per-sample missingness filter,
+# which looks across a block's variants: with one on, a block serves only its
+# own window.
 # @noRd
 .qtlBlockGroups <- function(specs, filter) {
     windows <- map(specs, "window")
@@ -1536,18 +1539,11 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         .qtlXGroups(
             keys,
             map_chr(specs, .qtlSpecContexts),
-            map(specs, .qtlSpecSamples)
+            map(specs, "samples")
         ),
         .qtlBlockGroup,
         specs = specs
     )
-}
-
-# The samples a spec's block is filtered on, as one key: its samples and its
-# conditions' own.
-# @noRd
-.qtlSpecSamples <- function(spec) {
-    list(spec$samples, spec$conditionSamples)
 }
 
 # A spec's contexts as a key; the order matters to the covariate design.
@@ -1556,24 +1552,33 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
     str_flatten(spec$contexts %||% character(0), "|")
 }
 
+# A group's block spec: the widest of its windows, and every set of conditions'
+# samples one of its fits takes its columns on.
 # @noRd
 .qtlBlockGroup <- function(group, specs) {
     first <- specs[[group$at[[1L]]]]
     list(
         at = group$at,
         spec = if (!is.null(first)) {
-            .qtlFitSpec(
-                .qtlWidestWindow(map(specs[group$at], "window")),
-                first$contexts,
-                first$samples,
-                first$conditionSamples
+            list_assign(
+                .qtlFitSpec(
+                    .qtlWidestWindow(map(specs[group$at], "window")),
+                    first$contexts,
+                    first$samples
+                ),
+                conditionSets = unique(compact(map(
+                    specs[group$at],
+                    "conditionSamples"
+                )))
             )
         }
     )
 }
 
 # The residualized genotypes of a spec, with their allele frequencies when the
-# run reports them; both come from `read`, which nothing here keeps.
+# run reports them, and for each of its sets of conditions' samples the
+# variants that pass the filter on every one of them (`passing`, keyed by
+# .qtlConditionKey()); all come from `read`, which nothing here keeps.
 # @noRd
 .qtlFitBlock <- function(spec, run, read) {
     if (is.null(spec)) {
@@ -1586,7 +1591,6 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
         contexts = spec$contexts,
         region = spec$window,
         samples = spec$samples,
-        conditionSamples = spec$conditionSamples,
         read = read
     )
     list(
@@ -1600,30 +1604,82 @@ setMethod("traitPosition", "QtlDataset", function(x, trait = NULL) {
                 read = read
             )
         },
+        window = spec$window,
+        passing = set_names(
+            map(
+                spec$conditionSets,
+                .qtlConditionVariants,
+                spec = spec,
+                run = run,
+                read = read
+            ),
+            map_chr(spec$conditionSets, .qtlConditionKey)
+        )
+    )
+}
+
+# The variants of a spec's window that pass the run's filter on its samples
+# and on each of `conditionSamples` (.qtlVariantFilters()).
+# @noRd
+.qtlConditionVariants <- function(conditionSamples, spec, run, read) {
+    .qtlExtractBlock(
+        run$dataset,
+        spec$window,
+        spec$samples,
+        run$filter,
+        read,
+        conditionSamples
+    )$variantIds
+}
+
+# @noRd
+.qtlConditionKey <- function(conditionSamples) {
+    rlang::hash(conditionSamples)
+}
+
+# A block as one fit sees it: the variants of the fit's own window, and of a
+# fit whose conditions each fit on their own samples, those passing on them.
+# @noRd
+.qtlBlockFor <- function(block, spec, dataset) {
+    if (is.null(block)) {
+        return(block)
+    }
+    kept <- .qtlInWindow(block, spec, dataset) &
+        .qtlPassesConditions(block, spec)
+    if (all(kept)) {
+        return(block)
+    }
+    list(
+        X = block$X[, kept, drop = FALSE],
+        af = block$af[kept],
         window = spec$window
     )
 }
 
-# A block as one fit sees it: the variants of the fit's own window.
+# Which of a block's columns lie in a fit's window.
 # @noRd
-.qtlBlockFor <- function(block, spec, dataset) {
-    if (
-        is.null(block) ||
-            .qtlWindowKey(spec$window) == .qtlWindowKey(block$window)
-    ) {
-        return(block)
+.qtlInWindow <- function(block, spec, dataset) {
+    if (.qtlWindowKey(spec$window) == .qtlWindowKey(block$window)) {
+        return(rep(TRUE, ncol(block$X)))
     }
-    kept <- is_in(
+    is_in(
         colnames(block$X),
         .ldRefMatchIds(
             .qtlGenotypeSe(dataset),
             .qtlVariantIndices(dataset, spec$window)
         )
     )
-    list(
-        X = block$X[, kept, drop = FALSE],
-        af = block$af[kept],
-        window = spec$window
+}
+
+# Which of a block's columns pass the filter on a fit's conditions' samples.
+# @noRd
+.qtlPassesConditions <- function(block, spec) {
+    if (is.null(spec$conditionSamples)) {
+        return(rep(TRUE, ncol(block$X)))
+    }
+    is_in(
+        colnames(block$X),
+        block$passing[[.qtlConditionKey(spec$conditionSamples)]]
     )
 }
 
@@ -2623,8 +2679,7 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
     samples = NULL,
     filter = .qtlResolveFilter(),
     residualizationParam = ResidualizationParam(),
-    read = NULL,
-    conditionSamples = NULL
+    read = NULL
 ) {
     if (missing(contexts) || is.null(contexts) || length(contexts) == 0L) {
         msg <- glue(
@@ -2650,8 +2705,7 @@ setMethod("phenotypeCovariates", "QtlDataset", function(x, context) {
         window,
         samples %||% .qtlSharedSamples(x, contexts, residualizationParam),
         filter,
-        read,
-        conditionSamples
+        read
     )$geno
     if (ncol(G) == 0L) {
         return(G)

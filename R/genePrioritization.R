@@ -859,11 +859,13 @@ geneSetEnrichment <- function(
 #'   \eqn{Q = \sum_j a_j z_j^2 = z' A z}. Under the null,
 #'   \eqn{z \sim N(0, R)}, \eqn{Q} is distributed as
 #'   \eqn{\sum_k \lambda_k \chi^2_1} over the eigenvalues \eqn{\lambda_k} of
-#'   \eqn{A^{1/2} R A^{1/2}}. Its p-value is computed exactly by
-#'   Farebrother's algorithm (\pkg{CompQuadForm}) and, below \eqn{10^{-12}}
-#'   where that loses its precision, by Kuonen's saddlepoint approximation
-#'   (\pkg{survey}). Two gene-level statistics are reported for a regression
-#'   on gene features: the probit \eqn{\Phi^{-1}(1 - p)}, MAGMA's scale, and
+#'   \eqn{A^{1/2} R A^{1/2}}. Its p-value is computed by numerical inversion
+#'   (\pkg{CompQuadForm}): Davies' algorithm, to an absolute error of
+#'   \eqn{10^{-8}}, for p-values of at least \eqn{10^{-5}}; Farebrother's
+#'   below that; and below \eqn{10^{-12}}, where both lose their precision,
+#'   Kuonen's saddlepoint approximation (\pkg{survey}). Two gene-level
+#'   statistics are reported for a regression on gene features: the probit
+#'   \eqn{\Phi^{-1}(1 - p)}, MAGMA's scale, and
 #'   the standardized \eqn{(Q - E Q) / SD(Q)}, with \eqn{E Q = \sum_k
 #'   \lambda_k} and \eqn{Var(Q) = 2 \sum_k \lambda_k^2}. Under the
 #'   variance-component model the standardized statistic's mean is linear in

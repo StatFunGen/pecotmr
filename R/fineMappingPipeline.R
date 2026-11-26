@@ -1780,10 +1780,8 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
 
 # The residualized genotypes of one analysis window -- the cis window of
 # `traitId` +/- `cisWindow`, or an explicit `region` -- over `samples`, under
-# the run's resolved `genotypeFilter`, whose per-variant cutoffs a variant
-# must also pass in each of `conditionSamples` (a joint fit's conditions' own
-# samples). No default for the filter: a call site that forgot it must fail
-# rather than extract unfiltered.
+# the run's resolved `genotypeFilter`. No default for the filter: a call site
+# that forgot it must fail rather than extract unfiltered.
 # @noRd
 .fmResidGeno <- function(
     x,
@@ -1794,7 +1792,6 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
     region = NULL,
     cisWindow = NULL,
     samples = NULL,
-    conditionSamples = NULL,
     read = NULL
 ) {
     # No scaling step here: the residualizer already returns columns scaled
@@ -1808,8 +1805,7 @@ combineFineMappingResults <- function(..., ldReference = NULL) {
         samples = samples,
         filter = genotypeFilter,
         residualizationParam = residualizationParam %||% ResidualizationParam(),
-        read = read,
-        conditionSamples = conditionSamples
+        read = read
     )
 }
 
